@@ -1,0 +1,533 @@
+/**
+ * 资源浏览页 /resources：
+ * - 筛选（类型 / 状态 / 搜索防抖 300ms）+ 分页表格；
+ * - 行点击 → 右侧抽屉（属性 / 来源 / 关联，关联支持展开二跳）；
+ * - 支持 ?focus=<id> 深链直接打开抽屉（问题清单实体链接跳转入口）。
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import type {
+  GraphEdge,
+  GraphNode,
+  Paged,
+  RelationGraph,
+  ResourceDetail,
+  ResourceItem,
+  ResourceType,
+} from '../api/types';
+import { ApiError, debounce, getResource, getResourceRelations, listResources } from '../api/client';
+import {
+  BTN_EXPAND_2HOP,
+  BTN_COLLAPSE_2HOP,
+  BTN_IMPORT_DATA,
+  FILTER_ALL,
+  format,
+  formatDateTime,
+  NO_VALUE,
+  RELATION_LABELS,
+  RES_ATTR_FIRST_BATCH,
+  RES_ATTR_UPDATED_AT,
+  RES_COL_KEY,
+  RES_COL_NAME,
+  RES_COL_STATUS,
+  RES_COL_TYPE,
+  RES_COL_UPDATED,
+  RES_DRAWER_TAB_ATTRS,
+  RES_DRAWER_TAB_RELATIONS,
+  RES_DRAWER_TAB_SOURCE,
+  RES_EMPTY_DESC,
+  RES_EMPTY_TITLE,
+  RES_FILTER_SEARCH,
+  RES_FILTER_STATUS,
+  RES_FILTER_TYPE,
+  RES_HOP2_EMPTY,
+  RES_HOP2_TITLE,
+  RES_NO_RELATIONS,
+  RES_NO_SOURCE,
+  RES_RELATION_COUNT,
+  RES_SEARCH_PLACEHOLDER,
+  RES_SOURCE_ITEM,
+  RES_TABLE_LABEL,
+  RESOURCE_STATUS_VALUES,
+  RESOURCE_TYPE_LABELS,
+} from '../i18n';
+import { fieldsForType, fieldLabel } from '../schema';
+import { Drawer } from '../components/Drawer';
+import { EmptyState } from '../components/EmptyState';
+import { ErrorBlock } from '../components/ErrorBlock';
+import { Pagination } from '../components/Pagination';
+import { Spinner } from '../components/Spinner';
+import { StatusChip } from '../components/StatusChip';
+import { Table } from '../components/Table';
+import type { TableColumn } from '../components/Table';
+import { TypeChip } from '../components/TypeChip';
+import { IconSearch, IconUpload } from '../components/icons';
+
+const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 300;
+
+type DrawerTab = 'attrs' | 'source' | 'relations';
+
+// ---------------------------------------------------------------------------
+// 资源抽屉
+// ---------------------------------------------------------------------------
+
+interface ResourceDrawerProps {
+  resourceId: string;
+  onClose: () => void;
+}
+
+function orderedAttributes(resource: ResourceDetail): Array<[string, string]> {
+  const specFields = fieldsForType(resource.type).map((spec) => spec.field);
+  const keys = Object.keys(resource.attributes);
+  const known = specFields.filter((field) => keys.includes(field));
+  const extra = keys.filter((field) => !specFields.includes(field)).sort();
+  return [...known, ...extra].map((field) => [field, resource.attributes[field] ?? '']);
+}
+
+function RelationItem({
+  edge,
+  anchorId,
+  node,
+}: {
+  edge: GraphEdge;
+  anchorId: string;
+  node: GraphNode | undefined;
+}) {
+  if (node === undefined) return null;
+  const outgoing = edge.fromId === anchorId;
+  const relLabel = RELATION_LABELS[edge.relationType] ?? edge.relationType;
+  return (
+    <div className="relation-item">
+      <span className="chip chip--primary">{relLabel}</span>
+      <span className="relation-arrow" aria-hidden="true">{outgoing ? '→' : '←'}</span>
+      <TypeChip type={node.type} />
+      <span className="cell-strong">{node.name === '' ? node.naturalKey : node.name}</span>
+      <span className="muted-note">{node.naturalKey}</span>
+    </div>
+  );
+}
+
+function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
+  const [detail, setDetail] = useState<ResourceDetail | null>(null);
+  const [graph, setGraph] = useState<RelationGraph | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<DrawerTab>('attrs');
+  const [depth2, setDepth2] = useState<RelationGraph | null>(null);
+  const [loading2, setLoading2] = useState(false);
+
+  const load = useCallback((): void => {
+    setLoading(true);
+    setError(null);
+    Promise.all([getResource(resourceId), getResourceRelations(resourceId, 1)])
+      .then((results) => {
+        setDetail(results[0]);
+        setGraph(results[1]);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof ApiError ? err.message : null);
+        setLoading(false);
+      });
+  }, [resourceId]);
+
+  useEffect(() => {
+    load();
+    setDepth2(null);
+    setTab('attrs');
+  }, [load]);
+
+  function expandDepth2(): void {
+    setLoading2(true);
+    getResourceRelations(resourceId, 2)
+      .then((result) => {
+        setDepth2(result);
+        setLoading2(false);
+      })
+      .catch(() => {
+        setLoading2(false);
+      });
+  }
+
+  const title = detail === null ? '' : detail.name === '' ? detail.naturalKey : detail.name;
+  const nodeById = useMemo(() => {
+    const source = depth2 ?? graph;
+    if (source === null) return new Map<string, GraphNode>();
+    return new Map(source.nodes.map((node) => [node.id, node]));
+  }, [depth2, graph]);
+
+  const hop1Edges: GraphEdge[] = graph === null ? [] : graph.edges;
+  const anchorId = detail?.id ?? '';
+
+  const hop2Groups: Array<{ anchor: GraphNode; edges: GraphEdge[] }> = useMemo(() => {
+    if (depth2 === null || graph === null || detail === null) return [];
+    const centerId = detail.id;
+    const hop1Ids = new Set(
+      graph.edges.flatMap((edge) => [edge.fromId, edge.toId]).filter((id) => id !== centerId),
+    );
+    const groups: Array<{ anchor: GraphNode; edges: GraphEdge[] }> = [];
+    for (const hop1Id of hop1Ids) {
+      const anchor = nodeById.get(hop1Id);
+      if (anchor === undefined) continue;
+      const edges = depth2.edges.filter(
+        (edge) =>
+          (edge.fromId === hop1Id || edge.toId === hop1Id) &&
+          edge.fromId !== centerId &&
+          edge.toId !== centerId,
+      );
+      if (edges.length > 0) {
+        groups.push({ anchor, edges });
+      }
+    }
+    return groups;
+  }, [depth2, graph, detail, nodeById]);
+
+  return (
+    <Drawer open title={title} onClose={onClose}>
+      {loading ? (
+        <div className="loading-panel">
+          <Spinner />
+        </div>
+      ) : error !== null || detail === null ? (
+        <ErrorBlock message={error} onRetry={load} />
+      ) : (
+        <>
+          <div className="drawer-summary">
+            <TypeChip type={detail.type} />
+            <StatusChip status={detail.status} />
+            <span className="cell-strong">{detail.naturalKey}</span>
+          </div>
+          <div className="tabs">
+            <button
+              type="button"
+              className={`tab${tab === 'attrs' ? ' tab--active' : ''}`}
+              onClick={() => setTab('attrs')}
+            >
+              {RES_DRAWER_TAB_ATTRS}
+            </button>
+            <button
+              type="button"
+              className={`tab${tab === 'source' ? ' tab--active' : ''}`}
+              onClick={() => setTab('source')}
+            >
+              {RES_DRAWER_TAB_SOURCE}
+            </button>
+            <button
+              type="button"
+              className={`tab${tab === 'relations' ? ' tab--active' : ''}`}
+              onClick={() => setTab('relations')}
+            >
+              {RES_DRAWER_TAB_RELATIONS}
+            </button>
+          </div>
+
+          {tab === 'attrs' && (
+            <table className="kv-table">
+              <tbody>
+                <tr>
+                  <th scope="row">{RES_COL_KEY}</th>
+                  <td>{detail.naturalKey}</td>
+                </tr>
+                <tr>
+                  <th scope="row">{RES_COL_NAME}</th>
+                  <td>{detail.name === '' ? NO_VALUE : detail.name}</td>
+                </tr>
+                <tr>
+                  <th scope="row">{RES_COL_TYPE}</th>
+                  <td>
+                    <TypeChip type={detail.type} />
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">{RES_COL_STATUS}</th>
+                  <td>
+                    <StatusChip status={detail.status} />
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">{RES_ATTR_FIRST_BATCH}</th>
+                  <td>{detail.firstBatchId === '' ? NO_VALUE : detail.firstBatchId}</td>
+                </tr>
+                <tr>
+                  <th scope="row">{RES_ATTR_UPDATED_AT}</th>
+                  <td>{formatDateTime(detail.updatedAt)}</td>
+                </tr>
+                {orderedAttributes(detail).map(([field, value]) => (
+                  <tr key={field}>
+                    <th scope="row">{fieldLabel(field)}</th>
+                    <td>{value === '' ? NO_VALUE : value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {tab === 'source' && (
+            <div className="source-list">
+              {detail.sourceRefs.length === 0 ? (
+                <div className="muted-note">{RES_NO_SOURCE}</div>
+              ) : (
+                detail.sourceRefs.map((ref, index) => (
+                  <div className="source-item" key={`${ref.workbook}-${ref.sheet}-${ref.rowNumber}-${index}`}>
+                    {format(RES_SOURCE_ITEM, {
+                      workbook: ref.workbook,
+                      sheet: ref.sheet,
+                      row: ref.rowNumber,
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {tab === 'relations' && (
+            <div className="relations">
+              <div className="muted-note">
+                {RES_RELATION_COUNT}：{detail.relationCount}
+              </div>
+              {hop1Edges.length === 0 ? (
+                <div className="muted-note">{RES_NO_RELATIONS}</div>
+              ) : (
+                hop1Edges.map((edge) => (
+                  <RelationItem
+                    key={edge.id}
+                    edge={edge}
+                    anchorId={anchorId}
+                    node={nodeById.get(edge.fromId === anchorId ? edge.toId : edge.fromId)}
+                  />
+                ))
+              )}
+              <div className="hop2">
+                {depth2 === null ? (
+                  hop1Edges.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      disabled={loading2}
+                      onClick={expandDepth2}
+                    >
+                      {BTN_EXPAND_2HOP}
+                    </button>
+                  )
+                ) : (
+                  <>
+                    <div className="hop2-title">{RES_HOP2_TITLE}</div>
+                    {hop2Groups.length === 0 ? (
+                      <div className="muted-note">{RES_HOP2_EMPTY}</div>
+                    ) : (
+                      hop2Groups.map((group) => (
+                        <div className="hop2-group" key={group.anchor.id}>
+                          <div className="hop2-anchor">
+                            <TypeChip type={group.anchor.type} />
+                            <span className="cell-strong">
+                              {group.anchor.name === '' ? group.anchor.naturalKey : group.anchor.name}
+                            </span>
+                            <span className="muted-note">{group.anchor.naturalKey}</span>
+                          </div>
+                          {group.edges.map((edge) => (
+                            <RelationItem
+                              key={edge.id}
+                              edge={edge}
+                              anchorId={group.anchor.id}
+                              node={nodeById.get(edge.fromId === group.anchor.id ? edge.toId : edge.fromId)}
+                            />
+                          ))}
+                        </div>
+                      ))
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      onClick={() => setDepth2(null)}
+                    >
+                      {BTN_COLLAPSE_2HOP}
+                    </button>
+                  </>
+                )}
+                {loading2 && <Spinner size={16} />}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </Drawer>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 页面
+// ---------------------------------------------------------------------------
+
+export function ResourcesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusId = searchParams.get('focus');
+
+  const [type, setType] = useState<ResourceType | ''>('');
+  const [status, setStatus] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<Paged<ResourceItem> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [drawerId, setDrawerId] = useState<string | null>(focusId);
+
+  const requestSeqRef = useRef(0);
+
+  const fetchResources = useCallback((): void => {
+    const seq = ++requestSeqRef.current;
+    setLoading(true);
+    setError(null);
+    listResources({
+      type: type === '' ? undefined : type,
+      q: query === '' ? undefined : query,
+      status: status === '' ? undefined : status,
+      page,
+      pageSize: PAGE_SIZE,
+    })
+      .then((paged) => {
+        if (requestSeqRef.current !== seq) return;
+        setData(paged);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (requestSeqRef.current !== seq) return;
+        setError(err instanceof ApiError ? err.message : null);
+        setLoading(false);
+      });
+  }, [type, query, status, page]);
+
+  useEffect(() => {
+    fetchResources();
+  }, [fetchResources]);
+
+  const debouncedSearch = useMemo(
+    () =>
+      debounce((value: string) => {
+        setQuery(value);
+        setPage(1);
+      }, SEARCH_DEBOUNCE_MS),
+    [],
+  );
+
+  useEffect(() => {
+    if (focusId !== null) {
+      setDrawerId(focusId);
+    }
+  }, [focusId]);
+
+  function closeDrawer(): void {
+    setDrawerId(null);
+    if (focusId !== null) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('focus');
+      setSearchParams(next, { replace: true });
+    }
+  }
+
+  const columns: TableColumn<ResourceItem>[] = [
+    { key: 'naturalKey', header: RES_COL_KEY, render: (row) => <span className="cell-strong">{row.naturalKey}</span> },
+    { key: 'name', header: RES_COL_NAME, render: (row) => (row.name === '' ? NO_VALUE : row.name) },
+    { key: 'type', header: RES_COL_TYPE, render: (row) => <TypeChip type={row.type} /> },
+    { key: 'status', header: RES_COL_STATUS, render: (row) => <StatusChip status={row.status} /> },
+    { key: 'updatedAt', header: RES_COL_UPDATED, render: (row) => formatDateTime(row.updatedAt) },
+  ];
+
+  const noFilters = type === '' && status === '' && query === '';
+  const showEmptyState = !loading && error === null && data !== null && data.total === 0 && noFilters;
+
+  return (
+    <>
+      <div className="card">
+        <div className="filter-bar" role="search">
+          <label className="filter-field">
+            <span className="filter-label">{RES_FILTER_TYPE}</span>
+            <select
+              className="select"
+              value={type}
+              onChange={(event) => {
+                setType(event.target.value === '' ? '' : (event.target.value as ResourceType));
+                setPage(1);
+              }}
+            >
+              <option value="">{FILTER_ALL}</option>
+              {(Object.keys(RESOURCE_TYPE_LABELS) as ResourceType[]).map((key) => (
+                <option key={key} value={key}>
+                  {RESOURCE_TYPE_LABELS[key]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span className="filter-label">{RES_FILTER_STATUS}</span>
+            <select
+              className="select"
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">{FILTER_ALL}</option>
+              {RESOURCE_STATUS_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="filter-field filter-field--grow">
+            <span className="filter-label">{RES_FILTER_SEARCH}</span>
+            <div className="search-box">
+              <IconSearch />
+              <input
+                type="search"
+                className="input"
+                placeholder={RES_SEARCH_PLACEHOLDER}
+                aria-label={RES_FILTER_SEARCH}
+                value={searchText}
+                onChange={(event) => {
+                  setSearchText(event.target.value);
+                  debouncedSearch(event.target.value);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {error !== null ? (
+          <ErrorBlock message={error} onRetry={fetchResources} />
+        ) : showEmptyState ? (
+          <EmptyState
+            title={RES_EMPTY_TITLE}
+            description={RES_EMPTY_DESC}
+            action={
+              <Link className="btn btn--primary" to="/import">
+                <IconUpload />
+                {BTN_IMPORT_DATA}
+              </Link>
+            }
+          />
+        ) : (
+          <>
+            <Table
+              columns={columns}
+              rows={data?.items ?? []}
+              rowKey={(row) => row.id}
+              loading={loading}
+              onRowClick={(row) => setDrawerId(row.id)}
+              ariaLabel={RES_TABLE_LABEL}
+            />
+            {data !== null && data.total > 0 && (
+              <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />
+            )}
+          </>
+        )}
+      </div>
+
+      {drawerId !== null && <ResourceDrawer resourceId={drawerId} onClose={closeDrawer} />}
+    </>
+  );
+}
