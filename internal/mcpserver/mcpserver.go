@@ -1,8 +1,15 @@
-// Package mcpserver exposes the NetOps Lab MCP STDIO server
-// (PROJECT_BRIEF §10). It registers EXACTLY ONE tool — resource_search
-// (read-only search over imported resources) — and nothing else: no SQL,
-// shell, SSH or file tools, no production write capability of any kind (the
-// SEC non-negotiable of PROJECT_BRIEF §1).
+// Package mcpserver exposes the NetOps Lab MCP STDIO server: resource_search
+// of PROJECT_BRIEF §10 plus the four simulation-workbench lab tools of
+// PROJECT_BRIEF_P2 §8 (lab_apply_ops, lab_run_checks, lab_diff_undo,
+// lab_checkpoint) — EXACTLY FIVE tools and nothing else: no SQL, shell, SSH or
+// file tools, no production write capability of any kind (the SEC
+// non-negotiable of PROJECT_BRIEF §1 and PROJECT_BRIEF_P2 §1).
+//
+// The AI mutates simulation state ONLY through these tools, and only by
+// typed application operations on an existing workspace — no tool can create
+// or delete a workspace (materialization stays a human/HTTP action), and
+// restore_* op codes are rejected inside lab_apply_ops because the engine's
+// own decoder guards every external boundary.
 //
 // The server speaks MCP over newline-delimited JSON-RPC 2.0 via the
 // modelcontextprotocol go-sdk v1.8.0 (IOTransport over the caller-provided
@@ -20,15 +27,19 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-lab/internal/sim"
 )
 
-// Server identity constants (§10).
+// Server identity constants (§8): name netops-lab, version domain.AppVersion
+// (v0.2.0 in Phase 2 — reported by the initialize handshake automatically).
 const (
 	ServerName    = "netops-lab"
 	ServerVersion = domain.AppVersion
 )
 
-// Tool name — the single registered tool.
+// Tool name — the Phase 1 read-only search tool (unchanged, §10). The four
+// Phase 2 lab tools are registered alongside it in labtools.go; together
+// they are the exactly five tools of PROJECT_BRIEF_P2 §8.
 const toolName = "resource_search"
 
 // Tool input/output limits (§10): limit defaults to 20 and is capped at 100.
@@ -77,8 +88,11 @@ type searchOutput struct {
 	ApplicationGenerated bool         `json:"applicationGenerated"`
 }
 
-// NewServer builds the MCP server with the single resource_search tool
-// registered against db. Exported for tests and future embedding.
+// NewServer builds the MCP server with the five registered tools
+// (PROJECT_BRIEF_P2 §8): the Phase 1 resource_search plus the four lab tools
+// bound to a sim.Service built from the same db — every lab mutation flows
+// through the engine path, exactly like the HTTP API (no SQL here).
+// Exported for tests and future embedding.
 func NewServer(db *repo.DB) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: ServerName, Version: ServerVersion},
@@ -100,6 +114,7 @@ func NewServer(db *repo.DB) *mcp.Server {
 		}
 		return nil, out, nil
 	})
+	addLabTools(server, sim.New(db))
 	return server
 }
 
