@@ -2,7 +2,9 @@
 // that speaks SQL (PROJECT_BRIEF §1.6). It opens the database, applies
 // ordered idempotent migrations, and exposes typed repositories for every
 // aggregate (batches, resources, relations, source refs, row results,
-// issues). Domain structs flow in and out; no SQL leaks beyond this package.
+// issues; Phase 2 adds workspaces, sequences, virtual devices, interfaces,
+// links, changesets, check runs, checkpoints). Domain structs flow in and
+// out; no SQL leaks beyond this package.
 //
 // All mutations that must be atomic go through DB.Do, which runs a function
 // inside one transaction and rolls back on error or panic.
@@ -37,6 +39,16 @@ type DB struct {
 	SourceRefs *SourceRefRepo
 	RowResults *RowResultRepo
 	Issues     *IssueRepo
+
+	// Phase 2 simulation workbench aggregates (DDL v5).
+	Workspaces     *WorkspaceRepo
+	Sequences      *SequenceRepo
+	VirtualDevices *VirtualDeviceRepo
+	SimInterfaces  *SimInterfaceRepo
+	SimLinks       *SimLinkRepo
+	ChangeSets     *ChangeSetRepo
+	CheckRuns      *CheckRunRepo
+	Checkpoints    *CheckpointRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies all pending
@@ -61,6 +73,14 @@ func Open(path string) (*DB, error) {
 	db.SourceRefs = &SourceRefRepo{q: sqlDB}
 	db.RowResults = &RowResultRepo{q: sqlDB}
 	db.Issues = &IssueRepo{q: sqlDB}
+	db.Workspaces = &WorkspaceRepo{q: sqlDB}
+	db.Sequences = &SequenceRepo{q: sqlDB}
+	db.VirtualDevices = &VirtualDeviceRepo{q: sqlDB}
+	db.SimInterfaces = &SimInterfaceRepo{q: sqlDB}
+	db.SimLinks = &SimLinkRepo{q: sqlDB}
+	db.ChangeSets = &ChangeSetRepo{q: sqlDB}
+	db.CheckRuns = &CheckRunRepo{q: sqlDB}
+	db.Checkpoints = &CheckpointRepo{q: sqlDB}
 	return db, nil
 }
 
@@ -79,6 +99,16 @@ type Tx struct {
 	SourceRefs *SourceRefRepo
 	RowResults *RowResultRepo
 	Issues     *IssueRepo
+
+	// Phase 2 simulation workbench aggregates (DDL v5).
+	Workspaces     *WorkspaceRepo
+	Sequences      *SequenceRepo
+	VirtualDevices *VirtualDeviceRepo
+	SimInterfaces  *SimInterfaceRepo
+	SimLinks       *SimLinkRepo
+	ChangeSets     *ChangeSetRepo
+	CheckRuns      *CheckRunRepo
+	Checkpoints    *CheckpointRepo
 }
 
 // Do runs fn inside a single transaction. If fn returns an error, the
@@ -92,12 +122,20 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		return fmt.Errorf("repo: begin transaction: %w", err)
 	}
 	tx := &Tx{
-		Batches:    &BatchRepo{q: sqlTx},
-		Resources:  &ResourceRepo{q: sqlTx},
-		Relations:  &RelationRepo{q: sqlTx},
-		SourceRefs: &SourceRefRepo{q: sqlTx},
-		RowResults: &RowResultRepo{q: sqlTx},
-		Issues:     &IssueRepo{q: sqlTx},
+		Batches:        &BatchRepo{q: sqlTx},
+		Resources:      &ResourceRepo{q: sqlTx},
+		Relations:      &RelationRepo{q: sqlTx},
+		SourceRefs:     &SourceRefRepo{q: sqlTx},
+		RowResults:     &RowResultRepo{q: sqlTx},
+		Issues:         &IssueRepo{q: sqlTx},
+		Workspaces:     &WorkspaceRepo{q: sqlTx},
+		Sequences:      &SequenceRepo{q: sqlTx},
+		VirtualDevices: &VirtualDeviceRepo{q: sqlTx},
+		SimInterfaces:  &SimInterfaceRepo{q: sqlTx},
+		SimLinks:       &SimLinkRepo{q: sqlTx},
+		ChangeSets:     &ChangeSetRepo{q: sqlTx},
+		CheckRuns:      &CheckRunRepo{q: sqlTx},
+		Checkpoints:    &CheckpointRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {
