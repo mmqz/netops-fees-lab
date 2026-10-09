@@ -1,0 +1,20 @@
+# binaries & build output
+/bin/
+*.test
+*.out
+/coverage/
+
+# frontend build (stub committed; real build output not committed)
+/web/node_modules/
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+
+# runtime data
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# misc
+.DS_Store
+*.log
