@@ -61,12 +61,14 @@
 | MCP 5 工具（SEC-P2） | `TestMCPToolRegistry`（go-sdk 客户端 × 双 os.Pipe + initialize 握手：tools/list == 恰好 5 个）+ `TestMCPLabApplyOps/RunChecks/DiffUndo/Checkpoint`（restore_* 双重拒绝、runChecks=false ⇒ checks null、mode/action 联动校验）+ **真子进程 stdio 冒烟**（`netopslab mcp --db` 裸 JSON-RPC → v0.2.0 + 5 工具） | 部署态（TeleAgent 宿主）仍未验证——见下表 |
 | 性能实测（PERF-P2） | `TestSimulationPerformance`（2 核）：物化 3–4 ms；10 操作变更集 0–1 ms；1 操作+自动校验 1 ms；RunChecks 1 ms；Path 0 ms；Topology+哈希 0 ms | 全部低于 2 s 预算三个数量级；数字入 docs/simulation.md §7 |
 | 前端构建（含 Cytoscape） | `cd web && npm run build`：tsc strict 零错误；js 717.63 kB（gzip 226.73）/ css 22.22 kB | ADR-0009（单 chunk 决策） |
+| **真浏览器 /lab 全流程冒烟（终审）** | Chrome 155 / agent-browser 隔离会话对真实 serve：空状态→新建工作台（批次多选）→拓扑页（27/40/20 + 哈希）→画布渲染+布局切换→节点点击→设备表行高亮联动→运行校验（95 分、CHK-003 孤岛发现）→执行操作（表单+JSON 双模式）→配置地址 10.0.0.1/24→撤销（哈希精确回基线 + toast）→故障注入（重复地址+断链）→前后对比（评分 −6、新增 CHK-001、连通性丢失 20 对）→检查点创建/no-op 恢复/真实恢复（哈希精确还原 + 变更集 cs-5）→导出报告新页签 | 2026-10-09 终审；截图证据见交付包 `ui-screenshots-p2/`；过程中发现并修复 2 个 UI 缺陷（空状态新建死锁、IPv4 未配置判定，commit 86b903c） |
+| CI（Phase 2 首推） | push 86b903c → GitHub Actions run 37967168941 **首推即绿**（go: gofmt/vet/169 tests；web: tsc strict + vite） | Phase 1 的两个 CI 数训（go job 先建前端、npm cache 路径）直接生效 |
 
 ## ⚠️ 未验证（Phase 2 诚实声明）
 
 | 事项 | 现状 | 计划 |
 | --- | --- | --- |
 | **部署态 TeleAgent 的 MCP 调用** | 与 P1 相同：环境无 TeleAgent 实例；已验证进程内 go-sdk 回环 + 真子进程 stdio 冒烟（含 5 工具握手） | 接入部署态时按 `docs/teleagent-integration.md` §2 操作并反馈；CLI fallback（§4.2 lab 子命令树）可先行 |
-| **真浏览器 /lab UI 冒烟** | 前端构建 + API 契约测试通过，但 Cytoscape 画布的视觉效果（布局观感、虚线、缩放）未经浏览器人工确认 | orchestrator 终审（P2-T8）agent-browser 跑 /lab 全流程 |
+| **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
