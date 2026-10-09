@@ -1,0 +1,44 @@
+# NetOps Lab CI.
+#
+# NOTE: this workflow has NOT run yet at the time of committing — the first
+# run triggers on the next push to main. CI status is TBD until then; the
+# equivalent gates (gofmt/vet/full tests; npm ci + build) were run and
+# captured locally on linux/amd64 (see docs/verified-capabilities.md).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 -timeout 15m ./...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm ci
+        run: npm ci
+      - name: build (tsc strict + vite)
+        run: npm run build

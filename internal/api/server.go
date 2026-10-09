@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -109,10 +110,17 @@ func (s *Server) Routes() http.Handler {
 	return s.middleware(mux)
 }
 
-// middleware wraps the mux with panic recovery and request logging.
+// middleware wraps the mux with panic recovery and request logging. All /api
+// responses carry Cache-Control: no-store: they are dynamic database views
+// and must never be served from a browser's HTTP cache (heuristic caching of
+// unvalidated 200s once produced stale-statistics illusions during UI
+// testing; see docs/adr/0006-api-no-store.md).
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		defer func() {
 			if p := recover(); p != nil {

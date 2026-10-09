@@ -1000,6 +1000,11 @@ func TestAPIHealthAndSPA(t *testing.T) {
 	if health.Status != "ok" || health.Version != domain.AppVersion || health.RuleVersion != domain.RuleVersion {
 		t.Errorf("health: %+v, want ok/%s/%s", health, domain.AppVersion, domain.RuleVersion)
 	}
+	// API responses must never be browser-cacheable (regression: stale
+	// heuristic caching once showed outdated statistics in the SPA).
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("health: cache-control = %q, want no-store", cc)
+	}
 
 	// SPA root serves the built index.html.
 	resp, body = doRequest(t, srv, http.MethodGet, "/", nil, "")
