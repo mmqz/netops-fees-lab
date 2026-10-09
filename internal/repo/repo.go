@@ -32,6 +32,9 @@ type DBTX interface {
 // multi-statement atomicity.
 type DB struct {
 	sql *sql.DB
+	// path is the database file path as passed to Open/OpenReadOnly;
+	// Path exposes it (checkpoint snapshot files live relative to it).
+	path string
 
 	Batches    *BatchRepo
 	Resources  *ResourceRepo
@@ -62,26 +65,32 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("repo: open %s: %w", path, err)
 	}
-	db := &DB{sql: sqlDB}
+	db := &DB{sql: sqlDB, path: path}
 	if err := db.applyMigrations(context.Background()); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
 	}
-	db.Batches = &BatchRepo{q: sqlDB}
-	db.Resources = &ResourceRepo{q: sqlDB}
-	db.Relations = &RelationRepo{q: sqlDB}
-	db.SourceRefs = &SourceRefRepo{q: sqlDB}
-	db.RowResults = &RowResultRepo{q: sqlDB}
-	db.Issues = &IssueRepo{q: sqlDB}
-	db.Workspaces = &WorkspaceRepo{q: sqlDB}
-	db.Sequences = &SequenceRepo{q: sqlDB}
-	db.VirtualDevices = &VirtualDeviceRepo{q: sqlDB}
-	db.SimInterfaces = &SimInterfaceRepo{q: sqlDB}
-	db.SimLinks = &SimLinkRepo{q: sqlDB}
-	db.ChangeSets = &ChangeSetRepo{q: sqlDB}
-	db.CheckRuns = &CheckRunRepo{q: sqlDB}
-	db.Checkpoints = &CheckpointRepo{q: sqlDB}
+	wire(db, sqlDB)
 	return db, nil
+}
+
+// wire attaches the repository set of q (autocommit mode) to db. Open and
+// OpenReadOnly (backup.go) share it so both handles expose the same surface.
+func wire(db *DB, q DBTX) {
+	db.Batches = &BatchRepo{q: q}
+	db.Resources = &ResourceRepo{q: q}
+	db.Relations = &RelationRepo{q: q}
+	db.SourceRefs = &SourceRefRepo{q: q}
+	db.RowResults = &RowResultRepo{q: q}
+	db.Issues = &IssueRepo{q: q}
+	db.Workspaces = &WorkspaceRepo{q: q}
+	db.Sequences = &SequenceRepo{q: q}
+	db.VirtualDevices = &VirtualDeviceRepo{q: q}
+	db.SimInterfaces = &SimInterfaceRepo{q: q}
+	db.SimLinks = &SimLinkRepo{q: q}
+	db.ChangeSets = &ChangeSetRepo{q: q}
+	db.CheckRuns = &CheckRunRepo{q: q}
+	db.Checkpoints = &CheckpointRepo{q: q}
 }
 
 // Close closes the underlying database handle.

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
@@ -20,6 +21,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/mcpserver"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 	"github.com/mmqz/netops-lab/internal/workbook"
 )
@@ -41,7 +43,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, mcp, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, lab, mcp, testdata")
 		return exitUsage
 	}
 
@@ -59,12 +61,14 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdReport(args[1:], stdout, stderr)
 	case "query":
 		err = cmdQuery(args[1:], stdout, stderr)
+	case "lab":
+		err = cmdLab(args[1:], stdout, stderr)
 	case "mcp":
 		err = cmdMCP(args[1:], stdout, stderr)
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, mcp, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, lab, mcp, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -123,6 +127,14 @@ func cliErrorCode(err error) string {
 		return "not_found"
 	case errors.Is(err, domain.ErrConflict):
 		return "conflict"
+	case errors.Is(err, domain.ErrInvalidOp):
+		return "invalid_request"
+	case errors.Is(err, domain.ErrOpFailed):
+		return "op_failed"
+	case errors.Is(err, domain.ErrNotLatest):
+		return "not_latest"
+	case errors.Is(err, domain.ErrNoSourceResources):
+		return "no_source_resources"
 	}
 	return "internal"
 }
@@ -570,4 +582,517 @@ func cmdTestdata(args []string, stdout, stderr io.Writer) error {
 		"out":   *out,
 		"files": []string{"devices.xlsx", "ippools.xlsx", "circuits.xlsx", "expected-summary.json"},
 	})
+}
+
+// ---- lab: the simulation workbench subcommand tree (PROJECT_BRIEF_P2 §9) ----
+
+// cmdLab implements `netopslab lab …`:
+//
+//	lab workspace create --db <path> --name <n> [--batches id1,id2 | --all-batches]
+//	lab topology      --db <path> --workspace <id>
+//	lab path          --db <path> --workspace <id> --from <code> --to <code>
+//	lab apply         --db <path> --workspace <id> --ops <ops.json> [--desc <s>] [--no-checks]
+//	lab checks        --db <path> --workspace <id> [--run]
+//	lab diff          --db <path> --workspace <id> --from <runId> --to <runId>
+//	lab undo          --db <path> --workspace <id> [--changeset <id>]
+//	lab checkpoint    --db <path> --workspace <id> (--list | --create --label <l> | --restore --id <cpId>)
+//
+// Every subcommand prints exactly one JSON object on stdout and follows the
+// P1 exit-code contract (0 success / 1 failure / 2 usage). All mutations
+// flow through the sim engine — no sim table is written directly here.
+func cmdLab(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "缺少 lab 子命令；可用：workspace, topology, path, apply, checks, diff, undo, checkpoint"}
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "workspace":
+		return cmdLabWorkspace(rest, stdout, stderr)
+	case "topology":
+		return cmdLabTopology(rest, stdout, stderr)
+	case "path":
+		return cmdLabPath(rest, stdout, stderr)
+	case "apply":
+		return cmdLabApply(rest, stdout, stderr)
+	case "checks":
+		return cmdLabChecks(rest, stdout, stderr)
+	case "diff":
+		return cmdLabDiff(rest, stdout, stderr)
+	case "undo":
+		return cmdLabUndo(rest, stdout, stderr)
+	case "checkpoint":
+		return cmdLabCheckpoint(rest, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("lab 子命令必须是 workspace、topology、path、apply、checks、diff、undo 或 checkpoint，收到 %q", sub)}
+	}
+}
+
+// cmdLabWorkspace implements `lab workspace create --db --name
+// [--batches id1,id2 | --all-batches]` → MaterializeResult JSON. An absent
+// --batches (and --all-batches) selects ALL completed batches — the §6
+// default scope.
+func cmdLabWorkspace(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 || args[0] != "create" {
+		return &usageError{msg: "lab workspace 的子命令必须是 create"}
+	}
+	fs, usage := newFlagSet("lab workspace create")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	name := fs.String("name", "", "工作台名称，必填")
+	batches := fs.String("batches", "", "逗号分隔的导入批次 id（缺省为全部 completed 批次）")
+	allBatches := fs.Bool("all-batches", false, "显式选择全部 completed 批次（与缺省行为相同）")
+	if err := fs.Parse(args[1:]); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *name == "" {
+		return &usageError{msg: "缺少 --name 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab workspace create 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	var batchIDs []string
+	if *batches != "" {
+		for _, id := range strings.Split(*batches, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				batchIDs = append(batchIDs, id)
+			}
+		}
+		if len(batchIDs) == 0 {
+			return &usageError{msg: "--batches 需要至少一个批次 id", usage: usage.String()}
+		}
+	}
+	// *allBatches deliberately leaves batchIDs nil (the default scope);
+	// passing BOTH --batches and --all-batches is rejected to avoid the
+	// ambiguous combination.
+	if *allBatches && len(batchIDs) > 0 {
+		return &usageError{msg: "--all-batches 与 --batches 不能同时使用", usage: usage.String()}
+	}
+	_ = *allBatches
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	res, err := a.Lab.Materialize(context.Background(), *name, "", batchIDs)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
+}
+
+// cmdLabTopology implements `lab topology --db --workspace` → Topology JSON.
+func cmdLabTopology(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab topology")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" {
+		return &usageError{msg: "缺少 --workspace 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab topology 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	res, err := a.Lab.Topology(context.Background(), *workspace)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
+}
+
+// cmdLabPath implements `lab path --db --workspace --from <code> --to <code>`
+// → PathResult JSON.
+func cmdLabPath(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab path")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	from := fs.String("from", "", "起点设备编码，必填")
+	to := fs.String("to", "", "终点设备编码，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" || *from == "" || *to == "" {
+		return &usageError{msg: "缺少 --workspace、--from 或 --to 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab path 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	res, err := a.Lab.Path(context.Background(), *workspace, *from, *to)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
+}
+
+// labOpsBody is the ops file shape of `lab apply` (§9: the §7 ops request
+// body {ops:[…], description?, runChecks?}). The ops array itself is
+// delegated to sim.DecodeOps.
+type labOpsBody struct {
+	Description string `json:"description"`
+	RunChecks   *bool  `json:"runChecks"`
+}
+
+// cmdLabApply implements `lab apply --db --workspace --ops <ops.json>
+// [--desc <s>] [--no-checks]` → ApplyResult JSON. --desc overrides the ops
+// file's description; --no-checks forces runChecks=false (file value or
+// default true otherwise).
+func cmdLabApply(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab apply")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	opsFile := fs.String("ops", "", "操作文件路径（§7 ops 请求体：{ops:[…], description?, runChecks?}），必填")
+	desc := fs.String("desc", "", "变更集描述（覆盖 ops 文件中的 description）")
+	noChecks := fs.Bool("no-checks", false, "跳过变更后的自动校验")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" || *opsFile == "" {
+		return &usageError{msg: "缺少 --workspace 或 --ops 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab apply 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	raw, err := os.ReadFile(*opsFile)
+	if err != nil {
+		return fmt.Errorf("读取操作文件 %s: %w", *opsFile, err)
+	}
+	var body labOpsBody
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return fmt.Errorf("操作文件 %s 不是合法 JSON: %w: %w", *opsFile, domain.ErrInvalidOp, err)
+	}
+	ops, err := sim.DecodeOps(raw)
+	if err != nil {
+		return err
+	}
+	description := body.Description
+	if *desc != "" {
+		description = *desc
+	}
+	runChecks := true
+	if body.RunChecks != nil {
+		runChecks = *body.RunChecks
+	}
+	if *noChecks {
+		runChecks = false
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	res, err := a.Lab.ApplyOps(context.Background(), *workspace, ops, description, runChecks)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
+}
+
+// labCheckResult is the JSON rendering of one check result row (the CLI's
+// camelCase projection of domain.CheckResult — the domain struct carries no
+// json tags on purpose).
+type labCheckResult struct {
+	Seq        int             `json:"seq"`
+	CheckCode  string          `json:"checkCode"`
+	Severity   string          `json:"severity"`
+	Passed     bool            `json:"passed"`
+	EntityKind string          `json:"entityKind"`
+	EntityID   string          `json:"entityId"`
+	Message    string          `json:"message"`
+	Detail     json.RawMessage `json:"detail"`
+}
+
+// labCheckResults maps stored result rows to their JSON projection (stored
+// order: findings first, then the per-check baselines).
+func labCheckResults(results []domain.CheckResult) []labCheckResult {
+	out := make([]labCheckResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, labCheckResult{
+			Seq:        r.Seq,
+			CheckCode:  r.CheckCode,
+			Severity:   r.Severity.String(),
+			Passed:     r.Passed,
+			EntityKind: r.EntityKind,
+			EntityID:   r.EntityID,
+			Message:    r.Message,
+			Detail:     json.RawMessage(r.DetailJSON),
+		})
+	}
+	return out
+}
+
+// sevCountsOf counts the findings of a result row set per severity.
+func sevCountsOf(results []domain.CheckResult) sim.SevCounts {
+	var c sim.SevCounts
+	for _, r := range results {
+		if r.Passed {
+			continue
+		}
+		switch r.Severity {
+		case domain.SeverityError:
+			c.Error++
+		case domain.SeverityWarning:
+			c.Warning++
+		case domain.SeverityInfo:
+			c.Info++
+		}
+	}
+	return c
+}
+
+// labRunDetail is the JSON payload of `lab checks` without --run: the
+// latest run with its full result rows (§7 GET …/checks/{runId} shape).
+type labRunDetail struct {
+	RunID       string           `json:"runId"`
+	ChangesetID *string          `json:"changesetId"` // null = not tied to a changeset
+	Trigger     string           `json:"trigger"`
+	RuleVersion string           `json:"ruleVersion"`
+	StartedAt   time.Time        `json:"startedAt"`
+	DurationMs  int              `json:"durationMs"`
+	Score       int              `json:"score"`
+	Counts      sim.SevCounts    `json:"counts"`
+	Results     []labCheckResult `json:"results"`
+}
+
+// cmdLabChecks implements `lab checks --db --workspace [--run]`: --run
+// executes a new manual run (RunResult JSON summary); the default prints the
+// LATEST run with its result rows — exit 1 not_found when none exists yet.
+func cmdLabChecks(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab checks")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	run := fs.Bool("run", false, "立即执行一次新的校验（缺省打印最近一次运行）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" {
+		return &usageError{msg: "缺少 --workspace 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab checks 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	if *run {
+		res, err := a.Lab.RunChecks(ctx, *workspace, domain.CheckTriggerManual)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, res)
+	}
+	runRow, results, err := a.Lab.LatestRun(ctx, *workspace)
+	if err != nil {
+		return err
+	}
+	detail := labRunDetail{
+		RunID:       runRow.ID,
+		Trigger:     runRow.Trigger.String(),
+		RuleVersion: runRow.RuleVersion,
+		StartedAt:   runRow.StartedAt,
+		DurationMs:  runRow.DurationMs,
+		Score:       runRow.Score,
+		Counts:      sevCountsOf(results),
+		Results:     labCheckResults(results),
+	}
+	if runRow.ChangesetID != "" {
+		changeset := runRow.ChangesetID
+		detail.ChangesetID = &changeset
+	}
+	return writeJSON(stdout, detail)
+}
+
+// labRunRef is the JSON projection of a diff's run reference.
+type labRunRef struct {
+	RunID     string        `json:"runId"`
+	StartedAt time.Time     `json:"startedAt"`
+	Score     int           `json:"score"`
+	Counts    sim.SevCounts `json:"counts"`
+}
+
+// labDiffResult is the JSON payload of `lab diff`: the sim.DiffResult with
+// the finding rows projected to their camelCase shape.
+type labDiffResult struct {
+	From               labRunRef        `json:"from"`
+	To                 labRunRef        `json:"to"`
+	FindingsAdded      []labCheckResult `json:"findingsAdded"`
+	FindingsRemoved    []labCheckResult `json:"findingsRemoved"`
+	ConnectivityLost   []sim.PairRef    `json:"connectivityLost"`
+	ConnectivityGained []sim.PairRef    `json:"connectivityGained"`
+	ScoreDelta         int              `json:"scoreDelta"`
+}
+
+// cmdLabDiff implements `lab diff --db --workspace --from <runId> --to
+// <runId>` → diff JSON.
+func cmdLabDiff(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab diff")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	from := fs.String("from", "", "对比基准 run id，必填")
+	to := fs.String("to", "", "对比目标 run id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" || *from == "" || *to == "" {
+		return &usageError{msg: "缺少 --workspace、--from 或 --to 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab diff 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	diff, err := a.Lab.Diff(context.Background(), *workspace, *from, *to)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, labDiffResult{
+		From: labRunRef{RunID: diff.From.RunID, StartedAt: diff.From.StartedAt,
+			Score: diff.From.Score, Counts: diff.From.Counts},
+		To: labRunRef{RunID: diff.To.RunID, StartedAt: diff.To.StartedAt,
+			Score: diff.To.Score, Counts: diff.To.Counts},
+		FindingsAdded:      labCheckResults(diff.FindingsAdded),
+		FindingsRemoved:    labCheckResults(diff.FindingsRemoved),
+		ConnectivityLost:   diff.ConnectivityLost,
+		ConnectivityGained: diff.ConnectivityGained,
+		ScoreDelta:         diff.ScoreDelta,
+	})
+}
+
+// cmdLabUndo implements `lab undo --db --workspace [--changeset <id>]` →
+// UndoResult JSON (checks run by default).
+func cmdLabUndo(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab undo")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	changeset := fs.String("changeset", "", "要撤销的变更集 id（缺省为最近一个已应用变更集）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" {
+		return &usageError{msg: "缺少 --workspace 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab undo 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	res, err := a.Lab.Undo(context.Background(), *workspace, *changeset, true)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
+}
+
+// labCheckpointItem is the JSON projection of one checkpoint row.
+type labCheckpointItem struct {
+	CheckpointID  string    `json:"checkpointId"`
+	Label         string    `json:"label"`
+	WorkspaceHash string    `json:"workspaceHash"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+// labCheckpointList is the JSON payload of `lab checkpoint --list`.
+type labCheckpointList struct {
+	Items []labCheckpointItem `json:"items"`
+	Total int                 `json:"total"`
+}
+
+// cmdLabCheckpoint implements `lab checkpoint --db --workspace (--list |
+// --create --label <l> | --restore --id <cpId>)`: exactly one of the three
+// modes is required.
+func cmdLabCheckpoint(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("lab checkpoint")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	workspace := fs.String("workspace", "", "工作台 id，必填")
+	list := fs.Bool("list", false, "列出工作台的检查点")
+	create := fs.Bool("create", false, "创建检查点（需要 --label）")
+	label := fs.String("label", "", "检查点标签（--create 时必填）")
+	restore := fs.Bool("restore", false, "恢复到检查点（需要 --id）")
+	id := fs.String("id", "", "检查点 id（--restore 时必填）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *workspace == "" {
+		return &usageError{msg: "缺少 --workspace 参数", usage: usage.String()}
+	}
+	modes := 0
+	for _, m := range []bool{*list, *create, *restore} {
+		if m {
+			modes++
+		}
+	}
+	if modes != 1 {
+		return &usageError{msg: "必须且只能指定 --list、--create --label 或 --restore --id 之一", usage: usage.String()}
+	}
+	if *create && *label == "" {
+		return &usageError{msg: "--create 需要 --label 参数", usage: usage.String()}
+	}
+	if *restore && *id == "" {
+		return &usageError{msg: "--restore 需要 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "lab checkpoint 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	switch {
+	case *list:
+		cps, err := a.Lab.ListCheckpoints(ctx, *workspace)
+		if err != nil {
+			return err
+		}
+		out := labCheckpointList{Items: make([]labCheckpointItem, 0, len(cps)), Total: len(cps)}
+		for _, cp := range cps {
+			out.Items = append(out.Items, labCheckpointItem{
+				CheckpointID:  cp.ID,
+				Label:         cp.Label,
+				WorkspaceHash: cp.WorkspaceHash,
+				CreatedAt:     cp.CreatedAt,
+			})
+		}
+		return writeJSON(stdout, out)
+	case *create:
+		res, err := a.Lab.CreateCheckpoint(ctx, *workspace, *label)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, res)
+	default: // *restore
+		res, err := a.Lab.RestoreCheckpoint(ctx, *workspace, *id, true)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, res)
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/report"
+	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/validation"
 )
 
@@ -65,6 +66,9 @@ type App struct {
 	Validation *validation.Engine
 	// Query is the read-side query service.
 	Query *query.Service
+	// Lab is the simulation workbench engine (Phase 2: materialize, ops,
+	// checks, undo, checkpoints).
+	Lab *sim.Service
 	// Report is the quality report generator.
 	Report *report.Generator
 	// API is the HTTP API server.
@@ -103,6 +107,7 @@ func New(cfg Config) (*App, error) {
 		Importer:   importer.New(db),
 		Validation: validation.New(db),
 		Query:      query.New(db),
+		Lab:        sim.New(db),
 		Report:     report.New(db),
 	}
 	a.API = api.New(log, db, cfg.DataDir)
