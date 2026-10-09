@@ -165,3 +165,43 @@ func (r *RelationRepo) CountByBatch(ctx context.Context, batchID string) (int, e
 	}
 	return n, nil
 }
+
+// CountByResourceIDs returns, for each id of resourceIDs, the number of
+// relations in which the resource participates as either the from or the to
+// endpoint. IDs absent from the result map participate in zero relations.
+// The validation engine uses this to find unlinked devices (I001); a single
+// grouped query avoids one round trip per device.
+func (r *RelationRepo) CountByResourceIDs(ctx context.Context, resourceIDs []string) (map[string]int, error) {
+	if len(resourceIDs) == 0 {
+		return map[string]int{}, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(resourceIDs)), ",")
+	args := make([]any, 0, 2*len(resourceIDs))
+	for range 2 {
+		for _, id := range resourceIDs {
+			args = append(args, id)
+		}
+	}
+	rows, err := r.q.QueryContext(ctx, `SELECT endpoint, COUNT(*) FROM (
+SELECT from_resource_id AS endpoint FROM relations WHERE from_resource_id IN (`+ph+`)
+UNION ALL
+SELECT to_resource_id AS endpoint FROM relations WHERE to_resource_id IN (`+ph+`)
+) GROUP BY endpoint`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("repo: count relations by resource ids: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[string]int, len(resourceIDs))
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("repo: scan count: %w", err)
+		}
+		counts[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: count relations by resource ids: %w", err)
+	}
+	return counts, nil
+}

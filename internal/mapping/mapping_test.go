@@ -438,6 +438,66 @@ func TestFieldKindCheckFormat(t *testing.T) {
 	}
 }
 
+// TestCheckFormatRanges covers the field-level integer range constraints of
+// PROJECT_BRIEF §6 (vlan_id 1..4094, bandwidth_mbps > 0) that turn
+// out-of-range values into E004 failures. Values are synthetic — the
+// committed fixtures only seed parse failures, so no new seeds are needed.
+func TestCheckFormatRanges(t *testing.T) {
+	poolSpec, ok := SpecByType(domain.ResourceTypeIPPool)
+	if !ok {
+		t.Fatal("ip_pool spec missing")
+	}
+	vlan, ok := poolSpec.Field("vlan_id")
+	if !ok {
+		t.Fatal("vlan_id field missing")
+	}
+	circuitSpec, ok := SpecByType(domain.ResourceTypeCircuit)
+	if !ok {
+		t.Fatal("circuit spec missing")
+	}
+	bandwidth, ok := circuitSpec.Field("bandwidth_mbps")
+	if !ok {
+		t.Fatal("bandwidth_mbps field missing")
+	}
+
+	cases := []struct {
+		field FieldSpec
+		value string
+		ok    bool
+	}{
+		{vlan, "4095", false},
+		{vlan, "4094", true},
+		{vlan, "0", false},
+		{vlan, "1", true},
+		{vlan, "-1", false},
+		{vlan, "abc", false},
+		{vlan, "", false}, // kind-level parse rejects empty typed values; the importer skips empties before checking
+		{bandwidth, "0", false},
+		{bandwidth, "-5", false},
+		{bandwidth, "100", true},
+		{bandwidth, "10000", true},
+		{bandwidth, "N/A", false},
+	}
+	for _, tc := range cases {
+		reason, ok := tc.field.CheckFormat(tc.value)
+		if ok != tc.ok {
+			t.Errorf("%s.CheckFormat(%q) ok = %v, want %v (reason %q)",
+				tc.field.Name, tc.value, ok, tc.ok, reason)
+		}
+		if !ok && reason == "" {
+			t.Errorf("%s.CheckFormat(%q) failed without a reason", tc.field.Name, tc.value)
+		}
+	}
+
+	// Non-int fields ignore the range machinery: the string field of device
+	// accepts any text and delegates only to the kind-level check.
+	deviceSpec, _ := SpecByType(domain.ResourceTypeDevice)
+	name, _ := deviceSpec.Field("device_name")
+	if reason, ok := name.CheckFormat("VLAN 4095"); !ok || reason != "" {
+		t.Errorf("device_name.CheckFormat must accept arbitrary text, got ok=%v reason=%q", ok, reason)
+	}
+}
+
 // TestNameField checks the name-field derivation of the three schemas.
 func TestNameField(t *testing.T) {
 	for _, tc := range []struct {

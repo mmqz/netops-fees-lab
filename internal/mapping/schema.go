@@ -10,6 +10,7 @@
 package mapping
 
 import (
+	"fmt"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -34,11 +35,9 @@ const (
 // not, reason describes the failure (it feeds the E004 issue evidence and
 // message). Enum fields are NOT checked here — an out-of-enum status is the
 // warning W002, not the error E004 (PROJECT_BRIEF §7); ref fields are
-// resolved against the database (E003).
-//
-// Integer range constraints (vlan_id 1..4094, bandwidth_mbps > 0) are left
-// to the rule engine refinement — the parse-level check only rejects
-// non-numeric values (E004), which matches the seeded test data.
+// resolved against the database (E003). Integer RANGE constraints
+// (vlan_id 1..4094, bandwidth_mbps > 0) are field-specific, so they live on
+// FieldSpec.CheckFormat, which wraps this parse-level check.
 func (k FieldKind) CheckFormat(value string) (reason string, ok bool) {
 	switch k {
 	case KindIPv4:
@@ -57,6 +56,42 @@ func (k FieldKind) CheckFormat(value string) (reason string, ok bool) {
 		}
 	case KindString, KindEnum, KindRef:
 		// No format constraint beyond trimming.
+	}
+	return "", true
+}
+
+// CheckFormat reports whether value is well-formed for this field: it
+// first runs the kind-level parse check (FieldKind.CheckFormat), then the
+// field's integer range constraint — vlan_id must be within 1..4094 and
+// bandwidth_mbps must be positive (PROJECT_BRIEF §6). An out-of-range
+// value is an E004 invalid_format failure, exactly like a parse failure. An
+// empty value is never range-checked here (required-ness is a separate
+// concern).
+func (f FieldSpec) CheckFormat(value string) (reason string, ok bool) {
+	if reason, ok := f.Kind.CheckFormat(value); !ok {
+		return reason, false
+	}
+	if f.Kind != KindInt || value == "" || (f.IntMin == 0 && f.IntMax == 0) {
+		return "", true
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		// Unreachable: the kind-level check already rejected non-integers.
+		return "不是十进制整数", false
+	}
+	switch {
+	case f.IntMin > 0 && f.IntMax > 0:
+		if n < f.IntMin || n > f.IntMax {
+			return fmt.Sprintf("超出取值范围（%d-%d）", f.IntMin, f.IntMax), false
+		}
+	case f.IntMin > 0:
+		if n < f.IntMin {
+			return fmt.Sprintf("必须为不小于 %d 的整数", f.IntMin), false
+		}
+	case f.IntMax > 0:
+		if n > f.IntMax {
+			return fmt.Sprintf("必须为不大于 %d 的整数", f.IntMax), false
+		}
 	}
 	return "", true
 }
@@ -83,6 +118,13 @@ type FieldSpec struct {
 	Enum []string
 	// Synonyms are the alternative header texts suggesting this field.
 	Synonyms []string
+	// IntMin is the inclusive lower bound of an int field's range
+	// (PROJECT_BRIEF §6: vlan_id ≥ 1, bandwidth_mbps ≥ 1). Zero means
+	// "no lower bound"; the pair (0, 0) disables the range check.
+	IntMin int
+	// IntMax is the inclusive upper bound of an int field's range
+	// (PROJECT_BRIEF §6: vlan_id ≤ 4094). Zero means "no upper bound".
+	IntMax int
 }
 
 // EnumContains reports whether v is one of the field's enum values.
@@ -181,7 +223,8 @@ var ipPoolSpec = TypeSpec{
 		{Name: "cidr", Label: "CIDR", Required: true, Kind: KindCIDR,
 			Synonyms: []string{"CIDR", "网段", "地址段", "子网"}},
 		{Name: "gateway", Label: "网关", Kind: KindIPv4, Synonyms: []string{"网关", "网关地址"}},
-		{Name: "vlan_id", Label: "VLAN", Kind: KindInt, Synonyms: []string{"VLAN", "VLAN_ID", "VLAN编号"}},
+		{Name: "vlan_id", Label: "VLAN", Kind: KindInt, IntMin: 1, IntMax: 4094,
+			Synonyms: []string{"VLAN", "VLAN_ID", "VLAN编号"}},
 		{Name: "assigned_device", Label: "归属设备", Kind: KindRef, RefType: domain.ResourceTypeDevice,
 			Synonyms: []string{"归属设备", "所属设备", "绑定设备"}},
 		{Name: "status", Label: "状态", Kind: KindEnum, Enum: StatusEnum,
@@ -200,7 +243,7 @@ var circuitSpec = TypeSpec{
 			Synonyms: []string{"A端设备", "A端", "本端设备"}},
 		{Name: "z_end_device", Label: "Z端设备", Required: true, Kind: KindRef, RefType: domain.ResourceTypeDevice,
 			Synonyms: []string{"Z端设备", "Z端", "对端设备"}},
-		{Name: "bandwidth_mbps", Label: "带宽Mbps", Kind: KindInt,
+		{Name: "bandwidth_mbps", Label: "带宽Mbps", Kind: KindInt, IntMin: 1,
 			Synonyms: []string{"带宽Mbps", "带宽(Mbps)", "带宽", "速率"}},
 		{Name: "status", Label: "状态", Kind: KindEnum, Enum: StatusEnum,
 			Synonyms: []string{"状态", "设备状态", "运行状态"}},

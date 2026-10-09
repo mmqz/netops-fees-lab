@@ -81,3 +81,30 @@ func TestSourceRefCRUDRoundtrip(t *testing.T) {
 		t.Errorf("after delete: %v", refs)
 	}
 }
+
+func TestSourceRefGetByID(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	_, _, _ = seedGraph(t, db)
+	ref := domain.SourceRef{
+		ID: "src_g1", EntityKind: domain.EntityKindRelation, EntityID: "rel_1",
+		BatchID: "bat_2", Workbook: "circuits.xlsx", Sheet: "电路", RowNumber: 2,
+		Raw: map[string]string{"A端设备": "DEV-001"},
+	}
+	if err := db.SourceRefs.Insert(ctx, ref); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	got, err := db.SourceRefs.GetByID(ctx, "src_g1")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.ID != ref.ID || got.EntityKind != domain.EntityKindRelation || got.EntityID != "rel_1" ||
+		got.Workbook != "circuits.xlsx" || got.Sheet != "电路" || got.RowNumber != 2 {
+		t.Errorf("GetByID roundtrip mismatch: %+v", got)
+	}
+
+	if _, err := db.SourceRefs.GetByID(ctx, "src_missing"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GetByID(missing) = %v, want domain.ErrNotFound", err)
+	}
+}

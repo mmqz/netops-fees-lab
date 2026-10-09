@@ -177,3 +177,30 @@ func TestRelationRejectsInvalidFK(t *testing.T) {
 		t.Errorf("error = %v, want it to mention FOREIGN KEY constraint failed", err)
 	}
 }
+
+func TestRelationCountByResourceIDs(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	devA, devB, circuit := seedGraph(t, db)
+
+	// devA/devB are the to-endpoint of one relation each, the circuit is the
+	// from-endpoint of both; a ghost id and the empty input are handled.
+	counts, err := db.Relations.CountByResourceIDs(ctx, []string{devA.ID, devB.ID, circuit.ID, "res_ghost"})
+	if err != nil {
+		t.Fatalf("CountByResourceIDs: %v", err)
+	}
+	want := map[string]int{devA.ID: 1, devB.ID: 1, circuit.ID: 2}
+	if len(counts) != len(want) {
+		t.Fatalf("counts = %v, want %v (ghost must be absent)", counts, want)
+	}
+	for id, n := range want {
+		if counts[id] != n {
+			t.Errorf("counts[%s] = %d, want %d", id, counts[id], n)
+		}
+	}
+
+	empty, err := db.Relations.CountByResourceIDs(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("CountByResourceIDs(nil) = %v, %v; want empty map", empty, err)
+	}
+}

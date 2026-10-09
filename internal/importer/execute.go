@@ -279,7 +279,9 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 		}
 		switch f.Kind {
 		case mapping.KindIPv4, mapping.KindCIDR, mapping.KindInt:
-			if reason, ok := f.Kind.CheckFormat(v); !ok {
+			// Field-level check = kind parse check + int range constraint
+			// (vlan_id 1..4094, bandwidth_mbps > 0) of PROJECT_BRIEF §6.
+			if reason, ok := f.CheckFormat(v); !ok {
 				return st.failRow(ctx, row, results, domain.RuleInvalidFormat,
 					fmt.Sprintf("字段格式无效：%s.%s=%q（%s）", rt, f.Name, v, reason),
 					map[string]string{"type": rt, "field": f.Name, "raw_value": v, "reason": reason})

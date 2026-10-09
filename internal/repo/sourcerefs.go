@@ -107,3 +107,15 @@ func (r *SourceRefRepo) CountByBatch(ctx context.Context, batchID string) (int, 
 	}
 	return n, nil
 }
+
+// GetByID returns the source ref with the given id, or an error wrapping
+// domain.ErrNotFound. The report generator resolves an issue's source_ref_id
+// into its workbook/sheet/row evidence with this lookup.
+func (r *SourceRefRepo) GetByID(ctx context.Context, id string) (domain.SourceRef, error) {
+	row := r.q.QueryRowContext(ctx, `SELECT `+sourceRefColumns+` FROM source_refs WHERE id = ?`, id)
+	ref, err := scanSourceRef(row)
+	if err != nil {
+		return domain.SourceRef{}, notFound("source ref", id, err)
+	}
+	return ref, nil
+}
