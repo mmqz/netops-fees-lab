@@ -330,20 +330,44 @@ export function LabWorkspacesPage() {
   }
 
   if (data !== null && data.total === 0 && !error) {
+    // Keep the create action reachable in the empty state — otherwise a
+    // user with imported batches but no workspace yet could never create
+    // the first one from this page (found in the orchestrator browser
+    // smoke; the header button must never disappear). The dialogs must
+    // ALSO mount here — this branch returns early, skipping the mounts at
+    // the bottom of the main return.
     return (
-      <div className="card">
-        <EmptyState
-          title={LAB_EMPTY_TITLE}
-          description={LAB_EMPTY_DESC}
-          icon={<IconFlask size={40} />}
-          action={
-            <Link className="btn btn--primary" to="/import">
-              <IconUpload />
-              {BTN_GO_IMPORT}
-            </Link>
-          }
+      <>
+        <div className="card">
+          <div className="card-head">
+            <h2 className="card-title">{LAB_TABLE_LABEL}</h2>
+            <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}>
+              <IconFlask />
+              {BTN_CREATE_WORKSPACE}
+            </button>
+          </div>
+          <EmptyState
+            title={LAB_EMPTY_TITLE}
+            description={LAB_EMPTY_DESC}
+            icon={<IconFlask size={40} />}
+            action={
+              <Link className="btn btn--primary" to="/import">
+                <IconUpload />
+                {BTN_GO_IMPORT}
+              </Link>
+            }
+          />
+        </div>
+        <CreateWorkspaceDialog
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(workspaceId) => {
+            setCreateOpen(false);
+            saveLastWorkspace(workspaceId);
+            navigate(`/lab/${workspaceId}`);
+          }}
         />
-      </div>
+      </>
     );
   }
 

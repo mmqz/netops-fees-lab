@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { SimEntityStatus, SimOp, TopologyNode } from '../../api/types';
+import { isUnconfiguredIPv4 } from './selection';
 import {
   BTN_CONFIG_ADDR,
   BTN_DELETE,
@@ -91,7 +92,7 @@ export function DeviceTab({ view, selected, onSelect, applyOps, opsBusy }: Entit
   const rows: DeviceRow[] = view.nodes.map((node) => ({
     ...node,
     interfaceCount: node.interfaces.length,
-    ipv4Count: node.interfaces.filter((iface) => iface.ipv4Addr !== null).length,
+    ipv4Count: node.interfaces.filter((iface) => !isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix)).length,
   }));
 
   function confirmDown(): void {

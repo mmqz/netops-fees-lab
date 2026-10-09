@@ -24,6 +24,14 @@ export interface InterfaceRow {
   linkCount: number;
 }
 
+/**
+ * 判断接口是否未配置 IPv4。线上的未配置表示是空串 + 前缀 -1
+ * （engine 存储约定直出），同时容忍 null/undefined 以兼容旧约定。
+ */
+export function isUnconfiguredIPv4(addr: string | null | undefined, prefix: number | null | undefined): boolean {
+  return addr === null || addr === undefined || addr === '' || prefix === null || prefix === undefined || prefix < 0;
+}
+
 /** 链路视图行。 */
 export interface LinkRow {
   id: string;
@@ -65,8 +73,8 @@ export function buildTopologyView(topology: SimTopology | null): TopologyView {
         deviceCode: node.code,
         name: iface.name,
         status: iface.status,
-        ipv4Addr: iface.ipv4Addr,
-        ipv4Prefix: iface.ipv4Prefix,
+        ipv4Addr: isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix) ? null : iface.ipv4Addr,
+        ipv4Prefix: isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix) ? null : iface.ipv4Prefix,
         linkCount: linkCountByInterface.get(iface.id) ?? 0,
       });
     }
