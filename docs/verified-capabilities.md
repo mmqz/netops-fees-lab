@@ -37,4 +37,4 @@
 | 长时运行 / 并发负载 | 无 7×24 运行或压测数据；SQLite 单写者 + WAL + busy_timeout 在 Phase 1 量级（每批几十行）下无压力证据，但也无高并发证据 | Phase 2 若引入服务化再做 |
 | 部分覆盖统计 | 未在 T9 重新测量覆盖率（门禁 = fmt/vet/全测试绿）；历史峰值：domain 91.2% / importer 83.5% / mapping 89.3% / report 84.5% / validation 87.4%（T6 时点） | 下一阶段补 `go test -cover` 报告 |
 
-> CI（`.github/workflows/ci.yml`）首跑将在下次 push 触发，状态待定——本文不声称它已通过。
+> CI 已**实际运行并通过**（GitHub Actions，2026-10-09）：run #1 失败——go job 未构建前端导致 SPA 嵌入测试 404（已修复：go job 先 `npm ci && vite build`）；run #2 go ✅ / web ✗——setup-node npm 缓存未指定 lockfile 路径（已修复：`cache-dependency-path: web/package-lock.json`）；run #3 **全绿**（go: gofmt/vet/96 测试 + web: tsc/vite，commit 215b897）。两次失败均由 CI 真实暴露并当日修复——这正是 CI 的价值。
