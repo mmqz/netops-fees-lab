@@ -29,6 +29,8 @@ interface TableProps<T> {
   onRowClick?: (row: T) => void;
   /** 提供时行可点击展开（onRowClick 与 renderExpanded 不应同时使用）。 */
   renderExpanded?: (row: T) => ReactNode;
+  /** 行级附加 class（如拓扑联动选中高亮）。 */
+  rowClassName?: (row: T) => string | undefined;
   ariaLabel?: string;
 }
 
@@ -42,6 +44,7 @@ export function Table<T>(props: TableProps<T>) {
     emptyText = EMPTY_TEXT,
     onRowClick,
     renderExpanded,
+    rowClassName,
     ariaLabel,
   } = props;
 
@@ -128,10 +131,16 @@ export function Table<T>(props: TableProps<T>) {
         {rows.map((row) => {
           const key = rowKey(row);
           const expanded = renderExpanded !== undefined && expandedKeys.has(key);
+          const extraClass = rowClassName === undefined ? undefined : rowClassName(row);
           return (
             <Fragment key={key}>
               <tr
-                className={clickable ? 'table-row-clickable' : undefined}
+                data-row-key={key}
+                className={
+                  clickable
+                    ? ['table-row-clickable', extraClass].filter(Boolean).join(' ')
+                    : extraClass
+                }
                 tabIndex={clickable ? 0 : undefined}
                 aria-expanded={renderExpanded !== undefined ? expanded : undefined}
                 onClick={clickable ? () => handleRowClick(row) : undefined}

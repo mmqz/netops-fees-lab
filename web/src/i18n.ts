@@ -8,11 +8,16 @@
 
 import type {
   BatchStatus,
+  ChangeSetStatus,
+  ChangeSetTrigger,
+  CheckTrigger,
   RelationType,
   ResourceType,
   RuleCode,
   RowStatus,
   Severity,
+  SimCheckCode,
+  SimEntityStatus,
 } from './api/types';
 
 // ---------------------------------------------------------------------------
@@ -21,13 +26,18 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.1.0';
+export const APP_VERSION = 'v0.2.0';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
 export const NAV_RESOURCES = '资源浏览';
 export const NAV_ISSUES = '问题清单';
 export const NAV_REPORT = '质量报告';
+
+/** 仿真工作台导航分组（icon + 两个入口）。 */
+export const NAV_LAB_GROUP = '仿真工作台';
+export const NAV_LAB_WORKSPACES = '工作台';
+export const NAV_LAB_TOPOLOGY = '拓扑工作台';
 
 export const BREADCRUMB_HOME = '首页';
 export const BREADCRUMB_LABEL = '面包屑';
@@ -325,6 +335,316 @@ export const RPT_FILENAME_HTML = 'netops-quality-report';
 export const RPT_FILENAME_JSON = 'netops-quality-report';
 export const RPT_FILE_EXT_HTML = '.html';
 export const RPT_FILE_EXT_JSON = '.json';
+
+// ---------------------------------------------------------------------------
+// 仿真工作台（Phase 2 · /lab）
+// ---------------------------------------------------------------------------
+
+/** 仿真实体状态：up=运行中，down=已停机。 */
+export const SIM_STATUS_LABELS: Record<SimEntityStatus, string> = {
+  up: '运行中',
+  down: '已停机',
+};
+
+/** 变更集状态中文标签。 */
+export const CS_STATUS_LABELS: Record<ChangeSetStatus, string> = {
+  applied: '已应用',
+  reverted: '已撤销',
+  failed: '失败',
+};
+
+/** 变更集触发方式中文标签。 */
+export const CS_TRIGGER_LABELS: Record<ChangeSetTrigger, string> = {
+  user: '用户操作',
+  undo: '撤销',
+  checkpoint_restore: '检查点恢复',
+};
+
+/** 校验运行触发方式中文标签。 */
+export const CHECK_TRIGGER_LABELS: Record<CheckTrigger, string> = {
+  manual: '手动',
+  api: 'API',
+  mcp: 'MCP',
+  auto_after_ops: '操作后自动',
+};
+
+/** 仿真检查项编码 → 中文标签（RuleChip 同风格）。 */
+export const SIM_CHECK_LABELS: Record<SimCheckCode, string> = {
+  'CHK-001': '主机地址重复',
+  'CHK-002': '网段重叠',
+  'CHK-003': '设备孤岛',
+  'CHK-004': '部分分区',
+  'CHK-005': '接口未配置地址',
+};
+
+// —— 工作台列表页（/lab） ——
+
+export const LAB_COL_NAME = '名称';
+export const LAB_COL_DESC = '描述';
+export const LAB_COL_DEVICES = '设备';
+export const LAB_COL_INTERFACES = '接口';
+export const LAB_COL_LINKS = '链路';
+export const LAB_COL_SCORE = '评分';
+export const LAB_COL_LAST_RUN = '最近检查';
+export const LAB_COL_CREATED_AT = '创建时间';
+export const LAB_COL_ACTIONS = '操作';
+export const LAB_TABLE_LABEL = '仿真工作台列表';
+export const LAB_SCORE_VALUE = '{score} 分';
+
+export const BTN_CREATE_WORKSPACE = '新建工作台';
+export const BTN_DELETE_WORKSPACE = '删除';
+export const BTN_CREATE = '创建';
+export const BTN_GO_IMPORT = '去数据导入';
+
+export const LAB_EMPTY_TITLE = '暂无工作台';
+export const LAB_EMPTY_DESC =
+  '尚未创建任何仿真工作台。请先在「数据导入」导入工作簿，再从已完成批次物化仿真拓扑。';
+
+export const LAB_CREATE_TITLE = '新建工作台';
+export const LAB_F_NAME = '名称';
+export const LAB_F_NAME_REQUIRED = '请输入工作台名称';
+export const LAB_F_DESC = '描述（可选）';
+export const LAB_F_BATCHES = '数据来源批次';
+export const LAB_F_BATCHES_HINT = '仅显示已完成批次，默认全选';
+export const LAB_BATCH_SELECT_ALL = '全选';
+export const LAB_BATCH_SELECT_NONE = '全不选';
+export const LAB_NO_COMPLETED_BATCHES = '没有已完成的导入批次，请先在「数据导入」上传工作簿';
+export const LAB_BATCH_OPTION = '{workbook} · 导入 {imported} / 共 {total} 行';
+
+export const TOAST_WORKSPACE_CREATED =
+  '工作台已创建：{name}（设备 {devices} · 接口 {interfaces} · 链路 {links}）';
+export const TOAST_WORKSPACE_DELETED = '工作台已删除';
+
+export const LAB_DELETE_TITLE = '确认删除工作台';
+export const LAB_DELETE_MESSAGE =
+  '删除工作台「{name}」将移除其全部设备、接口、链路、变更集、检查运行与检查点，操作不可恢复。是否继续？';
+
+// —— 拓扑工作台页（/lab/:id）通用 ——
+
+export const LABWS_NOT_FOUND = '工作台不存在或已被删除';
+export const LABWS_BACK_LIST = '返回工作台列表';
+export const LABWS_HASH_LABEL = '状态哈希';
+export const LABWS_CHIP_DEVICES = '设备';
+export const LABWS_CHIP_INTERFACES = '接口';
+export const LABWS_CHIP_LINKS = '链路';
+export const LABWS_UP_TITLE = '运行中 {n}';
+export const LABWS_DOWN_TITLE = '已停机 {n}';
+
+export const LAB_BTN_RUN_CHECKS = '运行校验';
+export const LAB_BTN_APPLY_OPS = '执行操作';
+export const LAB_BTN_UNDO = '撤销最近变更';
+export const LAB_BTN_CREATE_CHECKPOINT = '创建检查点';
+export const LAB_BTN_DIFF = '前后对比';
+export const LAB_BTN_EXPORT_REPORT = '导出报告';
+
+export const TOAST_CHECKS_DONE = '校验完成：错误 {error} · 警告 {warning} · 提示 {info} · 评分 {score} 分';
+export const TOAST_OPS_DONE = '操作已执行：变更集 {id}（{n} 个操作）';
+export const TOAST_UNDO_DONE = '已撤销变更集 {id}，撤销操作记录为新变更集 {newId}';
+export const TOAST_CHECKPOINT_CREATED = '检查点已创建：{label}';
+export const TOAST_RESTORE_DONE = '已恢复到检查点「{label}」（变更集 {id}）';
+export const TOAST_RESTORE_NOOP = '已处于该检查点状态，未产生新变更集';
+
+export const LAB_UNDO_TITLE = '确认撤销最近变更';
+export const LAB_UNDO_MESSAGE =
+  '将撤销最近的已应用变更集，其反向操作会作为一个新的变更集执行。是否继续？';
+
+// —— 右侧标签页 ——
+
+export const LAB_TAB_DEVICES = '设备';
+export const LAB_TAB_INTERFACES = '接口';
+export const LAB_TAB_LINKS = '链路';
+export const LAB_TAB_CHECKS = '检查结果';
+export const LAB_TAB_CHANGESETS = '变更集';
+export const LAB_TAB_CHECKPOINTS = '检查点';
+
+// —— 画布 ——
+
+export const LAB_CANVAS_LABEL = '拓扑画布';
+export const LAB_LAYOUT = '布局';
+export const LAB_LAYOUT_FORCE = '力导';
+export const LAB_LAYOUT_GRID = '网格';
+export const LAB_LAYOUT_CIRCLE = '环形';
+export const LAB_CANVAS_HINT = '点击节点或连线，可在右侧定位对应条目';
+export const LAB_CANVAS_EMPTY = '暂无拓扑数据';
+
+// —— 设备标签页 ——
+
+export const LAB_D_COL_CODE = '编码';
+export const LAB_D_COL_NAME = '名称';
+export const LAB_D_COL_STATUS = '状态';
+export const LAB_D_COL_IFACES = '接口数';
+export const LAB_D_COL_IPV4 = 'IPv4 数';
+export const LAB_D_DOWN_TITLE = '确认停用设备';
+export const LAB_D_DOWN_MESSAGE = '停机将中断所有经过该设备的连通性。确定停用设备 {code}？';
+export const LAB_D_TABLE_LABEL = '设备列表';
+
+// —— 接口标签页 ——
+
+export const LAB_I_TABLE_LABEL = '接口列表';
+export const LAB_I_COL_DEVICE = '设备';
+export const LAB_I_COL_NAME = '名称';
+export const LAB_I_COL_STATUS = '状态';
+export const LAB_I_COL_IPV4 = 'IPv4';
+export const LAB_I_COL_LINKS = '链路数';
+export const LAB_I_IPV4_UNSET = '未配置';
+export const LAB_I_IPV4_VALUE = '{addr}/{prefix}';
+export const LAB_I_LABEL = '{device}:{name}';
+
+export const BTN_ENABLE = '启用';
+export const BTN_DISABLE = '停用';
+export const BTN_CONFIG_ADDR = '配置地址';
+export const BTN_DELETE = '删除';
+
+export const LAB_I_CONFIG_TITLE = '配置接口地址';
+export const LAB_I_CONFIG_DESC = '配置 {iface} IPv4 地址';
+export const LAB_I_CONFIG_TARGET = '接口';
+export const LAB_I_F_ADDR = 'IPv4 地址';
+export const LAB_I_F_PREFIX = '前缀长度（0–32）';
+export const LAB_I_ADDR_PLACEHOLDER = '例如 10.0.0.1';
+export const LAB_I_PREFIX_PLACEHOLDER = '例如 24';
+export const LAB_I_ERR_ADDR = 'IPv4 地址格式不正确（应为点分十进制，如 10.0.0.1）';
+export const LAB_I_ERR_PREFIX = '前缀长度应为 0–32 的整数';
+export const LAB_I_ERR_BOTH = '地址与前缀需同时填写';
+export const BTN_CLEAR_ADDR = '清除地址';
+export const LAB_I_CLEAR_HINT = '地址与前缀均留空提交即清除该接口地址';
+
+export const LAB_I_DELETE_TITLE = '确认删除接口';
+export const LAB_I_DELETE_MESSAGE = '删除接口将同时删除其上的链路。确定删除 {iface}？';
+
+// —— 变更说明模板（写入变更集描述，展示于变更集标签页） ——
+
+export const LAB_OP_DESC_ENABLE = '启用 {target}';
+export const LAB_OP_DESC_DISABLE = '停用 {target}';
+export const LAB_OP_DESC_DELETE_IFACE = '删除接口 {target}';
+export const LAB_OP_DESC_DELETE_LINK = '删除链路 {target}';
+export const LAB_OP_DESC_CONFIG_IPV4 = '配置 {target} IPv4 地址';
+
+// —— 链路标签页 ——
+
+export const LAB_L_TABLE_LABEL = '链路列表';
+export const LAB_L_COL_LABEL = '标签';
+export const LAB_L_COL_A = 'A 端';
+export const LAB_L_COL_Z = 'Z 端';
+export const LAB_L_COL_STATUS = '状态';
+export const LAB_L_ENDPOINT = '{device}:{iface}';
+export const LAB_L_UNNAMED = '未命名';
+export const LAB_L_DELETE_TITLE = '确认删除链路';
+export const LAB_L_DELETE_MESSAGE = '确定删除链路 {label}（{a} ↔ {z}）？删除后可通过撤销恢复。';
+
+// —— 执行操作对话框 ——
+
+export const LAB_OPS_TITLE = '执行操作';
+export const LAB_OPS_TYPE = '操作类型';
+export const LAB_OPS_F_DEVICE = '设备';
+export const LAB_OPS_F_INTERFACE = '接口';
+export const LAB_OPS_F_LINK = '链路';
+export const LAB_OPS_F_STATUS = '目标状态';
+export const LAB_OPS_F_CODE = '设备编码';
+export const LAB_OPS_F_NAME = '设备名称';
+export const LAB_OPS_F_IF_NAME = '接口名称（如 eth0）';
+export const LAB_OPS_F_A_IFACE = 'A 端接口';
+export const LAB_OPS_F_Z_IFACE = 'Z 端接口';
+export const LAB_OPS_F_LINK_LABEL = '链路标签（可选）';
+export const LAB_OPS_F_INIT_STATUS = '初始状态（默认运行中）';
+export const LAB_OPS_F_DESC = '变更说明（可选）';
+export const LAB_OPS_RUN_CHECKS = '执行后自动运行校验';
+export const LAB_OPS_ERR_REQUIRED = '请完整填写必填项';
+export const LAB_OPS_ERR_SAME_IFACE = '新建链路的两个端点必须是不同设备上的接口';
+
+export const LAB_OPS_RAW_TOGGLE = 'JSON 模式';
+export const LAB_OPS_RAW_PLACEHOLDER =
+  '[{"op":"set_link_status","linkId":"ln-1","status":"down"}]';
+export const LAB_OPS_RAW_PARSE_ERROR = 'JSON 解析失败：{message}';
+export const LAB_OPS_RAW_NOT_ARRAY = 'JSON 顶层必须是操作数组或 {ops:[…]} 对象';
+export const LAB_OPS_RAW_NO_OPS = '操作数组不能为空';
+export const LAB_OPS_RAW_HINT = '高级模式：直接提交 §4 操作 JSON（数组或 {ops,description,runChecks} 对象）';
+
+export const OP_LABEL_CREATE_DEVICE = '新建设备';
+export const OP_LABEL_SET_DEVICE_STATUS = '启停设备';
+export const OP_LABEL_DELETE_DEVICE = '删除设备';
+export const OP_LABEL_CREATE_INTERFACE = '新建接口';
+export const OP_LABEL_DELETE_INTERFACE = '删除接口';
+export const OP_LABEL_SET_INTERFACE_STATUS = '接口启停';
+export const OP_LABEL_CONFIG_IPV4 = '配置接口地址';
+export const OP_LABEL_CLEAR_IPV4 = '清除接口地址';
+export const OP_LABEL_CREATE_LINK = '新建链路';
+export const OP_LABEL_DELETE_LINK = '删除链路';
+export const OP_LABEL_SET_LINK_STATUS = '链路启停';
+
+// —— 检查结果标签页 ——
+
+export const LAB_C_TABLE_LABEL = '检查结果列表';
+export const LAB_C_COL_SEV = '级别';
+export const LAB_C_COL_CHECK = '检查项';
+export const LAB_C_COL_MESSAGE = '消息';
+export const LAB_C_COL_ENTITY = '对象';
+export const LAB_C_TRIGGER = '触发方式';
+export const LAB_C_STARTED_AT = '开始时间';
+export const LAB_C_HISTORY = '历史运行';
+export const LAB_C_RUN_OPTION = '{runId} · {time} · {score} 分';
+export const LAB_C_ONLY_FINDINGS = '仅显示问题';
+export const LAB_C_NO_RUNS = '尚未运行过校验，点击「运行校验」生成第一份结果';
+export const LAB_C_NO_FINDINGS = '该次运行没有发现问题';
+export const LAB_C_PASSED = '通过';
+export const LAB_C_EMPTY_DETAIL = '无详情';
+export const LAB_C_DETAIL = '详情';
+
+// —— 前后对比对话框 ——
+
+export const LAB_DIFF_TITLE = '前后对比';
+export const LAB_DIFF_BTN_RUN = '生成对比';
+export const LAB_DIFF_FROM = '基准运行（前）';
+export const LAB_DIFF_TO = '对比运行（后）';
+export const LAB_DIFF_RUN_OPTION = '{runId} · {time} · {score} 分';
+export const LAB_DIFF_SCORE = '评分变化';
+export const LAB_DIFF_ADDED = '新增问题';
+export const LAB_DIFF_REMOVED = '消失问题';
+export const LAB_DIFF_CONN_LOST = '连通性丢失';
+export const LAB_DIFF_CONN_GAINED = '连通性恢复';
+export const LAB_DIFF_PAIR = '{from} ↔ {to}';
+export const LAB_DIFF_EMPTY_ADDED = '无新增问题';
+export const LAB_DIFF_EMPTY_REMOVED = '无消失问题';
+export const LAB_DIFF_EMPTY_LOST = '无连通性丢失';
+export const LAB_DIFF_EMPTY_GAINED = '无连通性恢复';
+export const LAB_DIFF_NOT_ENOUGH = '运行历史不足两次，请先运行校验';
+export const LAB_DIFF_SAME_RUN = '请选择两个不同的运行';
+export const LAB_DIFF_COL_CHECK = '检查项';
+export const LAB_DIFF_COL_SEV = '级别';
+export const LAB_DIFF_COL_MESSAGE = '消息';
+export const LAB_DIFF_ERR_REQUIRED = '请选择两个不同的校验运行';
+
+// —— 变更集标签页 ——
+
+export const LAB_CS_TABLE_LABEL = '变更集列表';
+export const LAB_CS_COL_ID = 'ID';
+export const LAB_CS_COL_DESC = '描述';
+export const LAB_CS_COL_TRIGGER = '触发';
+export const LAB_CS_COL_STATUS = '状态';
+export const LAB_CS_COL_OPS = '操作数';
+export const LAB_CS_COL_CREATED = '创建时间';
+export const LAB_CS_COL_REVERTED = '撤销时间';
+export const LAB_CS_BTN_UNDO = '撤销';
+export const LAB_CS_ONLY_LATEST_HINT = '仅可撤销最新已应用变更集';
+export const LAB_CS_EMPTY = '暂无变更集';
+export const LAB_CS_UNDO_TITLE = '确认撤销变更集';
+export const LAB_CS_UNDO_MESSAGE =
+  '将撤销变更集 {id} 的全部操作，其反向操作作为新变更集执行。是否继续？';
+
+// —— 检查点标签页 ——
+
+export const LAB_CP_TABLE_LABEL = '检查点列表';
+export const LAB_CP_LABEL = '标签';
+export const LAB_CP_LABEL_PLACEHOLDER = '例如：故障注入前基线';
+export const LAB_CP_COL_ID = 'ID';
+export const LAB_CP_COL_LABEL = '标签';
+export const LAB_CP_COL_HASH = '状态哈希';
+export const LAB_CP_COL_CREATED = '创建时间';
+export const LAB_CP_BTN_RESTORE = '恢复';
+export const LAB_CP_EMPTY = '暂无检查点';
+export const LAB_CP_ERR_LABEL = '请输入检查点标签';
+export const LAB_CP_RESTORE_TITLE = '确认恢复检查点';
+export const LAB_CP_RESTORE_MESSAGE =
+  '恢复将把工作台状态回退到该检查点（作为新变更集执行）。确定恢复「{label}」？';
 
 // ---------------------------------------------------------------------------
 // 格式化工具

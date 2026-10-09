@@ -8,28 +8,46 @@
  */
 
 import type {
+  ApplyResult,
   BatchDetail,
   BatchListItem,
   BatchRow,
+  ChangeSetItem,
+  CheckpointList,
+  CheckpointResult,
+  CheckRunDetail,
+  CheckRunItem,
+  DeleteWorkspaceResult,
+  DiffResult,
   HealthResponse,
   ImportAnalysisResponse,
   ImportResultResponse,
   IssueCounts,
   IssueItem,
   MappingModel,
+  MaterializeResult,
+  OpRequest,
   Paged,
   PartialIssueCounts,
   RelationGraph,
+  RestoreResult,
   ResourceDetail,
   ResourceItem,
   ResourceType,
   RollbackResponse,
   RowStatus,
   RuleCode,
+  RunResult,
   Severity,
+  SimPathResult,
+  SimTopology,
   StatsResponse,
   TopologyCheckResponse,
+  UndoResult,
   ValidateResponse,
+  WorkspaceCreateRequest,
+  WorkspaceDetail,
+  WorkspaceSummary,
 } from './types';
 import { ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
 
@@ -339,6 +357,125 @@ export function checkTopology(
 ): Promise<TopologyCheckResponse> {
   return requestJson<TopologyCheckResponse>(
     `/topology/check${buildQuery({ fromDevice, toDevice, maxHops })}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 仿真工作台端点（PROJECT_BRIEF_P2 §7）
+// ---------------------------------------------------------------------------
+
+/** 兼容空计数键缺失的 Go map 编码（仿真检查计数与 Phase 1 同一问题）。 */
+export function filledSeverityCounts(counts: PartialIssueCounts | undefined | null): IssueCounts {
+  return {
+    error: counts?.error ?? 0,
+    warning: counts?.warning ?? 0,
+    info: counts?.info ?? 0,
+  };
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return requestJson<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/** GET /api/workspaces?page=&pageSize= */
+export function listWorkspaces(page = 1, pageSize = 20): Promise<Paged<WorkspaceSummary>> {
+  return requestJson<Paged<WorkspaceSummary>>(
+    `/workspaces${buildQuery({ page, pageSize })}`,
+  );
+}
+
+/** POST /api/workspaces（物化默认取全部 completed 批次）→ 201 */
+export function createWorkspace(req: WorkspaceCreateRequest): Promise<MaterializeResult> {
+  return postJson<MaterializeResult>('/workspaces', req);
+}
+
+/** GET /api/workspaces/{id} */
+export function getWorkspace(id: string): Promise<WorkspaceDetail> {
+  return requestJson<WorkspaceDetail>(`/workspaces/${encodeURIComponent(id)}`);
+}
+
+/** DELETE /api/workspaces/{id} → 200 级联删除结果 */
+export function deleteWorkspace(id: string): Promise<DeleteWorkspaceResult> {
+  return requestJson<DeleteWorkspaceResult>(`/workspaces/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** GET /api/workspaces/{id}/topology */
+export function getTopology(id: string): Promise<SimTopology> {
+  return requestJson<SimTopology>(`/workspaces/${encodeURIComponent(id)}/topology`);
+}
+
+/** POST /api/workspaces/{id}/topology/path body {fromDevice,toDevice}（设备编码） */
+export function topologyPath(id: string, fromDevice: string, toDevice: string): Promise<SimPathResult> {
+  return postJson<SimPathResult>(
+    `/workspaces/${encodeURIComponent(id)}/topology/path`,
+    { fromDevice, toDevice },
+  );
+}
+
+/** POST /api/workspaces/{id}/ops（语义失败 → 422 op_failed，状态不变） */
+export function applyOps(id: string, req: OpRequest): Promise<ApplyResult> {
+  return postJson<ApplyResult>(`/workspaces/${encodeURIComponent(id)}/ops`, req);
+}
+
+/** POST /api/workspaces/{id}/checks/run → 200 全量运行结果 */
+export function runChecks(id: string): Promise<RunResult> {
+  return postJson<RunResult>(`/workspaces/${encodeURIComponent(id)}/checks/run`, {});
+}
+
+/** GET /api/workspaces/{id}/checks?page=&pageSize=（按 run id 倒序） */
+export function listChecks(id: string, page = 1, pageSize = 20): Promise<Paged<CheckRunItem>> {
+  return requestJson<Paged<CheckRunItem>>(
+    `/workspaces/${encodeURIComponent(id)}/checks${buildQuery({ page, pageSize })}`,
+  );
+}
+
+/** GET /api/workspaces/{id}/checks/{runId}（findings 在前，基线在后） */
+export function getCheckRun(id: string, runId: string): Promise<CheckRunDetail> {
+  return requestJson<CheckRunDetail>(
+    `/workspaces/${encodeURIComponent(id)}/checks/${encodeURIComponent(runId)}`,
+  );
+}
+
+/** GET /api/workspaces/{id}/checks/{runId}/diff?compareTo=<runId2> */
+export function diffRuns(id: string, runId: string, compareTo: string): Promise<DiffResult> {
+  return requestJson<DiffResult>(
+    `/workspaces/${encodeURIComponent(id)}/checks/${encodeURIComponent(runId)}/diff${buildQuery({ compareTo })}`,
+  );
+}
+
+/** GET /api/workspaces/{id}/changesets?page=&pageSize=（倒序） */
+export function listChangeSets(id: string, page = 1, pageSize = 20): Promise<Paged<ChangeSetItem>> {
+  return requestJson<Paged<ChangeSetItem>>(
+    `/workspaces/${encodeURIComponent(id)}/changesets${buildQuery({ page, pageSize })}`,
+  );
+}
+
+/** POST /api/workspaces/{id}/undo body {changesetId?}（默认最新已应用） */
+export function undo(id: string, changesetId?: string): Promise<UndoResult> {
+  return postJson<UndoResult>(`/workspaces/${encodeURIComponent(id)}/undo`, { changesetId });
+}
+
+/** POST /api/workspaces/{id}/checkpoints body {label} → 201 */
+export function createCheckpoint(id: string, label: string): Promise<CheckpointResult> {
+  return postJson<CheckpointResult>(`/workspaces/${encodeURIComponent(id)}/checkpoints`, { label });
+}
+
+/** GET /api/workspaces/{id}/checkpoints（信封仅 items + total） */
+export function listCheckpoints(id: string): Promise<CheckpointList> {
+  return requestJson<CheckpointList>(`/workspaces/${encodeURIComponent(id)}/checkpoints`);
+}
+
+/** POST /api/workspaces/{id}/checkpoints/{cpId}/restore */
+export function restoreCheckpoint(id: string, checkpointId: string): Promise<RestoreResult> {
+  return postJson<RestoreResult>(
+    `/workspaces/${encodeURIComponent(id)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
+    {},
   );
 }
 

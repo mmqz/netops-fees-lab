@@ -310,3 +310,360 @@ export interface TopologyCheckResponse {
   hops: TopologyHop[];
   pathLength: number;
 }
+
+// ---------------------------------------------------------------------------
+// 仿真工作台（Phase 2 · PROJECT_BRIEF_P2 §7）
+// ---------------------------------------------------------------------------
+
+/** 仿真实体状态（设备/接口/链路共用）。 */
+export type SimEntityStatus = 'up' | 'down';
+
+/** 工作台状态。 */
+export type WorkspaceStatus = 'active' | 'archived';
+
+/** §4 前向操作编码（外部边界闭集；restore_* 仅引擎内部，不出现在此）。 */
+export type OpCode =
+  | 'create_device'
+  | 'set_device_status'
+  | 'delete_device'
+  | 'create_interface'
+  | 'set_interface_status'
+  | 'config_interface_ipv4'
+  | 'delete_interface'
+  | 'create_link'
+  | 'set_link_status'
+  | 'delete_link';
+
+/** §4 类型化操作（以 op 判别的联合类型；字段名与契约逐字对齐）。 */
+export type SimOp =
+  | { op: 'create_device'; code: string; name: string }
+  | { op: 'set_device_status'; deviceId: string; status: SimEntityStatus }
+  | { op: 'delete_device'; deviceId: string }
+  | {
+      op: 'create_interface';
+      deviceId: string;
+      name: string;
+      status?: SimEntityStatus;
+      ipv4Addr?: string | null;
+      ipv4Prefix?: number | null;
+    }
+  | { op: 'set_interface_status'; interfaceId: string; status: SimEntityStatus }
+  | {
+      op: 'config_interface_ipv4';
+      interfaceId: string;
+      ipv4Addr: string | null;
+      ipv4Prefix: number | null;
+    }
+  | { op: 'delete_interface'; interfaceId: string }
+  | {
+      op: 'create_link';
+      aInterfaceId: string;
+      zInterfaceId: string;
+      status?: SimEntityStatus;
+      label?: string;
+    }
+  | { op: 'set_link_status'; linkId: string; status: SimEntityStatus }
+  | { op: 'delete_link'; linkId: string };
+
+/** 变更集触发方式。 */
+export type ChangeSetTrigger = 'user' | 'undo' | 'checkpoint_restore';
+
+/** 变更集状态。 */
+export type ChangeSetStatus = 'applied' | 'reverted' | 'failed';
+
+/** 校验运行触发方式。 */
+export type CheckTrigger = 'manual' | 'api' | 'mcp' | 'auto_after_ops';
+
+/** 检查项编码（CHK-001…CHK-005）。 */
+export type SimCheckCode = 'CHK-001' | 'CHK-002' | 'CHK-003' | 'CHK-004' | 'CHK-005';
+
+/**
+ * 严重级别计数。后端由 map 编码时可能省略为 0 的键，
+ * 读取时用 filledSeverityCounts 兜底（与 Phase 1 同一问题）。
+ */
+export type PartialSeverityCounts = Partial<IssueCounts>;
+
+/** 工作台 POST 创建请求体。 */
+export interface WorkspaceCreateRequest {
+  name: string;
+  description?: string;
+  sourceBatchIds?: string[];
+}
+
+/** GET /api/workspaces 列表行。 */
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  description: string;
+  deviceCount: number;
+  interfaceCount: number;
+  linkCount: number;
+  upDeviceCount: number;
+  changesetCount: number;
+  checkpointCount: number;
+  lastRunId?: string | null;
+  lastRunScore?: number | null;
+  createdAt: string;
+}
+
+/** POST /api/workspaces → 201 物化结果。 */
+export interface MaterializeResult {
+  workspaceId: string;
+  name: string;
+  sourceBatchIds: string[];
+  counts: {
+    devices: number;
+    interfaces: number;
+    links: number;
+  };
+  workspaceHash: string;
+}
+
+/** GET /api/workspaces/{id} 详情计数。 */
+export interface WorkspaceCounts {
+  devices: number;
+  upDevices: number;
+  downDevices: number;
+  interfaces: number;
+  upInterfaces: number;
+  links: number;
+  upLinks: number;
+  changesets: number;
+  checkpoints: number;
+}
+
+/** GET /api/workspaces/{id} → 工作台详情。 */
+export interface WorkspaceDetail {
+  id: string;
+  name: string;
+  description: string;
+  status: WorkspaceStatus;
+  sourceBatchIds: string[];
+  counts: WorkspaceCounts;
+  workspaceHash: string;
+  latestChangeset: {
+    id: string;
+    description: string;
+    trigger: ChangeSetTrigger;
+    status: ChangeSetStatus;
+    opsApplied: number;
+    createdAt: string;
+  } | null;
+  latestRun: {
+    runId: string;
+    score: number;
+    counts: PartialSeverityCounts;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** DELETE /api/workspaces/{id} → 级联删除计数。 */
+export interface DeleteWorkspaceResult {
+  deleted: boolean;
+  removed: {
+    devices: number;
+    interfaces: number;
+    links: number;
+    changesets: number;
+    checkRuns: number;
+    checkpoints: number;
+  };
+}
+
+/** 拓扑节点（设备，含接口列表；按 code 排序）。 */
+export interface TopologyNode {
+  id: string;
+  code: string;
+  name: string;
+  status: SimEntityStatus;
+  interfaces: Array<{
+    id: string;
+    name: string;
+    status: SimEntityStatus;
+    ipv4Addr: string | null;
+    ipv4Prefix: number | null;
+  }>;
+}
+
+/** 拓扑边（链路，按 id 排序）。 */
+export interface TopologyEdge {
+  id: string;
+  aInterfaceId: string;
+  aDeviceId: string;
+  aDeviceCode: string;
+  zInterfaceId: string;
+  zDeviceId: string;
+  zDeviceCode: string;
+  status: SimEntityStatus;
+  label: string;
+}
+
+/** GET /api/workspaces/{id}/topology。 */
+export interface SimTopology {
+  workspaceId: string;
+  workspaceHash: string;
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}
+
+/** POST /api/workspaces/{id}/topology/path 连通性查询结果。 */
+export interface SimPathResult {
+  reachable: boolean;
+  hops: Array<{ deviceId: string; code: string }>;
+  pathLength: number;
+}
+
+/** POST /api/workspaces/{id}/ops 请求体。 */
+export interface OpRequest {
+  ops: SimOp[];
+  description?: string;
+  runChecks?: boolean;
+}
+
+/** 校验摘要（applyOps / undo / restore 附带；runChecks 全量形态见 RunResult）。 */
+export interface RunSummary {
+  runId: string;
+  counts: PartialSeverityCounts;
+  score: number;
+}
+
+/** POST /api/workspaces/{id}/ops → 应用结果。 */
+export interface ApplyResult {
+  changesetId: string;
+  trigger: 'user';
+  opsApplied: number;
+  workspaceHash: string;
+  checks?: RunSummary | null;
+}
+
+/** POST /api/workspaces/{id}/checks/run → 运行结果（无逐条结果）。 */
+export interface RunResult {
+  runId: string;
+  trigger: CheckTrigger;
+  counts: PartialSeverityCounts;
+  score: number;
+  workspaceHash: string;
+  durationMs: number;
+}
+
+/** GET /api/workspaces/{id}/checks 列表行。 */
+export interface CheckRunItem {
+  runId: string;
+  changesetId?: string | null;
+  trigger: CheckTrigger;
+  startedAt: string;
+  counts: PartialSeverityCounts;
+  score: number;
+}
+
+/** GET /api/workspaces/{id}/checks/{runId} 逐条检查结果。 */
+export interface CheckResultRow {
+  seq: number;
+  checkCode: SimCheckCode;
+  severity: Severity;
+  passed: boolean;
+  entityKind?: string | null;
+  entityId?: string | null;
+  message: string;
+  detail: Record<string, unknown>;
+}
+
+/** GET /api/workspaces/{id}/checks/{runId} 详情。 */
+export interface CheckRunDetail {
+  runId: string;
+  workspaceId: string;
+  changesetId?: string | null;
+  trigger: CheckTrigger;
+  ruleVersion: string;
+  startedAt: string;
+  durationMs: number;
+  score: number;
+  counts: PartialSeverityCounts;
+  results: CheckResultRow[];
+}
+
+/** diff 中的差异问题条目。 */
+export interface DiffFinding {
+  checkCode: SimCheckCode;
+  severity: Severity;
+  message: string;
+  detail: Record<string, unknown>;
+}
+
+/** diff 端点摘要（from/to）。 */
+export interface DiffRunSummary {
+  runId: string;
+  startedAt: string;
+  score: number;
+  counts: PartialSeverityCounts;
+}
+
+/** GET …/checks/{runId}/diff?compareTo= → 前后对比。 */
+export interface DiffResult {
+  from: DiffRunSummary;
+  to: DiffRunSummary;
+  findingsAdded: DiffFinding[];
+  findingsRemoved: DiffFinding[];
+  connectivityLost: Array<{ fromDevice: string; toDevice: string }>;
+  connectivityGained: Array<{ fromDevice: string; toDevice: string }>;
+  scoreDelta: number;
+}
+
+/** GET /api/workspaces/{id}/changesets 列表行。 */
+export interface ChangeSetItem {
+  id: string;
+  description: string;
+  trigger: ChangeSetTrigger;
+  status: ChangeSetStatus;
+  opsApplied: number;
+  createdAt: string;
+  revertedAt?: string | null;
+}
+
+/** POST /api/workspaces/{id}/undo → 撤销结果。 */
+export interface UndoResult {
+  changesetId: string;
+  trigger: 'undo';
+  reverted: string;
+  opsApplied: number;
+  workspaceHash: string;
+  checks?: RunSummary | null;
+}
+
+/** POST /api/workspaces/{id}/checkpoints → 201。 */
+export interface CheckpointResult {
+  checkpointId: string;
+  label: string;
+  workspaceHash: string;
+  createdAt: string;
+}
+
+/** GET /api/workspaces/{id}/checkpoints 列表行。 */
+export interface CheckpointItem {
+  checkpointId: string;
+  label: string;
+  workspaceHash: string;
+  createdAt: string;
+}
+
+/** 检查点列表信封（契约：只有 items + total，无分页字段）。 */
+export interface CheckpointList {
+  items: CheckpointItem[];
+  total: number;
+}
+
+/**
+ * POST /api/workspaces/{id}/checkpoints/{cpId}/restore。
+ * no-op 恢复：changesetId 为空（null 或空串）且附 note。
+ */
+export interface RestoreResult {
+  checkpointId: string;
+  label: string;
+  changesetId?: string | null;
+  note?: string | null;
+  opsApplied: number;
+  restoredToHash: string;
+  workspaceHash: string;
+  checks?: RunSummary | null;
+}

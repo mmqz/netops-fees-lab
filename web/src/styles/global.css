@@ -1513,3 +1513,376 @@ a.btn:hover {
     height: 560px;
   }
 }
+
+/* ------------------------------------------------------------------ 仿真工作台 */
+
+/* 侧栏分组标题 */
+.sidebar-group {
+  margin: 14px 16px 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+}
+
+/* 60/40 工作区分栏 */
+.lab-split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.lab-canvas-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  height: calc(100vh - 350px);
+}
+
+.lab-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lab-canvas-toolbar-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.lab-canvas-toolbar-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.lab-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.lab-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.lab-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 右侧面板 */
+.lab-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  height: calc(100vh - 350px);
+}
+
+.lab-panel .tabs {
+  margin-bottom: 0;
+}
+
+.lab-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 0 12px 0;
+}
+
+/* 页头信息条 */
+.lab-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lab-head-name {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.lab-hash-chip {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lab-chip-split {
+  font-weight: 600;
+}
+
+.lab-chip-split .lab-up {
+  color: var(--success);
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.lab-chip-split .lab-down {
+  color: var(--error);
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.lab-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.lab-desc {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+/* 拓扑联动行高亮 */
+.lab-row-selected > td {
+  background: rgba(47, 95, 224, 0.12) !important;
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* 停机行弱化 */
+.lab-row-muted > td {
+  opacity: 0.55;
+}
+
+/* 宽弹窗（执行操作 / 前后对比 / 新建工作台） */
+.modal--wide {
+  max-width: 680px;
+}
+
+.modal--wide .modal-body {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+}
+
+.modal-body {
+  margin-bottom: 16px;
+}
+
+.modal-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.modal-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* 批次多选列表（新建工作台） */
+.batch-check-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.batch-check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.batch-check-item:last-child {
+  border-bottom: none;
+}
+
+.batch-check-item input {
+  accent-color: var(--primary);
+}
+
+.batch-check-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* 详情 JSON 块（检查结果 / diff 明细） */
+.lab-json {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 8px 0 0;
+}
+
+/* diff 红绿底色表 */
+.table--red-tint tbody tr,
+.table--red-tint tbody tr:nth-child(even) {
+  background: rgba(214, 69, 69, 0.06);
+}
+
+.table--red-tint tbody tr:hover,
+.table--red-tint tbody tr:nth-child(even):hover {
+  background: rgba(214, 69, 69, 0.12);
+}
+
+.table--green-tint tbody tr,
+.table--green-tint tbody tr:nth-child(even) {
+  background: rgba(31, 157, 85, 0.06);
+}
+
+.table--green-tint tbody tr:hover,
+.table--green-tint tbody tr:nth-child(even):hover {
+  background: rgba(31, 157, 85, 0.12);
+}
+
+.lab-diff-section {
+  margin-top: 16px;
+}
+
+.lab-diff-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lab-pair-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.lab-score-delta {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.lab-score-delta--up {
+  color: var(--success);
+}
+
+.lab-score-delta--down {
+  color: var(--error);
+}
+
+.lab-score-delta--flat {
+  color: var(--muted);
+}
+
+/* 检查点创建行 */
+.lab-cp-create {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.lab-cp-create .input {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* 检查结果运行头 */
+.lab-checks-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.lab-checks-head .select {
+  height: 30px;
+  font-size: 13px;
+  max-width: 260px;
+}
+
+/* 原始 JSON 文本域 */
+.lab-textarea {
+  width: 100%;
+  min-height: 180px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  color: var(--text);
+  background: var(--surface);
+  resize: vertical;
+}
+
+.lab-textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-tint);
+  outline: none;
+}
+
+/* 单行两个下拉并排 */
+.lab-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.lab-form-grid .field {
+  min-width: 0;
+}
+
+@media (max-width: 1280px) {
+  .lab-split {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-canvas-card,
+  .lab-panel {
+    height: auto;
+  }
+
+  .lab-canvas-wrap {
+    height: 420px;
+    flex: none;
+  }
+
+  .lab-panel-body {
+    max-height: 480px;
+  }
+}

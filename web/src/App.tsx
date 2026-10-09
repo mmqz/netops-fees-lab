@@ -1,5 +1,6 @@
 /**
  * 应用外壳：路由 + 左侧深色导航栏 + 顶栏（页标题与面包屑）+ 内容区。
+ * Phase 2：新增「仿真工作台」导航分组（工作台 /lab + 拓扑工作台 /lab/:id）。
  */
 
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
@@ -13,6 +14,9 @@ import {
   BTN_BACK_HOME,
   NAV_IMPORT,
   NAV_ISSUES,
+  NAV_LAB_GROUP,
+  NAV_LAB_TOPOLOGY,
+  NAV_LAB_WORKSPACES,
   NAV_MAIN_LABEL,
   NAV_OVERVIEW,
   NAV_REPORT,
@@ -22,12 +26,24 @@ import {
 } from './i18n';
 import { ToastProvider } from './components/Toast';
 import { EmptyState } from './components/EmptyState';
-import { IconDoc, IconHome, IconReport, IconTable, IconUpload, IconWarning } from './components/icons';
+import {
+  IconDoc,
+  IconFlask,
+  IconHome,
+  IconReport,
+  IconTable,
+  IconTopology,
+  IconUpload,
+  IconWarning,
+} from './components/icons';
 import { OverviewPage } from './pages/Overview';
 import { ImportWizardPage } from './pages/ImportWizard';
 import { ResourcesPage } from './pages/Resources';
 import { IssuesPage } from './pages/Issues';
 import { ReportPage } from './pages/Report';
+import { LabWorkspacesPage } from './pages/LabWorkspaces';
+import { LabWorkspacePage } from './pages/LabWorkspace';
+import { readLastWorkspace } from './lastWorkspace';
 
 interface NavItem {
   to: string;
@@ -45,6 +61,8 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 function routeTitle(pathname: string): string {
+  if (pathname === '/lab') return NAV_LAB_WORKSPACES;
+  if (pathname.startsWith('/lab/')) return NAV_LAB_TOPOLOGY;
   switch (pathname) {
     case '/':
       return NAV_OVERVIEW;
@@ -62,6 +80,21 @@ function routeTitle(pathname: string): string {
 }
 
 function Sidebar() {
+  // 路由切换触发重渲染时读取最近工作台（进入 /lab/:id 时写入）
+  const lastWorkspaceId = readLastWorkspace();
+  const labItems: NavItem[] = [
+    { to: '/lab', label: NAV_LAB_WORKSPACES, icon: <IconFlask /> },
+    ...(lastWorkspaceId === null
+      ? []
+      : [
+          {
+            to: `/lab/${lastWorkspaceId}`,
+            label: NAV_LAB_TOPOLOGY,
+            icon: <IconTopology />,
+          },
+        ]),
+  ];
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -77,6 +110,19 @@ function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.end}
+            className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
+          >
+            <span className="sidebar-link-icon">{item.icon}</span>
+            <span className="sidebar-link-text">{item.label}</span>
+          </NavLink>
+        ))}
+        <div className="sidebar-group">{NAV_LAB_GROUP}</div>
+        {labItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            title={item.to === '/lab' ? undefined : NAV_LAB_TOPOLOGY}
             className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
           >
             <span className="sidebar-link-icon">{item.icon}</span>
@@ -143,6 +189,8 @@ export default function App() {
                 <Route path="/resources" element={<ResourcesPage />} />
                 <Route path="/issues" element={<IssuesPage />} />
                 <Route path="/report" element={<ReportPage />} />
+                <Route path="/lab" element={<LabWorkspacesPage />} />
+                <Route path="/lab/:id" element={<LabWorkspacePage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
             </main>

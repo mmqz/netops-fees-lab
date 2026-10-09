@@ -166,3 +166,74 @@ export function IconDoc({ size = 32, className }: IconProps) {
     </svg>
   );
 }
+
+/** 仿真工作台：烧瓶（工作台列表入口）。 */
+export function IconFlask({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M9 3h6" />
+      <path d="M10 3v6l-5.5 9A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-3L14 9V3" />
+      <path d="M7.5 15h9" />
+    </svg>
+  );
+}
+
+/** 仿真工作台：拓扑（互联节点，/lab/:id 入口与画布共用）。 */
+export function IconTopology({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="5" cy="6" r="2.5" />
+      <circle cx="19" cy="6" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <line x1="7.2" y1="7" x2="16.8" y2="7" />
+      <line x1="6.3" y1="8.2" x2="10.4" y2="16" />
+      <line x1="17.7" y1="8.2" x2="13.6" y2="16" />
+    </svg>
+  );
+}
+
+/** 画布工具栏：力导向布局。 */
+export function IconLayoutForce({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="2.5" />
+      <circle cx="4" cy="5" r="2" />
+      <circle cx="20" cy="5" r="2" />
+      <circle cx="4" cy="19" r="2" />
+      <circle cx="20" cy="19" r="2" />
+      <line x1="5.8" y1="6.2" x2="10" y2="10.4" />
+      <line x1="18.2" y1="6.2" x2="14" y2="10.4" />
+      <line x1="5.8" y1="17.8" x2="10" y2="13.6" />
+      <line x1="18.2" y1="17.8" x2="14" y2="13.6" />
+    </svg>
+  );
+}
+
+/** 画布工具栏：网格布局。 */
+export function IconLayoutGrid({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="5" cy="5" r="2" />
+      <circle cx="12" cy="5" r="2" />
+      <circle cx="19" cy="5" r="2" />
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+      <circle cx="5" cy="19" r="2" />
+      <circle cx="12" cy="19" r="2" />
+      <circle cx="19" cy="19" r="2" />
+    </svg>
+  );
+}
+
+/** 画布工具栏：环形布局。 */
+export function IconLayoutCircle({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="9" strokeDasharray="2 4" />
+      <circle cx="12" cy="3" r="2" />
+      <circle cx="18.4" cy="15.5" r="2" />
+      <circle cx="5.6" cy="15.5" r="2" />
+    </svg>
+  );
+}
