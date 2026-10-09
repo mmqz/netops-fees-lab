@@ -84,9 +84,11 @@ func (r *BatchRepo) Get(ctx context.Context, id string) (domain.ImportBatch, err
 	return b, nil
 }
 
-// List returns batches newest-first (started_at DESC, id DESC as tie
-// breaker) with the total count ignoring limit/offset. limit <= 0 means
-// unlimited; offset < 0 means 0.
+// List returns batches newest-first (started_at DESC; same-second creations
+// tie-break by insertion order via rowid DESC, so "latest batch" is
+// deterministic — batch ids are random UUIDs and cannot order) with the
+// total count ignoring limit/offset. limit <= 0 means unlimited; offset < 0
+// means 0.
 func (r *BatchRepo) List(ctx context.Context, limit, offset int) ([]domain.ImportBatch, int, error) {
 	var total int
 	if err := r.q.QueryRowContext(ctx, `SELECT COUNT(*) FROM import_batches`).
@@ -95,7 +97,7 @@ func (r *BatchRepo) List(ctx context.Context, limit, offset int) ([]domain.Impor
 	}
 	limit, offset = paging(limit, offset)
 	rows, err := r.q.QueryContext(ctx,
-		`SELECT `+batchColumns+` FROM import_batches ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`,
+		`SELECT `+batchColumns+` FROM import_batches ORDER BY started_at DESC, rowid DESC LIMIT ? OFFSET ?`,
 		limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("repo: list batches: %w", err)

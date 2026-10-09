@@ -204,3 +204,33 @@ func TestRelationCountByResourceIDs(t *testing.T) {
 		t.Errorf("CountByResourceIDs(nil) = %v, %v; want empty map", empty, err)
 	}
 }
+
+func TestRelationListAll(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Empty database: empty (non-nil) slice, no error.
+	rels, err := db.Relations.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll on empty db: %v", err)
+	}
+	if len(rels) != 0 {
+		t.Fatalf("ListAll on empty db = %d relations, want 0", len(rels))
+	}
+
+	_, _, _ = seedGraph(t, db)
+	rels, err = db.Relations.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(rels) != 2 {
+		t.Fatalf("ListAll = %d relations, want 2", len(rels))
+	}
+	// Deterministic (relation_type, from, to, id) order: a_end before z_end.
+	if rels[0].Type != domain.RelationTypeAEnd || rels[0].FromResourceID != "res_c" || rels[0].ToResourceID != "res_a" {
+		t.Errorf("rels[0] = %+v, want a_end res_c → res_a", rels[0])
+	}
+	if rels[1].Type != domain.RelationTypeZEnd || rels[1].FromResourceID != "res_c" || rels[1].ToResourceID != "res_b" {
+		t.Errorf("rels[1] = %+v, want z_end res_c → res_b", rels[1])
+	}
+}

@@ -166,6 +166,31 @@ func (r *RelationRepo) CountByBatch(ctx context.Context, batchID string) (int, e
 	return n, nil
 }
 
+// ListAll returns every relation of the database, ordered by
+// (relation_type, from_resource_id, to_resource_id, id) for deterministic
+// iteration. The topology graph builder consumes this to construct the full
+// undirected adjacency of the dataset.
+func (r *RelationRepo) ListAll(ctx context.Context) ([]domain.Relation, error) {
+	rows, err := r.q.QueryContext(ctx, `SELECT `+relationColumns+` FROM relations
+ORDER BY relation_type, from_resource_id, to_resource_id, id`)
+	if err != nil {
+		return nil, fmt.Errorf("repo: list all relations: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.Relation, 0)
+	for rows.Next() {
+		rel, err := scanRelation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repo: scan relation: %w", err)
+		}
+		out = append(out, rel)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: list all relations: %w", err)
+	}
+	return out, nil
+}
+
 // CountByResourceIDs returns, for each id of resourceIDs, the number of
 // relations in which the resource participates as either the from or the to
 // endpoint. IDs absent from the result map participate in zero relations.
