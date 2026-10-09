@@ -1,0 +1,98 @@
+package repo
+
+// extend via new methods; do not rewrite.
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/mmqz/netops-lab/internal/domain"
+)
+
+// SourceRefRepo persists the source evidence of resources and relations.
+type SourceRefRepo struct{ q DBTX }
+
+// sourceRefColumns is the canonical SELECT column list of source_refs.
+const sourceRefColumns = `id, entity_kind, entity_id, batch_id, workbook, sheet, row_number, raw`
+
+// scanSourceRef scans one source_refs row into a domain.SourceRef.
+func scanSourceRef(s scanner) (domain.SourceRef, error) {
+	var (
+		ref     domain.SourceRef
+		kind    string
+		rawJSON string
+		rowNum  int
+	)
+	err := s.Scan(&ref.ID, &kind, &ref.EntityID, &ref.BatchID, &ref.Workbook, &ref.Sheet, &rowNum, &rawJSON)
+	if err != nil {
+		return domain.SourceRef{}, err
+	}
+	ref.EntityKind = domain.EntityKind(kind)
+	ref.RowNumber = rowNum
+	ref.Raw, err = mapFromJSON(rawJSON)
+	if err != nil {
+		return domain.SourceRef{}, err
+	}
+	return ref, nil
+}
+
+// Insert adds a new source ref. A conflicting (entity_kind, entity_id,
+// batch_id) returns an error wrapping domain.ErrConflict.
+func (r *SourceRefRepo) Insert(ctx context.Context, ref domain.SourceRef) error {
+	raw, err := mapJSON(ref.Raw)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.ExecContext(ctx, `INSERT INTO source_refs
+(id, entity_kind, entity_id, batch_id, workbook, sheet, row_number, raw)
+VALUES (?,?,?,?,?,?,?,?)`,
+		ref.ID, ref.EntityKind.String(), ref.EntityID, ref.BatchID, ref.Workbook, ref.Sheet,
+		ref.RowNumber, raw)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("repo: insert source ref %s: %w: %w", ref.ID, domain.ErrConflict, err)
+		}
+		return fmt.Errorf("repo: insert source ref %s: %w", ref.ID, err)
+	}
+	return nil
+}
+
+// ListByEntity returns all source refs recorded for the given entity,
+// ordered by (batch_id, row_number).
+func (r *SourceRefRepo) ListByEntity(ctx context.Context, kind domain.EntityKind, entityID string) ([]domain.SourceRef, error) {
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT `+sourceRefColumns+` FROM source_refs
+WHERE entity_kind = ? AND entity_id = ?
+ORDER BY batch_id, row_number`,
+		kind.String(), entityID)
+	if err != nil {
+		return nil, fmt.Errorf("repo: list source refs of %s %s: %w", kind, entityID, err)
+	}
+	defer rows.Close()
+	out := make([]domain.SourceRef, 0)
+	for rows.Next() {
+		ref, err := scanSourceRef(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repo: scan source ref: %w", err)
+		}
+		out = append(out, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: list source refs of %s %s: %w", kind, entityID, err)
+	}
+	return out, nil
+}
+
+// DeleteByBatch deletes all source refs recorded by batchID and returns
+// the number of deleted rows.
+func (r *SourceRefRepo) DeleteByBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := r.q.ExecContext(ctx, `DELETE FROM source_refs WHERE batch_id = ?`, batchID)
+	if err != nil {
+		return 0, fmt.Errorf("repo: delete source refs of batch %s: %w", batchID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("repo: delete source refs of batch %s: rows affected: %w", batchID, err)
+	}
+	return n, nil
+}
