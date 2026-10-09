@@ -149,3 +149,17 @@ func (r *RowResultRepo) CountsByBatch(ctx context.Context, batchID string) (map[
 	}
 	return counts, nil
 }
+
+// DeleteByBatch deletes all row results of batchID (batch rollback) and
+// returns the number of deleted rows.
+func (r *RowResultRepo) DeleteByBatch(ctx context.Context, batchID string) (int64, error) {
+	res, err := r.q.ExecContext(ctx, `DELETE FROM import_row_results WHERE batch_id = ?`, batchID)
+	if err != nil {
+		return 0, fmt.Errorf("repo: delete row results of batch %s: %w", batchID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("repo: delete row results of batch %s: rows affected: %w", batchID, err)
+	}
+	return n, nil
+}

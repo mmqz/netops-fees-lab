@@ -96,3 +96,14 @@ func (r *SourceRefRepo) DeleteByBatch(ctx context.Context, batchID string) (int6
 	}
 	return n, nil
 }
+
+// CountByBatch returns the number of source refs recorded by batchID. Used
+// by rollback reporting and the import atomicity tests.
+func (r *SourceRefRepo) CountByBatch(ctx context.Context, batchID string) (int, error) {
+	var n int
+	if err := r.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM source_refs WHERE batch_id = ?`, batchID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count source refs of batch %s: %w", batchID, err)
+	}
+	return n, nil
+}

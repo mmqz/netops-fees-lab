@@ -195,3 +195,26 @@ func requireUpdated(res sql.Result, kind, key string) error {
 	}
 	return nil
 }
+
+// SetWorkbookPath records the file path of the workbook the batch was
+// analyzed from, so the import service can re-read the workbook when the
+// confirmed mapping is executed (column added by migration v4).
+func (r *BatchRepo) SetWorkbookPath(ctx context.Context, id, path string) error {
+	res, err := r.q.ExecContext(ctx, `UPDATE import_batches SET workbook_path = ? WHERE id = ?`, path, id)
+	if err != nil {
+		return fmt.Errorf("repo: set workbook path of batch %s: %w", id, err)
+	}
+	return requireUpdated(res, "batch", id)
+}
+
+// WorkbookPath returns the recorded workbook file path of the batch, or ""
+// when no path is stored (batches predating migration v4). A missing batch
+// returns an error wrapping domain.ErrNotFound.
+func (r *BatchRepo) WorkbookPath(ctx context.Context, id string) (string, error) {
+	var path sql.NullString
+	err := r.q.QueryRowContext(ctx, `SELECT workbook_path FROM import_batches WHERE id = ?`, id).Scan(&path)
+	if err != nil {
+		return "", notFound("batch", id, err)
+	}
+	return stringFromNull(path), nil
+}

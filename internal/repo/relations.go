@@ -154,3 +154,14 @@ func (r *RelationRepo) CountByType(ctx context.Context) (map[domain.RelationType
 	}
 	return counts, nil
 }
+
+// CountByBatch returns the number of relations created by batchID. Used by
+// rollback reporting and the import atomicity tests.
+func (r *RelationRepo) CountByBatch(ctx context.Context, batchID string) (int, error) {
+	var n int
+	if err := r.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM relations WHERE first_batch_id = ?`, batchID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count relations of batch %s: %w", batchID, err)
+	}
+	return n, nil
+}
