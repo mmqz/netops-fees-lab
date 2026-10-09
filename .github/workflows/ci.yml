@@ -1,9 +1,8 @@
 # NetOps Lab CI.
 #
-# NOTE: this workflow has NOT run yet at the time of committing — the first
-# run triggers on the next push to main. CI status is TBD until then; the
-# equivalent gates (gofmt/vet/full tests; npm ci + build) were run and
-# captured locally on linux/amd64 (see docs/verified-capabilities.md).
+# The go job builds the frontend first: SPA-serving API tests embed
+# internal/webui/dist, which is empty (only .gitkeep) until `vite build`
+# runs — mirroring the local `make build` dependency on `make web`.
 
 name: ci
 
@@ -21,6 +20,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build frontend (embedded by go:embed)
+        run: cd web && npm ci && npm run build
       - name: gofmt check
         run: test -z "$(gofmt -l .)"
       - name: go vet
@@ -38,6 +44,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       - name: npm ci
         run: npm ci
       - name: build (tsc strict + vite)
