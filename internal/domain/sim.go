@@ -130,4 +130,11 @@ var (
 	// *OpError carrying the failing op; the API layer maps it to 422
 	// op_failed (PROJECT_BRIEF_P2 §4/§7).
 	ErrOpFailed = errors.New("domain: operation failed")
+	// ErrCheckpointMissing is returned by checkpoint restore when the
+	// checkpoint snapshot file is gone from disk (deleted or moved after
+	// the checkpoint was created). It wraps ErrConflict — a restore
+	// against a vanished snapshot is a state conflict — while giving the
+	// HTTP layer its dedicated 409 checkpoint_missing_file code
+	// (PROJECT_BRIEF_P2 §7).
+	ErrCheckpointMissing = fmt.Errorf("domain: checkpoint snapshot file is gone from disk: %w", ErrConflict)
 )

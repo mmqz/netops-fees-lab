@@ -164,8 +164,9 @@ type RestoreResult struct {
 //
 // Errors: unknown workspace/checkpoint (or one of another workspace) ⇒
 // domain.ErrNotFound; a missing snapshot file ⇒ an error wrapping
-// domain.ErrConflict whose message contains "checkpoint file missing" —
-// P2-T4 maps that exact case to HTTP 409 checkpoint_missing_file.
+// domain.ErrCheckpointMissing (which itself wraps domain.ErrConflict)
+// whose message contains "checkpoint file missing" — the API maps that
+// exact case to HTTP 409 checkpoint_missing_file (P2-T4).
 // Semantic op failures wrap domain.ErrOpFailed like every apply.
 func (s *Service) RestoreCheckpoint(ctx context.Context, workspaceID, checkpointID string, runChecks bool) (RestoreResult, error) {
 	if _, err := s.mustWorkspace(ctx, workspaceID); err != nil {
@@ -183,7 +184,7 @@ func (s *Service) RestoreCheckpoint(ctx context.Context, workspaceID, checkpoint
 	if _, err := os.Stat(snapshotPath); err != nil {
 		// 409 checkpoint_missing_file at the API (brief §7) — see doc comment.
 		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: checkpoint file missing: %s: %w: %v",
-			checkpointID, snapshotPath, domain.ErrConflict, err)
+			checkpointID, snapshotPath, domain.ErrCheckpointMissing, err)
 	}
 	snapDB, err := repo.OpenReadOnly(snapshotPath)
 	if err != nil {

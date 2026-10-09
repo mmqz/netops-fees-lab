@@ -34,6 +34,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/report"
+	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/validation"
 	"github.com/mmqz/netops-lab/internal/webui"
 	"github.com/mmqz/netops-lab/internal/workbook"
@@ -54,12 +55,15 @@ type Server struct {
 	validation *validation.Engine
 	query      *query.Service
 	report     *report.Generator
+	sim        *sim.Service
+	lab        *report.LabGenerator
 }
 
 // New returns a Server bound to db; uploads are stored under
 // <dataDir>/uploads (created lazily on the first upload). dataDir may be
 // empty when uploads are not served (no directory is created then).
 func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
+	simSvc := sim.New(db)
 	return &Server{
 		log:        log,
 		db:         db,
@@ -68,6 +72,8 @@ func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
 		validation: validation.New(db),
 		query:      query.New(db),
 		report:     report.New(db),
+		sim:        simSvc,
+		lab:        report.NewLab(db, simSvc),
 	}
 }
 
@@ -97,6 +103,26 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/validate", s.handleValidate)
 	mux.HandleFunc("GET /api/report", s.handleReport)
 	mux.HandleFunc("GET /api/topology/check", s.handleTopologyCheck)
+
+	// Simulation workbench (PROJECT_BRIEF_P2 Â§7). The sim engine owns ALL
+	// writes to the sim tables; the handlers only decode, call and project.
+	mux.HandleFunc("GET /api/workspaces", s.handleWorkspacesList)
+	mux.HandleFunc("POST /api/workspaces", s.handleWorkspacesCreate)
+	mux.HandleFunc("GET /api/workspaces/{id}", s.handleWorkspaceDetail)
+	mux.HandleFunc("DELETE /api/workspaces/{id}", s.handleWorkspaceDelete)
+	mux.HandleFunc("GET /api/workspaces/{id}/topology", s.handleWorkspaceTopology)
+	mux.HandleFunc("POST /api/workspaces/{id}/topology/path", s.handleWorkspacePath)
+	mux.HandleFunc("POST /api/workspaces/{id}/ops", s.handleWorkspaceOps)
+	mux.HandleFunc("POST /api/workspaces/{id}/checks/run", s.handleWorkspaceChecksRun)
+	mux.HandleFunc("GET /api/workspaces/{id}/checks", s.handleWorkspaceChecksList)
+	mux.HandleFunc("GET /api/workspaces/{id}/checks/{runId}", s.handleWorkspaceCheckRun)
+	mux.HandleFunc("GET /api/workspaces/{id}/checks/{runId}/diff", s.handleWorkspaceRunDiff)
+	mux.HandleFunc("GET /api/workspaces/{id}/changesets", s.handleWorkspaceChangeSets)
+	mux.HandleFunc("POST /api/workspaces/{id}/undo", s.handleWorkspaceUndo)
+	mux.HandleFunc("POST /api/workspaces/{id}/checkpoints", s.handleCheckpointCreate)
+	mux.HandleFunc("GET /api/workspaces/{id}/checkpoints", s.handleCheckpointsList)
+	mux.HandleFunc("POST /api/workspaces/{id}/checkpoints/{cpId}/restore", s.handleCheckpointRestore)
+	mux.HandleFunc("GET /api/lab/report", s.handleLabReport)
 
 	// Unknown /api/ paths: JSON 404 envelope (never the SPA fallback).
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

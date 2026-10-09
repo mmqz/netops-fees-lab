@@ -266,6 +266,7 @@ func (s *Service) applyInternal(ctx context.Context, workspaceID string, ops []i
 		if recErr != nil {
 			return ApplyResult{}, fmt.Errorf("sim: %w; additionally, recording the failed changeset failed: %w", opErr, recErr)
 		}
+		opErr.ChangeSetID = csID // surfaced to the API 422 op_failed message
 		return ApplyResult{}, fmt.Errorf("sim: %w [changeset %s recorded as failed]", opErr, csID)
 	}
 

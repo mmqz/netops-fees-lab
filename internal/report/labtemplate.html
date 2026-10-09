@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetOps Lab 仿真工作台报告</title>
+<style>
+  :root {
+    --bg: #F4F6F9; --surface: #FFFFFF; --border: #E3E8EF;
+    --text: #17233A; --muted: #5C6B85; --primary: #2F5FE0;
+    --error: #D64545; --warning: #C77D06; --info: #3A7BD5; --success: #1F9D55;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px 40px; background: var(--bg); color: var(--text);
+    font: 14px/1.65 "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  .page { max-width: 1080px; margin: 0 auto; }
+
+  header.report-header {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 20px 24px; margin-bottom: 16px;
+  }
+  header.report-header h1 { margin: 0 0 10px; font-size: 20px; font-weight: 600; }
+  header.report-header .meta { color: var(--muted); font-size: 13px; }
+  header.report-header .meta span { margin-right: 24px; white-space: nowrap; }
+  header.report-header .meta b { color: var(--text); font-weight: 500; }
+  .hash { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .card {
+    flex: 1 1 200px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .card .value { font-size: 26px; font-weight: 600; line-height: 1.2; }
+  .card .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .score-good { color: var(--success); }
+  .score-mid  { color: var(--warning); }
+  .score-bad  { color: var(--error); }
+  .muted { color: var(--muted); }
+
+  section.panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 24px 20px; margin-bottom: 16px;
+  }
+  section.panel > h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  thead th {
+    position: sticky; top: 0; background: var(--surface); color: var(--muted);
+    font-weight: 500; font-size: 12px; border-bottom: 2px solid var(--border);
+  }
+  tbody tr:nth-child(even) { background: #FAFBFD; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; }
+
+  .chip {
+    display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  }
+  .chip-error   { background: rgba(214, 69, 69, .12);  color: var(--error); }
+  .chip-warning { background: rgba(199, 125, 6, .12);  color: var(--warning); }
+  .chip-info    { background: rgba(58, 123, 213, .12); color: var(--info); }
+  .chip-status  { background: rgba(47, 95, 224, .10);  color: var(--primary); }
+
+  .section-title { display: flex; align-items: center; gap: 10px; }
+  .section-title .count { color: var(--muted); font-weight: 400; font-size: 13px; }
+  .empty-row td { color: var(--muted); text-align: center; padding: 18px 0; }
+
+  .detail { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
+  .message-cell { min-width: 260px; }
+
+  footer.disclaimer {
+    margin-top: 8px; padding: 14px 18px; border: 1px dashed var(--border);
+    border-radius: 8px; color: var(--muted); font-size: 12px; background: var(--surface);
+  }
+  footer.disclaimer p { margin: 2px 0; }
+  footer.disclaimer .en { font-style: italic; }
+
+  @media print {
+    body { padding: 0; background: #fff; }
+    .page { max-width: none; }
+    thead th { position: static; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="report-header">
+    <h1>NetOps Lab 仿真工作台报告</h1>
+    <div class="meta">
+      <span>工作台：<b>{{.WorkspaceName}}</b></span>
+      <span>生成时间：<b>{{.GeneratedAt}}</b></span>
+      <span>引擎版本：<b>{{.EngineVersion}}</b></span>
+    </div>
+    <div class="meta" style="margin-top:6px;">
+      <span>状态哈希：<b class="hash">{{.WorkspaceHash}}</b></span>
+      <span>变更集 <b>{{.ChangeSetCount}}</b> · 检查点 <b>{{.CheckpointCount}}</b></span>
+    </div>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">设备</div>
+      <div class="value">{{.DeviceCount}}</div>
+      <div class="hint">在线 {{.UpDeviceCount}} · 离线 {{.DownDeviceCount}}</div>
+    </div>
+    <div class="card">
+      <div class="label">接口</div>
+      <div class="value">{{.InterfaceCount}}</div>
+      <div class="hint">虚拟链路端口</div>
+    </div>
+    <div class="card">
+      <div class="label">链路</div>
+      <div class="value">{{.LinkCount}}</div>
+      <div class="hint">在线 {{.UpLinkCount}} · 离线 {{.DownLinkCount}}</div>
+    </div>
+    <div class="card">
+      <div class="label">评分</div>
+      <div class="value {{.ScoreClass}}">{{.Score}}</div>
+      <div class="hint">100 − 5×错误 − 1×警告</div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>设备列表（{{len .Devices}}）</h2>
+    <table>
+      <thead>
+        <tr><th>编码</th><th>名称</th><th>状态</th><th class="num">接口数</th></tr>
+      </thead>
+      <tbody>
+        {{range .Devices}}
+        <tr>
+          <td>{{.Code}}</td>
+          <td>{{.Name}}</td>
+          <td><span class="chip {{.StatusClass}}">{{.StatusLabel}}</span></td>
+          <td class="num">{{.InterfaceCount}}</td>
+        </tr>
+        {{else}}
+        <tr class="empty-row"><td colspan="4">工作台暂无设备</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  {{range .Groups}}
+  <section class="panel">
+    <h2 class="section-title">
+      <span class="chip {{.Class}}">{{.Label}}</span>
+      检查发现 <span class="count">（{{.Count}} 条）</span>
+    </h2>
+    <table>
+      <thead>
+        <tr><th>检查</th><th class="message-cell">消息</th><th>详情</th></tr>
+      </thead>
+      <tbody>
+        {{range .Findings}}
+        <tr>
+          <td>{{.CheckCode}}</td>
+          <td class="message-cell">{{.Message}}</td>
+          <td class="detail">{{.Detail}}</td>
+        </tr>
+        {{else}}
+        <tr class="empty-row"><td colspan="3">该级别下暂无发现</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+
+  <section class="panel">
+    <h2>变更集历史（最近 {{len .ChangeSets}} 条）</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>变更集</th><th class="message-cell">描述</th><th>触发</th><th>状态</th>
+          <th class="num">操作数</th><th>创建时间</th><th>撤销时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .ChangeSets}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td class="message-cell">{{.Description}}</td>
+          <td>{{.TriggerLabel}}</td>
+          <td><span class="chip {{.StatusClass}}">{{.StatusLabel}}</span></td>
+          <td class="num">{{.OpsApplied}}</td>
+          <td>{{.CreatedAt}}</td>
+          <td>{{.RevertedAt}}</td>
+        </tr>
+        {{else}}
+        <tr class="empty-row"><td colspan="7">暂无变更集</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>检查点（{{len .Checkpoints}}）</h2>
+    <table>
+      <thead>
+        <tr><th>检查点</th><th>标签</th><th>状态哈希</th><th>创建时间</th></tr>
+      </thead>
+      <tbody>
+        {{range .Checkpoints}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td>{{.Label}}</td>
+          <td class="hash">{{.Hash}}</td>
+          <td>{{.CreatedAt}}</td>
+        </tr>
+        {{else}}
+        <tr class="empty-row"><td colspan="4">暂无检查点</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="disclaimer">
+    <p><b>免责声明</b></p>
+    <p>本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。</p>
+    <p class="en">Synthetic data — engineering-method validation only.</p>
+  </footer>
+
+</div>
+</body>
+</html>

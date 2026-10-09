@@ -22,6 +22,11 @@ type OpError struct {
 	Code string
 	// Message is the failure reason (English, deterministic).
 	Message string
+	// ChangeSetID is the id of the changeset recorded as failed for this
+	// failure; it stays empty until that record transaction completed (the
+	// API layer appends it to the 422 op_failed message as "[changeset <id>
+	// recorded as failed]", PROJECT_BRIEF_P2 section 7).
+	ChangeSetID string
 }
 
 // Error implements error.
