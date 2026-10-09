@@ -4,18 +4,19 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `internal`。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `internal`；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`。
 - 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
+- `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化。
+以下示例均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；§7 示例取自一次完整的服务器旅程（2026-10-09，v0.2.0）。
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.1.0",
+  "version": "v0.2.0",
   "ruleVersion": "1.0.0"
 }
 ```
@@ -493,4 +494,508 @@ POST /api/validate                                  → {E13,W3,I1}, score 32
 GET  /api/report?format=html                        → HTML 报告
 GET  /api/stats                                     → 64 资源 / 57 关系
 GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
+```
+
+---
+
+# 仿真工作台 API（Phase 2 §7，v0.2.0）
+
+以下路由操作**仿真工作区**（从导入批次物化的虚拟拓扑）。全部示例为**真实服务器捕获**（`netopslab serve` 于 127.0.0.1:8095，全新库 + CLI 导入三本工作簿，2026-10-09），uuid 截断以 `…` 表示；cs-/run-/cp-/vd-/if-/ln- 序号在同一旅程内单调递增，故具有跨示例的可读性。
+
+本节路由的错误信封与 P1 同构（`{"error":{"code","message"}}`），但消息为**英文**（§7 约定）；错误码 → 状态：`invalid_request` 400 · `not_found` 404 · `conflict` / `not_latest` / `checkpoint_missing_file` 409 · `no_source_resources` / `op_failed` 422。`{"checks":null}` 出现在 `runChecks=false` 的 ops/undo 响应中。
+
+## GET /api/workspaces?page=&pageSize= — 工作区列表
+
+```json
+{
+  "items": [
+    {
+      "id": "7fe21f56-…",
+      "name": "演示工作台二",
+      "description": "",
+      "deviceCount": 27,
+      "interfaceCount": 40,
+      "linkCount": 20,
+      "upDeviceCount": 23,
+      "changesetCount": 0,
+      "checkpointCount": 0,
+      "lastRunId": "run-6",
+      "lastRunScore": 95,
+      "createdAt": "2026-10-09T17:09:56Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+（`lastRunId` / `lastRunScore` 在首次校验运行前为 `null`。）
+
+## POST /api/workspaces — 物化工作区（201）
+
+请求体 `{name, description?, sourceBatchIds?}`（批次缺省 = 全部 `completed` 批次，按导入顺序）。物化规则、端口分配见 [simulation.md](simulation.md) §1.1。
+
+```json
+{
+  "workspaceId": "bb72d10a-…",
+  "name": "演示工作台",
+  "sourceBatchIds": [
+    "bat_d8f67408-…",
+    "bat_deeb22d2-…",
+    "bat_cfe93a31-…"
+  ],
+  "counts": {
+    "devices": 27,
+    "interfaces": 40,
+    "links": 20
+  },
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa"
+}
+```
+
+错误：名称重复 → `409 {"error":{"code":"conflict","message":"operation conflicts with the current state"}}`；空名称 → `400 invalid_request "name must not be empty"`；所选批次无设备资源 → `422 no_source_resources`；未知批次 → 404。
+
+## GET /api/workspaces/{id} — 工作区详情
+
+```json
+{
+  "id": "bb72d10a-…",
+  "name": "演示工作台",
+  "description": "docs api.md 采集",
+  "status": "active",
+  "sourceBatchIds": ["bat_d8f67408-…", "bat_deeb22d2-…", "bat_cfe93a31-…"],
+  "counts": {
+    "devices": 27,
+    "upDevices": 23,
+    "downDevices": 4,
+    "interfaces": 40,
+    "upInterfaces": 40,
+    "links": 20,
+    "upLinks": 20,
+    "changesets": 0,
+    "checkpoints": 0
+  },
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "latestChangeset": null,
+  "latestRun": {
+    "runId": "run-6",
+    "score": 95,
+    "counts": { "error": 0, "warning": 5, "info": 36 }
+  },
+  "createdAt": "2026-10-09T17:09:56Z",
+  "updatedAt": "2026-10-09T17:09:56Z"
+}
+```
+
+（`latestChangeset` / `latestRun` 在无变更集/无运行时为 `null`，此处 `latestRun` 取自另一已运行的详情。未知工作区 → 404 `not_found`。）
+
+## GET /api/workspaces/{id}/topology — 拓扑（节点按 code、接口按 name、边按数值 id）
+
+```json
+{
+  "workspaceId": "bb72d10a-…",
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "nodes": [
+    {
+      "id": "vd-1",
+      "code": "DEV-001",
+      "name": "杭州-核心路由器-001",
+      "status": "up",
+      "interfaces": [
+        { "id": "if-1", "name": "eth0", "status": "up", "ipv4Addr": "", "ipv4Prefix": -1 }
+      ]
+    },
+    {
+      "id": "vd-2",
+      "code": "DEV-002",
+      "name": "宁波-接入路由器-002",
+      "status": "up",
+      "interfaces": [
+        { "id": "if-2", "name": "eth0", "status": "up", "ipv4Addr": "", "ipv4Prefix": -1 },
+        { "id": "if-3", "name": "eth1", "status": "up", "ipv4Addr": "", "ipv4Prefix": -1 }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "ln-1",
+      "aInterfaceId": "if-1",
+      "aDeviceId": "vd-1",
+      "aDeviceCode": "DEV-001",
+      "zInterfaceId": "if-2",
+      "zDeviceId": "vd-2",
+      "zDeviceCode": "DEV-002",
+      "status": "up",
+      "label": "CKT-001"
+    }
+  ]
+}
+```
+
+（27 节点 / 20 边，此处截断到前 2 节点与第 1 边；`ipv4Addr:""`、`ipv4Prefix:-1` 表示未配置——与状态哈希的 `null` 表示法故意不同，§7 vs §3。）
+
+## POST /api/workspaces/{id}/topology/path — 连通性查询
+
+请求体 `{fromDevice, toDevice}`（**设备编码**）。可达示例（DEV-001→DEV-003，2 跳）：
+
+```json
+{
+  "reachable": true,
+  "hops": [
+    { "deviceId": "vd-1", "code": "DEV-001" },
+    { "deviceId": "vd-2", "code": "DEV-002" },
+    { "deviceId": "vd-3", "code": "DEV-003" }
+  ],
+  "pathLength": 2
+}
+```
+
+不可达（注入 ln-1 down 之后）：`{"reachable":false,"hops":null,"pathLength":0}`；同编码 → `{"reachable":true,"hops":[{…self}],"pathLength":0}`。未知设备编码 → 404；缺字段 → `400 {"error":{"code":"invalid_request","message":"fromDevice and toDevice are required"}}`。
+
+## POST /api/workspaces/{id}/ops — 应用操作（变更集）
+
+请求体 `{"ops":[…], "description?", "runChecks?"(默认 true)}`——操作目录（10 个前向操作）见 [simulation.md](simulation.md) §2。成功（故障注入示例：同地址两接口 + 链路 down，自动校验附带）：
+
+```json
+{
+  "changesetId": "cs-1",
+  "trigger": "user",
+  "opsApplied": 3,
+  "workspaceHash": "005c7b2066f4b82e38baef75dbf30f286ad964754fb0d1dbbf924e19646b5cc3",
+  "checks": {
+    "runId": "run-2",
+    "counts": { "error": 1, "warning": 6, "info": 34 },
+    "score": 89
+  }
+}
+```
+
+（`runChecks:false` 时 `"checks": null` 且 `workspaceHash` 由哈希读取填充。）
+
+语义失败 → **422 op_failed**（状态零污染，失败变更集留档）：
+
+```
+{"error":{"code":"op_failed","message":"op 0 (set_link_status): link not found: ln-999 [changeset cs-2 recorded as failed]"}}
+```
+
+畸形负载 → 400 `invalid_request`。真实示例（restore_* 引擎内部操作码 / 未知操作码）：
+
+```
+{"error":{"code":"invalid_request","message":"sim: op 0: \"restore_link\": not a forward op code (restore_* ops are engine-internal): domain: invalid operation"}}
+{"error":{"code":"invalid_request","message":"sim: op 0: \"reboot_device\": not a forward op code (restore_* ops are engine-internal): domain: invalid operation"}}
+```
+
+（字段拼写错误、多余字段、坏类型同走 400——`DisallowUnknownFields` + 严格字段表。）
+
+## POST /api/workspaces/{id}/checks/run — 执行校验
+
+```json
+{
+  "runId": "run-1",
+  "trigger": "manual",
+  "counts": { "error": 0, "warning": 5, "info": 36 },
+  "score": 95,
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "durationMs": 0
+}
+```
+
+## GET /api/workspaces/{id}/checks?page=&pageSize= — 运行列表（倒序）
+
+```json
+{
+  "items": [
+    {
+      "runId": "run-2",
+      "changesetId": "cs-1",
+      "trigger": "auto_after_ops",
+      "startedAt": "2026-10-09T17:09:08Z",
+      "counts": { "error": 1, "warning": 6, "info": 34 },
+      "score": 89
+    },
+    {
+      "runId": "run-1",
+      "changesetId": null,
+      "trigger": "manual",
+      "startedAt": "2026-10-09T17:09:07Z",
+      "counts": { "error": 0, "warning": 5, "info": 36 },
+      "score": 95
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+（手动运行的 `changesetId` 为 `null`。）
+
+## GET /api/workspaces/{id}/checks/{runId} — 运行详情（发现行在前 + 5 条基线）
+
+```json
+{
+  "runId": "run-2",
+  "workspaceId": "bb72d10a-…",
+  "changesetId": "cs-1",
+  "trigger": "auto_after_ops",
+  "ruleVersion": "1.0.0",
+  "startedAt": "2026-10-09T17:09:08Z",
+  "durationMs": 0,
+  "score": 89,
+  "counts": { "error": 1, "warning": 6, "info": 34 },
+  "results": [
+    {
+      "seq": 1,
+      "checkCode": "CHK-001",
+      "severity": "error",
+      "passed": false,
+      "entityKind": "workspace",
+      "entityId": "bb72d10a-…",
+      "message": "duplicate host address 10.99.0.1 used by 2 interfaces",
+      "detail": {
+        "addr": "10.99.0.1",
+        "interfaces": [
+          { "interfaceId": "if-1", "deviceId": "vd-1", "deviceCode": "DEV-001", "name": "eth0" },
+          { "interfaceId": "if-3", "deviceId": "vd-2", "deviceCode": "DEV-002", "name": "eth1" }
+        ]
+      }
+    },
+    {
+      "seq": 2,
+      "checkCode": "CHK-003",
+      "severity": "warning",
+      "passed": false,
+      "entityKind": "device",
+      "entityId": "vd-1",
+      "message": "device DEV-001 is isolated (no up links)",
+      "detail": { "deviceId": "vd-1", "code": "DEV-001", "totalLinks": 1, "upLinks": 0 }
+    },
+    { "seq": 3, "checkCode": "CHK-003", "severity": "warning", "passed": false, "entityKind": "device", "entityId": "vd-22", "message": "device DEV-022 is isolated (no up links)", "detail": { "deviceId": "vd-22", "code": "DEV-022", "totalLinks": 0, "upLinks": 0 } },
+    "…（共 41 条发现行：CHK-001×1、CHK-003×6、CHK-004×2、CHK-005×34）…",
+    { "seq": 42, "checkCode": "CHK-001", "severity": "error", "passed": true, "entityKind": "", "entityId": "", "message": "ok", "detail": {} },
+    { "seq": 43, "checkCode": "CHK-002", "severity": "error", "passed": true, "entityKind": "", "entityId": "", "message": "ok", "detail": {} },
+    { "seq": 44, "checkCode": "CHK-003", "severity": "warning", "passed": true, "entityKind": "", "entityId": "", "message": "ok", "detail": {} },
+    { "seq": 45, "checkCode": "CHK-004", "severity": "info", "passed": true, "entityKind": "", "entityId": "", "message": "ok", "detail": {} },
+    { "seq": 46, "checkCode": "CHK-005", "severity": "info", "passed": true, "entityKind": "", "entityId": "", "message": "ok", "detail": {} }
+  ]
+}
+```
+
+（`detail` 是**解析后的 JSON 对象**，结构与 check 目录一一对应 [simulation.md](simulation.md) §3。）
+
+## GET /api/workspaces/{id}/checks/{runId}/diff?compareTo=<runId2> — 前后对比
+
+```json
+{
+  "from": { "runId": "run-1", "startedAt": "2026-10-09T17:09:07Z", "score": 95, "counts": { "error": 0, "warning": 5, "info": 36 } },
+  "to": { "runId": "run-2", "startedAt": "2026-10-09T17:09:08Z", "score": 89, "counts": { "error": 1, "warning": 6, "info": 34 } },
+  "findingsAdded": [
+    {
+      "checkCode": "CHK-001",
+      "severity": "error",
+      "message": "duplicate host address 10.99.0.1 used by 2 interfaces",
+      "detail": { "addr": "10.99.0.1", "interfaces": [ { "interfaceId": "if-1", "deviceId": "vd-1", "deviceCode": "DEV-001", "name": "eth0" }, { "interfaceId": "if-3", "deviceId": "vd-2", "deviceCode": "DEV-002", "name": "eth1" } ] }
+    },
+    {
+      "checkCode": "CHK-003",
+      "severity": "warning",
+      "message": "device DEV-001 is isolated (no up links)",
+      "detail": { "deviceId": "vd-1", "code": "DEV-001", "totalLinks": 1, "upLinks": 0 }
+    }
+  ],
+  "findingsRemoved": [
+    {
+      "checkCode": "CHK-005",
+      "severity": "info",
+      "message": "interface DEV-001/eth0 has no IPv4 address",
+      "detail": { "interfaceId": "if-1", "deviceId": "vd-1", "deviceCode": "DEV-001", "name": "eth0" }
+    },
+    { "checkCode": "CHK-005", "severity": "info", "message": "interface DEV-002/eth1 has no IPv4 address", "detail": { "interfaceId": "if-3", "deviceId": "vd-2", "deviceCode": "DEV-002", "name": "eth1" } }
+  ],
+  "connectivityLost": [
+    { "fromDevice": "DEV-001", "toDevice": "DEV-002" },
+    { "fromDevice": "DEV-001", "toDevice": "DEV-003" },
+    { "fromDevice": "DEV-001", "toDevice": "DEV-004" },
+    "…（共 20 对：DEV-001 与其余全部设备）…"
+  ],
+  "connectivityGained": [],
+  "scoreDelta": -6
+}
+```
+
+（匹配键与连通性重算规则见 [simulation.md](simulation.md) §5；空数组渲染 `[]` 而非 null。同一运行对比 → `400 {"error":{"code":"invalid_request","message":"cannot diff a run against itself; pass a different compareTo run"}}`；跨工作区运行 → 404。）
+
+## GET /api/workspaces/{id}/changesets?page=&pageSize= — 变更集列表（倒序）
+
+```json
+{
+  "items": [
+    { "id": "cs-2", "description": "", "trigger": "user", "status": "failed", "opsApplied": 0, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": null },
+    { "id": "cs-1", "description": "docs 示例：地址冲突 + 链路中断", "trigger": "user", "status": "applied", "opsApplied": 3, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": null }
+  ],
+  "total": 2,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+（`trigger` ∈ `user | undo | checkpoint_restore`；`status` ∈ `applied | reverted | failed`。）
+
+## POST /api/workspaces/{id}/undo — 撤销变更集（LIFO）
+
+请求体 `{"changesetId?"}`（缺省 = 最新已应用）。撤销后哈希精确回到物化基线：
+
+```json
+{
+  "changesetId": "cs-3",
+  "trigger": "undo",
+  "reverted": "cs-1",
+  "opsApplied": 3,
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "checks": { "runId": "run-3", "counts": { "error": 0, "warning": 5, "info": 36 }, "score": 95 }
+}
+```
+
+撤销非最新已应用（有更晚的已应用前向变更集）→ 真实 409：
+
+```
+{"error":{"code":"not_latest","message":"changeset is not the latest applied changeset of the workspace (undo is LIFO)"}}
+```
+
+（撤销已 reverted / failed 的目标 → 409 `conflict`（普通）；未知变更集 → 404。）
+
+## POST /api/workspaces/{id}/checkpoints — 创建检查点（201）
+
+请求体 `{"label"}`（必填）。
+
+```json
+{
+  "checkpointId": "cp-1",
+  "label": "演示基线",
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "createdAt": "2026-10-09T17:09:08.121473516Z"
+}
+```
+
+（空 label → `400 invalid_request "label must not be empty"`。快照文件在 `<dbdir>/checkpoints/<workspaceId>/<cpId>.db`，Online Backup API 写入。）
+
+## GET /api/workspaces/{id}/checkpoints — 检查点列表（倒序）
+
+```json
+{
+  "items": [
+    {
+      "checkpointId": "cp-1",
+      "label": "演示基线",
+      "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+      "createdAt": "2026-10-09T17:09:08Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+## POST /api/workspaces/{id}/checkpoints/{cpId}/restore — 恢复到检查点
+
+先执行破坏性操作（`delete_device vd-1`，变更集 cs-4）后恢复——恢复本身是一个前向操作变更集（删除的设备/接口/链路按快照重建）：
+
+```json
+{
+  "checkpointId": "cp-1",
+  "label": "演示基线",
+  "changesetId": "cs-5",
+  "opsApplied": 3,
+  "restoredToHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "checks": { "runId": "run-5", "counts": { "error": 0, "warning": 5, "info": 36 }, "score": 95 }
+}
+```
+
+重复恢复（当前状态已是检查点状态）→ no-op：
+
+```json
+{
+  "checkpointId": "cp-1",
+  "label": "演示基线",
+  "changesetId": null,
+  "note": "already at checkpoint state",
+  "opsApplied": 0,
+  "restoredToHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+  "checks": null
+}
+```
+
+（快照文件被删 → `409 checkpoint_missing_file "checkpoint snapshot file is missing on disk"`；未知检查点 → 404。）
+
+## GET /api/lab/report?workspaceId=&format=html|json — 仿真工作台报告
+
+`format` 默认 `html`（`Content-Type: text/html; charset=utf-8`，独立文档：P1 报告视觉风格，设备表 + 按严重级别分节的发现 + 变更集表（中文触发标签：用户操作/撤销/检查点恢复）+ 检查点表 + 页脚免责声明）。`format=json` 示例（旅程末尾，已恢复基线，截断）：
+
+```json
+{
+  "generatedAt": "2026-10-09T17:09:08.189409423Z",
+  "engineVersion": "v0.2.0",
+  "workspace": {
+    "id": "bb72d10a-…",
+    "name": "演示工作台",
+    "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa",
+    "counts": { "devices": 27, "upDevices": 23, "downDevices": 4, "interfaces": 40, "links": 20, "upLinks": 20, "changesets": 5, "checkpoints": 1 }
+  },
+  "score": 95,
+  "checks": {
+    "counts": { "error": 0, "warning": 5, "info": 36 },
+    "results": [
+      { "checkCode": "CHK-003", "severity": "warning", "message": "device DEV-022 is isolated (no up links)", "detail": { "deviceId": "vd-22", "code": "DEV-022", "totalLinks": 0, "upLinks": 0 } },
+      "…（仅发现行，共 41 条）…"
+    ]
+  },
+  "changesets": [
+    { "id": "cs-5", "description": "restore checkpoint cp-1 \"演示基线\"", "trigger": "checkpoint_restore", "status": "applied", "opsApplied": 3, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": null },
+    { "id": "cs-4", "description": "docs 示例：删除设备", "trigger": "user", "status": "applied", "opsApplied": 1, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": null },
+    { "id": "cs-3", "description": "undo of cs-1", "trigger": "undo", "status": "applied", "opsApplied": 3, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": null },
+    { "id": "cs-2", "description": "", "trigger": "user", "status": "failed", "opsApplied": 0, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": null },
+    { "id": "cs-1", "description": "docs 示例：地址冲突 + 链路中断", "trigger": "user", "status": "reverted", "opsApplied": 3, "createdAt": "2026-10-09T17:09:08Z", "revertedAt": "2026-10-09T17:09:08Z" }
+  ],
+  "checkpoints": [
+    { "checkpointId": "cp-1", "label": "演示基线", "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa", "createdAt": "2026-10-09T17:09:08Z" }
+  ],
+  "disclaimer": "本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。"
+}
+```
+
+（无运行的工作区 `score` 为 `null`（绝不编造评分）；变更集取最近 10 条倒序。未知 workspaceId → 404；非法 format → 400。）
+
+## DELETE /api/workspaces/{id} — 删除工作区（级联 + 清理检查点目录）
+
+```json
+{
+  "deleted": true,
+  "removed": {
+    "devices": 27,
+    "interfaces": 40,
+    "links": 20,
+    "changesets": 5,
+    "checkRuns": 5,
+    "checkpoints": 1
+  }
+}
+```
+
+## 典型调用序列（等价于 scripts/demo-lab.sh 的 API 版）
+
+```
+POST /api/workspaces                       → 201 {27/40/20, hash aea27501…}
+POST /api/workspaces/{id}/checks/run       → run-1 {0,5,36} 95
+POST /api/workspaces/{id}/topology/path    → DEV-001→DEV-003 2 跳
+POST /api/workspaces/{id}/ops              → cs-1 + 自动 run-2 {1,6,34} 89
+POST /api/workspaces/{id}/topology/path    → 不可达
+GET  /api/workspaces/{id}/checks/run-1/diff?compareTo=run-2 → −6 / +[CHK-001,CHK-003] / 丢失 20 对
+POST /api/workspaces/{id}/undo             → cs-3，哈希回到 aea27501…
+POST /api/workspaces/{id}/checkpoints      → 201 cp-1
+POST /api/workspaces/{id}/ops (delete)     → cs-4
+POST /api/workspaces/{id}/checkpoints/cp-1/restore → cs-5，restoredToHash == 当前哈希
+POST /api/workspaces/{id}/checkpoints/cp-1/restore → no-op（changesetId null）
+GET  /api/lab/report?workspaceId=…         → HTML/JSON 报告
 ```

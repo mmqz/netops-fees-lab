@@ -1,6 +1,6 @@
 # NetOps Lab — developer targets.
 
-.PHONY: fmt vet test testdata build build-testdatagen web demo all clean
+.PHONY: fmt vet test testdata build build-testdatagen web demo demo-lab all clean
 
 fmt:
 	gofmt -l -w .
@@ -33,6 +33,12 @@ web:
 # Uses bin/netopslab (builds it first if missing). See scripts/demo.sh.
 demo:
 	bash scripts/demo.sh
+
+# Repeatable simulation-workbench demo: fresh temp DB → import×3 →
+# materialize workspace → fault injection (CHK-001 + link down) → path/diff
+# → undo → checkpoint create/break/restore. See scripts/demo-lab.sh.
+demo-lab:
+	bash scripts/demo-lab.sh
 
 # Full production artifact: frontend first, then the binary that embeds it.
 all: web build
