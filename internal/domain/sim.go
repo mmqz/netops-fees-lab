@@ -120,4 +120,14 @@ var (
 	// it is not the latest applied changeset of its workspace (undo is
 	// LIFO, PROJECT_BRIEF_P2 §4).
 	ErrNotLatest = errors.New("domain: changeset is not the latest applied")
+	// ErrNoSourceResources is returned by workspace materialization when
+	// the selected import batches contain no device resources to build a
+	// workspace from (PROJECT_BRIEF_P2 §6: "no_source_resources").
+	ErrNoSourceResources = errors.New("domain: no importable device resources in the selected batches")
+	// ErrOpFailed is returned when a well-formed op fails to APPLY
+	// (unknown entity, duplicate code, self loop …): the whole changeset
+	// rolled back and was recorded as failed. The engine wraps it in an
+	// *OpError carrying the failing op; the API layer maps it to 422
+	// op_failed (PROJECT_BRIEF_P2 §4/§7).
+	ErrOpFailed = errors.New("domain: operation failed")
 )
