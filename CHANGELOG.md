@@ -2,6 +2,37 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.3.2] — 2026-10-10
+
+**工程审查整改版**（R1 架构 A- / R2 代码质量 / R3 计划偏移 / R4 主键身份模型——四维只读审查的整改落地；用户需求驱动：「继续做修复然后做分析告诉我下一步的开发」）。
+
+### 修复 — 版本事实源（R1-D1 / R3-C1，全项目唯一 P1）
+- **根因**：AppVersion 三处手抄（domain / web i18n / CHANGELOG），v0.3.1 已真实漂移——domain 停在 v0.3.0，`/api/health` 与 MCP 握手错报，README 承诺未兑现。
+- **修复**：三处统一升版 v0.3.2；新增 `TestAppVersionMatchesChangelogHead`——domain 常量必须等于 CHANGELOG 头版本，再漂移即测试红；侧栏版本号改读 `/api/health`（前端不再手抄）。
+
+### 修复 — 后端健壮性（R2-P2×2 + R1-D6 + R2-P3×3）
+- `importer.Rollback` 的 in-use 检查与状态前置校验**移入 `db.Do` 事务内**（BEGIN IMMEDIATE 先取写锁，与其他写事务严格串行，TOCTOU 窗口归零）。
+- workbook 层新增**解压上限**（单 sheet 行数 / 全簿单元格总量封顶，超限走既有 422 错误通道）——zip 炸弹暴露面收敛。
+- serve 启动**自愈**：进程崩溃遗留的非终态 `importing` 批次复位为 `failed(interrupted)`（R1-D6 崩溃窗口关闭；自愈仅在会执行导入的进程启动时运行，MCP 进程不做以免误伤并发导入）。
+- `handleBatchDelete` 删除响应计数改 **COUNT 聚合**（不再全量加载行结果与 issue 仅为取 len）。
+- MCP `resource_search` 的 type 描述与错误文案**补 port**（文案与封闭集对齐）。
+- dataDir 为空时上传请求直接 500（消除半初始化相对路径拼接）。
+
+### 修复 — 前端（R2-P2-3 / R1-D4 / R4 短期）
+- **Overview 类型统计动态化**：此前硬编码 `device|ip_pool|circuit` 三类型，v0.3.1 新增的 port 在总览统计完全缺席——改为按后端 stats.byType 动态渲染全部类型。
+- **Report 页批次切换加 useSeq 陈旧响应守卫**（快速切换下拉时慢响应后到覆盖新批次预览的串台修复——全站最后一个未守卫的异步加载点）。
+- **导入映射确认页主键稳定性告警**（R4 短期落地）：IP 类列被选入自然键时告警「IP 属可变属性，重划后同键资源将分裂」；名称类自然键提示 (地市, 名称) 作用域。
+
+### 文档 — 诚实对齐（R3-P0×2 + P1×2 + P3）
+- README 合规横幅**加 samples/ 真实样例例外条款**；新增 `samples/README.md`（来源/授权/范围说明——红线 8「no real network data」的已文档化偏差）。
+- 新增 `docs/natural-keys.md`：**各资源类型自然键规范**（R4 裁决落地——UUID 代理键 PK 不变；编号类自然键优先；名称键须 (地市,名称) 作用域；IP 一律降级可变属性；port 键含 IP 定性为 P1 隐患并排入 v0.4 迁移计划）。
+- `docs/api.md` 补 v0.3.x 契约（拓扑节点 geoLat/geoLng、`type=port`、port 复合键导入示例）；`docs/import-and-validation.md` 补 port / 重复表头 / 解压上限行为。
+- `docs/verified-capabilities.md` 新增 v0.3.2 段（测试计数口径注明）；ADR-0002 / ADR-0009 补遗（DSN `_txlock=immediate`；maplibre-gl 懒加载独立 chunk）；`architecture.md` §4 undo 标记原子化更正。
+- backup-local-impl 本地分支归档决策记入 worklog（tag 归档、永不直推）。
+
+### 测试
+- Go 198 个顶层测试基线 + 本轮新增回归（版本一致性 / 事务内回滚检查 / 解压上限 / importing 自愈 / 动态统计）；门禁全绿：gofmt 空 · vet 干净 · 全包 ok · `-race` 0 · tsc 0 错误 · build ✓（最终实测计数与 CI 运行记于 verified-capabilities.md v0.3.2 段）。
+
 ## [0.3.1] — 2026-10-10
 
 **真实表格导入 + 3D 比例修复版**（用户需求驱动：「这个是可导入的多个表格示例，还有这个 3D 地图太过于大了，应该根据所有的点调整默认展示比例」）。

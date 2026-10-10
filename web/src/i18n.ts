@@ -26,7 +26,7 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.3.1';
+export const APP_VERSION = 'v0.3.2';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';

@@ -35,7 +35,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ## 2. 当前阶段能力清单（Stage 0 + Phase 1 + Phase 2 已交付）
 
-### 仿真工作台（Phase 2，v0.3.1 地理视图 + 真实端口表导入版）
+### 仿真工作台（Phase 2，v0.3.2 工程审查整改版）
 
 - **一键物化**：从导入批次生成虚拟拓扑（设备 → 虚拟设备、电路 → 链路、确定性 `eth0/eth1…` 端口分配）；演示规模 27 设备 / 40 接口 / 20 链路，物化 3–4 ms。
 - **类型化操作集（含故障注入）**：10 个前向操作（增删设备/接口/链路、启停、配地址）经同一引擎路径（API/MCP/CLI 无旁路）；单事务变更集，失败零污染且留档（422 `op_failed`）。
@@ -224,7 +224,7 @@ netopslab mcp      [--db ./data/netops.db]                  # 或环境变量 NE
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.3.1`），注册**恰好 5 个工具**：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.3.2`），注册**恰好 5 个工具**：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |

@@ -3,6 +3,9 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -189,9 +192,37 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	if AppVersion != "v0.3.0" {
-		t.Errorf("AppVersion = %q, want v0.3.0 (PROJECT_BRIEF_P2 §7 + v0.3.0 geographic 2D/3D map views)", AppVersion)
+	if AppVersion != "v0.3.2" {
+		t.Errorf("AppVersion = %q, want v0.3.2 (v0.3.2 review-remediation release)", AppVersion)
 	}
+}
+
+// TestAppVersionMatchesChangelogHead enforces the single-fact-source rule
+// (review R1-D1 / R3-C1): the domain constant and the CHANGELOG head section
+// must always agree, otherwise the health endpoint, the MCP handshake, the
+// frontend and the docs report different versions — exactly the v0.3.0 /
+// v0.3.1 drift this test makes impossible to reintroduce silently.
+func TestAppVersionMatchesChangelogHead(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "CHANGELOG.md"))
+	if err != nil {
+		t.Skipf("CHANGELOG.md not readable (package tested outside the repo tree): %v", err)
+	}
+	head := firstChangelogHeading(string(raw))
+	want := "## [" + strings.TrimPrefix(AppVersion, "v") + "]"
+	if !strings.HasPrefix(head, want) {
+		t.Errorf("CHANGELOG head section %q does not match AppVersion %q — bump the constant and the CHANGELOG together", head, AppVersion)
+	}
+}
+
+// firstChangelogHeading returns the first "## [x.y.z]" line of the changelog.
+func firstChangelogHeading(changelog string) string {
+	for _, line := range strings.Split(changelog, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "## [") {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestWorkspaceSource(t *testing.T) {
