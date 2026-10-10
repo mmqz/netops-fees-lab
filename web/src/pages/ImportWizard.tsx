@@ -57,6 +57,9 @@ import {
   IMP_ISSUE_STATS,
   IMP_MAPPED_COUNT,
   IMP_NATURAL_KEY_HINT,
+  IMP_NATURAL_KEY_IP_SHORT,
+  IMP_NATURAL_KEY_IP_WARNING,
+  IMP_NATURAL_KEY_NAME_SCOPE,
   IMP_NATURAL_KEY_TAG,
   IMP_NO_ROWS,
   IMP_OPT_UNMAPPED,
@@ -95,7 +98,7 @@ import { RuleChip } from '../components/RuleChip';
 import { Spinner } from '../components/Spinner';
 import { Stepper } from '../components/Stepper';
 import { useToast } from '../components/Toast';
-import { IconUpload } from '../components/icons';
+import { IconInfo, IconUpload, IconWarning } from '../components/icons';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const WIZARD_STEPS = [
@@ -253,6 +256,19 @@ function confidenceChip(confidence: number): ReactElement | null {
   return null;
 }
 
+// R4 短期项 2：自然键稳定性提示（仅展示提示，不改 keyColumns / TYPE_SPECS 数据）
+/** 目标字段是否为 IP 类自然键（如 port 的 device_ip）：IP 属可变属性，作键有分裂风险。 */
+function isIpNaturalKeyField(field: string, type: ResourceType): boolean {
+  if (field === '') return false;
+  const spec = fieldsForType(type).find((f) => f.field === field);
+  return spec !== undefined && spec.naturalKey && spec.field.includes('ip');
+}
+
+/** 该类型的自然键是否含名称类字段（如 pool_name / port_name）：需保证唯一作用域。 */
+function hasNameNaturalKey(type: ResourceType): boolean {
+  return naturalKeyFields(type).some((field) => field.includes('name'));
+}
+
 function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChange }: SheetCardProps) {
   const enabled = draft.action === 'import';
   const mappedCount = Object.keys(draft.columnMapping).length;
@@ -294,20 +310,34 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
         const mappedField =
           Object.entries(draft.columnMapping).find(([, header]) => header === column.header)?.[0] ??
           '';
+        const ipKeyRisk = isIpNaturalKeyField(mappedField, draft.resourceType);
         return (
-          <select
-            className="select select--full"
-            value={mappedField}
-            disabled={!enabled}
-            onChange={(event) => onTargetChange(column.header, event.target.value)}
-          >
-            <option value="">{IMP_OPT_UNMAPPED}</option>
-            {fieldsForType(draft.resourceType).map((spec) => (
-              <option key={spec.field} value={spec.field}>
-                {fieldOptionLabel(spec)}
-              </option>
-            ))}
-          </select>
+          <div className="map-target-cell">
+            <select
+              className="select select--full"
+              value={mappedField}
+              disabled={!enabled}
+              onChange={(event) => onTargetChange(column.header, event.target.value)}
+            >
+              <option value="">{IMP_OPT_UNMAPPED}</option>
+              {fieldsForType(draft.resourceType).map((spec) => (
+                <option key={spec.field} value={spec.field}>
+                  {fieldOptionLabel(spec)}
+                </option>
+              ))}
+            </select>
+            {ipKeyRisk && (
+              <span
+                className="key-note key-note--warning"
+                role="img"
+                aria-label={IMP_NATURAL_KEY_IP_WARNING}
+                title={IMP_NATURAL_KEY_IP_WARNING}
+              >
+                <IconWarning size={14} />
+                <span aria-hidden="true">{IMP_NATURAL_KEY_IP_SHORT}</span>
+              </span>
+            )}
+          </div>
         );
       },
     },
@@ -368,6 +398,12 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
               })}
             </span>
           </div>
+          {hasNameNaturalKey(draft.resourceType) && (
+            <span className="key-note key-note--info">
+              <IconInfo size={14} />
+              <span>{IMP_NATURAL_KEY_NAME_SCOPE}</span>
+            </span>
+          )}
           {errors.length > 0 && (
             <ul className="form-error-list" role="alert">
               {errors.map((error) => (

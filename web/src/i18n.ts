@@ -26,6 +26,8 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
+/** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
+ *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
 export const APP_VERSION = 'v0.3.2';
 
 export const NAV_OVERVIEW = '概览';
@@ -105,6 +107,15 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
   circuit: '传输电路',
   port: '设备端口',
 };
+
+/**
+ * 资源类型标签查找：键来自后端动态 byType map（未知类型回退原始键名），
+ * 避免前端另抄一份类型清单造成漂移（R1-D4）。
+ */
+export function resourceTypeLabel(key: string): string {
+  const labels: Record<string, string | undefined> = RESOURCE_TYPE_LABELS;
+  return labels[key] ?? key;
+}
 
 export const RESOURCE_STATUS_LABELS: Record<string, string> = {
   在网: '在网',
@@ -274,6 +285,16 @@ export const IMP_NATURAL_KEY_TAG = '自然键';
 export const IMP_CONFIDENCE_HIGH = '高';
 export const IMP_CONFIDENCE_MEDIUM = '中';
 export const IMP_NATURAL_KEY_HINT = '自然键：{field}，自动作为唯一键，不可更改';
+
+// R4 短期项 2：映射确认页自然键稳定性提示（仅展示，不改 keyColumns 逻辑）
+/** IP 类自然键的短标签（行内展示）。 */
+export const IMP_NATURAL_KEY_IP_SHORT = 'IP 作键不稳定';
+/** IP 类自然键的完整告警文案（tooltip / 无障碍名称）。 */
+export const IMP_NATURAL_KEY_IP_WARNING =
+  'IP 属可变属性：设备重划 IP 后，同键资源将分裂为两条（计划 v0.4 迁移为设备稳定键）';
+/** 名称类自然键的作用域轻提示（info 级）。 */
+export const IMP_NATURAL_KEY_NAME_SCOPE =
+  '名称键需保证唯一作用域：跨地市同名会冲突，建议（地市 + 名称）复合作键';
 export const IMP_VALIDATION_TITLE = '请先完成以下必填映射：';
 export const IMP_ERR_REQUIRED_UNMAPPED = '工作表「{sheet}」：必填字段「{field}」尚未映射';
 export const IMP_ROWS_INFO = '数据行 {rows} 行，跳过空行 {empty} 行';

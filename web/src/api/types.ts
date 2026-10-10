@@ -261,7 +261,12 @@ export interface RelationGraph {
 
 export interface StatsResponse {
   totalResources: number;
-  byType: Partial<Record<ResourceType, number>>;
+  /**
+   * 动态键 map（后端 Go map[string]int）：键集由服务端决定——
+   * device/ip_pool/circuit 恒出现（计 0 亦发），port 等新增类型仅在有数据时出现。
+   * 渲染必须按实际键遍历（Object.entries），不得在前端硬编码类型清单（R1-D4）。
+   */
+  byType: Record<string, number>;
   byStatus: Record<string, number>;
   byRelationType: Partial<Record<RelationType, number>>;
   issuesBySeverity: PartialIssueCounts;

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { BatchListItem } from '../api/types';
 import { formatApiError, getReportHtml, getReportJson, listBatches, runValidate } from '../api/client';
+import { useSeq } from '../hooks/useSeq';
 import {
   BATCH_STATUS_LABELS,
   LAB_CAPPED_HINT,
@@ -62,6 +63,8 @@ export function ReportPage() {
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [validating, setValidating] = useState(false);
   const [downloadingJson, setDownloadingJson] = useState(false);
+  /** 报告范围切换的陈旧响应守卫（R2-P2-3：防慢响应后到覆盖新批次预览）。 */
+  const reportGuard = useSeq();
 
   useEffect(() => {
     setSelectedBatch(urlBatchId);
@@ -77,21 +80,24 @@ export function ReportPage() {
   }, []);
 
   const load = useCallback((): void => {
+    const isCurrent = reportGuard.begin();
     setLoading(true);
     setError(null);
     setErrorDetail(null);
     getReportHtml(selectedBatch === '' ? undefined : selectedBatch)
       .then((text) => {
+        if (!isCurrent()) return;
         setHtml(text);
         setLoading(false);
       })
       .catch((err: unknown) => {
+        if (!isCurrent()) return;
         const display = formatApiError(err);
         setError(display.title);
         setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, [selectedBatch]);
+  }, [selectedBatch, reportGuard]);
 
   useEffect(() => {
     load();

@@ -1383,6 +1383,36 @@ a.btn:hover {
   font-size: 13px;
 }
 
+/* 映射表目标字段单元格（R4 短期项：下拉 + 可选的键稳定性告警行） */
+.map-target-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 键稳定性提示（克制单行，无动画）：warning = IP 作键分裂风险；info = 名称键作用域 */
+.key-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.key-note svg {
+  flex-shrink: 0;
+}
+
+.key-note--warning {
+  color: var(--warning-text);
+}
+
+.key-note--info {
+  color: var(--info-text);
+  margin-top: 8px;
+}
+
 .file-note {
   margin-top: 12px;
 }

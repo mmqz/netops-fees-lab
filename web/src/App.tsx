@@ -3,8 +3,11 @@
  * Phase 2：新增「仿真工作台」导航分组（工作台 /lab + 拓扑工作台 /lab/:id）。
  */
 
+import { useEffect, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { getHealth } from './api/client';
+import { useSeq } from './hooks/useSeq';
 import {
   APP_NAME,
   APP_SUBTITLE,
@@ -82,6 +85,23 @@ function routeTitle(pathname: string): string {
 function Sidebar() {
   // 路由切换触发重渲染时读取最近工作台（进入 /lab/:id 时写入）
   const lastWorkspaceId = readLastWorkspace();
+  // 侧栏版本号：挂载时从 /api/health 读服务端 domain.AppVersion（单一事实源，R1-D1 根治），
+  // 失败/超时/空值时静默回退本地常量 APP_VERSION；仅请求一次，不轮询。
+  const [version, setVersion] = useState<string>(APP_VERSION);
+  const healthGuard = useSeq();
+
+  useEffect(() => {
+    const isCurrent = healthGuard.begin();
+    getHealth()
+      .then((health) => {
+        if (!isCurrent()) return;
+        if (health.version !== '') setVersion(health.version);
+      })
+      .catch(() => {
+        /* 静默回退：保留本地常量，不打日志噪音 */
+      });
+  }, [healthGuard]);
+
   const labItems: NavItem[] = [
     { to: '/lab', label: NAV_LAB_WORKSPACES, icon: <IconFlask /> },
     ...(lastWorkspaceId === null
@@ -132,7 +152,7 @@ function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-footer">
-        <span className="sidebar-version">{APP_VERSION}</span>
+        <span className="sidebar-version">{version}</span>
       </div>
     </aside>
   );

@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { BatchListItem, IssueCounts, Paged, StatsResponse } from '../api/types';
 import { ApiError, deleteBatch, filledIssueCounts, formatApiError, getStats, listBatches, runValidate } from '../api/client';
+import { useSeq } from '../hooks/useSeq';
 import {
   BTN_IMPORT_DATA,
   BTN_ROLLBACK,
@@ -40,7 +41,7 @@ import {
   OV_STAT_SCORE_FULL,
   OV_STAT_TOTAL_ISSUES,
   OV_STAT_TOTAL_RESOURCES,
-  RESOURCE_TYPE_LABELS,
+  resourceTypeLabel,
   TOAST_BATCH_IN_USE,
   TOAST_ROLLBACK_DONE,
 } from '../i18n';
@@ -86,9 +87,23 @@ function TypeBar({ label, count, max }: { label: string; count: number; max: num
   );
 }
 
+/** 类型分布行（按 count 降序；键集来自后端 stats.byType 动态 map，含 port）。 */
+interface TypeStatRow {
+  key: string;
+  label: string;
+  count: number;
+}
+
+function typeStatRows(byType: Record<string, number>): TypeStatRow[] {
+  return Object.entries(byType)
+    .map(([key, count]) => ({ key, label: resourceTypeLabel(key), count }))
+    .sort((a, b) => b.count - a.count);
+}
+
 function OverviewBody() {
   const navigate = useNavigate();
   const toast = useToast();
+  const loadGuard = useSeq();
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,11 +112,13 @@ function OverviewBody() {
   const [rollbackBusy, setRollbackBusy] = useState(false);
 
   const load = useCallback((): void => {
+    const isCurrent = loadGuard.begin();
     setLoading(true);
     setError(null);
     setErrorDetail(null);
     Promise.all([getStats(), runValidate().catch(() => null), listBatches(1, RECENT_BATCH_LIMIT)])
       .then((results) => {
+        if (!isCurrent()) return;
         const [stats, validateResult, batches] = results;
         setData({
           stats,
@@ -112,12 +129,13 @@ function OverviewBody() {
         setLoading(false);
       })
       .catch((err: unknown) => {
+        if (!isCurrent()) return;
         const display = formatApiError(err);
         setError(display.title);
         setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, []);
+  }, [loadGuard]);
 
   useEffect(() => {
     load();
@@ -175,8 +193,10 @@ function OverviewBody() {
     );
   }
 
-  const typeCount = (key: 'device' | 'ip_pool' | 'circuit'): number => stats.byType[key] ?? 0;
-  const maxTypeCount = Math.max(typeCount('device'), typeCount('ip_pool'), typeCount('circuit'), 1);
+  // 类型分布动态化（R1-D4）：按后端 stats.byType 实际键渲染（含 port），不硬编码类型清单
+  const typeStats = typeStatRows(stats.byType);
+  const maxTypeCount = typeStats.reduce((max, row) => Math.max(max, row.count), 1);
+  const typeSummary = typeStats.map((row) => `${row.count} ${row.label}`).join(' · ');
   const totalIssues = counts.error + counts.warning + counts.info;
   const latestBatch: BatchListItem | undefined = batches.items[0];
 
@@ -212,7 +232,7 @@ function OverviewBody() {
         <StatCard
           label={OV_STAT_TOTAL_RESOURCES}
           value={stats.totalResources}
-          sub={`${typeCount('device')} ${RESOURCE_TYPE_LABELS.device} · ${typeCount('ip_pool')} ${RESOURCE_TYPE_LABELS.ip_pool} · ${typeCount('circuit')} ${RESOURCE_TYPE_LABELS.circuit}`}
+          sub={typeSummary === '' ? undefined : typeSummary}
         />
         <StatCard
           label={OV_STAT_TOTAL_ISSUES}
@@ -237,9 +257,9 @@ function OverviewBody() {
       <div className="ov-grid">
         <div className="card">
           <h2 className="card-title">{OV_BY_TYPE_TITLE}</h2>
-          <TypeBar label={RESOURCE_TYPE_LABELS.device} count={typeCount('device')} max={maxTypeCount} />
-          <TypeBar label={RESOURCE_TYPE_LABELS.ip_pool} count={typeCount('ip_pool')} max={maxTypeCount} />
-          <TypeBar label={RESOURCE_TYPE_LABELS.circuit} count={typeCount('circuit')} max={maxTypeCount} />
+          {typeStats.map((row) => (
+            <TypeBar key={row.key} label={row.label} count={row.count} max={maxTypeCount} />
+          ))}
         </div>
         <div className="card">
           <h2 className="card-title">{OV_QUICK_ACTIONS}</h2>
