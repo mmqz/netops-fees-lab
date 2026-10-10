@@ -1204,3 +1204,403 @@ func TestBaseStationKeyValidate(t *testing.T) {
 		})
 	}
 }
+
+// ---- site / machine_room (the 机房局站 export, v0.4 W3-D) ----
+
+// siteMachineRoomSheetName is the REAL sheet name family of the owner's
+// 机房局站 export (samples/telecom-site-machine-room.xlsx): the name carries
+// BOTH SheetHints (机房 and 局站), so SuggestType resolves to whichever spec
+// is registered first — site, per the container-first import story.
+const siteMachineRoomSheetName = "机房局站表"
+
+// machineRoomSheetName carries only the 机房 hint (the second pass of the
+// same story, or a machine-room-only export).
+const machineRoomSheetName = "机房表"
+
+// siteMachineRoomHeaders is the REAL 8-column layout of the 机房局站 export
+// (owner session paste): 地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称.
+var siteMachineRoomHeaders = []string{"地市", "区县", "设备名称", "IP地址", "机房ID", "机房名称", "局站ID", "局站名称"}
+
+// TestSiteMachineRoomSpec pins both schemas of the 机房局站 family: the ID
+// fields are KindString (digit-string codes — a numeric kind would strip
+// leading zeros and split identities), the optional site ref of machine_room
+// (KindRef → site, the belongs_to source), the IPv4 value column, the
+// display-name overrides, and the Specs REGISTRATION ORDER (site before
+// machine_room — the deterministic tie-breaker of SuggestType on a sheet
+// named 机房局站表).
+func TestSiteMachineRoomSpec(t *testing.T) {
+	site, ok := SpecByType(domain.ResourceTypeSite)
+	if !ok {
+		t.Fatal("site spec missing from Specs")
+	}
+	if site.Type != domain.ResourceTypeSite || site.SheetHint != "局站" {
+		t.Errorf("site identity = %s/%q, want site/局站", site.Type, site.SheetHint)
+	}
+	if got := site.NameField(); got != "site_name" {
+		t.Errorf("NameField(site) = %q, want site_name (first *_name heuristic)", got)
+	}
+	if got := site.NaturalKeyNames(); !reflect.DeepEqual(got, []string{"site_id"}) {
+		t.Errorf("site NaturalKeyNames = %v, want [site_id]", got)
+	}
+	if f, _ := site.Field("site_id"); !f.Required || !f.NaturalKey || f.Kind != KindString {
+		t.Errorf("site_id = Required%v NaturalKey%v Kind%v, want all true/true/string (12-digit code, leading zeros are identity)", f.Required, f.NaturalKey, f.Kind)
+	}
+	if f, _ := site.Field("site_name"); !f.Required || f.NaturalKey {
+		t.Errorf("site_name = Required%v NaturalKey%v, want true/false", f.Required, f.NaturalKey)
+	}
+	if f, _ := site.Field("ip_address"); f.Kind != KindIPv4 {
+		t.Errorf("site ip_address kind = %q, want ipv4 (mutable attribute, E004 on bad values)", f.Kind)
+	}
+	for _, f := range site.Fields {
+		if f.Kind == KindRef {
+			t.Errorf("site must not carry ref fields (plain container, found %s)", f.Name)
+		}
+	}
+	if len(site.KeyFallbackFields) != 0 {
+		t.Errorf("site KeyFallbackFields = %v, want none (unconditional ID key)", site.KeyFallbackFields)
+	}
+
+	mr, ok := SpecByType(domain.ResourceTypeMachineRoom)
+	if !ok {
+		t.Fatal("machine_room spec missing from Specs")
+	}
+	if mr.Type != domain.ResourceTypeMachineRoom || mr.SheetHint != "机房" {
+		t.Errorf("machine_room identity = %s/%q, want machine_room/机房", mr.Type, mr.SheetHint)
+	}
+	if got := mr.NameField(); got != "machine_room_name" {
+		t.Errorf("NameField(machine_room) = %q, want machine_room_name (override)", got)
+	}
+	if got := mr.NaturalKeyNames(); !reflect.DeepEqual(got, []string{"machine_room_id"}) {
+		t.Errorf("machine_room NaturalKeyNames = %v, want [machine_room_id]", got)
+	}
+	if f, _ := mr.Field("machine_room_id"); !f.Required || !f.NaturalKey || f.Kind != KindString {
+		t.Errorf("machine_room_id = Required%v NaturalKey%v Kind%v, want true/true/string (17-digit code, leading zeros are identity)", f.Required, f.NaturalKey, f.Kind)
+	}
+	if f, _ := mr.Field("machine_room_name"); !f.Required || f.NaturalKey {
+		t.Errorf("machine_room_name = Required%v NaturalKey%v, want true/false", f.Required, f.NaturalKey)
+	}
+	// The container ref: optional (unmapped column = relation-less import),
+	// typed to site, and the source of the belongs_to relation.
+	siteRef, found := mr.Field("site_id")
+	if !found {
+		t.Fatal("machine_room spec misses the site_id ref field")
+	}
+	if siteRef.Kind != KindRef || siteRef.RefType != domain.ResourceTypeSite {
+		t.Errorf("site_id = Kind%v RefType%v, want ref/site", siteRef.Kind, siteRef.RefType)
+	}
+	if siteRef.Required {
+		t.Error("site_id must NOT be Required (sites not imported yet ⇒ the column can stay unmapped)")
+	}
+	if f, _ := mr.Field("ip_address"); f.Kind != KindIPv4 {
+		t.Errorf("machine_room ip_address kind = %q, want ipv4", f.Kind)
+	}
+	// device_name stays a plain string attribute in both specs (device keys
+	// are device_code; free-text nicknames resolve to nothing).
+	for _, spec := range []TypeSpec{site, mr} {
+		f, _ := spec.Field("device_name")
+		if f.Kind != KindString || f.RefType != "" {
+			t.Errorf("%s device_name = Kind%v RefType%q, want plain string attribute", spec.Type, f.Kind, f.RefType)
+		}
+	}
+
+	// Registration order: site BEFORE machine_room — the container-first
+	// ruling SuggestType relies on for the 机房局站表 double-hint sheet.
+	var siteIdx, mrIdx = -1, -1
+	for i, s := range Specs {
+		switch s.Type {
+		case domain.ResourceTypeSite:
+			siteIdx = i
+		case domain.ResourceTypeMachineRoom:
+			mrIdx = i
+		}
+	}
+	if siteIdx == -1 || mrIdx == -1 || siteIdx > mrIdx {
+		t.Errorf("Specs order = site@%d machine_room@%d, want site registered first", siteIdx, mrIdx)
+	}
+}
+
+// TestSuggestTypeSiteMachineRoom pins the hint resolution, including the
+// double-hint sheet 机房局站表 (both 机房 and 局站 match): the FIRST
+// registered spec wins — site — which is the documented prefill for the
+// first pass of the import story; the mapping confirmation page still lets
+// the user switch the type (the suggestion is only a prefill).
+func TestSuggestTypeSiteMachineRoom(t *testing.T) {
+	cases := []struct {
+		sheet string
+		want  domain.ResourceType
+		ok    bool
+	}{
+		{siteMachineRoomSheetName, domain.ResourceTypeSite, true}, // double hint → first registered (site)
+		{"局站表", domain.ResourceTypeSite, true},
+		{"局站", domain.ResourceTypeSite, true},
+		{"机房表", domain.ResourceTypeMachineRoom, true},
+		{"机房", domain.ResourceTypeMachineRoom, true},
+		{"动力机房清单", domain.ResourceTypeMachineRoom, true},
+		{"Sheet1", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := SuggestType(tc.sheet)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("SuggestType(%q) = (%q, %v), want (%q, %v)", tc.sheet, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// TestSiteMachineRoomSuggest covers the suggestion ladder on the real
+// 8-column layout: the site-typed 机房局站表 suggests the 6 site-relevant
+// columns (the 机房 columns have no site-field synonym), while the
+// machine_room-typed sheet suggests ALL 8 including the 局站ID → site_id ref.
+func TestSiteMachineRoomSuggest(t *testing.T) {
+	// Site reading of the double-hint sheet: 6 of 8 columns suggested at
+	// synonym confidence; 机房ID/机房名称 have no candidate in the site spec.
+	sug := Suggest(siteMachineRoomSheetName, siteMachineRoomHeaders)
+	if len(sug) != len(siteMachineRoomHeaders) {
+		t.Fatalf("Suggest returned %d suggestions, want %d", len(sug), len(siteMachineRoomHeaders))
+	}
+	want := []string{"city", "district", "device_name", "ip_address", "", "", "site_id", "site_name"}
+	for i, w := range want {
+		if sug[i].Field != w {
+			t.Errorf("site suggestion[%d] (%q) = %q, want %q", i, siteMachineRoomHeaders[i], sug[i].Field, w)
+		}
+		if w != "" && sug[i].Confidence != ConfidenceSynonym {
+			t.Errorf("site suggestion[%d] confidence = %v, want %v", i, sug[i].Confidence, ConfidenceSynonym)
+		}
+	}
+
+	// Machine-room reading (机房-only sheet name): 7 of 8 columns map,
+	// including the 局站ID → site_id ref field; 局站名称 has NO machine_room
+	// target (the site's name lives on the site resource — the column is
+	// simply not mappable in this reading).
+	sugMr := Suggest(machineRoomSheetName, siteMachineRoomHeaders)
+	wantMr := []string{"city", "district", "device_name", "ip_address", "machine_room_id", "machine_room_name", "site_id", ""}
+	for i, w := range wantMr {
+		if sugMr[i].Field != w {
+			t.Errorf("machine_room suggestion[%d] (%q) = %q, want %q", i, siteMachineRoomHeaders[i], sugMr[i].Field, w)
+		}
+	}
+
+	// Confidence tiers on the typed sheet.
+	cases := []struct {
+		name     string
+		sheet    string
+		header   string
+		wantFld  string
+		wantConf float64
+	}{
+		{"exact field name", siteMachineRoomSheetName, "site_id", "site_id", 1.0},
+		{"normalized case field name", siteMachineRoomSheetName, "SITE_NAME", "site_name", 0.9},
+		{"district alt synonym", siteMachineRoomSheetName, "县区", "district", 0.75},
+		{"device-only column not suggested on site sheet", siteMachineRoomSheetName, "管理IP", "", 0},
+		{"base-station column not suggested on site sheet", siteMachineRoomSheetName, "基站编码", "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Suggest(tc.sheet, []string{tc.header})
+			if len(got) != 1 {
+				t.Fatalf("Suggest returned %d suggestions, want 1", len(got))
+			}
+			if got[0].Field != tc.wantFld || got[0].Confidence != tc.wantConf {
+				t.Errorf("Suggest(%q, %q) = %q/%v, want %q/%v",
+					tc.sheet, tc.header, got[0].Field, got[0].Confidence, tc.wantFld, tc.wantConf)
+			}
+		})
+	}
+}
+
+// TestSuggestMappingSiteMachineRoom pins the prefill of both readings: the
+// double-hint sheet suggests the site import (keyColumns [site_id], both
+// required site fields mapped, validates as-is), the 机房-only sheet
+// suggests the machine_room import (keyColumns [machine_room_id], the
+// 局站ID → site_id ref prefilled, validates as-is — the ref is optional but
+// the prefill maps it because the column exists).
+func TestSuggestMappingSiteMachineRoom(t *testing.T) {
+	m := SuggestMapping([]SheetInfo{{Name: siteMachineRoomSheetName, Headers: siteMachineRoomHeaders}})
+	if len(m.Sheets) != 1 {
+		t.Fatalf("SuggestMapping returned %d sheets, want 1", len(m.Sheets))
+	}
+	sm := m.Sheets[0]
+	if sm.Action != ActionImport || sm.ResourceType != domain.ResourceTypeSite {
+		t.Fatalf("suggested sheet = %s/%s, want import/site", sm.Action, sm.ResourceType)
+	}
+	if !reflect.DeepEqual(sm.KeyColumns, []string{"site_id"}) {
+		t.Errorf("site keyColumns = %v, want [site_id]", sm.KeyColumns)
+	}
+	if len(sm.ColumnMapping) != 6 {
+		t.Errorf("site columnMapping has %d entries, want 6 (机房 columns excluded)", len(sm.ColumnMapping))
+	}
+	if err := Validate(m, map[string][]string{siteMachineRoomSheetName: siteMachineRoomHeaders}); err != nil {
+		t.Errorf("suggested site mapping must validate as-is: %v", err)
+	}
+
+	mMr := SuggestMapping([]SheetInfo{{Name: machineRoomSheetName, Headers: siteMachineRoomHeaders}})
+	if len(mMr.Sheets) != 1 {
+		t.Fatalf("SuggestMapping returned %d sheets, want 1", len(mMr.Sheets))
+	}
+	smMr := mMr.Sheets[0]
+	if smMr.Action != ActionImport || smMr.ResourceType != domain.ResourceTypeMachineRoom {
+		t.Fatalf("suggested sheet = %s/%s, want import/machine_room", smMr.Action, smMr.ResourceType)
+	}
+	if !reflect.DeepEqual(smMr.KeyColumns, []string{"machine_room_id"}) {
+		t.Errorf("machine_room keyColumns = %v, want [machine_room_id]", smMr.KeyColumns)
+	}
+	if smMr.ColumnMapping["site_id"] != "局站ID" {
+		t.Errorf("machine_room prefill site_id ← %q, want 局站ID (the ref column)", smMr.ColumnMapping["site_id"])
+	}
+	if err := Validate(mMr, map[string][]string{machineRoomSheetName: siteMachineRoomHeaders}); err != nil {
+		t.Errorf("suggested machine_room mapping must validate as-is: %v", err)
+	}
+}
+
+// siteSheetMapping builds a complete, valid site mapping of the real layout.
+func siteSheetMapping(sheet string) SheetMapping {
+	return SheetMapping{
+		Sheet:        sheet,
+		Action:       ActionImport,
+		ResourceType: domain.ResourceTypeSite,
+		KeyColumns:   []string{"site_id"},
+		ColumnMapping: map[string]string{
+			"site_id":     "局站ID",
+			"site_name":   "局站名称",
+			"city":        "地市",
+			"district":    "区县",
+			"device_name": "设备名称",
+			"ip_address":  "IP地址",
+		},
+	}
+}
+
+// machineRoomSheetMapping builds a machine_room mapping of the real layout;
+// withSiteRef adds the optional 局站ID → site_id ref (the belongs_to source).
+func machineRoomSheetMapping(sheet string, withSiteRef bool) SheetMapping {
+	cm := map[string]string{
+		"machine_room_id":   "机房ID",
+		"machine_room_name": "机房名称",
+		"city":              "地市",
+		"district":          "区县",
+		"device_name":       "设备名称",
+		"ip_address":        "IP地址",
+	}
+	if withSiteRef {
+		cm["site_id"] = "局站ID"
+	}
+	return SheetMapping{
+		Sheet:         sheet,
+		Action:        ActionImport,
+		ResourceType:  domain.ResourceTypeMachineRoom,
+		KeyColumns:    []string{"machine_room_id"},
+		ColumnMapping: cm,
+	}
+}
+
+// TestSiteMachineRoomValidate pins the mapping contract of both types:
+// keyColumns are the single ID natural keys, the optional site_id ref column
+// may stay unmapped (relation-less import), required ID/name columns must be
+// mapped, and unknown target fields / missing source headers are rejected.
+func TestSiteMachineRoomValidate(t *testing.T) {
+	headers := map[string][]string{
+		siteMachineRoomSheetName: siteMachineRoomHeaders,
+		machineRoomSheetName:     siteMachineRoomHeaders,
+	}
+	for k, v := range testHeaders {
+		headers[k] = v
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(m *Mapping)
+		wantErr   bool
+		wantField string
+	}{
+		{
+			name: "site happy path",
+			mutate: func(m *Mapping) {
+				m.Sheets = append(m.Sheets, siteSheetMapping(siteMachineRoomSheetName))
+			},
+		},
+		{
+			name: "machine_room with site ref (the belongs_to path)",
+			mutate: func(m *Mapping) {
+				m.Sheets = append(m.Sheets, machineRoomSheetMapping(machineRoomSheetName, true))
+			},
+		},
+		{
+			name: "machine_room without site ref (optional, relation-less)",
+			mutate: func(m *Mapping) {
+				m.Sheets = append(m.Sheets, machineRoomSheetMapping(machineRoomSheetName, false))
+			},
+		},
+		{
+			name: "site keyColumns on machine_room mapping rejected",
+			mutate: func(m *Mapping) {
+				sm := machineRoomSheetMapping(machineRoomSheetName, true)
+				sm.KeyColumns = []string{"site_id"}
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "keyColumns",
+		},
+		{
+			name: "unmapped required machine_room_id rejected",
+			mutate: func(m *Mapping) {
+				sm := machineRoomSheetMapping(machineRoomSheetName, true)
+				delete(sm.ColumnMapping, "machine_room_id")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "machine_room_id",
+		},
+		{
+			name: "unmapped required machine_room_name rejected",
+			mutate: func(m *Mapping) {
+				sm := machineRoomSheetMapping(machineRoomSheetName, true)
+				delete(sm.ColumnMapping, "machine_room_name")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "machine_room_name",
+		},
+		{
+			name: "unmapped required site_name rejected",
+			mutate: func(m *Mapping) {
+				sm := siteSheetMapping(siteMachineRoomSheetName)
+				delete(sm.ColumnMapping, "site_name")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "site_name",
+		},
+		{
+			name: "unknown target field rejected",
+			mutate: func(m *Mapping) {
+				sm := siteSheetMapping(siteMachineRoomSheetName)
+				sm.ColumnMapping["vendor"] = "设备名称"
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "vendor",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Mapping{}
+			tc.mutate(&m)
+			err := Validate(m, headers)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("Validate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Validate: want error, got nil")
+			}
+			var fe *FieldError
+			if !errors.As(err, &fe) {
+				t.Fatalf("Validate error %v is not *FieldError", err)
+			}
+			if fe.Field != tc.wantField {
+				t.Errorf("FieldError.Field = %q, want %q", fe.Field, tc.wantField)
+			}
+		})
+	}
+}

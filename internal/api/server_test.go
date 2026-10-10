@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xuri/excelize/v2"
+
 	"github.com/mmqz/netops-lab/internal/api"
 	"github.com/mmqz/netops-lab/internal/app"
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -1205,5 +1207,195 @@ func TestAPIUploadWithoutDataDirFailsFast(t *testing.T) {
 	}
 	if !strings.Contains(er.Error.Message, "dataDir") {
 		t.Errorf("upload without dataDir: message %q should name the missing dataDir configuration", er.Error.Message)
+	}
+}
+
+// TestAPISiteMachineRoomBelongsTo walks the two-sheet 机房局站 import story
+// over the full HTTP API (one batch, the site sheet imported BEFORE the
+// machine-room sheet so the ref resolves batch-locally), then pins the
+// read-side contract of belongs_to: the machine_room resource detail counts
+// the relation, the relations subgraph carries relationType "belongs_to"
+// edge-by-edge, and /api/stats reports both new types plus the new relation
+// type (v0.4 W3-D, migration v10).
+func TestAPISiteMachineRoomBelongsTo(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	// A two-sheet workbook in the real 8-column layout: a slim 局站表 (the
+	// site pass) and the 机房局站表 (the machine-room pass) carrying the real
+	// pasted row. Built in memory, uploaded as multipart.
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "局站表"); err != nil {
+		t.Fatalf("rename sheet: %v", err)
+	}
+	if _, err := f.NewSheet("机房局站表"); err != nil {
+		t.Fatalf("new sheet: %v", err)
+	}
+	siteHeaders := []string{"地市", "区县", "设备名称", "IP地址", "局站ID", "局站名称"}
+	siteRow := []string{"大兴", "呼区", "源1", "4.8.14.8", "231001824048", "源"}
+	mrHeaders := []string{"地市", "区县", "设备名称", "IP地址", "机房ID", "机房名称", "局站ID", "局站名称"}
+	mrRow := []string{"大兴", "呼区", "源1", "4.8.14.8", "23100120000018049", "呼", "231001824048", "源"}
+	for i, row := range [][]string{siteHeaders, siteRow} {
+		for c, v := range row {
+			cell, err := excelize.CoordinatesToCellName(c+1, i+1)
+			if err != nil {
+				t.Fatalf("cell name: %v", err)
+			}
+			if err := f.SetCellStr("局站表", cell, v); err != nil {
+				t.Fatalf("set cell: %v", err)
+			}
+		}
+	}
+	for i, row := range [][]string{mrHeaders, mrRow} {
+		for c, v := range row {
+			cell, err := excelize.CoordinatesToCellName(c+1, i+1)
+			if err != nil {
+				t.Fatalf("cell name: %v", err)
+			}
+			if err := f.SetCellStr("机房局站表", cell, v); err != nil {
+				t.Fatalf("set cell: %v", err)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close workbook: %v", err)
+	}
+
+	// Upload → 202 analysis. The 局站表 hint suggests site; the double-hint
+	// 机房局站表 ALSO suggests site (site is registered before machine_room —
+	// the suggestion is a prefill, the confirmed mapping below switches the
+	// second sheet to machine_room).
+	resp, body := uploadFile(t, srv, "site-machine-room.xlsx", buf.Bytes())
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("upload: status = %d, want 202\nbody: %s", resp.StatusCode, body)
+	}
+	var a importAnalysis
+	decodeJSON(t, "upload", body, &a)
+	var sm suggestedMapping
+	decodeJSON(t, "suggested mapping", a.SuggestedMapping, &sm)
+	if len(sm.Sheets) != 2 {
+		t.Fatalf("suggested mapping has %d sheets, want 2", len(sm.Sheets))
+	}
+	for _, s := range sm.Sheets {
+		if s.Action != "import" || s.ResourceType != "site" {
+			t.Errorf("suggested mapping of %q = %s/%s, want import/site (prefill; user switches pass 2)", s.Sheet, s.Action, s.ResourceType)
+		}
+	}
+
+	// Confirm a CUSTOM mapping: the site sheet first, then the same physical
+	// family as machine_room with the 局站ID ref — the story's two readings in
+	// one batch (sheet order = ref resolution order).
+	mapping := []byte(`{"sheets":[
+		{"sheet":"局站表","action":"import","resourceType":"site","keyColumns":["site_id"],
+		 "columnMapping":{"site_id":"局站ID","site_name":"局站名称","city":"地市","district":"区县","device_name":"设备名称","ip_address":"IP地址"}},
+		{"sheet":"机房局站表","action":"import","resourceType":"machine_room","keyColumns":["machine_room_id"],
+		 "columnMapping":{"machine_room_id":"机房ID","machine_room_name":"机房名称","site_id":"局站ID","city":"地市","district":"区县","device_name":"设备名称","ip_address":"IP地址"}}
+	]}`)
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/imports/"+a.BatchID+"/mapping", mapping, "application/json")
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("mapping: status = %d, want 202\nbody: %s", resp.StatusCode, body)
+	}
+	var sum importSummary
+	decodeJSON(t, "mapping", body, &sum)
+	if sum.Status != "completed" || sum.Summary.RowsTotal != 2 || sum.Summary.RowsImported != 2 ||
+		sum.Summary.RowsSkipped != 0 || sum.Summary.RowsFailed != 0 {
+		t.Fatalf("summary = %+v, want completed 2 total / 2 imported / 0 skipped / 0 failed", sum)
+	}
+
+	// GET /api/resources?type=machine_room → the room keyed by 机房ID.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=machine_room", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resources: status = %d, want 200", resp.StatusCode)
+	}
+	var rooms resourcesPage
+	decodeJSON(t, "resources", body, &rooms)
+	if rooms.Total != 1 || len(rooms.Items) != 1 {
+		t.Fatalf("machine_room resources = %d (total %d), want 1/1", len(rooms.Items), rooms.Total)
+	}
+	room := rooms.Items[0]
+	if room.NaturalKey != "23100120000018049" || room.Name != "呼" || room.Type != "machine_room" {
+		t.Errorf("machine_room item = %s/%s/%s, want 23100120000018049/呼/machine_room", room.Type, room.NaturalKey, room.Name)
+	}
+	if room.Attributes["site_id"] != "231001824048" {
+		t.Errorf("machine_room attrs site_id = %q, want 231001824048 (the ref value, like ip_pool.assigned_device)", room.Attributes["site_id"])
+	}
+
+	// GET /api/resources/{id} → relationCount counts the belongs_to edge.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+room.ID, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resource detail: status = %d, want 200", resp.StatusCode)
+	}
+	var detail resourceDetail
+	decodeJSON(t, "resource detail", body, &detail)
+	if detail.RelationCount != 1 {
+		t.Fatalf("resource detail relationCount = %d, want 1", detail.RelationCount)
+	}
+	if len(detail.SourceRefs) != 1 || detail.SourceRefs[0].Sheet != "机房局站表" || detail.SourceRefs[0].RowNumber != 2 {
+		t.Errorf("source refs = %+v, want one ref at 机房局站表 row 2", detail.SourceRefs)
+	}
+
+	// GET /api/resources/{id}/relations → the belongs_to edge is passed
+	// through verbatim (relationType, fromId, toId).
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+room.ID+"/relations", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("relations: status = %d, want 200", resp.StatusCode)
+	}
+	var rel relationsResp
+	decodeJSON(t, "relations", body, &rel)
+	if rel.Center.ID != room.ID || rel.Center.Type != "machine_room" {
+		t.Errorf("relations center = %s/%s, want the machine_room %s", rel.Center.Type, rel.Center.ID, room.ID)
+	}
+	if len(rel.Nodes) != 1 || len(rel.Edges) != 1 {
+		t.Fatalf("relations graph = %d nodes / %d edges, want 1/1", len(rel.Nodes), len(rel.Edges))
+	}
+	edge := rel.Edges[0]
+	if edge.RelationType != "belongs_to" || edge.FromID != room.ID || rel.Nodes[0].Type != "site" ||
+		rel.Nodes[0].NaturalKey != "231001824048" || edge.ToID != rel.Nodes[0].ID {
+		t.Errorf("belongs_to edge = %+v (node %+v), want belongs_to from the room to site 231001824048", edge, rel.Nodes[0])
+	}
+
+	// The site side of the graph: undirected traversal reaches the room.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=site", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("site resources: status = %d, want 200", resp.StatusCode)
+	}
+	var sites resourcesPage
+	decodeJSON(t, "site resources", body, &sites)
+	if sites.Total != 1 || sites.Items[0].NaturalKey != "231001824048" || sites.Items[0].Name != "源" {
+		t.Fatalf("site resources = %+v, want one site 231001824048/源", sites.Items)
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+sites.Items[0].ID+"/relations", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("site relations: status = %d, want 200", resp.StatusCode)
+	}
+	var siteRel relationsResp
+	decodeJSON(t, "site relations", body, &siteRel)
+	if len(siteRel.Edges) != 1 || siteRel.Edges[0].RelationType != "belongs_to" ||
+		siteRel.Edges[0].FromID != room.ID || siteRel.Edges[0].ToID != sites.Items[0].ID {
+		t.Errorf("site-side belongs_to edge = %+v, want the same stored edge (undirected traversal)", siteRel.Edges)
+	}
+
+	// GET /api/stats → both new types counted, belongs_to in byRelationType.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/stats", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stats: status = %d, want 200", resp.StatusCode)
+	}
+	var stats statsResp
+	decodeJSON(t, "stats", body, &stats)
+	if stats.ByType["site"] != 1 || stats.ByType["machine_room"] != 1 || stats.TotalResources != 2 {
+		t.Errorf("stats byType = %v (total %d), want site 1 / machine_room 1 / total 2", stats.ByType, stats.TotalResources)
+	}
+	if stats.ByRelationType["belongs_to"] != 1 {
+		t.Errorf("stats byRelationType = %v, want belongs_to 1", stats.ByRelationType)
+	}
+
+	// The type validation message accepts the new types; a bogus type still
+	// 400s (closed-set enforcement).
+	resp, _ = doRequest(t, srv, http.MethodGet, "/api/resources?type=building", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("resources?type=building: status = %d, want 400", resp.StatusCode)
 	}
 }

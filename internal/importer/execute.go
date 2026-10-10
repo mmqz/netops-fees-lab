@@ -714,8 +714,12 @@ func (st *sheetState) failRow(ctx context.Context, row workbook.Row, results *[]
 }
 
 // relationTypeFor maps a ref field of a resource type to the derived
-// relation type of PROJECT_BRIEF §6: ip_pool.assigned_device → assigned_to,
-// circuit.a_end_device → a_end, circuit.z_end_device → z_end.
+// relation type of PROJECT_BRIEF §6 (+ the v0.4 extension):
+// ip_pool.assigned_device → assigned_to, circuit.a_end_device → a_end,
+// circuit.z_end_device → z_end, machine_room.site_id → belongs_to (the
+// container attribution of a machine room to its site; the ref itself
+// resolves through the same E003 path as any other ref, so the import
+// order 先局站后机房 is enforced by E003, not by this switch).
 func relationTypeFor(rt domain.ResourceType, field string) domain.RelationType {
 	switch {
 	case rt == domain.ResourceTypeIPPool && field == "assigned_device":
@@ -724,6 +728,8 @@ func relationTypeFor(rt domain.ResourceType, field string) domain.RelationType {
 		return domain.RelationTypeAEnd
 	case rt == domain.ResourceTypeCircuit && field == "z_end_device":
 		return domain.RelationTypeZEnd
+	case rt == domain.ResourceTypeMachineRoom && field == "site_id":
+		return domain.RelationTypeBelongsTo
 	default:
 		return domain.RelationType("")
 	}

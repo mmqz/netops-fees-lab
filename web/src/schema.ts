@@ -86,6 +86,28 @@ export const TYPE_SPECS: Record<ResourceType, FieldSpec[]> = {
     { field: 'work_order', required: false, naturalKey: false, kind: 'string' },
     { field: 'remark', required: false, naturalKey: false, kind: 'string' },
   ],
+  // 局站（v0.4 W3-D）：键 = site_id（12 位数字编码，全局）；ID 为 string 防前导零丢失；
+  // device_name 为局站内设备昵称（属性，非 device ref——设备键是 device_code 无法解析）；
+  // ip_address 为可变属性（IPv4 值列，非身份）
+  site: [
+    { field: 'site_id', required: true, naturalKey: true, kind: 'string' },
+    { field: 'site_name', required: true, naturalKey: false, kind: 'string' },
+    { field: 'city', required: false, naturalKey: false, kind: 'string' },
+    { field: 'district', required: false, naturalKey: false, kind: 'string' },
+    { field: 'device_name', required: false, naturalKey: false, kind: 'string' },
+    { field: 'ip_address', required: false, naturalKey: false, kind: 'ipv4' },
+  ],
+  // 机房（v0.4 W3-D）：键 = machine_room_id（15 位数字编码，全局）；site_id 为可选 ref（局站），
+  // 映射后按 E003 语义解析——需先导入局站，否则该行失败；解析成功建 belongs_to 关系
+  machine_room: [
+    { field: 'machine_room_id', required: true, naturalKey: true, kind: 'string' },
+    { field: 'machine_room_name', required: true, naturalKey: false, kind: 'string' },
+    { field: 'site_id', required: false, naturalKey: false, kind: 'ref' },
+    { field: 'city', required: false, naturalKey: false, kind: 'string' },
+    { field: 'district', required: false, naturalKey: false, kind: 'string' },
+    { field: 'device_name', required: false, naturalKey: false, kind: 'string' },
+    { field: 'ip_address', required: false, naturalKey: false, kind: 'ipv4' },
+  ],
 };
 
 /** 字段中文名（未知字段回退为字段名本身）。 */

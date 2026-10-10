@@ -18,8 +18,9 @@ type Resource struct {
 	UpdatedAt    time.Time
 }
 
-// Relation is a typed edge between two resources. Only assigned_to
-// (ip_pool → device), a_end and z_end (circuit → device) exist in Phase 1.
+// Relation is a typed edge between two resources. Current closed set:
+// assigned_to (ip_pool → device), a_end and z_end (circuit → device),
+// belongs_to (machine_room → site, v0.4 W3-D).
 type Relation struct {
 	ID             string
 	Type           RelationType

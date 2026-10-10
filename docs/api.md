@@ -257,7 +257,7 @@ HTTP/1.1 409 Conflict
 
 ## GET /api/resources?type=&q=&status=&page=&pageSize= — 资源检索
 
-`type` 可取 `device` / `ip_pool` / `circuit` / `port` / `base_station`（v0.3.1 起 port、v0.4 起 base_station 入封闭集；非法值 → 400 `bad_request`）。`q` 对 natural_key / name / attributes 值做不区分大小写包含匹配；默认按类型分组、每组自然键排序（首页 circuit-first 为排序副作用）。示例 `?pageSize=2`：
+`type` 可取 `device` / `ip_pool` / `circuit` / `port` / `base_station` / `site` / `machine_room`（v0.3.1 起 port、v0.4 起 base_station、v0.4 W3-D 起 site/machine_room 入封闭集；非法值 → 400 `bad_request`）。`q` 对 natural_key / name / attributes 值做不区分大小写包含匹配；默认按类型分组、每组自然键排序（首页 circuit-first 为排序副作用）。示例 `?pageSize=2`：
 
 ```json
 {
@@ -325,6 +325,8 @@ HTTP/1.1 409 Conflict
 
 **base_station 的条件自然键（v0.4 引入，W004）**：基站的主自然键字段是 `base_station_code`（基站编码，非必填——真实表编码列存在但值常为空）。编码值**非空**时 `naturalKey` = 编码（全局唯一）；**为空**时键退化为兜底字段 `(city, base_station_name)` 按序以 `|` 拼接、跳过空值——工作簿无地市列（真实形态）即退化为纯名称（如真实样例的 `动力机房2`），映射了地市列则为 `哈尔滨|花园小区1`。行照常导入并记 **W004**（身份键退化，warning 级）治理 issue，evidence 含 `natural_key`（所用兜底键）、`missing_fields`（缺失的主键字段）、`fallback_fields`。E001 判重与幂等 skip 都在解析后的最终键上判定：编码行与同名兜底行是两个身份。基站IP 真实值带 /30 掩码，为 string 值列（可变属性，非身份）；条件键机制由 spec 声明（`TypeSpec.KeyFallbackFields`）驱动，见 [natural-keys.md](natural-keys.md) §4/§5。
 
+**site / machine_room 的编号自然键与 belongs_to 关系（v0.4 W3-D 引入，migration v10）**：真实机房局站表（8 列：地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；样例 `samples/telecom-site-machine-room.xlsx`）**同一张 sheet 承载两类实体**——导入故事是把同一 sheet 读两遍：先按局站类型导入落 `site` 资源（`naturalKey` = 局站ID，12 位数字编码，全局唯一），再按机房类型导入落 `machine_room` 资源（`naturalKey` = 机房ID，17 位数字编码，全局唯一）。两类 ID 字段均为 string 值列（编号是数字串，前导零是身份的一部分，绝不数值化）。机房读法把 `局站ID` 列映射为可选 ref 字段 `site_id`：按局站ID 解析目标 site 资源，成功即派生一条 `machine_room --belongs_to--> site` 关系（见下节）；解析失败（局站未先入库）→ 该行 **E003** 失败——**导入顺序（先局站后机房）由 E003 语义钉死**；不映射该列则导入成功且不建关系（每行记 W001 孤儿警告）。ref 字段值同 `ip_pool.assigned_device` 一样落在 `attributes` 中。机房名称/局站名称/设备名称均为昵称（展示名/属性），IP地址为可变属性（KindIPv4，坏值 E004）。键策略裁决见 [natural-keys.md](natural-keys.md) §4。W004 无涉（两类 ID 键均为无条件主键，非条件键类型）。
+
 ## GET /api/resources/{id}/relations?depth=1|2 — 关系子图（BFS）
 
 `depth` 默认 1，最大 2。返回以该资源为中心的邻域子图（`nodes` 不含 center；`edges` 全部落在 visited 集合内）。示例 `?depth=2`（CKT-001 中心）：
@@ -350,7 +352,7 @@ HTTP/1.1 409 Conflict
 }
 ```
 
-遍历无向（a_end 可从设备侧走回电路）；节点按 `(type, natural_key)` 排序，输出确定。
+遍历无向（a_end 可从设备侧走回电路；belongs_to 可从局站侧走回机房）；节点按 `(type, natural_key)` 排序，输出确定。`relationType` 的取值集为 `assigned_to` / `a_end` / `z_end` / `belongs_to`（后者 machine_room → site，v0.4 W3-D 起入 relations CHECK 封闭集，migration v10）。
 
 ## GET /api/stats — 全库统计
 
@@ -364,6 +366,8 @@ HTTP/1.1 409 Conflict
   "latestBatchId": "bat_b1052d12-0854-441d-96fc-1d4a79363404"
 }
 ```
+
+`byType` 键集动态（新增类型如 port/site/machine_room 仅在有数据时出现，R1-D4 起前端按实际键动态渲染）；`byRelationType` 的四个已知关系类型恒出现（含 v0.4 W3-D 起的 `belongs_to`，计 0 亦发）。上例为三张合成工作簿的种子数据，故不含新类型键。
 
 ## GET /api/issues?batchId=&severity=&ruleCode=&page=&pageSize= — 问题清单
 

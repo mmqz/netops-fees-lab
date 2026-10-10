@@ -662,6 +662,19 @@ th[aria-sort="descending"] .th-sort-indicator {
   color: #92400e;
 }
 
+/* 局站：深绿（容器/站点读作"落地点"；#166534 对浅底对比度 ≈ 6:1，满足 AA） */
+.chip--site {
+  background: rgba(22, 101, 52, 0.12);
+  color: #166534;
+}
+
+/* 机房：玫瑰深红（与基站琥珀同暖色系但色相错开；#9f1239 对浅底对比度
+   ≈ 6.5:1，满足 AA 文本标准） */
+.chip--machine-room {
+  background: rgba(159, 18, 57, 0.12);
+  color: #9f1239;
+}
+
 /* 表格内的实体 id 代码芯片（W3：vd-22 / if-9 / ln-4 / cs-3 …） */
 .code-chip {
   display: inline-block;

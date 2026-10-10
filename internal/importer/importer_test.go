@@ -1717,3 +1717,376 @@ func contains(ss []string, s string) bool {
 	}
 	return false
 }
+
+// ---- site / machine_room (the 机房局站 export, v0.4 W3-D) ----
+
+// siteMachineRoomHeaders is the REAL 8-column layout of the owner's 机房局站
+// paste (samples/telecom-site-machine-room.xlsx): the first row below is the
+// verbatim real row, the rest are synthetic rows covering the rule paths.
+var siteMachineRoomHeaders = []string{"地市", "区县", "设备名称", "IP地址", "机房ID", "机房名称", "局站ID", "局站名称"}
+
+// siteMachineRoomSheetName carries BOTH SheetHints (机房 + 局站); SuggestType
+// resolves to site (first registered) — the mapping below overrides the
+// prefill per the story's reading of the moment.
+const siteMachineRoomSheetName = "机房局站表"
+
+// siteReadingMapping maps the real layout onto the site schema (first pass
+// of the story: 先局站).
+func siteReadingMapping(sheet string) mapping.Mapping {
+	return mapping.Mapping{Sheets: []mapping.SheetMapping{{
+		Sheet:        sheet,
+		Action:       mapping.ActionImport,
+		ResourceType: domain.ResourceTypeSite,
+		KeyColumns:   []string{"site_id"},
+		ColumnMapping: map[string]string{
+			"site_id": "局站ID", "site_name": "局站名称", "city": "地市",
+			"district": "区县", "device_name": "设备名称", "ip_address": "IP地址",
+		},
+	}}}
+}
+
+// machineRoomReadingMapping maps the same layout onto machine_room (second
+// pass: 后机房); withSiteRef toggles the optional 局站ID → site_id ref (the
+// belongs_to source).
+func machineRoomReadingMapping(sheet string, withSiteRef bool) mapping.Mapping {
+	cm := map[string]string{
+		"machine_room_id": "机房ID", "machine_room_name": "机房名称", "city": "地市",
+		"district": "区县", "device_name": "设备名称", "ip_address": "IP地址",
+	}
+	if withSiteRef {
+		cm["site_id"] = "局站ID"
+	}
+	return mapping.Mapping{Sheets: []mapping.SheetMapping{{
+		Sheet:         sheet,
+		Action:        mapping.ActionImport,
+		ResourceType:  domain.ResourceTypeMachineRoom,
+		KeyColumns:    []string{"machine_room_id"},
+		ColumnMapping: cm,
+	}}}
+}
+
+// TestRelationTypeFor pins the ref-field → relation-type mapping of the
+// importer, including the new belongs_to case and the unchanged legacy
+// behaviour for every other combination.
+func TestRelationTypeFor(t *testing.T) {
+	cases := []struct {
+		rt    domain.ResourceType
+		field string
+		want  domain.RelationType
+	}{
+		{domain.ResourceTypeIPPool, "assigned_device", domain.RelationTypeAssignedTo},
+		{domain.ResourceTypeCircuit, "a_end_device", domain.RelationTypeAEnd},
+		{domain.ResourceTypeCircuit, "z_end_device", domain.RelationTypeZEnd},
+		{domain.ResourceTypeMachineRoom, "site_id", domain.RelationTypeBelongsTo},
+		// Unmapped combinations stay "" (no relation is derived from them).
+		{domain.ResourceTypeMachineRoom, "city", ""},
+		{domain.ResourceTypeMachineRoom, "device_name", ""},
+		{domain.ResourceTypeIPPool, "site_id", ""},
+		{domain.ResourceTypeSite, "site_id", ""},
+		{domain.ResourceTypeCircuit, "assigned_device", ""},
+		{domain.ResourceTypeDevice, "site_id", ""},
+	}
+	for _, tc := range cases {
+		if got := relationTypeFor(tc.rt, tc.field); got != tc.want {
+			t.Errorf("relationTypeFor(%s, %q) = %q, want %q", tc.rt, tc.field, got, tc.want)
+		}
+	}
+}
+
+// TestImportMachineRoomAndSite drives the two-reading import story of the
+// real 机房局站 export (先局站后机房) plus its order/optional/idempotency
+// semantics:
+//
+//   - Phase A (site reading): the real row and a leading-zero row import as
+//     site resources keyed by 局站ID (KindString keeps the zeros); a name
+//     row, an ID row and a bad-IP row fail E002/E002/E004; zero relations.
+//   - Phase B (machine_room reading, same database): the rooms import keyed
+//     by 机房ID, the 局站ID column resolves against the sites of Phase A and
+//     derives belongs_to relations; the row whose site failed in Phase A now
+//     fails E003 (the import ORDER is pinned by E003).
+//   - Phase C (machine_room reading FIRST on a fresh database): every row
+//     with a non-empty 局站ID fails E003 — the 先机房 order is rejected.
+//   - Phase D (machine_room WITHOUT the 局站ID mapping): the rooms import
+//     relation-less (the ref column is optional); each imported row records
+//     the W001 orphan warning, exactly like an unassigned ip_pool.
+//   - Phase E (idempotency): re-running the Phase B mapping skips both
+//     rooms, re-fails the three bad rows and does NOT duplicate the
+//     belongs_to relations.
+func TestImportMachineRoomAndSite(t *testing.T) {
+	ctx := context.Background()
+
+	// The real row (session paste, all 8 cells verbatim).
+	realRow := []string{"大兴", "呼区", "源1", "4.8.14.8", "23100120000018049", "呼", "231001824048", "源"}
+	// Leading-zero IDs: 12-digit site code and 17-digit room code both keep
+	// their zeros as identity (KindString, no numeric coercion anywhere).
+	zeroRow := []string{"呼伦贝尔", "海拉尔", "源北1", "4.8.14.9", "00045600000000012", "呼北", "000123", "源北"}
+	// 局站名称 empty: E002 on the site reading; on the machine_room reading
+	// the row is valid EXCEPT its 局站ID never imported (that site row failed)
+	// → E003 — the order semantics in one row.
+	noNameRow := []string{"大兴", "呼区", "源南1", "4.8.14.10", "23100120000018051", "呼南", "231001824050", ""}
+	// 机房ID/局站ID empty: E002 on the (respective) required ID field.
+	noIDRow := []string{"大兴", "呼区", "源西1", "4.8.14.11", "", "呼西", "", "源西"}
+	// Bad IPv4: E004 in both readings (ip_address is KindIPv4 in both specs).
+	badIPRow := []string{"大兴", "呼区", "源东1", "999.4.8.14", "23100120000018052", "呼东", "231001824048", "源东"}
+
+	path := writeMultiSheetWorkbook(t, []sheetSpec{
+		{name: siteMachineRoomSheetName, rows: [][]string{
+			siteMachineRoomHeaders, // row 1: header
+			realRow,                // row 2
+			zeroRow,                // row 3
+			noNameRow,              // row 4
+			noIDRow,                // row 5
+			badIPRow,               // row 6
+		}},
+	})
+
+	// ---- Phase A: the site reading (先局站) ----
+	svc, db := newService(t)
+	a, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	// The double-hint sheet is prefilled as site (first registered spec).
+	for _, sm := range a.SuggestedMapping.Sheets {
+		if sm.Action != mapping.ActionImport || sm.ResourceType != domain.ResourceTypeSite {
+			t.Fatalf("suggested mapping for %q = %s/%s, want import/site (site registered before machine_room)", sm.Sheet, sm.Action, sm.ResourceType)
+		}
+	}
+	siteMap := siteReadingMapping(siteMachineRoomSheetName)
+	siteSum, err := svc.Execute(ctx, a.BatchID, siteMap)
+	if err != nil {
+		t.Fatalf("Execute site reading: %v", err)
+	}
+	if siteSum.Status != domain.BatchStatusCompleted ||
+		siteSum.RowsTotal != 5 || siteSum.RowsImported != 2 || siteSum.RowsSkipped != 0 || siteSum.RowsFailed != 3 {
+		t.Fatalf("site summary = %+v, want completed 5 total / 2 imported / 0 skipped / 3 failed", siteSum)
+	}
+	if siteSum.IssuesBySeverity[domain.SeverityError] != 3 || siteSum.IssuesBySeverity[domain.SeverityWarning] != 0 {
+		t.Fatalf("site issues = %v, want error 3 (2xE002 + E004) / warning 0", siteSum.IssuesBySeverity)
+	}
+
+	// The real site: key = 局站ID, display name = 局站名称, the ID field is
+	// excluded from attrs (key treatment), the rest of the row lands in attrs.
+	siteReal, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeSite, "231001824048")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(site, 231001824048): %v", err)
+	}
+	if siteReal.Name != "源" || siteReal.Status != "" {
+		t.Errorf("site resource = name %q status %q, want 源/empty (no enum field)", siteReal.Name, siteReal.Status)
+	}
+	for field, want := range map[string]string{
+		"site_name": "源", "city": "大兴", "district": "呼区",
+		"device_name": "源1", "ip_address": "4.8.14.8",
+	} {
+		if siteReal.Attributes[field] != want {
+			t.Errorf("site attrs[%s] = %q, want %q", field, siteReal.Attributes[field], want)
+		}
+	}
+	if _, isKey := siteReal.Attributes["site_id"]; isKey {
+		t.Errorf("site attrs must not contain the key field site_id: %v", siteReal.Attributes)
+	}
+
+	// The leading-zero site: the key keeps its zeros byte-for-byte.
+	siteZero, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeSite, "000123")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(site, 000123): %v", err)
+	}
+	if siteZero.NaturalKey != "000123" || siteZero.Name != "源北" {
+		t.Errorf("zero-key site = %q/%q, want 000123/源北 (leading zeros are identity)", siteZero.NaturalKey, siteZero.Name)
+	}
+
+	// E002 evidence of the site reading: field names, row numbers.
+	failed := failedRowCodes(t, db, a.BatchID)
+	if failed[4] != domain.RuleMissingRequiredField || failed[5] != domain.RuleMissingRequiredField || failed[6] != domain.RuleInvalidFormat {
+		t.Fatalf("site failed rows = %v, want E002@4 E002@5 E004@6", failed)
+	}
+	siteIssues := batchIssues(t, db, a.BatchID)
+	var e002Fields []string
+	var e004Field string
+	for _, iss := range siteIssues {
+		switch iss.RuleCode {
+		case domain.RuleMissingRequiredField:
+			e002Fields = append(e002Fields, iss.Evidence["field"])
+		case domain.RuleInvalidFormat:
+			e004Field = iss.Evidence["field"]
+		}
+	}
+	if !contains(e002Fields, "site_name") || !contains(e002Fields, "site_id") {
+		t.Errorf("site E002 fields = %v, want site_name and site_id", e002Fields)
+	}
+	if e004Field != "ip_address" {
+		t.Errorf("site E004 field = %q, want ip_address", e004Field)
+	}
+
+	// Sites are plain containers: zero relations so far.
+	if relCounts, _ := db.Relations.CountByType(ctx); len(relCounts) != 0 {
+		t.Errorf("relations after site import = %v, want none", relCounts)
+	}
+
+	// ---- Phase B: the machine_room reading (后机房), same database ----
+	a2, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze 2: %v", err)
+	}
+	mrMap := machineRoomReadingMapping(siteMachineRoomSheetName, true)
+	mrSum, err := svc.Execute(ctx, a2.BatchID, mrMap)
+	if err != nil {
+		t.Fatalf("Execute machine_room reading: %v", err)
+	}
+	if mrSum.RowsTotal != 5 || mrSum.RowsImported != 2 || mrSum.RowsSkipped != 0 || mrSum.RowsFailed != 3 {
+		t.Fatalf("machine_room summary = %+v, want 5 total / 2 imported / 0 skipped / 3 failed", mrSum)
+	}
+	if mrSum.IssuesBySeverity[domain.SeverityError] != 3 || mrSum.IssuesBySeverity[domain.SeverityWarning] != 0 {
+		t.Fatalf("machine_room issues = %v, want error 3 (E003 + E002 + E004) / warning 0", mrSum.IssuesBySeverity)
+	}
+
+	// 4 resources total (2 sites + 2 rooms), 2 belongs_to relations.
+	if n, _ := db.Resources.CountByType(ctx); n[domain.ResourceTypeSite] != 2 || n[domain.ResourceTypeMachineRoom] != 2 {
+		t.Errorf("resource counts = %v, want site 2 / machine_room 2", n)
+	}
+	relCounts, _ := db.Relations.CountByType(ctx)
+	if relCounts[domain.RelationTypeBelongsTo] != 2 {
+		t.Errorf("belongs_to count = %d, want 2 (one per imported room)", relCounts[domain.RelationTypeBelongsTo])
+	}
+	if n, _ := db.Relations.CountByBatch(ctx, a2.BatchID); n != 2 {
+		t.Errorf("relations of the machine_room batch = %d, want 2", n)
+	}
+
+	// The real room: key = 机房ID, name = 机房名称, attrs keep the site ref
+	// value (ref fields are ordinary attributes, like ip_pool.assigned_device).
+	mrReal, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeMachineRoom, "23100120000018049")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(machine_room, 23100120000018049): %v", err)
+	}
+	if mrReal.Name != "呼" {
+		t.Errorf("machine_room name = %q, want 呼 (NameFieldOverride)", mrReal.Name)
+	}
+	for field, want := range map[string]string{
+		"machine_room_name": "呼", "site_id": "231001824048", "city": "大兴",
+		"district": "呼区", "device_name": "源1", "ip_address": "4.8.14.8",
+	} {
+		if mrReal.Attributes[field] != want {
+			t.Errorf("machine_room attrs[%s] = %q, want %q", field, mrReal.Attributes[field], want)
+		}
+	}
+	if _, isKey := mrReal.Attributes["machine_room_id"]; isKey {
+		t.Errorf("machine_room attrs must not contain the key field machine_room_id: %v", mrReal.Attributes)
+	}
+
+	// The belongs_to relation itself: from the room to the real site.
+	rels, err := db.Relations.ListByResource(ctx, mrReal.ID)
+	if err != nil || len(rels) != 1 {
+		t.Fatalf("relations of the real room = %d (err %v), want 1", len(rels), err)
+	}
+	if rels[0].Type != domain.RelationTypeBelongsTo || rels[0].FromResourceID != mrReal.ID ||
+		rels[0].ToResourceID != siteReal.ID || rels[0].FirstBatchID != a2.BatchID {
+		t.Errorf("belongs_to relation = %+v, want %s from room to site of batch %s",
+			rels[0], domain.RelationTypeBelongsTo, a2.BatchID)
+	}
+
+	// The zero-key room round-trips with its zeros.
+	mrZero, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeMachineRoom, "00045600000000012")
+	if err != nil || mrZero.NaturalKey != "00045600000000012" || mrZero.Name != "呼北" {
+		t.Errorf("zero-key machine_room = %v/%v (err %v), want 00045600000000012/呼北", mrZero.NaturalKey, mrZero.Name, err)
+	}
+	if zRels, _ := db.Relations.ListByResource(ctx, mrZero.ID); len(zRels) != 1 || zRels[0].ToResourceID != siteZero.ID {
+		t.Errorf("zero room relations = %+v, want one belongs_to to the zero site %s", zRels, siteZero.ID)
+	}
+
+	// The machine_room reading's failures: row 4 = E003 (its 局站ID never
+	// imported — Phase A failed it), row 5 = E002 machine_room_id, row 6 =
+	// E004 ip_address.
+	failed2 := failedRowCodes(t, db, a2.BatchID)
+	if failed2[4] != domain.RuleInvalidReference || failed2[5] != domain.RuleMissingRequiredField || failed2[6] != domain.RuleInvalidFormat {
+		t.Fatalf("machine_room failed rows = %v, want E003@4 E002@5 E004@6", failed2)
+	}
+	mrIssues := batchIssues(t, db, a2.BatchID)
+	var e003 domain.Issue
+	for _, iss := range mrIssues {
+		if iss.RuleCode == domain.RuleInvalidReference {
+			e003 = iss
+		}
+	}
+	if e003.Evidence["field"] != "site_id" || e003.Evidence["ref_value"] != "231001824050" ||
+		e003.Evidence["expected_type"] != "site" || e003.Evidence["row_number"] != "4" {
+		t.Errorf("E003 evidence = %v, want site_id=231001824050 expected_type site at row 4", e003.Evidence)
+	}
+
+	// ---- Phase C: machine_room FIRST (fresh database) pins the order ----
+	svcC, dbC := newService(t)
+	aC, err := svcC.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze C: %v", err)
+	}
+	sumC, err := svcC.Execute(ctx, aC.BatchID, machineRoomReadingMapping(siteMachineRoomSheetName, true))
+	if err != nil {
+		t.Fatalf("Execute C (rooms before sites): %v", err)
+	}
+	// Every row with a non-empty 局站ID fails E003 (rows 2/3/4); rows 5/6
+	// fail E002/E004 as before. Nothing imports, nothing relates.
+	if sumC.RowsImported != 0 || sumC.RowsFailed != 5 {
+		t.Fatalf("rooms-first summary = %+v, want 0 imported / 5 failed (E003 order semantics)", sumC)
+	}
+	if sumC.IssuesBySeverity[domain.SeverityError] != 5 {
+		t.Fatalf("rooms-first issues = %v, want error 5 (3xE003 + E002 + E004)", sumC.IssuesBySeverity)
+	}
+	if n, _ := dbC.Relations.CountByType(ctx); n[domain.RelationTypeBelongsTo] != 0 {
+		t.Errorf("rooms-first belongs_to = %d, want 0", n[domain.RelationTypeBelongsTo])
+	}
+
+	// ---- Phase D: rooms WITHOUT the 局站ID mapping (optional ref) ----
+	aD, err := svcC.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze D: %v", err)
+	}
+	sumD, err := svcC.Execute(ctx, aD.BatchID, machineRoomReadingMapping(siteMachineRoomSheetName, false))
+	if err != nil {
+		t.Fatalf("Execute D (no site ref mapping): %v", err)
+	}
+	// Rows 2/3/4 import (row 4 has no E003 to fail on — the ref column is
+	// unmapped); rows 5/6 keep their E002/E004. Zero relations; one W001
+	// orphan warning per imported room (the ip_pool.assigned_device semantics).
+	if sumD.RowsImported != 3 || sumD.RowsFailed != 2 {
+		t.Fatalf("no-ref summary = %+v, want 3 imported / 2 failed", sumD)
+	}
+	if n, _ := dbC.Relations.CountByType(ctx); len(n) != 0 {
+		t.Errorf("relations after no-ref import = %v, want none", n)
+	}
+	if sumD.IssuesBySeverity[domain.SeverityWarning] != 3 {
+		t.Fatalf("no-ref warnings = %d, want 3 (W001 per imported row)", sumD.IssuesBySeverity[domain.SeverityWarning])
+	}
+	issuesD := batchIssues(t, dbC, aD.BatchID)
+	w001 := 0
+	for _, iss := range issuesD {
+		if iss.RuleCode == domain.RuleOrphanRecord {
+			w001++
+			if iss.Evidence["field"] != "site_id" || iss.EntityID == "" || iss.SourceRefID == nil {
+				t.Errorf("W001 issue = %+v, want field site_id with entity and source ref", iss)
+			}
+		}
+	}
+	if w001 != 3 {
+		t.Errorf("W001 count = %d, want 3", w001)
+	}
+
+	// ---- Phase E: idempotency of the belongs_to derivation ----
+	aE, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze E: %v", err)
+	}
+	sumE, err := svc.Execute(ctx, aE.BatchID, mrMap)
+	if err != nil {
+		t.Fatalf("Execute E (re-import): %v", err)
+	}
+	if sumE.RowsImported != 0 || sumE.RowsSkipped != 2 || sumE.RowsFailed != 3 || sumE.RowsTotal != 5 {
+		t.Fatalf("re-import summary = %+v, want 0 imported / 2 skipped / 3 failed / 5 total", sumE)
+	}
+	// The (from, to, type) triples are NOT re-inserted: skipped rows create
+	// nothing, so the belongs_to count stays 2 and the DB row set is stable.
+	if relCounts, _ = db.Relations.CountByType(ctx); relCounts[domain.RelationTypeBelongsTo] != 2 {
+		t.Errorf("belongs_to after re-import = %d, want still 2 (UNIQUE + skip path)", relCounts[domain.RelationTypeBelongsTo])
+	}
+	if n, _ := db.Resources.CountByType(ctx); n[domain.ResourceTypeMachineRoom] != 2 || n[domain.ResourceTypeSite] != 2 {
+		t.Errorf("resources after re-import = %v, want 2 rooms / 2 sites", n)
+	}
+}

@@ -13,6 +13,8 @@ const (
 	ResourceTypeCircuit     ResourceType = "circuit"
 	ResourceTypePort        ResourceType = "port"
 	ResourceTypeBaseStation ResourceType = "base_station"
+	ResourceTypeSite        ResourceType = "site"
+	ResourceTypeMachineRoom ResourceType = "machine_room"
 )
 
 // String implements fmt.Stringer.
@@ -20,13 +22,14 @@ func (t ResourceType) String() string { return string(t) }
 
 // IsValid reports whether t is a known resource type. The values must stay
 // in sync with the resources table CHECK constraint (migrations v1 + v6 +
-// v9: 'device', 'ip_pool', 'circuit', 'port', 'base_station'). port and
-// base_station resources carry no derived relations (RelationType has no
-// such cases).
+// v9 + v10: 'device', 'ip_pool', 'circuit', 'port', 'base_station', 'site',
+// 'machine_room'). port and base_station resources carry no derived
+// relations; site is a plain container; machine_room derives belongs_to
+// relations to site (RelationTypeBelongsTo).
 func (t ResourceType) IsValid() bool {
 	switch t {
 	case ResourceTypeDevice, ResourceTypeIPPool, ResourceTypeCircuit, ResourceTypePort,
-		ResourceTypeBaseStation:
+		ResourceTypeBaseStation, ResourceTypeSite, ResourceTypeMachineRoom:
 		return true
 	}
 	return false
@@ -41,7 +44,9 @@ func ParseResourceType(s string) (ResourceType, error) {
 	return t, nil
 }
 
-// RelationType enumerates the derived relations of Phase 1 (PROJECT_BRIEF §6).
+// RelationType enumerates the derived relations (PROJECT_BRIEF §6;
+// belongs_to added by migration v10). Values must stay in sync with the
+// relations table CHECK constraint.
 type RelationType string
 
 // Relation types.
@@ -49,6 +54,7 @@ const (
 	RelationTypeAssignedTo RelationType = "assigned_to" // ip_pool → device
 	RelationTypeAEnd       RelationType = "a_end"       // circuit → device
 	RelationTypeZEnd       RelationType = "z_end"       // circuit → device
+	RelationTypeBelongsTo  RelationType = "belongs_to"  // machine_room → site（容器归属）
 )
 
 // String implements fmt.Stringer.
@@ -57,7 +63,7 @@ func (t RelationType) String() string { return string(t) }
 // IsValid reports whether t is a known relation type.
 func (t RelationType) IsValid() bool {
 	switch t {
-	case RelationTypeAssignedTo, RelationTypeAEnd, RelationTypeZEnd:
+	case RelationTypeAssignedTo, RelationTypeAEnd, RelationTypeZEnd, RelationTypeBelongsTo:
 		return true
 	}
 	return false

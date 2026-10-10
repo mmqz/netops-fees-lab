@@ -68,8 +68,8 @@ func TestEnumRoundTrips(t *testing.T) {
 		invalid string
 	}
 	cases := []testCase{
-		{"ResourceType", []string{"device", "ip_pool", "circuit", "port", "base_station"}, "vlan"},
-		{"RelationType", []string{"assigned_to", "a_end", "z_end"}, "peer_of"},
+		{"ResourceType", []string{"device", "ip_pool", "circuit", "port", "base_station", "site", "machine_room"}, "vlan"},
+		{"RelationType", []string{"assigned_to", "a_end", "z_end", "belongs_to"}, "peer_of"},
 		{"BatchStatus", []string{"analyzing", "awaiting_mapping", "importing", "completed", "failed", "rolled_back"}, "paused"},
 		{"RowStatus", []string{"imported", "skipped", "failed"}, "pending"},
 		{"Severity", []string{"error", "warning", "info"}, "fatal"},

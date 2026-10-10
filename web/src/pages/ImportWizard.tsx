@@ -63,6 +63,8 @@ import {
   IMP_NATURAL_KEY_NAME_SCOPE,
   IMP_NATURAL_KEY_PORT_COMPOSITE,
   IMP_NATURAL_KEY_TAG,
+  IMP_REF_FIELD_NOTE,
+  IMP_REF_FIELD_SHORT,
   IMP_NO_ROWS,
   IMP_OPT_UNMAPPED,
   IMP_REQUIRED_TAG,
@@ -268,6 +270,15 @@ function isIpNaturalKeyField(field: string, type: ResourceType): boolean {
   return spec !== undefined && spec.naturalKey && spec.field.includes('ip');
 }
 
+/** 目标字段是否为引用字段（如 machine_room.site_id / ip_pool.assigned_device）：
+ *  按被引用类型的自然键解析，E003 语义依赖导入顺序（机房局站故事：
+ *  先局站后机房）——展示正向提示，不改映射逻辑。 */
+function isRefField(field: string, type: ResourceType): boolean {
+  if (field === '') return false;
+  const spec = fieldsForType(type).find((f) => f.field === field);
+  return spec !== undefined && spec.kind === 'ref';
+}
+
 /** 该类型的自然键是否含名称类字段（如 pool_name）：需保证唯一作用域。 */
 function hasNameNaturalKey(type: ResourceType): boolean {
   return naturalKeyFields(type).some((field) => field.includes('name'));
@@ -329,6 +340,7 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
           Object.entries(draft.columnMapping).find(([, header]) => header === column.header)?.[0] ??
           '';
         const ipKeyRisk = isIpNaturalKeyField(mappedField, draft.resourceType);
+        const refNote = isRefField(mappedField, draft.resourceType);
         return (
           <div className="map-target-cell">
             <select
@@ -353,6 +365,17 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
               >
                 <IconWarning size={14} />
                 <span aria-hidden="true">{IMP_NATURAL_KEY_IP_SHORT}</span>
+              </span>
+            )}
+            {refNote && (
+              <span
+                className="key-note key-note--info"
+                role="img"
+                aria-label={IMP_REF_FIELD_NOTE}
+                title={IMP_REF_FIELD_NOTE}
+              >
+                <IconInfo size={14} />
+                <span aria-hidden="true">{IMP_REF_FIELD_SHORT}</span>
               </span>
             )}
           </div>

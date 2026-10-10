@@ -525,11 +525,88 @@ var baseStationSpec = TypeSpec{
 	},
 }
 
+// siteSpec is the 局站 (site) schema (v0.4, W3-D): one row of the real 机房局站
+// export (samples/telecom-site-machine-room.xlsx, sheet family 机房局站表).
+// The natural key is site_id (局站ID, a 12-digit numeric code, globally
+// unique — R4 ruling, natural-keys.md §4). The ID field is KindString, NOT a
+// numeric kind: the codes are system-issued digit strings whose leading zeros
+// are significant identity (an int column/parse would strip them, splitting
+// identities); there is no arithmetic on the code, so text is the honest kind.
+// site is a plain container (no ref fields, no derived relations): nothing
+// points FROM a site in this schema family. site_name (局站名称) is the
+// display name (the first *_name field, so the default NameField heuristic
+// needs no override); device_name is the nickname of a device AT the site —
+// a plain attribute, deliberately NOT a device ref: the device schema's key
+// is device_code and this sheet carries only free-text names (unresolvable,
+// same rationale as port's device_ip). ip_address is a mutable attribute
+// (KindIPv4 → E004 on malformed values), never identity.
+var siteSpec = TypeSpec{
+	Type:      domain.ResourceTypeSite,
+	SheetHint: "局站",
+	Fields: []FieldSpec{
+		{Name: "site_id", Label: "局站ID", Required: true, NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"局站ID", "局站编号", "局站编码", "局站代码"}},
+		{Name: "site_name", Label: "局站名称", Required: true, Kind: KindString,
+			Synonyms: []string{"局站名称", "局站名", "名称"}},
+		{Name: "city", Label: "地市", Kind: KindString, Synonyms: []string{"地市", "城市", "归属地"}},
+		{Name: "district", Label: "区县", Kind: KindString, Synonyms: []string{"区县", "县区"}},
+		{Name: "device_name", Label: "设备名称", Kind: KindString,
+			Synonyms: []string{"设备名称", "网元名称", "设备名"}},
+		{Name: "ip_address", Label: "IP地址", Kind: KindIPv4,
+			Synonyms: []string{"IP地址", "IP", "设备IP"}},
+	},
+}
+
+// machineRoomSpec is the 机房 (machine room) schema (v0.4, W3-D): the second
+// reading of the SAME 机房局站 export — one physical sheet, two resource
+// types (先按局站类型导入落 site，再按机房类型导入同一 sheet). The natural key
+// is machine_room_id (机房ID, a 17-digit numeric code, globally unique — R4
+// ruling, natural-keys.md §4). Like site_id it is KindString on purpose:
+// digit-string codes keep their leading zeros as identity and take no
+// arithmetic, so a numeric kind would only invite coercion damage. site_id
+// (局站ID) is a KindRef to site and is OPTIONAL: when the sites are not
+// imported (yet), the column can stay unmapped and the rooms import as
+// relation-less orphans (W001 per the generic optional-ref semantics); when
+// it IS mapped, the existing E003 semantics pin the import ORDER — the
+// referenced site must already exist (earlier batch or an earlier sheet of
+// the same batch), otherwise the row fails E003 — and each resolved ref
+// derives one machine_room --belongs_to--> site relation. device_name is the
+// nickname of a device IN the room — a plain attribute, NOT a device ref
+// (the device key is device_code; this sheet's free-text names cannot
+// resolve, so no relation is invented from them). ip_address is a mutable
+// attribute (KindIPv4). NameFieldOverride pins the display name to
+// machine_room_name — explicit like port/base_station, so a future field
+// insertion before it can never hijack the "first *_name" heuristic.
+var machineRoomSpec = TypeSpec{
+	Type:              domain.ResourceTypeMachineRoom,
+	SheetHint:         "机房",
+	NameFieldOverride: "machine_room_name",
+	Fields: []FieldSpec{
+		{Name: "machine_room_id", Label: "机房ID", Required: true, NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"机房ID", "机房编号", "机房编码", "机房代码"}},
+		{Name: "machine_room_name", Label: "机房名称", Required: true, Kind: KindString,
+			Synonyms: []string{"机房名称", "机房名"}},
+		{Name: "site_id", Label: "局站ID", Kind: KindRef, RefType: domain.ResourceTypeSite,
+			Synonyms: []string{"局站ID", "局站编号", "局站编码"}},
+		{Name: "city", Label: "地市", Kind: KindString, Synonyms: []string{"地市", "城市", "归属地"}},
+		{Name: "district", Label: "区县", Kind: KindString, Synonyms: []string{"区县", "县区"}},
+		{Name: "device_name", Label: "设备名称", Kind: KindString,
+			Synonyms: []string{"设备名称", "网元名称", "设备名"}},
+		{Name: "ip_address", Label: "IP地址", Kind: KindIPv4,
+			Synonyms: []string{"IP地址", "IP", "设备IP"}},
+	},
+}
+
 // Specs lists the resource type schemas in canonical order (device,
-// ip_pool, circuit, port, base_station). The order is the deterministic
-// tie-breaker of SuggestType and of the suggestion fallback for untyped
-// sheets. Treat the list as read-only.
-var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec}
+// ip_pool, circuit, port, base_station, site, machine_room). The order is
+// the deterministic tie-breaker of SuggestType and of the suggestion fallback
+// for untyped sheets. site is registered BEFORE machine_room (container
+// first, mirroring the import story 先局站后机房): a sheet named 机房局站表
+// matches BOTH SheetHints (机房 and 局站) and SuggestType therefore suggests
+// site — the suggestion is only a prefill, the mapping confirmation page lets
+// the user switch to machine_room for the second pass. Treat the list as
+// read-only.
+var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec, siteSpec, machineRoomSpec}
 
 // SpecByType returns the schema of t; ok is false for unknown types.
 func SpecByType(t domain.ResourceType) (TypeSpec, bool) {

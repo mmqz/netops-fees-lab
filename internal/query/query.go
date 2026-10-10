@@ -228,9 +228,10 @@ func (s *Service) Relations(ctx context.Context, id string, depth int) (Relation
 
 // Stats is the /api/stats aggregate (§9): resource counts by type and
 // status, relation counts by type, issue counts by severity and the newest
-// batch id. The three known resource types, relation types and severities
-// are always present (0 when absent) so UI charts render stable axes;
-// byStatus lists only the statuses actually present. LatestBatchID is ""
+// batch id. The three legacy resource types, the four known relation types
+// and the severities are always present (0 when absent) so UI charts render
+// stable axes; newer resource types (port, base_station, site, machine_room)
+// and byStatus list only the values actually present. LatestBatchID is ""
 // when no batch exists.
 type Stats struct {
 	TotalResources   int            `json:"totalResources"`
@@ -275,6 +276,7 @@ func (s *Service) Stats(ctx context.Context) (Stats, error) {
 		domain.RelationTypeAssignedTo.String(): 0,
 		domain.RelationTypeAEnd.String():       0,
 		domain.RelationTypeZEnd.String():       0,
+		domain.RelationTypeBelongsTo.String():  0,
 	}
 	for t, n := range byRelation {
 		byRelationJSON[t.String()] = n

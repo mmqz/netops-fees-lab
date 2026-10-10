@@ -107,6 +107,8 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
   circuit: '传输电路',
   port: '设备端口',
   base_station: '基站',
+  site: '局站',
+  machine_room: '机房',
 };
 
 /**
@@ -151,6 +153,7 @@ export const RELATION_LABELS: Record<RelationType, string> = {
   assigned_to: '归属',
   a_end: 'A端',
   z_end: 'Z端',
+  belongs_to: '所属',
 };
 
 export const BATCH_STATUS_LABELS: Record<BatchStatus, string> = {
@@ -212,6 +215,11 @@ export const FIELD_LABELS: Record<string, string> = {
   description: '描述',
   work_order: '工单号',
   remark: '备注',
+  site_id: '局站ID',
+  site_name: '局站名称',
+  machine_room_id: '机房ID',
+  machine_room_name: '机房名称',
+  ip_address: 'IP地址',
 };
 
 export const FIELD_KIND_LABELS: Record<string, string> = {
@@ -318,6 +326,11 @@ export const IMP_NATURAL_KEY_PORT_COMPOSITE =
 /** 条件自然键提示（base_station，v0.4）：编码缺失时键退化为兜底字段并记 W004。 */
 export const IMP_NATURAL_KEY_FALLBACK =
   '基站键 = 基站编码（全局唯一）；编码为空时退化为 地市|无线基站名称 兜底键（缺地市列则为纯名称），并记录 W004 治理问题（行照常导入）';
+/** 引用字段列短标签（行内展示；v0.4 W3-D 机房局站导入故事）。 */
+export const IMP_REF_FIELD_SHORT = '引用列 · 需先导入目标类型';
+/** 引用字段列的完整说明（tooltip / 无障碍名称）：E003 依赖导入顺序的正向说明。 */
+export const IMP_REF_FIELD_NOTE =
+  '引用字段按被引用类型的自然键解析（机房表的 局站ID → 局站资源）：请先导入被引用类型（先局站后机房），未解析的引用将使该行失败（E003）；该列可不映射（不建立关系，行照常导入）';
 export const IMP_VALIDATION_TITLE = '请先完成以下必填映射：';
 export const IMP_ERR_REQUIRED_UNMAPPED = '工作表「{sheet}」：必填字段「{field}」尚未映射';
 export const IMP_ROWS_INFO = '数据行 {rows} 行，跳过空行 {empty} 行';

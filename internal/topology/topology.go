@@ -44,7 +44,7 @@ type Node struct {
 type Edge struct {
 	// ID is the relation id.
 	ID string `json:"id"`
-	// Type is the relation type (assigned_to, a_end, z_end).
+	// Type is the relation type (assigned_to, a_end, z_end, belongs_to).
 	Type domain.RelationType `json:"relationType"`
 	// FromID is the from endpoint resource id.
 	FromID string `json:"fromId"`

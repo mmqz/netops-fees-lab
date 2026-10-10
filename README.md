@@ -31,7 +31,7 @@
 
 ## 1. 项目定位
 
-NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿真工作台：把多份 Excel 资源台账（设备 / 地址池 / 电路 / 端口 / 基站）经**用户确认的列映射**导入 SQLite，完成行级记账的标准化与确定性质量校验；再从导入资源**一键物化**虚拟拓扑工作区，让用户与 AI（经 MCP）通过**封闭的类型化操作集**（含故障注入）在仿真态上做真实状态迁移，引擎给出确定性校验结果、前后对比与三层撤销（事务回滚 / 变更集逆向 / 检查点）。出口为 HTTP API、嵌入式 React 界面（含 Cytoscape 拓扑画布）、CLI 与 **MCP 五工具**。本仓库交付 **Stage 0（技术验证）+ Phase 1（资源治理）+ Phase 2（仿真工作台）**。
+NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿真工作台：把多份 Excel 资源台账（设备 / 地址池 / 电路 / 端口 / 基站 / 机房 / 局站）经**用户确认的列映射**导入 SQLite，完成行级记账的标准化与确定性质量校验；再从导入资源**一键物化**虚拟拓扑工作区，让用户与 AI（经 MCP）通过**封闭的类型化操作集**（含故障注入）在仿真态上做真实状态迁移，引擎给出确定性校验结果、前后对比与三层撤销（事务回滚 / 变更集逆向 / 检查点）。出口为 HTTP API、嵌入式 React 界面（含 Cytoscape 拓扑画布）、CLI 与 **MCP 五工具**。本仓库交付 **Stage 0（技术验证）+ Phase 1（资源治理）+ Phase 2（仿真工作台）**。
 
 ## 2. 当前阶段能力清单（Stage 0 + Phase 1 + Phase 2 已交付）
 
@@ -49,6 +49,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **地理视图（v0.3.0 三视图切换）**：画布新增「拓扑图 / 2D 地图 / 3D 地图」分段切换（按工作台持久化）；导入设备表时自动识别**经度/纬度/经纬度列**（组合列按中国坐标边界启发式拆分），物化后设备携带 geoLat/geoLng；2D 俯视——真实深色地理底图（ESRI World_Dark_Gray，免密钥）上按真实经纬度落设备（状态色圆点 + 编码牌）、链路 up 蓝实线 / down 红虚线 marching-ants；3D 斜视 58°——设备渲染为按连接数分高的塔体（数字孪生示意）、右键拖拽旋转环视；设备点击/选中与右侧表格双向联动；瓦片失败自动降级离线网格底图；maplibre-gl 懒加载独立 chunk。演示数据：`testdata/geodevices.xlsx`（黑龙江哈尔滨→漠河北南干线 + 地震局 10M 长专线，坐标为演示近似值），一键脚本 `scripts/demo-geo-lab.sh`。
 - **port 资源类型（v0.3.1 真实表格导入；migration v8 换稳定键）**：真实电信端口工作簿（端口流量监控表 / 端口资源表两种表头形态）可直接导入——`device_name + port_name` 复合自然键（`|` 拼接落库，键的设备侧自 migration v8 起锚定设备名称而非 IP：设备重划 IP 不再分裂资源，存量库升级语义见 [docs/data-model.md](docs/data-model.md) §11）、逐字重复表头行自动跳过多段导出拼接、带宽 0 合法入库；样例 `samples/telecom-port-multi-header.xlsx`（项目所有者在需求会话中提供的真实电信运营导出，已授权入库、仅限本私有仓库使用——来源与授权见 [samples/README.md](samples/README.md)；自然键稳定性分析见 [docs/natural-keys.md](docs/natural-keys.md)）；3D 地图默认视野按全部数据点的包围盒几何直解自适应（修「3D 地图过大」）。
 - **base_station 资源类型与条件自然键（v0.4，migration v9）**：真实无线基站工作簿可直接导入（14 真实业务列，无地市列；样例 `samples/telecom-base-station.xlsx`，来源与授权见 [samples/README.md](samples/README.md)）——主自然键为**基站编码**（非必填，真实表编码列常为空），编码缺失时键退化为 `(地市, 无线基站名称)` 兜底拼接、跳过空值，行照常导入并记 **W004**（身份键退化，warning 级治理 issue）；E001 判重与幂等 skip 都在解析后的最终键上（编码行与名称兜底行天然异键）；基站IP 值带 /30 掩码按 string 值列入库（IP 属可变属性，永不作身份）；键策略裁决见 [docs/natural-keys.md](docs/natural-keys.md) §4、行为细节见 [docs/import-and-validation.md](docs/import-and-validation.md) §12、DDL v9 见 [docs/data-model.md](docs/data-model.md) §12。
+- **机房 / 局站资源类型与 belongs_to 跨表关联（v0.4，migration v10）**：真实机房局站表（8 真实业务列：地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；样例 `samples/telecom-site-machine-room.xlsx`，来源与授权见 [samples/README.md](samples/README.md)）**同一张 sheet 承载两类实体**——先按局站类型导入（键 = 局站ID，12 位数字编码），再按机房类型导入同一 sheet（键 = 机房ID，17 位数字编码，机房 spec 的 局站ID 列映射为可选 ref 字段）：局站先入库即自动派生 `machine_room --belongs_to--> site` 关系，导入顺序由 E003 语义钉死；两类 ID 均为 KindString（前导零即身份，绝不数值化）；机房名称/局站名称/设备名称为昵称（展示名/属性），IP 地址为可变属性；键策略裁决见 [docs/natural-keys.md](docs/natural-keys.md) §4、行为细节见 [docs/import-and-validation.md](docs/import-and-validation.md) §13、DDL v10 见 [docs/data-model.md](docs/data-model.md) §13。
 - **MCP 五工具**：`resource_search`（只读）+ `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`——AI 改仿真态的唯一通道；`restore_*` 内部操作码三边界拒绝；**无建删工作区工具**。
 - **CLI `lab` 子命令树**：workspace/topology/path/apply/checks/diff/undo/checkpoint，全部单一 JSON 输出。
 - **仿真报告**：`GET /api/lab/report`（HTML/JSON）：引擎版本、评分、发现、变更集史、检查点、固定免责声明。

@@ -10,18 +10,20 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 )
 
-// withoutV9 temporarily removes migration v9 from the registry so the next
-// Open builds a GENUINE v8 database (migrations v1–v8 applied, resources
-// CHECK without 'base_station'). The registry is restored via t.Cleanup so
-// later tests in this package are unaffected even on failure. The package
-// never runs these migrations concurrently (no t.Parallel in the repo
-// package), so mutating the package-level list between Opens is safe.
+// withoutV9 temporarily removes migration v9 AND every later migration
+// (v10, …) from the registry so the next Open builds a GENUINE v8 database
+// (migrations v1–v8 applied, resources CHECK without 'base_station' — and
+// without the v10 types). The registry is restored via t.Cleanup so later
+// tests in this package are unaffected even on failure. The package never
+// runs these migrations concurrently (no t.Parallel in the repo package), so
+// mutating the package-level list between Opens is safe. Phase 2 of the test
+// then re-appends ONLY migrationV9, so the upgrade under test stops at v9.
 func withoutV9(t *testing.T) {
 	t.Helper()
 	restored := append([]Migration(nil), migrations...)
 	filtered := make([]Migration, 0, len(migrations))
 	for _, m := range migrations {
-		if m.Version != 9 {
+		if m.Version <= 8 {
 			filtered = append(filtered, m)
 		}
 	}

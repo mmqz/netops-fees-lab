@@ -54,7 +54,7 @@ const (
 // reserved and rejected).
 type searchInput struct {
 	Q      string `json:"q,omitempty" jsonschema:"搜索关键词：natural_key/name/attributes 不区分大小写的包含匹配"`
-	Type   string `json:"type,omitempty" jsonschema:"资源类型过滤：device、ip_pool、circuit、port 或 base_station"`
+	Type   string `json:"type,omitempty" jsonschema:"资源类型过滤：device、ip_pool、circuit、port、base_station、site 或 machine_room"`
 	Limit  *int   `json:"limit,omitempty" jsonschema:"返回条数上限，缺省 20，最大 100"`
 	Offset *int   `json:"offset,omitempty" jsonschema:"返回起始偏移，缺省 0"`
 }
@@ -103,7 +103,7 @@ func NewServer(db *repo.DB) *mcp.Server {
 	)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        toolName,
-		Description: "只读检索 NetOps Lab 中已导入的网络资源（设备 / 地址池 / 电路 / 端口 / 基站）。返回 total 与 items，每个条目含 id、type、naturalKey、name、status、attributes 及其来源（workbook/sheet/rowNumber）或 applicationGenerated 标记。",
+		Description: "只读检索 NetOps Lab 中已导入的网络资源（设备 / 地址池 / 电路 / 端口 / 基站 / 局站 / 机房）。返回 total 与 items，每个条目含 id、type、naturalKey、name、status、attributes 及其来源（workbook/sheet/rowNumber）或 applicationGenerated 标记。",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
 		out, err := resourceSearch(ctx, db, in)
 		if err != nil {
@@ -145,7 +145,7 @@ func resourceSearch(ctx context.Context, db *repo.DB, in searchInput) (searchOut
 	if in.Type != "" {
 		t, err := domain.ParseResourceType(in.Type)
 		if err != nil {
-			return searchOutput{}, fmt.Errorf("type 必须是 device、ip_pool、circuit、port 或 base_station，收到 %q", in.Type)
+			return searchOutput{}, fmt.Errorf("type 必须是 device、ip_pool、circuit、port、base_station、site 或 machine_room，收到 %q", in.Type)
 		}
 		filter.Type = t
 	}

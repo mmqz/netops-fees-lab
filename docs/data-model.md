@@ -1,11 +1,11 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **9**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键与 v9 base_station 类型为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **10**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型与 v10 site/machine_room 类型 + belongs_to 关系为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
 - **ID**：TEXT。P1 聚合 `前缀_<uuid>`：`res_`（资源）、`rel_`（关系）、`src_`（来源引用）、`bat_`（导入批次）、`iss_`（问题），生成见 `internal/domain` 的 `NewID`；P2 仿真实体 `前缀-<n>`（全局序列，见文末 §6）。工作区为 UUID。
-- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_name|port_name`（v8 换键，见文末 v7/v8 节）、base_station 用**条件键** `base_station_code`（编码空时兜底 `city|base_station_name`，跳空值，记 W004；v9 落地，见文末 v9 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
+- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_name|port_name`（v8 换键，见文末 v7/v8 节）、base_station 用**条件键** `base_station_code`（编码空时兜底 `city|base_station_name`，跳空值，记 W004；v9 落地，见文末 v9 节）、site 用 `site_id`（局站ID，12 位数字编码）、machine_room 用 `machine_room_id`（机房ID，17 位数字编码）——两者均为 KindString 无条件编号键、v10 落地（见文末 v10 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
 - **时间戳**：一律 **UTC RFC3339 字符串**（如 `2026-10-09T12:04:40Z`）。
 - **JSON 列**：`attributes` / `raw` / `evidence` / `mapping` 均为 TEXT 存 JSON 对象（默认 `'{}'`）。
 
@@ -459,3 +459,50 @@ ALTER TABLE resources_new RENAME TO resources;
 ```
 
 与 v7 完全同构的 `ForeignKeysOff` 重建（专用连接事务外 `PRAGMA foreign_keys=OFF` → 事务内重建 → `PRAGMA foreign_key_check` 门禁 → 恢复 FK ON）：v9 之前 base_station INSERT 被 CHECK 拒绝（`TestMigrationV9AddsBaseStation` 钉死该回归）；迁移后既有行（含 port 行）逐字节保留、`first_batch_id` FK 仍强制、`Open` 幂等。base_station 无 relations / 无工作台侧实体（RelationType 封闭集不动）。
+
+
+# DDL v10 — site / machine_room 资源类型 + belongs_to 关系类型（resources 与 relations 双 CHECK 扩容）
+
+> Migration `10` name `site_machine_room_types_and_belongs_to`（`internal/repo/migrations_v10.go`，经 `init()` 自注册追加 + 按版本排序，机制同 v4–v9；migrations.go 字面量列表不动）。**当前 schema version = 10**。
+
+## 13. 机房 / 局站资源（site / machine_room schema）与 belongs_to 关系
+
+面向真实机房局站表（`samples/telecom-site-machine-room.xlsx`：8 真实业务列——地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；**同一张 sheet 承载两类实体**，导入故事为先局站后机房的双读法，行为细节见 [import-and-validation.md](import-and-validation.md) §13）。`site` 键 = `site_id`（12 位数字编码，全局唯一，KindString——前导零即身份）；`machine_room` 键 = `machine_room_id`（17 位数字编码，全局唯一，KindString 同理）。机房 spec 携带**可选 ref 字段** `site_id`（KindRef → site）：映射后按 E003 既有语义解析（局站须先入库），解析成功派生一条 `machine_room --belongs_to--> site` 关系；不映射则零关系 + W001。机房名称/局站名称/设备名称为昵称（展示名/属性），IP地址为 KindIPv4 可变属性——字段表与同义词见 `internal/mapping/schema.go` 的 `siteSpec` / `machineRoomSpec`。
+
+**关系封闭集扩容**：v10 是首个同时重建 `relations` 的迁移——`relation_type` CHECK 增加 `'belongs_to'`（machine_room → site 的容器归属，importer 的 `relationTypeFor` 新增 `machine_room.site_id` → `belongs_to` 一例；其余四类旧关系行为不变）。同时 `resources` CHECK 增加 `'site'` 与 `'machine_room'`。
+
+### 13.1 DDL v10 全文（FK 安全的双表重建，v9 同构 ×2）
+
+```sql
+CREATE TABLE resources_new (
+  id TEXT PRIMARY KEY,
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('device','ip_pool','circuit','port','base_station','site','machine_room')),
+  natural_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  attributes TEXT NOT NULL DEFAULT '{}',
+  status TEXT,
+  first_batch_id TEXT NOT NULL REFERENCES import_batches(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (resource_type, natural_key)
+);
+INSERT INTO resources_new (…全列…) SELECT …全列… FROM resources;
+DROP TABLE resources;
+ALTER TABLE resources_new RENAME TO resources;
+
+CREATE TABLE relations_new (
+  id TEXT PRIMARY KEY,
+  relation_type TEXT NOT NULL CHECK (relation_type IN ('assigned_to','a_end','z_end','belongs_to')),
+  from_resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+  to_resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+  attributes TEXT NOT NULL DEFAULT '{}',
+  first_batch_id TEXT NOT NULL REFERENCES import_batches(id),
+  created_at TEXT NOT NULL,
+  UNIQUE (from_resource_id, to_resource_id, relation_type)
+);
+INSERT INTO relations_new (…全列…) SELECT …全列… FROM relations;
+DROP TABLE relations;
+ALTER TABLE relations_new RENAME TO relations;
+```
+
+与 v7/v9 完全同构的 `ForeignKeysOff` 重建（专用连接事务外 `PRAGMA foreign_keys=OFF` → 事务内重建 → `PRAGMA foreign_key_check` 门禁 → 恢复 FK ON），但**同一迁移内串行两次重建**。**重建顺序 = 先 resources 后 relations**：relations 以**表名**引用 resources(id)，v9 已验证的 drop+rename 循环使名字 "resources" 始终指向重建后的表（id/行/约束逐字节保留），relations 重建因此对着一个按名一致的父表进行；FK 关闭时两种顺序都能通过 foreign_key_check 门禁，但 resources-first 保证即使迁移在两次重建之间中断，每个中间态的按名引用都是自洽的。v10 之前 site/machine_room INSERT 与 belongs_to 关系 INSERT 均被 CHECK 拒绝（`TestMigrationV10AddsSiteMachineRoom` 钉死两处回归）；迁移后既有行（device/circuit/a_end 等两表数据）逐字节保留、`first_batch_id` 与 relations→resources 两向 FK 仍强制、`UNIQUE (from, to, relation_type)` 防重、`Open` 幂等。site/machine_room 无工作台侧实体（物化仅消费 device，同 port/base_station）。

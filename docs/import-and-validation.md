@@ -54,9 +54,9 @@
 | --- | --- | --- | --- | --- |
 | E001 | 重复键 | 错误 | 自然键与本批次内已处理的行重复，或库中已有同 `(type, natural_key)` 资源（后者行=skipped） | type, natural_key, conflicting_sheet, conflicting_row_number, existing_entity_id |
 | E002 | 必填字段缺失 | 错误 | 必填字段空或未映射 | type, field, raw_value |
-| E003 | 引用无效 | 错误 | 引用字段非空但批内/库中无匹配资源 | type, field, ref_value, expected_type |
+| E003 | 引用无效 | 错误 | 引用字段非空但批内/库中无匹配资源（machine_room.site_id 依赖导入顺序：先局站后机房） | type, field, ref_value, expected_type |
 | E004 | 格式无效 | 错误 | ipv4/cidr/int/enum 解析失败或超界（vlan 1–4094、bandwidth ≥ 1） | type, field, raw_value, reason |
-| W001 | 孤儿记录 | 警告 | 可选关系字段留空（assigned_device） | type, field |
+| W001 | 孤儿记录 | 警告 | 可选关系字段留空（assigned_device；machine_room.site_id 不映射/留空同语义） | type, field |
 | W002 | 状态值未知 | 警告 | status 非空不在枚举内（行导入，状态丢弃） | type, field, raw_value, allowed |
 | W003 | 电路自环 | 警告 | a_end == z_end（两端都解析成功） | circuit_code, device |
 | W004 | 身份键退化 | 警告 | 条件自然键类型的主键字段值任一为空，键退化为兜底字段拼接（行照常导入；base_station：基站编码缺失 → 地市\|无线基站名称 兜底，缺地市列则为纯名称） | type, natural_key, missing_fields, fallback_fields |
@@ -165,3 +165,16 @@ base_station（基站）是 v0.4 引入的第五类资源类型，面向真实�
 - **主键字段不进 attributes**（`base_station_code` 同 port 键字段待遇）；兜底字段 `city` / `base_station_name` 是普通字段，落库后可在 attributes 中检视。
 - 样例实测（CLI，两表 8 行）：4 imported（真实行 动力机房2 兜底键 + 编码行 BTS-HLJ-0001 + 哈尔滨|花园小区1 + 齐齐哈尔|花园小区1）/ 4 failed（2×E001 兜底键重复、E002 名称空、E004 归属A IP 坏值）+ 3×W004；重导幂等（0 新增 / 4 skipped / 4 failed，W004 不重记——skipped 行不记警告，与 W002 同语义）。
 - 键策略与稳定性裁决见 [natural-keys.md](natural-keys.md) §4/§5；schema v9（resources CHECK 扩容）见 [data-model.md](data-model.md) §12。
+
+## 13. site / machine_room 资源类型与 belongs_to 关联（v0.4，W3-D）
+
+site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七类资源类型，面向真实机房局站表（样例 `samples/telecom-site-machine-room.xlsx`，真实表头 8 列：地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；授权与披露见其目录内 README）。**同一张 sheet 承载两类实体**——导入故事是把同一 sheet 读两遍：
+
+- **双类型导入（先局站后机房）**：①按局站类型导入（映射 局站ID→site_id、局站名称→site_name 等）落 `site` 资源，**键 = 局站ID**（12 位数字编码，全局唯一）；②再按机房类型导入同一 sheet（映射 机房ID→machine_room_id、机房名称→machine_room_name、**局站ID→site_id（ref）** 等）落 `machine_room` 资源，**键 = 机房ID**（17 位数字编码，全局唯一），并自动派生 `machine_room --belongs_to--> site` 关系。两遍导入各建一个批次（同一工作簿可反复上传，各批次独立记账）；也可在一个工作簿里用两个 sheet（局站 sheet 在前）一次完成——批内 ref 解析覆盖「本批次更早 sheet 导入的资源」。
+- **E003 钉死导入顺序**：机房读法映射了 局站ID 列时，引用值按局站ID 解析（批内 site 资源 ∪ 库内已有）——**局站未先入库则该行失败 E003**（`引用不存在：machine_room.site_id=…（目标类型 site）`）。这是特性而非缺陷：容器先落地，归属后建立，顺序错误立即显式失败。
+- **可选 ref 与 W001**：机房读法可不映射 局站ID 列（site_id 非 Required）——导入成功、零关系、每个导入行记 W001 孤儿警告（与 ip_pool.assigned_device 留空同语义，行照常导入）。
+- **幂等与防重**：重导同一批次语义不变——site/machine_room 已存在的行 skipped；`relations` 的 `UNIQUE (from, to, relation_type)` 天然防止 belongs_to 重复插入，且 skipped 行根本不走到关系创建路径（测试钉死：重导后 belongs_to 计数不变）。
+- **ID 为 KindString（前导零即身份）**：机房ID/局站ID 是系统签发的数字串，**绝不数值化**——数字解析会剥前导零导致身份分裂（如 `000123` → `123`）；两 spec 均为 string 键，无算术语义。
+- **名称与 IP 的处置**：机房名称/局站名称为展示名（machine_room 用 NameFieldOverride 钉定，site 走 first *_name 启发式）；设备名称为机房/局站内设备昵称——普通属性，**非 device ref**（设备键是 device_code，本表自由文本无法解析，同 port 的 device_ip 决策）；IP地址为 KindIPv4 可变属性（坏值 → E004）。
+- 样例实测（CLI，6 行双读法）：局站读法 2 imported / 4 failed（2×E001 局站ID 批内重复 + E004 + E002）；机房读法 4 imported / 2 failed + 1×W001；**3×belongs_to**；前导零键 `000123`、`00045600000000013/14` 逐字节保留；重导幂等（0 新增、关系不重复）。
+- 键策略裁决见 [natural-keys.md](natural-keys.md) §4；schema v10（resources + relations 双表重建）见 [data-model.md](data-model.md) §13；API 形态见 [api.md](api.md) 的 site / machine_room 段落。
