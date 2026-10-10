@@ -251,3 +251,32 @@ func (r *BatchRepo) WorkbookPath(ctx context.Context, id string) (string, error)
 	}
 	return stringFromNull(path), nil
 }
+
+// ListWorkbookPaths returns the workbook_path of EVERY batch in the
+// database, regardless of status — completed, failed, rolled_back,
+// awaiting_mapping, all of it. It is the reference set of the uploads
+// garbage collector (W5-D, v0.4.0): a batch's workbook is evidence (issue
+// source refs re-read it), so any file it references must survive GC even
+// when the batch itself failed or was rolled back. Only the never-referenced
+// files under <dataDir>/uploads are collectable.
+func (r *BatchRepo) ListWorkbookPaths(ctx context.Context) ([]string, error) {
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT workbook_path FROM import_batches
+WHERE workbook_path IS NOT NULL AND workbook_path != ''`)
+	if err != nil {
+		return nil, fmt.Errorf("repo: list workbook paths: %w", err)
+	}
+	defer rows.Close()
+	paths := make([]string, 0)
+	for rows.Next() {
+		var path sql.NullString
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("repo: scan workbook path: %w", err)
+		}
+		paths = append(paths, stringFromNull(path))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: list workbook paths: %w", err)
+	}
+	return paths, nil
+}

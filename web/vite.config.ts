@@ -30,5 +30,39 @@ export default defineConfig({
   build: {
     outDir: '../internal/webui/dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Vendor chunking by dependency family (W5-D, v0.4.0). The app used
+        // to ship ONE ~795 kB index.js (vite ">500 kB after minification"
+        // warning). Split by family so:
+        //   - vendor-react: react + react-dom + react-router-dom (+ their
+        //     internal deps scheduler / @remix-run/router) — loaded once
+        //     with the app shell;
+        //   - vendor-cytoscape: the topology canvas engine — statically
+        //     imported by the /lab bundle but heavy enough to own a chunk;
+        //   - vendor-maplibre: the geo 2D/3D engine — ALREADY lazily
+        //     imported (ADR-0009, await import('maplibre-gl')), and the
+        //     manualChunks assignment keeps that chunk async; its ~1.08 MB
+        //     body is a single third-party library that cannot be split
+        //     further (the remaining >500 kB warning is that vendor's
+        //     intrinsic size, reported honestly);
+        //   - everything else (app code, styles) stays in the entry chunks.
+        // maplibre's web worker ships as a ?url asset
+        // (maplibre-gl-worker-*.mjs), not as a JS chunk.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('react') || id.includes('scheduler') || id.includes('@remix-run')) {
+            return 'vendor-react';
+          }
+          if (id.includes('cytoscape')) {
+            return 'vendor-cytoscape';
+          }
+          if (id.includes('maplibre-gl')) {
+            return 'vendor-maplibre';
+          }
+          return undefined;
+        },
+      },
+    },
   },
 });

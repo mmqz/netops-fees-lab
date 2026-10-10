@@ -1,7 +1,7 @@
 # NetOps Lab — 已验证 / 未验证能力清单
 
 > 诚实为本：每一条"已验证"都可追溯到具体的验证方式与日期；未验证事项显式列出，不粉饰。
-> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版）。
+> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）。
 
 ## ✅ 已验证（2026-10-09，linux/amd64）
 
@@ -72,6 +72,32 @@
 | **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
+
+## v0.4.0（2026-10-10）真实电信资源类型与身份治理版
+
+五轮迭代（W1-W4 功能开发 + W5-D 发布轮），主代理逐轮派发开发子代理并派 W1-Q/W2-Q/W3-Q/W4-Q 只读质检（四轮均 PASS-with-notes，零 P0/P1）；四个功能提交 f32fa6c（W1 port 换键）/ e5f82b0（W2 基站）/ 97cf00e（W3 机房局站）/ 92195c4（W4 属性变更）+ 本轮发布提交。以下为本轮（W5-D）实测；W1-W4 各轮的独立实测记录见 worklog 各 Task ID 小节。
+
+### ✅ 已验证（2026-10-10，linux/amd64 · 2 核沙箱）
+
+| 能力 | 验证方式 | 备注 |
+| --- | --- | --- |
+| **244 个顶层测试全绿** | `gofmt -l .` 空；`go vet ./...` 0 告警；`go test -count=1 -timeout 15m ./...` 15 个含测试的包全部 ok；`-race -count=1` importer/repo/api 三包 0 race（13.9s/19.8s/6.9s）；`npx tsc -b` 0 错误；`npm run build` ✓ | 计数口径：`go test -list '.*' \| grep -c '^Test'` = **244** = v0.3.2 基线 207 + W1-W4 各轮 30 + W5-D 7（schema 投影 3 + schema 端点 1 + GC 3） |
+| GET /api/schema（W5-D） | live serve 真实输出：7 类型（Specs 注册序）/ 66 字段 / 12 规则（E001-E006·W001-W005·I001 各带 severity+description）；port 复合键 + nameFieldOverride、base_station keyFallbackFields、machine_room.site_id refType=site 逐项核对；`TestAPISchemaEndpoint`（HTTP 契约）+ `TestSchemaProjectionMirrorsSpecs/Rules/SpotPins`（逐字段对照 mapping.Specs） | 投影由 `BuildSchemaDocument()` 机械生成，无手抄面；MCP 工具数 grep 实测仍恰 5 |
+| uploads GC（W5-D） | `TestGCOrphanUploads`（孤儿删 / completed+failed+rolled_back 引用保留 / 相对路径形态 / 幂等二跑 / 目录缺失 no-op）+ `TestGCOrphanUploadsRemovalFailureNotFatal`（只读目录 → errors=1 不致命）+ `TestCLIGCSubcommand`（真实 CLI dispatch，单 JSON 契约 + usage 错误 exit 2）+ live serve 启动观察 + 手动 `gc` 子命令端到端 | 引用集含任何状态批次；MCP 进程零触发（调用点仅 cmdServe 与 gc 子命令）；repo 新增 `ListWorkbookPaths` |
+| web manualChunks 分包（W5-D） | `npm run build` 实测：主 chunk 795.03 kB（gzip 249.86）→ **187.19 kB（gzip 54.51）**；vendor-react 166.24 kB / vendor-cytoscape 438.71 kB / vendor-maplibre 1,085.01 kB（懒加载异步 chunk，首屏 index.html 零引用——modulepreload 与 CSS 预载均已消除，maplibre 库/样式/worker URL 三点改为同点动态 import）；首屏 CSS 123.61 → 40.46 kB；`make build` 后 live serve：/ 返回 200，index.html 引用的全部 chunk/worker 资产逐个 200 | 唯一 >500 kB 警告 = vendor-maplibre（第三方单库本体不可再分，且为按需异步 chunk，如实保留警告）；无 three 依赖（3D 由 maplibre fill-extrusion 实现，任务书「three 家族」系误设） |
+| W1-W4 旅程（汇总自各轮独立验证） | port 样例 2/1/2 键 `B2\|bvi2.1008`；基站样例 4/0/4 + 3×W004；机房局站 site 2/0/4 → machine_room 4/0/2 + belongs_to×3（前导零保留）；属性变更 基站IP diff → W005×1 → apply 生效 → 同值三导零 warning → dismiss 终态；迁移 v8 三守卫 / v9 / v10 双表重建 / v11 纯建表各被专门测试钉死（含 withoutVx 真 v(n-1) 库升级断言） | 详见 worklog W1-D/W1-Q/W2-D/W2-Q/W3-D/W3-Q/W4-D/W4-Q 小节与 CHANGELOG 0.4.0 |
+| 版本事实源 | `domain.AppVersion = v0.4.0`；`TestAppVersionP2` + `TestAppVersionMatchesChangelogHead` 双锚定；live serve `/api/health` 实报 v0.4.0；api.md 契约基线、README、i18n.ts APP_VERSION、teleagent-integration 同步 | 全仓 `rg v0.3.2` 残留清零（历史段/时点事实除外） |
+
+### ⏳ CI 运行态（推送后补记）
+
+- 本轮发布提交的 GitHub Actions 运行态：**待推送后补记**（不预填 run 号）。历史：v0.3.2 提交 84294e3 → run 38056776554 全绿。
+
+## ⚠️ 未验证（v0.4.0 诚实声明，沿 v0.3.2 清单）
+
+- 部署态 TeleAgent 的 MCP 调用（环境无 TeleAgent 实例；进程内回环 + 真子进程 stdio 冒烟已验证，含 5 工具握手）。
+- Windows / macOS 构建（仅 linux/amd64 实际产出）。
+- 长时运行 / 并发负载（无 7×24 或压测数据；GC 语义按单进程 serve 设计）。
+- 浏览器级对 /api/schema 的消费 UI（前端镜像未切换——按发布决策「稳定性优先」，schema.ts 注释已注明可经端点校验）。
 
 ## v0.3.2（2026-10-10）工程审查整改版
 

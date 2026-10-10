@@ -190,3 +190,13 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **幂等去重口径**：同一资源同一字段已有 **pending** 且 new 值相同 → 再导不重复记录（也不重记 W005，零痕迹）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409。
 - **回滚不对称**：批次回滚删除链删**本批 pending 提案**；applied/dismissed 保留（人工决策与导入批次生命周期解耦的审计线）；提案的资源被本批删除时 FK 级联连带删除其全部记录（含终态）——被审计资源已不存在，正确行为。见 §5 回滚节。
 - **边界声明**：apply 只写 attributes 快照，**不重建派生关系**——ref 类字段（如 machine_room.site_id 属性快照）的变更走属性通道时，belongs_to 关系不随之变化；ref 变更的正确路径是回滚批次后重新导入（E003 顺序约束重新生效）。
+
+## 15. 孤儿上传文件清理（uploads GC，v0.4 W5-D）
+
+上传的工作簿以内容寻址落盘（`dataDir/uploads/<sha256>_<原名>.xlsx`），批次表记录其 `workbook_path`。两类垃圾会产生**从未被任何批次引用**的孤儿文件：崩溃窗口（`analyzing` 瞬态批次失败但文件已写盘）与同内容不同名的重复上传。v0.4.0 起 GC 清理它们：
+
+- **引用口径（保守）**：`import_batches.workbook_path` 非空的**任何状态**批次都算引用——completed 批次回读工作簿出具 issue 证据；failed/rolled_back 批次的路径是「导入了什么」的审计记录（操作者可能据此重导）。**只删从未被任何批次引用的文件**。
+- **触发点（cmd 层，二处）**：①`serve` 启动时——HTTP 监听启动**前**串行执行（此时本进程不可能有在途上传，判定无竞态；与 R1-D6 崩溃自愈同款先例）；②CLI 子命令 `netopslab gc --db <db> --data <dir>`（手动可跑，stdout 单 JSON 计数对象 `{"scanned","deleted","referenced","errors"}`，n>0 时 slog Info 走 stderr）。**MCP 进程零触发**（mcp 子命令不经过 serve 启动路径）；HTTP API 无 GC 路由（维护动作归进程所有者）。
+- **非致命语义**：删除失败（权限等）记 slog Warn 并计入 `errors`，不中断启动、不改变退出码；uploads 目录不存在（全新安装）为 no-op；uploads 下的子目录跳过不递归（保守）。
+- **匹配口径**：引用路径按 Clean 后原值、绝对形式与**基名**三形态匹配（上传文件名含 sha256 前缀，全局唯一）；基名命中优先保留——误保留（多留一个文件）远轻于误删除（丢证据）。
+- 测试钉死（internal/app/gc_test.go）：孤儿被删 / completed+failed+rolled_back 三状态引用保留（含相对路径形态）/ 幂等二跑 / 目录缺失 no-op / 删除失败非致命 / CLI 契约（exit 0 + 单 JSON + usage 错误 2）。

@@ -192,8 +192,8 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	if AppVersion != "v0.3.2" {
-		t.Errorf("AppVersion = %q, want v0.3.2 (v0.3.2 review-remediation release)", AppVersion)
+	if AppVersion != "v0.4.0" {
+		t.Errorf("AppVersion = %q, want v0.4.0 (v0.4.0 real-telecom-types release)", AppVersion)
 	}
 }
 

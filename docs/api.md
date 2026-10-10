@@ -9,23 +9,133 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.3.2（2026-10-10）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.4.0（2026-10-10）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.3.2",
+  "version": "v0.4.0",
   "ruleVersion": "1.0.0"
 }
 ```
 
 （`version` = `domain.AppVersion` 单一事实源，v0.3.2 起由 `TestAppVersionMatchesChangelogHead` 锚定与 CHANGELOG 头版本一致，不再手抄漂移。）
 
+## GET /api/schema — 资源 schema 动态发现（v0.4.0）
+
+返回**全部可导入资源类型的字段规格 + 数据质量规则目录**。响应体由后端 `mapping.BuildSchemaDocument()` 从 `mapping.Specs`（Go 类型规格的唯一事实源）与 domain 规则目录机械投影生成——非手抄快照，后端规格演进时该端点自动同步（mapping 包投影测试逐字段对照 Specs 钉死）。**只读、无参数、不进 MCP 工具面**（MCP 工具恒为 5 个；schema 发现是 HTTP 专属能力）。前端 `web/src/schema.ts` 编译期镜像保留，可用本端点对照校验。
+
+- `types[]`（按 Specs 注册序）：`type`（资源类型）、`label`（类型中文名）、`sheetHint`（sheet 名建议锚点）、`nameField`（展示名字段——`NameFieldOverride` 优先、否则「first *_name」启发式）、`nameFieldOverride`（显式展示名钉定，仅 port/base_station/machine_room 有）、`naturalKeyFields[]`（主自然键字段，序 = `|` 拼接序）、`keyFallbackFields[]`（条件键兜底字段，v0.4 仅 base_station）、`fields[]`。
+- `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界；intMax 未投影）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
+- `rules[]`（规则目录，按码序 E001→E006 / W001→W005 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
+
+以下为真实输出截断（完整响应含 7 类共 66 字段与 12 条规则）：
+
+```json
+{
+  "types": [
+    {
+      "type": "device",
+      "label": "网元设备",
+      "sheetHint": "设备",
+      "nameField": "device_name",
+      "naturalKeyFields": [
+        "device_code"
+      ],
+      "fields": [
+        {
+          "name": "device_code",
+          "label": "设备编码",
+          "required": true,
+          "naturalKey": true,
+          "kind": "string",
+          "synonyms": [
+            "设备编码",
+            "设备编号",
+            "网元编码",
+            "编码",
+            "code"
+          ]
+        },
+        {
+          "name": "device_name",
+          "label": "设备名称",
+          "required": true,
+          "naturalKey": false,
+          "kind": "string",
+          "synonyms": [
+            "设备名称",
+            "网元名称",
+            "名称"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "port",
+      "label": "设备端口",
+      "sheetHint": "端口",
+      "nameField": "port_name",
+      "nameFieldOverride": "port_name",
+      "naturalKeyFields": [
+        "device_name",
+        "port_name"
+      ],
+      "fields": [
+        "…（17 字段，含 device_ip kind=ipv4 required=true 非键值列）…"
+      ]
+    },
+    {
+      "type": "base_station",
+      "label": "基站",
+      "sheetHint": "基站",
+      "nameField": "base_station_name",
+      "nameFieldOverride": "base_station_name",
+      "naturalKeyFields": [
+        "base_station_code"
+      ],
+      "keyFallbackFields": [
+        "city",
+        "base_station_name"
+      ],
+      "fields": [
+        "…（15 字段）…"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "code": "E001",
+      "severity": "error",
+      "description": "natural key duplicated (row)"
+    },
+    {
+      "code": "W004",
+      "severity": "warning",
+      "description": "natural key degraded to fallback fields (row)"
+    },
+    {
+      "code": "W005",
+      "severity": "warning",
+      "description": "attribute diff on a duplicate-key row awaits confirmation (row)"
+    },
+    {
+      "code": "I001",
+      "severity": "info",
+      "description": "device with zero relations (set)"
+    }
+  ]
+}
+```
+
+
 ## POST /api/imports — 上传并分析工作簿
 
 multipart/form-data，字段名 `file`，仅 `.xlsx`，≤10MB（压缩尺寸超出 → 413 `too_large`）。**解压后尺寸另有上限（v0.3.2，zip 炸弹防护）**：单 sheet 物化行数 > 100,000（含表头）或全簿物化单元格总数 > 5,000,000 → **422 `workbook_too_large`**（"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"）。解析为逐 sheet 流式读取，超限即中止，不会整表先物化。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
+
+上传落盘为内容寻址存储 `dataDir/uploads/<sha256>_<原名>.xlsx`；**孤儿上传清理（v0.4.0）**：`serve` 启动时（HTTP 监听启动前、串行执行）与 CLI `netopslab gc --db <db> --data <dir>` 会删除 uploads 下未被任何批次 `workbook_path` 引用的文件（任何状态的批次都算引用——含 failed/rolled_back）；MCP 进程不触发清理。见 [docs/import-and-validation.md](import-and-validation.md) §15。
 
 ```json
 {

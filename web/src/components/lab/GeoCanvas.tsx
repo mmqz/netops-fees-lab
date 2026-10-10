@@ -34,11 +34,10 @@ import type {
 } from 'maplibre-gl';
 import type { LayerSpecification, FilterSpecification, ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Feature, FeatureCollection, LineString, Point, Polygon, Position } from 'geojson';
-import 'maplibre-gl/dist/maplibre-gl.css';
-// maplibre v6 的 worker 是自包含 ESM 文件（dist/maplibre-gl-worker.mjs）。
-// vite `?url` 将其作为静态资源发射（哈希名防缓存），建图前 setWorkerUrl 注入；
-// 主 maplibre chunk 仍保持懒加载，worker 资源与之一同按需服务于首次地理视图。
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
+// maplibre 全家（库本体 / 样式表 / worker URL）均不静态 import（W5-D 分包）：
+// 静态 import 会把 vendor-maplibre 变成入口的静态依赖（modulepreload
+// ~1.08 MB JS + 首屏 CSS），失去 ADR-0009 的懒加载语义；三者在首次
+// 地理视图挂载时同点动态 import。
 import type { SimEntityStatus, SimTopology } from '../../api/types';
 import type { SelectedEntity } from './selection';
 import {
@@ -657,12 +656,18 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     const cleanups: Array<() => void> = [];
 
     void (async (): Promise<void> => {
-      const maplibregl: MapLibreModule = await import('maplibre-gl');
+      // 同点懒加载库 / 样式 / worker URL（W5-D 分包：maplibre 家族全部按需，
+      // 入口对 vendor-maplibre 零静态依赖）。
+      const [maplibregl, , workerUrlMod] = await Promise.all([
+        import('maplibre-gl'),
+        import('maplibre-gl/dist/maplibre-gl.css'),
+        import('maplibre-gl/dist/maplibre-gl-worker.mjs?url'),
+      ]);
       if (disposed || mapDivRef.current !== div) return;
       libRef.current = maplibregl;
       // 必须在建图之前：worker URL 默认按 import.meta.url 推导（打包后指向不存在的
       // 未哈希文件名 → Worker 加载失败）。?url 资源地址在构建期注入，恒有效。
-      maplibregl.setWorkerUrl(maplibreWorkerUrl);
+      maplibregl.setWorkerUrl(workerUrlMod.default);
       const map = new maplibregl.Map({
         container: div,
         style: buildGeoStyle(true),

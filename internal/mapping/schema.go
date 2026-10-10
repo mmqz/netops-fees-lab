@@ -273,6 +273,12 @@ func (f FieldSpec) EnumContains(v string) bool {
 type TypeSpec struct {
 	// Type is the resource type.
 	Type domain.ResourceType
+	// Label is the human-readable (Chinese) name of the TYPE itself —
+	// e.g. "网元设备" for device, the same wording the frontend's
+	// RESOURCE_TYPE_LABELS uses. GET /api/schema (W5-D) projects it so
+	// schema consumers get one canonical label per type without
+	// hand-copying a second table.
+	Label string
 	// SheetHint is a sheet-name substring that suggests this type
 	// (设备→device, 池→ip_pool [matches 地址池 too], 电路→circuit).
 	SheetHint string
@@ -358,6 +364,7 @@ func (t TypeSpec) NameField() string {
 // deviceSpec is the device schema of §6.
 var deviceSpec = TypeSpec{
 	Type:      domain.ResourceTypeDevice,
+	Label:     "网元设备",
 	SheetHint: "设备",
 	Fields: []FieldSpec{
 		{Name: "device_code", Label: "设备编码", Required: true, NaturalKey: true, Kind: KindString,
@@ -387,6 +394,7 @@ var deviceSpec = TypeSpec{
 // ipPoolSpec is the ip_pool schema of §6.
 var ipPoolSpec = TypeSpec{
 	Type:      domain.ResourceTypeIPPool,
+	Label:     "IP地址池",
 	SheetHint: "池", // substring match covers 地址池 and a bare 池
 	Fields: []FieldSpec{
 		{Name: "pool_name", Label: "地址池名称", Required: true, NaturalKey: true, Kind: KindString,
@@ -406,6 +414,7 @@ var ipPoolSpec = TypeSpec{
 // circuitSpec is the circuit schema of §6.
 var circuitSpec = TypeSpec{
 	Type:      domain.ResourceTypeCircuit,
+	Label:     "传输电路",
 	SheetHint: "电路",
 	Fields: []FieldSpec{
 		{Name: "circuit_code", Label: "电路编号", Required: true, NaturalKey: true, Kind: KindString,
@@ -436,6 +445,7 @@ var circuitSpec = TypeSpec{
 // to port_name — device_name is the key's scope, not the port's own name.
 var portSpec = TypeSpec{
 	Type:              domain.ResourceTypePort,
+	Label:             "设备端口",
 	SheetHint:         "端口",
 	NameFieldOverride: "port_name",
 	Fields: []FieldSpec{
@@ -488,6 +498,7 @@ var portSpec = TypeSpec{
 // human name is the station's name).
 var baseStationSpec = TypeSpec{
 	Type:              domain.ResourceTypeBaseStation,
+	Label:             "基站",
 	SheetHint:         "基站",
 	NameFieldOverride: "base_station_name",
 	KeyFallbackFields: []string{"city", "base_station_name"},
@@ -542,6 +553,7 @@ var baseStationSpec = TypeSpec{
 // (KindIPv4 → E004 on malformed values), never identity.
 var siteSpec = TypeSpec{
 	Type:      domain.ResourceTypeSite,
+	Label:     "局站",
 	SheetHint: "局站",
 	Fields: []FieldSpec{
 		{Name: "site_id", Label: "局站ID", Required: true, NaturalKey: true, Kind: KindString,
@@ -579,6 +591,7 @@ var siteSpec = TypeSpec{
 // insertion before it can never hijack the "first *_name" heuristic.
 var machineRoomSpec = TypeSpec{
 	Type:              domain.ResourceTypeMachineRoom,
+	Label:             "机房",
 	SheetHint:         "机房",
 	NameFieldOverride: "machine_room_name",
 	Fields: []FieldSpec{

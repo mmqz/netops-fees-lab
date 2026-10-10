@@ -2,6 +2,37 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.4.0] — 2026-10-10
+
+**真实电信资源类型与身份治理版**（五轮迭代：W1-W4 四轮功能开发 + W5 发布轮收口；需求驱动为 v0.3.2 后提供的真实电信样例工作簿与 R4 身份模型审查裁决）。核心：从「三类合成台账」走到「七类资源、真实表格直导、身份键受治理、属性变更有审计」。
+
+### 新增 — port 稳定自然键（W1-D，migration v8，闭环 R4 审查 P1）
+- **根因**：v0.3.1 的 port 复合键 = `device_ip|port_name`——IP 是可变属性，设备重划 IP 即端口资源分裂。v8 换稳定键 **`device_name|port_name`**（spec 字段序拼接）；`device_ip` 降级为必填值列（进 attrs，不再入键）。
+- migration v8：纯 SQL 快照三守卫（冻结快照 + 唯一认领 + 目标未被占用）就地 UPDATE；冲突行**保守保留原键**；存量 fallback 行（不可能携带 device_name 属性）逐字节保留；幂等由构造保证。`NameFieldOverride` 钉定 port 展示名 = port_name（防止 device_name 劫持「first *_name」启发式）。
+- 真实样例回归：`samples/telecom-port-multi-header.xlsx` 2 imported / 1 skipped / 2 failed 不变，键 = `B2|bvi2.1008` 等；前端 `schema.ts` 镜像同步 + 向导正向提示。
+
+### 新增 — base_station 资源类型与条件自然键（W2-D，migration v9，W004）
+- 真实无线基站工作簿 15 字段直导（真实 14 列 + 预留 city）；**条件自然键机制**（spec 声明式 `KeyFallbackFields`，零类型硬编码）：主键 base_station_code 非空 → 编码即键；为空 → 键退化为 `(地市, 无线基站名称)` 兜底拼接（跳过空值，真实表无地市列 → 纯名称），行照常导入并记 **W004 身份键退化**（仅 imported 行、幂等重导不重记）；E001 判重在解析后的最终键上。
+- migration v9：resources CHECK 封闭集扩 `'base_station'`（SQLite CHECK 不可 ALTER → v7 同构 ForeignKeysOff 12 步安全重建）；基站IP 为 string 值列（真实值带 /30 掩码，IP 属可变属性不作身份）；MCP 文案/前端类型枚举/双 chip/文档六处封闭集触点全同步。样例 `samples/telecom-base-station.xlsx`（4 imported / 4 failed / 3×W004）。
+
+### 新增 — machine_room / site 资源类型与 belongs_to 跨表关联（W3-D，migration v10）
+- 真实机房局站表（8 真实业务列）**同表双读**：先按局站类型导入（键 = 局站ID，12 位数字编码），再按机房类型导入同一 sheet（键 = 机房ID，17 位数字编码；机房 spec 的局站ID 列映射为可选 ref）。两类 ID 均 KindString——**前导零即身份，绝不数值化**；机房名称/局站名称/设备名称为昵称属性，IP 地址为可变属性。
+- 局站先入库即自动派生 `machine_room --belongs_to--> site` 关系（E003 语义钉死导入顺序）；同表双命中建议 = 局站（注册序容器优先），映射确认页可切换。migration v10：resources + relations 双表 CHECK 扩容重建（ForeignKeysOff 安全形 + foreign_key_check 门禁）。样例 `samples/telecom-site-machine-room.xlsx`（site 2/0/4 → machine_room 4/0/2，belongs_to×3，幂等重导 0/4/2）。
+
+### 新增 — 属性变更历史与人工确认（W4-D，migration v11，W005）
+- 同键再导不再静默丢弃属性差异：diff 逐字段记为**待确认变更**（`resource_attribute_changes` 表 + **W005** issue，行仍 skip 幂等）；口径与 attributes 归集同源（非键非枚举非空、新值空不记、pending 同值去重），与 row_result/counts 同事务。
+- **人工确认通道**（资源域写仅限人类）：HTTP `GET /api/attribute-changes` + `POST …/{id}/apply|dismiss` 与 CLI `netopslab changes list|apply|dismiss`；apply 携带旧值校验（漂移即 409 `attribute_conflict`）+ 同事务写入 + `updated_at` 刷新；**MCP 工具面 5 个冻结不变**（AI 不得 apply 属性变更）。
+- 回滚不对称语义：回滚删本批 pending、**保留 applied/dismissed 审计线**（被审计资源若被回滚删除则记录随之级联消失，四处注释/文档一致声明）；前端 Resources 详情新增待确认变更面板。端到端：改基站IP 再导 → 0/4/4 + W005×1 → CLI apply 生效 → 同值三导零 warning（幂等闭环）。
+
+### 新增 — 发布轮工程化（W5-D）
+- **GET /api/schema（动态 schema 发现端点）**：`{"types":[…],"rules":[…]}`——types 为 mapping.Specs 的**忠实投影**（type/label/sheetHint/nameField(+override)/naturalKeyFields/keyFallbackFields/fields[name,label,required,naturalKey,kind,enum?,intMin?,refType?,synonyms[]]，由 `BuildSchemaDocument()` 机械生成，投影测试逐字段对照 Specs，禁止手抄漂移）；rules 为 domain 规则目录（12 码 + SeverityForCode + 一行英文释义）。**仅 HTTP 端点，不进 MCP**（工具面 5 冻结）；前端 `schema.ts` 镜像保留（注释注明可经 /api/schema 校验，稳定性优先不强制切换）。
+- **uploads 垃圾回收**：删除 `dataDir/uploads/` 下未被任何 import_batches.workbook_path 引用的孤儿文件（**任何状态的批次都算引用**——含 failed/rolled_back：工作簿是 issue 证据的回读源）。落点 = `serve` 启动时（监听启动前串行执行，无并发上传窗口；RecoverInterrupted 同款 cmd 层先例，**MCP 进程零触发**）+ CLI `netopslab gc --db --data` 手动子命令（stdout 单 JSON 计数契约，n>0 时 slog Info 走 stderr）；删除失败记日志不致命；目录不存在容错为 no-op。
+- **前端构建分包**（vite manualChunks 按依赖家族）：主 chunk **795.03 kB → 187.19 kB**（gzip 249.86 → 54.51 kB）；react 家族 166.24 kB / cytoscape 438.71 kB 独立 vendor chunk；maplibre-gl 维持 ADR-0009 懒加载异步 chunk（1,085.01 kB，本体不可再分的第三方单库——vite 唯一 >500 kB 警告即此，如实保留）；maplibre CSS 83.15 kB 随异步 chunk 懒加载（首屏 CSS 123.61 → 40.46 kB）。
+
+### 测试
+- Go **244 个顶层测试**全绿（v0.3.2 基线 207 + 本里程碑五轮新增：W1 +2 / W2 +7 / W3 +9 / W4 +12 / W5 +7 = +37，`go test -list '.*'` 顶层函数实测口径——迁移守卫、条件键、W004/W005 语义、belongs_to 语义链、schema 投影、GC 四态与 CLI 契约等；既有断言零放宽，仅 max-version 断言随迁移前进）。门禁六项全绿：gofmt 空 · vet 0 告警 · 15 含测试包全 ok · `-race` 0（importer/repo/api 等重点包）· tsc 0 错误 · build ✓（最终实测计数与 CI 运行态——**待推送后补记**——见 docs/verified-capabilities.md v0.4.0 段）。
+- 真实样例端到端冒烟（W1-W4 各轮均验）：port / 基站 / 机房局站样例的导入-幂等-回滚旅程、属性变更 apply/dismiss 旅程、demo.sh 与 demo-lab.sh 全脚本可重复。
+
 ## [0.3.2] — 2026-10-10
 
 **工程审查整改版**（R1 架构 A- / R2 代码质量 / R3 计划偏移 / R4 主键身份模型——四维只读审查的整改落地；用户需求驱动：「继续做修复然后做分析告诉我下一步的开发」）。

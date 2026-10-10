@@ -94,6 +94,11 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 
+	// Dynamic schema discovery (W5-D, v0.4.0): the faithful projection
+	// of mapping.Specs + the domain rule catalog. HTTP-only — the MCP
+	// tool surface stays frozen at the five read-only tools.
+	mux.HandleFunc("GET /api/schema", s.handleSchema)
+
 	mux.HandleFunc("POST /api/imports", s.handleImportUpload)
 	mux.HandleFunc("POST /api/imports/{id}/mapping", s.handleImportMapping)
 

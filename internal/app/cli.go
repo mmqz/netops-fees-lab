@@ -44,7 +44,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, changes, lab, mcp, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, changes, lab, mcp, gc, testdata")
 		return exitUsage
 	}
 
@@ -68,10 +68,12 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdLab(args[1:], stdout, stderr)
 	case "mcp":
 		err = cmdMCP(args[1:], stdout, stderr)
+	case "gc":
+		err = cmdGC(args[1:], stdout, stderr)
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, changes, lab, mcp, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, changes, lab, mcp, gc, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -192,6 +194,20 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("recover interrupted imports: %w", err)
 	} else if n > 0 {
 		a.Log.Info("recovered interrupted import batches", "count", n)
+	}
+
+	// Uploads garbage collection (W5-D, v0.4.0), same placement rationale
+	// as RecoverInterrupted above: run serially BEFORE the listener starts,
+	// so no upload of this (or any other) process can be in flight while we
+	// judge orphans — an upload being written right now is not yet
+	// referenced by any batch and would be misjudged. The MCP process never
+	// reaches this call site (it owns no serve loop).
+	if gc, err := a.GCOrphanUploads(ctx); err != nil {
+		// Not fatal: a broken sweep must not keep the server down; the
+		// operator can retry with `netopslab gc`.
+		a.Log.Error("uploads gc failed (server continues)", "error", err.Error())
+	} else if gc.Deleted > 0 {
+		a.Log.Info("gc: removed orphan uploads", "deleted", gc.Deleted, "scanned", gc.Scanned)
 	}
 	return a.Run(ctx)
 }
