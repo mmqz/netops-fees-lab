@@ -26,7 +26,7 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.2.1';
+export const APP_VERSION = 'v0.2.2';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -504,10 +504,28 @@ export const LAB_FILTER_NO_MATCH = '没有符合筛选的条目';
 export const LAB_CANVAS_LABEL = '拓扑画布';
 export const LAB_LAYOUT = '布局';
 export const LAB_LAYOUT_FORCE = '力导';
+export const LAB_LAYOUT_HIER = '层级';
+export const LAB_LAYOUT_CONCENTRIC = '同心圆';
 export const LAB_LAYOUT_GRID = '网格';
 export const LAB_LAYOUT_CIRCLE = '环形';
+export const LAB_LAYOUT_FREEZE = '锁定';
+export const LAB_MODE = '模式';
+export const LAB_MODE_SELECT = '选择';
+export const LAB_MODE_TRACE = '路径';
+export const LAB_MODE_FOCUS = '聚焦';
+export const LAB_CANVAS_LABELS = '链路标签';
 export const LAB_CANVAS_HINT = '点击节点或连线，可在右侧定位对应条目';
 export const LAB_CANVAS_EMPTY = '暂无拓扑数据';
+
+/** 交互模式提示（工具带右侧 hint 随模式切换）。 */
+export const LAB_MODE_TRACE_HINT = '依次点击两台设备，高亮最短路径；Esc 或点击空白清除';
+export const LAB_MODE_FOCUS_HINT = '点击设备聚焦其邻域；Esc 或点击空白取消';
+export const LAB_TRACE_PICK_A = '路径模式：点击起点设备';
+export const LAB_TRACE_PICK_B = '已选起点 {a}，点击终点设备';
+export const LAB_TRACE_DONE = '{a} → {b} · {hops} 跳 · 经 {via}';
+export const LAB_TRACE_UNREACHABLE = '{a} → {b} · 不可达（无可用链路）';
+export const LAB_TRACE_CLEAR = '清除路径';
+export const LAB_MINIMAP_LABEL = '缩略导航图（点击/拖动定位视图）';
 
 /** 画布缩放 / 视图控制（W2：图标按钮 + title 提示）。 */
 export const LAB_CANVAS_ZOOM_IN = '放大';

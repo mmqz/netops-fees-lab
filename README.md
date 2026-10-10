@@ -35,14 +35,14 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ## 2. 当前阶段能力清单（Stage 0 + Phase 1 + Phase 2 已交付）
 
-### 仿真工作台（Phase 2，v0.2.1 打磨版）
+### 仿真工作台（Phase 2，v0.2.2 画布多模式版）
 
 - **一键物化**：从导入批次生成虚拟拓扑（设备 → 虚拟设备、电路 → 链路、确定性 `eth0/eth1…` 端口分配）；演示规模 27 设备 / 40 接口 / 20 链路，物化 3–4 ms。
 - **类型化操作集（含故障注入）**：10 个前向操作（增删设备/接口/链路、启停、配地址）经同一引擎路径（API/MCP/CLI 无旁路）；单事务变更集，失败零污染且留档（422 `op_failed`）。
 - **确定性校验**：CHK-001..005（重复主机地址/网段重叠/孤岛设备/部分分区/未配置接口），同状态同结果；评分 100−5×错误−1×警告；运行自带拓扑快照。
 - **连通性与前后对比**：up-only BFS 路径查询；两次校验运行的 diff（新增/消失问题按业务键匹配、连通性丢失/恢复对、评分差）。
 - **三层撤销**：事务回滚（失败变更集）/ 变更集逆向 LIFO undo（撤销本身也是变更集，可撤销的撤销）/ 检查点（SQLite Online Backup API 快照，恢复 = 前向操作变更集，精确到状态哈希相等，no-op 检测）。
-- **拓扑画布**：`/lab/:id` Cytoscape 交互图（up/down 分色、实线/虚线、布局切换、点击联动表格）+ 设备/接口/链路/检查结果/变更集/检查点六个标签页。
+- **拓扑画布（v0.2.2 多模式）**：`/lab/:id` Cytoscape 交互图——**6 种布局**（力导 / 层级树 / 同心圆 / 网格 / 环形 / 锁定手动排布）× **3 种交互模式**（选择联动表格 / 路径追踪：点两台设备高亮最短路径与跳数 / 邻域聚焦：一跳之外压暗）+ 链路标签开关 + 右下角迷你导航图（点击/拖动定位视图）+ 悬停信息条；up/down 分色、实线/虚线故障可视；布局与模式按工作台持久化。
 - **MCP 五工具**：`resource_search`（只读）+ `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`——AI 改仿真态的唯一通道；`restore_*` 内部操作码三边界拒绝；**无建删工作区工具**。
 - **CLI `lab` 子命令树**：workspace/topology/path/apply/checks/diff/undo/checkpoint，全部单一 JSON 输出。
 - **仿真报告**：`GET /api/lab/report`（HTML/JSON）：引擎版本、评分、发现、变更集史、检查点、固定免责声明。
@@ -219,7 +219,7 @@ netopslab mcp      [--db ./data/netops.db]                  # 或环境变量 NE
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.2.1`），注册**恰好 5 个工具**：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.2.2`），注册**恰好 5 个工具**：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |

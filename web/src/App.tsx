@@ -97,8 +97,9 @@ function Sidebar() {
 
   return (
     <aside className="sidebar">
+      {/* v0.2.2：删除渐变色块 logo（AI 味主要来源）——纯文字字标；折叠态显示单字符标记 */}
       <div className="sidebar-brand">
-        <div className="sidebar-logo" aria-hidden="true">N</div>
+        <span className="sidebar-brand-mark" aria-hidden="true">N</span>
         <div className="sidebar-brand-text">
           <div className="sidebar-name">{APP_NAME}</div>
           <div className="sidebar-subtitle">{APP_SUBTITLE}</div>

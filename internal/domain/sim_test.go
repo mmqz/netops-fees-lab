@@ -189,8 +189,8 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	if AppVersion != "v0.2.1" {
-		t.Errorf("AppVersion = %q, want v0.2.1 (PROJECT_BRIEF_P2 §7 + v0.2.1 polish)", AppVersion)
+	if AppVersion != "v0.2.2" {
+		t.Errorf("AppVersion = %q, want v0.2.2 (PROJECT_BRIEF_P2 §7 + v0.2.2 canvas modes)", AppVersion)
 	}
 }
 

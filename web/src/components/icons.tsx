@@ -238,6 +238,85 @@ export function IconLayoutCircle({ size = 16, className }: IconProps) {
   );
 }
 
+/** 画布工具栏：层级布局（自上而下树形）。 */
+export function IconLayoutHier({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <rect x="3" y="17" width="6" height="4" rx="1" />
+      <rect x="15" y="17" width="6" height="4" rx="1" />
+      <rect x="9" y="17" width="6" height="4" rx="1" />
+      <path d="M12 7v4" />
+      <path d="M6 13h12v-2" />
+      <path d="M6 13v4M12 11v6M18 13v4" />
+    </svg>
+  );
+}
+
+/** 画布工具栏：同心圆布局（中心辐射）。 */
+export function IconLayoutConcentric({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="8.5" strokeDasharray="2 3" />
+      <circle cx="12" cy="12" r="5" strokeDasharray="2 3" />
+      <circle cx="12" cy="12" r="1.8" />
+    </svg>
+  );
+}
+
+/** 画布工具栏：锁定布局（图钉）。 */
+export function IconLayoutFreeze({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M9 3h6" />
+      <path d="M10 3v5l-3.5 5.5A2 2 0 0 0 8.2 17h7.6a2 2 0 0 0 1.7-3.5L14 8V3" />
+      <path d="M12 17v4" />
+    </svg>
+  );
+}
+
+/** 画布交互模式：选择（光标）。 */
+export function IconModeSelect({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M5 3l14 8.5-6.2 1.6L10 19z" />
+    </svg>
+  );
+}
+
+/** 画布交互模式：路径追踪（两点间折线路由）。 */
+export function IconModeTrace({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="5.5" cy="18.5" r="2" />
+      <circle cx="18.5" cy="5.5" r="2" />
+      <path d="M7 17L17 7" strokeDasharray="2.5 2.5" />
+      <path d="M7 17l4-1.5M17 7l-1.5 4" strokeDasharray="none" />
+    </svg>
+  );
+}
+
+/** 画布交互模式：邻域聚焦（聚光/目标）。 */
+export function IconModeFocus({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" />
+    </svg>
+  );
+}
+
+/** 画布视图开关：链路标签。 */
+export function IconLabels({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M20.6 13.4 11 3.8a2 2 0 0 0-1.4-.6H4v5.6a2 2 0 0 0 .6 1.4l9.6 9.6a1.5 1.5 0 0 0 2.1 0l4.3-4.3a1.5 1.5 0 0 0 0-2.1z" />
+      <circle cx="7.5" cy="7.5" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** 画布视图控制：放大。 */
 export function IconZoomIn({ size = 16, className }: IconProps) {
   return (

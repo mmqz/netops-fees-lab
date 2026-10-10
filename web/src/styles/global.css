@@ -25,7 +25,8 @@
   --pool-text: #0b6b62;
   --circuit-text: #5b3fd1;
   --radius: 8px;
-  --shadow: 0 1px 3px rgba(23, 35, 58, 0.08);
+  /* v0.2.2 去模板化：卡片一律 1px 边框 + 无投影（AntD5/Linear 式平面）,
+     浮层（对话框/抽屉）保留 --shadow-lg 提供层级 */
   --shadow-lg: 0 8px 24px rgba(23, 35, 58, 0.16);
   --sidebar-bg: #101828;
   --sidebar-width: 220px;
@@ -141,37 +142,38 @@ button {
 
 .sidebar-brand {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 16px;
+  align-items: baseline;
+  gap: 8px;
+  padding: 20px 16px 16px;
   border-bottom: 1px solid rgba(208, 217, 232, 0.12);
 }
 
-.sidebar-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--primary), #5b83e8);
-  color: #fff;
-  font-weight: 700;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
+/* v0.2.2：删除渐变色块 logo（「AI 味」首要来源）——改为纯文字字标，
+   真实 B2B 工业软件（vCenter/Zabbix/Grafana 企业版）的侧栏识别靠文字而非彩色几何块 */
 .sidebar-name {
   color: #fff;
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
 }
 
 .sidebar-subtitle {
-  font-size: 12px;
+  font-size: 11px;
   color: #93a1b8;
-  margin-top: 1px;
+  margin-top: 3px;
+  letter-spacing: 0.05em;
+}
+
+/* 折叠态（<1100px）：纯字符单字标（无底色块），保持最小识别度 */
+.sidebar-brand-mark {
+  display: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  line-height: 1;
+  padding: 4px 0;
 }
 
 .sidebar-nav {
@@ -270,7 +272,7 @@ button {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: none;
   padding: 16px;
   margin-bottom: 16px;
 }
@@ -1676,7 +1678,12 @@ a.btn:hover {
 
   .sidebar-brand {
     justify-content: center;
+    align-items: center;
     padding: 14px 8px;
+  }
+
+  .sidebar-brand-mark {
+    display: block;
   }
 
   .sidebar-link {
@@ -1737,9 +1744,9 @@ a.btn:hover {
 .lab-canvas-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1749,10 +1756,69 @@ a.btn:hover {
   margin-right: 2px;
 }
 
+.lab-canvas-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
 .lab-canvas-toolbar-hint {
   margin-left: auto;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* v0.2.2 图标化分段控件（Grafana/Kiali 式工具带）：
+   灰底轨道 + 白色浮起激活态，图标按钮带 title/aria-label */
+.canvas-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #edf1f7;
+}
+
+.canvas-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.canvas-tool:hover {
+  background: #fff;
+  color: var(--text);
+}
+
+.canvas-tool:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.canvas-tool.is-active {
+  background: #fff;
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px rgba(47, 95, 224, 0.45), 0 1px 2px rgba(23, 35, 58, 0.08);
+}
+
+/* 独立开关（链路标签）：带边框的独立按钮，激活时主色描边 */
+.canvas-tool--toggle {
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.canvas-tool--toggle.is-active {
+  color: var(--primary);
+  border-color: rgba(47, 95, 224, 0.45);
 }
 
 .lab-canvas-wrap {
@@ -1914,6 +1980,98 @@ a.btn:hover {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   font-size: 12px;
   color: #c3cdd9;
+}
+
+/* —— 路径追踪横幅（v0.2.2，顶部居中）：待选/结果/不可达三态 —— */
+.lab-canvas-trace {
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 10px;
+  max-width: min(72%, 640px);
+  padding: 6px 8px 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(13, 20, 36, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: #d9e3f2;
+}
+
+.lab-canvas-trace .trace-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-canvas-trace--pick {
+  border-color: rgba(125, 162, 255, 0.4);
+}
+
+.lab-canvas-trace--done {
+  border-color: rgba(63, 216, 199, 0.45);
+  color: #d9f7f2;
+}
+
+.lab-canvas-trace--unreachable {
+  border-color: rgba(242, 85, 74, 0.5);
+  color: #ffd9d6;
+}
+
+.lab-canvas-trace .trace-close {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #93a1b8;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lab-canvas-trace .trace-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.lab-canvas-trace .trace-close:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 1px;
+}
+
+/* —— 迷你导航图（v0.2.2，右下角）：需接收指针（点击/拖动定位） —— */
+.lab-canvas-minimap {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 5;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 20, 36, 0.85);
+  overflow: hidden;
+  cursor: crosshair;
+  line-height: 0;
+}
+
+.lab-canvas-minimap canvas {
+  display: block;
+  width: 160px;
+  height: 104px;
+}
+
+.lab-canvas-minimap:hover {
+  border-color: rgba(125, 162, 255, 0.35);
+}
+
+.lab-canvas-minimap:focus-within {
+  outline: 2px solid #7da2ff;
+  outline-offset: 1px;
 }
 
 .hoverinfo-dot {
@@ -2315,6 +2473,15 @@ a.btn:hover {
 
   .lab-panel-body {
     max-height: 480px;
+  }
+
+  /* v0.2.2：窄屏工具带收纳提示文案，避免换行成两行 */
+  .lab-canvas-toolbar {
+    gap: 8px;
+  }
+
+  .lab-canvas-toolbar-hint {
+    display: none;
   }
 }
 
