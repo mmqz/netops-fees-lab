@@ -1726,19 +1726,269 @@ a.btn:hover {
   text-transform: uppercase;
 }
 
-/* 60/40 工作区分栏 */
+/* 工作区分栏（FX-5 可拖拽）：三列 = 画布 | 6px 把手 | 面板；比例经 CSS 变量
+   注入（LabWorkspace inline style），折叠/zen/窄屏由修饰类与媒体查询覆盖——
+   变量不阻碍层叠。两侧 gap 5px + 把手 6px = 16px（与旧 2 列 16px 视觉等宽）。 */
 .lab-split {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, var(--split-a, 60fr)) 6px minmax(0, var(--split-b, 40fr));
   gap: 16px;
+  column-gap: 5px;
   align-items: stretch;
+}
+
+/* 折叠：单列，画布占满工作区宽（面板 display:none 保持挂载，恢复不丢状态） */
+.lab-split--collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lab-split--collapsed .lab-panel {
+  display: none;
+}
+
+/* zen：画布卡片 fixed inset:0 盖住整页，面板留在身后单列（不可见） */
+.lab-split--zen {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 分栏拖拽把手（FX-5）：6px 命中区 + 居中 2px 提示线；role=separator 可聚焦 */
+.lab-split-handle {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: 3px;
+  z-index: 1;
+}
+
+.lab-split-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: #c3ccd9;
+  transition: background 0.15s ease;
+}
+
+.lab-split-handle:hover::before,
+.lab-split-handle.is-dragging::before {
+  background: var(--primary);
+}
+
+.lab-split-handle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+/* 拖动中：全局列光标 + 禁止文本选择（pointerup / 卸载时移除） */
+body.lab-split-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* 分栏内两张卡片取消 .card 的默认 16px 下边距（grid 行高即卡片高，把手对齐；
+   split 是页尾最后一个元素，无需卡片间下边距） */
+.lab-split .lab-canvas-card,
+.lab-split .lab-panel {
+  margin-bottom: 0;
 }
 
 .lab-canvas-card {
   display: flex;
   flex-direction: column;
   min-height: 520px;
-  height: calc(100vh - 350px);
+  /* FX-5 高度优化：扣除 237px = 顶栏 56 + app-content 上 padding 24 + 页头 97 +
+     间距 12 + 下 padding 24 + 滚动缓冲 24（1080p 卡片 843px，画布渲染区 761px
+     ≥760 目标；配合页头紧凑化 + split 内取消卡片下边距）。 */
+  height: calc(100vh - 237px);
+}
+
+/* zen 全屏工作模式（FX-5）：盖住侧栏/顶栏/页头/右侧面板；Toast(z100)/对话框
+   (z70) 更高不受影响。工具带保留（用户全屏是来「工作」的）。 */
+.lab-canvas-card--zen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+/* zen 下画布区域铺满剩余高度（覆盖窄屏媒体查询的 clamp 固定高） */
+.lab-canvas-card--zen .lab-canvas-wrap {
+  height: auto;
+  flex: 1;
+}
+
+/* zen 工具带深色化（与画布底色 #0e1626 一致，白字系；AA 对比度） */
+.lab-canvas-card--zen .lab-canvas-toolbar {
+  background: #0e1626;
+  border-bottom: 1px solid rgba(125, 162, 255, 0.22);
+}
+
+.lab-canvas-card--zen .lab-canvas-toolbar-label,
+.lab-canvas-card--zen .lab-canvas-toolbar-hint {
+  color: #8da0bf;
+}
+
+.lab-canvas-card--zen .lab-canvas-toolbar-sep {
+  background: rgba(125, 162, 255, 0.22);
+}
+
+.lab-canvas-card--zen .canvas-seg {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(125, 162, 255, 0.25);
+}
+
+.lab-canvas-card--zen .canvas-tool {
+  color: #c9d6ec;
+}
+
+.lab-canvas-card--zen .canvas-tool:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+
+.lab-canvas-card--zen .canvas-tool.is-active {
+  background: rgba(47, 95, 224, 0.5);
+  color: #fff;
+  box-shadow: none;
+}
+
+.lab-canvas-card--zen .canvas-tool--toggle,
+.lab-canvas-card--zen .canvas-tool--action {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(125, 162, 255, 0.25);
+}
+
+.lab-canvas-card--zen .canvas-tool--toggle.is-active {
+  color: #9fc0ff;
+  border-color: rgba(125, 162, 255, 0.55);
+}
+
+.lab-canvas-card--zen .canvas-tool:disabled,
+.lab-canvas-card--zen .canvas-tool:disabled:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #8da0bf;
+}
+
+/* zen 退出按钮（带文字，明显可退）：白字 #fff 于 #2f5fe0 ≈ 5.5:1 ≥ AA */
+.canvas-zen-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 27px;
+  padding: 0 12px 0 10px;
+  border-radius: 6px;
+  border: 1px solid #7da2ff;
+  background: #2f5fe0;
+  color: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.canvas-zen-exit:hover {
+  background: #3a6ff0;
+}
+
+.canvas-zen-exit:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 1px;
+}
+
+/*
+ * FX-5：zen 左上浮动选中详情卡（hover 信息条下方）。
+ * 正文 #d7e2f4 / 次要 #c3cdd9 对 #0d1424 底 ≈ 14:1 / 9.6:1；标题列 #8da0bf ≈ 6.9:1。
+ */
+.canvas-zen-info {
+  top: 46px;
+  left: 10px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 208px;
+  max-width: 300px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(125, 162, 255, 0.35);
+  background: rgba(13, 20, 36, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d7e2f4;
+}
+
+.zen-info-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zen-info-code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  font-weight: 600;
+  color: #e8eefb;
+}
+
+.zen-info-status {
+  margin-left: auto;
+  color: #c3cdd9;
+}
+
+.zen-info-name {
+  color: #c3cdd9;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-info-row {
+  color: #c3cdd9;
+  font-variant-numeric: tabular-nums;
+}
+
+.zen-info-row--muted {
+  color: #8da0bf;
+}
+
+.zen-info-ipv4-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.zen-info-ipv4-label {
+  color: #8da0bf;
+}
+
+.zen-info-ipv4 {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  color: #e8eefb;
+  font-variant-numeric: tabular-nums;
+}
+
+.zen-info-ends {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #c3cdd9;
+}
+
+.zen-info-end {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  color: #e8eefb;
+}
+
+.zen-info-arrow {
+  color: #8da0bf;
 }
 
 .lab-canvas-toolbar {
@@ -1810,8 +2060,9 @@ a.btn:hover {
   box-shadow: inset 0 0 0 1px rgba(47, 95, 224, 0.45), 0 1px 2px rgba(23, 35, 58, 0.08);
 }
 
-/* 独立开关（链路标签）：带边框的独立按钮，激活时主色描边 */
-.canvas-tool--toggle {
+/* 独立按钮（链路标签开关 / FX-6 PNG 导出动作）：带边框的独立按钮，激活时主色描边 */
+.canvas-tool--toggle,
+.canvas-tool--action {
   border: 1px solid var(--border);
   background: #fff;
 }
@@ -1819,6 +2070,22 @@ a.btn:hover {
 .canvas-tool--toggle.is-active {
   color: var(--primary);
   border-color: rgba(47, 95, 224, 0.45);
+}
+
+/* FX-6：动作按钮禁用态（空拓扑禁止导出） */
+.canvas-tool:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.canvas-tool:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+
+.canvas-tool--toggle:disabled:hover,
+.canvas-tool--action:disabled:hover {
+  background: #fff;
 }
 
 .lab-canvas-wrap {
@@ -2045,6 +2312,91 @@ a.btn:hover {
   outline-offset: 1px;
 }
 
+/*
+ * FX-6：右键上下文菜单（纯自实现，无 cxtmenu 插件）。
+ * 深色系匹配画布面板（--dark 工程风）；正文 #d7e2f4 对 #0d1424 ≈ 14:1，
+ * 快捷键列 #8da0bf ≈ 6.9:1，均 ≥ AA；hover 主色浮层 + 白字 ≈ 11:1。
+ */
+.canvas-menu {
+  position: absolute;
+  z-index: 8;
+  min-width: 176px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid rgba(125, 162, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(13, 20, 36, 0.97);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.canvas-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #d7e2f4;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.canvas-menu-item:hover {
+  background: rgba(47, 95, 224, 0.45);
+  color: #ffffff;
+}
+
+.canvas-menu-item:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 1px;
+}
+
+.canvas-menu-label {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 快捷键提示列（右对齐、弱化；hover 提亮一档仍 ≥ AA） */
+.canvas-menu-key {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #8da0bf;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-menu-item:hover .canvas-menu-key {
+  color: #c9d6ec;
+}
+
+/*
+ * FX-6：缩放百分比 chip（缩放控制组旁，仅显示不接指针）。
+ * #c9d6ec 对底色 ≈ 12:1；与 .canvas-ctrl 同系边框/底色。
+ */
+.canvas-zoom-chip {
+  top: 13px;
+  right: 48px;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 3px 8px;
+  border: 1px solid rgba(125, 162, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(14, 22, 38, 0.88);
+  color: #c9d6ec;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* —— 迷你导航图（v0.2.2，右下角）：需接收指针（点击/拖动定位） —— */
 .lab-canvas-minimap {
   position: absolute;
@@ -2116,7 +2468,8 @@ a.btn:hover {
   display: flex;
   flex-direction: column;
   min-height: 520px;
-  height: calc(100vh - 350px);
+  /* FX-5 高度优化：与 .lab-canvas-card 同步 350px → 237px（1080p 843px 两卡等高） */
+  height: calc(100vh - 237px);
 }
 
 .lab-panel .tabs {
@@ -2130,7 +2483,12 @@ a.btn:hover {
   padding: 12px 0 12px 0;
 }
 
-/* 页头信息条 */
+/* 页头信息条（FX-5 紧凑化：只压 padding/间距，不动按钮/信息，1080p 画布高度优化） */
+.lab-pagehead {
+  padding: 12px 16px 12px;
+  margin-bottom: 12px;
+}
+
 .lab-head-meta {
   display: flex;
   align-items: center;
@@ -2173,10 +2531,18 @@ a.btn:hover {
   margin-top: 12px;
 }
 
+.lab-pagehead .lab-head-actions {
+  margin-top: 8px;
+}
+
 .lab-desc {
   color: var(--muted);
   font-size: 13px;
   margin: 4px 0 0;
+}
+
+.lab-pagehead .lab-desc {
+  margin-top: 2px;
 }
 
 /* 拓扑联动行高亮 */
@@ -2458,6 +2824,11 @@ a.btn:hover {
 @media (max-width: 1080px) {
   .lab-split {
     grid-template-columns: 1fr;
+  }
+
+  /* 窄屏堆叠：分栏把手隐藏（不可拖，折叠按钮仍可用） */
+  .lab-split-handle {
+    display: none;
   }
 
   .lab-canvas-card,

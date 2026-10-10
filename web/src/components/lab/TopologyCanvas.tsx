@@ -22,23 +22,73 @@
  * - 布局 + 交互模式 + 标签开关按工作台持久化到 sessionStorage（v2 JSON；
  *   兼容读取 v1 纯布局字符串）；prefers-reduced-motion 时关闭布局动画；
  * - 点击节点/边 → onSelect（右侧面板切换标签并定位行）；数据增量同步
- *   （保留既有节点位置，仅新增节点及其邻域参与重排）；卸载时 cy.destroy()。
+ *   （保留既有节点位置，仅新增节点及其邻域参与重排）；卸载时 cy.destroy()；
+ * - FX-6 画布能力增强：
+ *   · 右键上下文菜单（cy.on('cxttap') + 自渲染绝对定位 div，无 cxtmenu 插件）：
+ *     节点=邻域聚焦/路径追踪起点/表格定位/复制设备 ID；边=表格定位/复制链路 ID；
+ *     空白=适配视图/重置视图。菜单出现在鼠标右下、越界向对侧翻转；Esc/点击
+ *     别处/Tab 关闭；role=menu + menuitem + ↑↓/Home/End 导航，打开后焦点入菜单，
+ *     Esc 关闭还焦点；快捷键提示列（F 等）；
+ *   · PNG 快照导出：cy.png({ full, scale:2, bg: CANVAS_BG })（bg 保证不透明）
+ *     → a[download] 触发下载 netops-topology-<persistKey>.png；
+ *   · 缩放百分比 chip：cy.on('zoom') rAF 节流实时刷新（1:1 → 100%）；
+ *   · 节点位置持久化：拖拽结束（drag 标记 + free 事件 + 160ms 合并）把全部
+ *     节点 {id,x,y} 写 localStorage netops-lab.canvas.pos.<persistKey>（隐私
+ *     模式 try/catch 静默降级）；加载时恢复存档并跳过自动布局（等价 freeze
+ *     语义）；重置视图/切换自动布局时清除存档并重排；
+ *   · 键盘快捷键：F=适配视图、L=链路标签开关、Esc=清除高亮并关菜单；
+ *     输入框/textarea/contenteditable/对话框（焦点陷阱）内不抢键。
+ * - FX-5 画布全屏工作模式（zen）：
+ *   · 新增可选 props（向后兼容）：zen / onZenChange / resizeSuspended；
+ *   · 工具带最右「全屏」按钮 → 画布卡片 position:fixed inset:0（盖住侧栏/顶栏/
+ *     页头/右侧面板），工具带深色化（与画布底色一致），退出按钮显著（带文字）；
+ *   · zen 时左上浮动选中详情卡（设备：编码/名称/状态/接口 up-down/IPv4；
+ *     链路：两端设备+接口）——右侧表格不可见时信息不断档；
+ *   · 原生 Fullscreen API 两级增强：requestFullscreen 成功 = 真全屏，失败/不
+ *     支持 = 应用内 CSS zen（try/catch 静默降级）；fullscreenchange 同步：浏览
+ *     器 Esc 退原生全屏时 CSS zen 一并退（避免「盖着但非全屏」错乱态）；
+ *   · Esc 逐级链路（与 FX-6 协调）：右键菜单 → trace/focus → zen，不一键全清；
+ *   · resizeSuspended：分栏拖拽期间挂起 cy.resize（不逐帧重设画布缓冲），
+ *     拖完/zen 切换后补一次 resize + minimap（容器尺寸变化 Cytoscape 不自动
+ *     感知；平时 ResizeObserver 自动，拖拽期间手动挂起防卡顿）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import cytoscape from 'cytoscape';
-import type { CollectionReturnValue, Core, ElementDefinition, Layouts, LayoutOptions, NodeSingular, StylesheetJson } from 'cytoscape';
+import type { CollectionReturnValue, Core, EdgeSingular, ElementDefinition, Layouts, LayoutOptions, NodeSingular, StylesheetJson } from 'cytoscape';
 import type { SimEntityStatus, SimTopology } from '../../api/types';
 import type { SelectedEntity } from './selection';
+import { isUnconfiguredIPv4 } from './selection';
 import {
+  LAB_CANVAS_CTX_COPY_ID,
+  LAB_CANVAS_CTX_COPY_ID_TITLE,
+  LAB_CANVAS_CTX_COPY_LINK_ID,
+  LAB_CANVAS_CTX_COPY_LINK_ID_TITLE,
+  LAB_CANVAS_CTX_FIT,
+  LAB_CANVAS_CTX_FIT_TITLE,
+  LAB_CANVAS_CTX_FOCUS,
+  LAB_CANVAS_CTX_FOCUS_TITLE,
+  LAB_CANVAS_CTX_LOCATE,
+  LAB_CANVAS_CTX_LOCATE_LINK,
+  LAB_CANVAS_CTX_LOCATE_LINK_TITLE,
+  LAB_CANVAS_CTX_LOCATE_TITLE,
+  LAB_CANVAS_CTX_RESET,
+  LAB_CANVAS_CTX_RESET_TITLE,
+  LAB_CANVAS_CTX_TRACE,
+  LAB_CANVAS_CTX_TRACE_TITLE,
   LAB_CANVAS_EMPTY,
+  LAB_CANVAS_EXPORT,
   LAB_CANVAS_FIT,
   LAB_CANVAS_HINT,
   LAB_CANVAS_LABEL,
   LAB_CANVAS_LABELS,
   LAB_CANVAS_LEGEND_LABEL,
+  LAB_CANVAS_MENU_CANVAS,
+  LAB_CANVAS_MENU_EDGE,
+  LAB_CANVAS_MENU_NODE,
   LAB_CANVAS_RESET,
+  LAB_CANVAS_ZOOM_CURRENT,
   LAB_CANVAS_ZOOM_IN,
   LAB_CANVAS_ZOOM_OUT,
   LAB_CANVAS_ZOOM_HINT,
@@ -63,15 +113,27 @@ import {
   LAB_MODE_TRACE_HINT,
   LAB_TRACE_CLEAR,
   LAB_TRACE_DONE,
+  LAB_TRACE_EXIT_MODE,
   LAB_TRACE_PICK_A,
   LAB_TRACE_PICK_B,
   LAB_TRACE_UNREACHABLE,
+  LABWS_ZEN_ENTER,
+  LABWS_ZEN_EXIT,
+  LABWS_ZEN_EXIT_LABEL,
+  LABWS_ZEN_INFO_IFACES,
+  LABWS_ZEN_INFO_IPV4,
+  LABWS_ZEN_INFO_IPV4_MORE,
+  LABWS_ZEN_INFO_IPV4_NONE,
+  LABWS_ZEN_INFO_LABEL,
+  LABWS_ZEN_INFO_LINK_ENDS,
   LOADING_TEXT,
   SIM_STATUS_LABELS,
   format,
 } from '../../i18n';
 import {
+  IconCamera,
   IconClose,
+  IconExpand,
   IconFit,
   IconLabels,
   IconLayoutCircle,
@@ -80,6 +142,7 @@ import {
   IconLayoutFreeze,
   IconLayoutGrid,
   IconLayoutHier,
+  IconMinimize,
   IconModeFocus,
   IconModeSelect,
   IconModeTrace,
@@ -96,6 +159,25 @@ interface CanvasPrefs {
   layout: LayoutKind;
   mode: ModeKind;
   labels: boolean;
+}
+
+/** FX-6：右键菜单项（label=可见文案；title=tooltip；hint=快捷键提示列）。 */
+interface CanvasMenuItem {
+  key: string;
+  label: string;
+  title: string;
+  hint?: string;
+  run: () => void;
+}
+
+/** FX-6：右键菜单状态（cx/cy=光标点；x/y=当前左上角，越界翻转后更新）。 */
+interface CanvasMenuState {
+  cx: number;
+  cy: number;
+  x: number;
+  y: number;
+  label: string;
+  items: CanvasMenuItem[];
 }
 
 const DEFAULT_PREFS: CanvasPrefs = { layout: 'force', mode: 'select', labels: true };
@@ -160,6 +242,15 @@ const FIT_PADDING = 40;
 /** 视图按钮单步缩放系数。 */
 const ZOOM_STEP = 1.25;
 
+/** FX-6：右键菜单出现位置相对鼠标的偏移（默认右下方，越界向对侧翻转）。 */
+const MENU_CURSOR_OFFSET = 6;
+
+/** FX-6：拖拽结束后位置存档写入的合并窗口（ms；free 后一次性落盘，不在 drag 过程狂写）。 */
+const POSITION_SAVE_DELAY_MS = 160;
+
+/** FX-6：PNG 快照导出倍率。 */
+const PNG_EXPORT_SCALE = 2;
+
 /** 迷你导航图尺寸（CSS px，内部按 devicePixelRatio 放大）。 */
 const MINIMAP_W = 160;
 const MINIMAP_H = 104;
@@ -168,9 +259,11 @@ const MINIMAP_H = 104;
 const TRACE_CLASSES = 'trace-dim trace-route trace-end';
 const FOCUS_CLASSES = 'focus-dim';
 
-/** 路径追踪状态机（横幅渲染）：待选起点 → 待选终点 → 完成/不可达。 */
+/** 路径追踪状态机（横幅渲染）：待选终点 → 完成/不可达。
+ *  待选起点（pick-a）不入状态机：由渲染层直接从 mode==='trace' && trace===null 派生——
+ *  否则挂载时序（mode effect 先跑、topology 异步到达后数据 effect 再清一次）会把
+ *  引导横幅覆盖掉，且 mode 值不变时 effect 不会重跑（v0.2.3 修复）。 */
 type TraceState =
-  | { stage: 'pick-a' }
   | { stage: 'pick-b'; aCode: string }
   | { stage: 'done'; aCode: string; bCode: string; hops: number; via: string[] }
   | { stage: 'unreachable'; aCode: string; bCode: string };
@@ -220,6 +313,113 @@ function writePrefs(persistKey: string | undefined, prefs: CanvasPrefs): void {
   } catch {
     // 写失败不影响功能
   }
+}
+
+// —— FX-6：节点位置持久化（localStorage；位置数据量大且需跨会话保真，
+// 与 sessionStorage 里的轻量 prefs 分开存放；隐私模式 try/catch 静默降级） ——
+
+function positionsKey(persistKey: string | undefined): string {
+  return `netops-lab.canvas.pos.${persistKey ?? ''}`;
+}
+
+/** 读取位置存档；不存在 / JSON 损坏 / 隐私模式 → 返回 null。 */
+function readPositions(persistKey: string | undefined): Record<string, { x: number; y: number }> | null {
+  if (persistKey === undefined || persistKey === '' || typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(positionsKey(persistKey));
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const rec = parsed as Record<string, unknown>;
+    if (rec.v !== 1 || typeof rec.p !== 'object' || rec.p === null) return null;
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const [id, value] of Object.entries(rec.p as Record<string, unknown>)) {
+      if (typeof value !== 'object' || value === null) continue;
+      const v = value as Record<string, unknown>;
+      const x = Number(v.x);
+      const y = Number(v.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) out[id] = { x, y };
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 把当前全部节点 {id,x,y} 写入存档（隐私模式 / 配额写失败静默降级）。 */
+function writePositions(persistKey: string | undefined, cy: Core): void {
+  if (persistKey === undefined || persistKey === '' || typeof localStorage === 'undefined') return;
+  try {
+    const p: Record<string, { x: number; y: number }> = {};
+    cy.nodes().forEach((node) => {
+      p[node.id()] = { x: node.position('x'), y: node.position('y') };
+    });
+    localStorage.setItem(positionsKey(persistKey), JSON.stringify({ v: 1, p }));
+  } catch {
+    // 写失败不影响功能
+  }
+}
+
+/** 清除位置存档（重置视图 / 切换自动布局时）。 */
+function clearPositions(persistKey: string | undefined): void {
+  if (persistKey === undefined || persistKey === '' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(positionsKey(persistKey));
+  } catch {
+    // 忽略
+  }
+}
+
+/** 是否存在位置存档（决定重置视图是否触发「清除 + 重排」）。 */
+function hasPositions(persistKey: string | undefined): boolean {
+  if (persistKey === undefined || persistKey === '' || typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(positionsKey(persistKey)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** FX-6：剪贴板写入（navigator.clipboard 优先，旧环境 execCommand 降级）。 */
+async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.clipboard !== undefined &&
+      typeof navigator.clipboard.writeText === 'function'
+    ) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // 非安全上下文 / 权限拒绝 → execCommand 降级
+  }
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-1000px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  } catch {
+    // 剪贴板整体不可用：静默（不打断画布交互）
+  }
+}
+
+/** FX-6：快捷键抢键守卫——事件目标或当前焦点是可编辑控件时不响应。 */
+function isEditableTarget(node: EventTarget | null): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  const tag = node.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable;
+}
+
+/** FX-6：焦点在打开的对话框内（焦点陷阱）时不响应画布快捷键。 */
+function inOpenDialog(node: EventTarget | null): boolean {
+  return node instanceof Element && node.closest('[role="dialog"]') !== null;
 }
 
 /**
@@ -348,6 +548,16 @@ function placeNewNodesSpiral(cy: Core, addedIds: Set<string>): void {
       y: cy0 + radius * Math.sin(angle),
     });
   });
+}
+
+/** 布局完成后再 fit（cose 为异步仿真、grid/circle 有 300ms 动画，立即 fit 抓到的是布局前包围盒）。 */
+function fitToView(cy: Core): void {
+  cy.fit(undefined, FIT_PADDING);
+  // minZoom 在构造时已设为 0.55；fit 受其约束，这里再显式钳一次作保险
+  if (cy.zoom() < MIN_ZOOM) {
+    cy.zoom(MIN_ZOOM);
+    cy.center();
+  }
 }
 
 /** 迷你导航图坐标变换：模型坐标 → 缩略图像素（内容等比缩放并居中）。 */
@@ -513,6 +723,12 @@ interface TopologyCanvasProps {
   onSelect: (entity: SelectedEntity) => void;
   /** 布局持久化键（工作台 id）；不提供则不持久化。 */
   persistKey?: string;
+  /** FX-5：zen 全屏工作模式（画布卡片 fixed inset:0 盖住整页）。 */
+  zen?: boolean;
+  /** FX-5：zen 状态变化回调（由 LabWorkspace 持有并持久化 sessionStorage）。 */
+  onZenChange?: (zen: boolean) => void;
+  /** FX-5：分栏拖拽进行中——挂起 cy.resize，结束后补一次（避免逐帧 resize 卡顿）。 */
+  resizeSuspended?: boolean;
 }
 
 /** 悬浮信息条内容（FX-4）：节点 code / 完整名 / 状态。 */
@@ -520,6 +736,97 @@ interface HoverInfo {
   code: string;
   name: string;
   status: SimEntityStatus;
+}
+
+/** FX-5：zen 左上浮动选中详情卡内容（设备 / 接口 / 链路三种选中）。 */
+interface ZenInfo {
+  kind: 'device' | 'interface' | 'link';
+  /** 主编码（设备编码 / 链路标签）。 */
+  code: string;
+  /** 设备完整名（链路无）。 */
+  name: string | null;
+  status: SimEntityStatus;
+  /** 设备：接口 up/down 计数。 */
+  ifacesUp: number;
+  ifacesDown: number;
+  /** 设备：已配置 IPv4（'addr/prefix'，超出上限折叠计数）。 */
+  ipv4: string[];
+  ipv4More: number;
+  /** 接口选中：'接口名 · 状态' 行 + 该接口 IPv4。 */
+  ifaceLine: string | null;
+  ifaceIpv4: string | null;
+  /** 链路选中：两端 'DEV-xxx · 接口名'。 */
+  linkEnds: { a: string; z: string } | null;
+}
+
+/** FX-5：zen 详情卡 IPv4 列表展示上限（超过折叠为「等 N 个」）。 */
+const ZEN_INFO_IPV4_MAX = 4;
+
+function buildZenInfo(topology: SimTopology, selected: SelectedEntity): ZenInfo | null {
+  const emptyCounts = { ifacesUp: 0, ifacesDown: 0, ipv4: [] as string[], ipv4More: 0 };
+  if (selected.kind === 'device') {
+    const node = topology.nodes.find((n) => n.id === selected.id);
+    if (node === undefined) return null;
+    const ifacesUp = node.interfaces.filter((iface) => iface.status === 'up').length;
+    const addrs = node.interfaces
+      .filter((iface) => !isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix))
+      .map((iface) => `${iface.ipv4Addr}/${iface.ipv4Prefix}`);
+    return {
+      kind: 'device',
+      code: node.code,
+      name: node.name,
+      status: node.status,
+      ifacesUp,
+      ifacesDown: node.interfaces.length - ifacesUp,
+      ipv4: addrs.slice(0, ZEN_INFO_IPV4_MAX),
+      ipv4More: Math.max(addrs.length - ZEN_INFO_IPV4_MAX, 0),
+      ifaceLine: null,
+      ifaceIpv4: null,
+      linkEnds: null,
+    };
+  }
+  if (selected.kind === 'link') {
+    const edge = topology.edges.find((e) => e.id === selected.id);
+    if (edge === undefined) return null;
+    const ifaceName = (ifaceId: string): string => {
+      for (const node of topology.nodes) {
+        const found = node.interfaces.find((iface) => iface.id === ifaceId);
+        if (found !== undefined) return found.name;
+      }
+      return '';
+    };
+    return {
+      kind: 'link',
+      code: edge.label,
+      name: null,
+      status: edge.status,
+      ...emptyCounts,
+      ifaceLine: null,
+      ifaceIpv4: null,
+      linkEnds: {
+        a: `${edge.aDeviceCode} · ${ifaceName(edge.aInterfaceId)}`,
+        z: `${edge.zDeviceCode} · ${ifaceName(edge.zInterfaceId)}`,
+      },
+    };
+  }
+  // 接口选中：定位其所属设备 + 该接口行
+  for (const node of topology.nodes) {
+    const iface = node.interfaces.find((i) => i.id === selected.id);
+    if (iface !== undefined) {
+      const configured = !isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix);
+      return {
+        kind: 'interface',
+        code: node.code,
+        name: node.name,
+        status: node.status,
+        ...emptyCounts,
+        ifaceLine: `${iface.name} · ${SIM_STATUS_LABELS[iface.status]}`,
+        ifaceIpv4: configured ? `${iface.ipv4Addr}/${iface.ipv4Prefix}` : null,
+        linkEnds: null,
+      };
+    }
+  }
+  return null;
 }
 
 function buildElements(topology: SimTopology): ElementDefinition[] {
@@ -550,7 +857,7 @@ function buildElements(topology: SimTopology): ElementDefinition[] {
   return [...nodes, ...edges];
 }
 
-export function TopologyCanvas({ topology, selected, onSelect, persistKey }: TopologyCanvasProps) {
+export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen = false, onZenChange, resizeSuspended = false }: TopologyCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
@@ -574,6 +881,52 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
   }>({ traceTap: () => undefined, focusTap: () => undefined });
   /** 迷你导航图重绘调度（挂载期注册监听，rAF 合并 pan/zoom 高频事件）。 */
   const scheduleMinimapRef = useRef<() => void>(() => undefined);
+  // —— FX-6 状态/refs ——
+  /** 右键菜单状态（null=关闭）。 */
+  const [menu, setMenu] = useState<CanvasMenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  /** 菜单宿主容器（.lab-canvas-wrap；菜单定位与越界翻转的参照系）。 */
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  /** 打开菜单前的焦点元素（Esc 关闭时还焦点）。 */
+  const menuReturnFocusRef = useRef<HTMLElement | null>(null);
+  /** 当前缩放百分比（zoom 事件 → rAF 节流刷新）。 */
+  const [zoomPct, setZoomPct] = useState(100);
+  /** persistKey 镜像（cxttap / 位置存档 / PNG 文件名在挂载期闭包里读最新值）。 */
+  const persistKeyRef = useRef(persistKey);
+  /** 位置存档生效（恢复存档或 freeze）→ 新增节点螺旋落位而非局部重排。 */
+  const manualLayoutRef = useRef(false);
+  /** 当前 persistKey 是否已尝试恢复位置存档（首个数据批次到达时执行一次）。 */
+  const posRestoreDoneRef = useRef(false);
+  /** 拖拽结束后待落盘的位置存档定时器（合并窗口内去抖）。 */
+  const posSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 右键「路径起点」跨模式切换传递（模式切换 effect 消费，避免闭包过期）。 */
+  const pendingContextTraceRef = useRef<string | null>(null);
+  /** 菜单动作转发（挂载期注册一次的 cxttap 处理器经 ref 读到最新实现）。 */
+  const menuActionsRef = useRef<{
+    focusTap: (id: string) => void;
+    traceStart: (id: string) => void;
+  }>({ focusTap: () => undefined, traceStart: () => undefined });
+  /** 视图动作转发（全局快捷键 F/L、菜单 fit/reset、外部关闭读取）。 */
+  const viewActionsRef = useRef<{
+    fitView: () => void;
+    resetView: () => void;
+    toggleLabels: () => void;
+    exportPng: () => void;
+    closeMenu: (restoreFocus: boolean) => void;
+  }>({
+    fitView: () => undefined,
+    resetView: () => undefined,
+    toggleLabels: () => undefined,
+    exportPng: () => undefined,
+    closeMenu: () => undefined,
+  });
+  // —— FX-5 zen / 分栏 resize 状态 ——
+  /** zen 镜像（fullscreenchange 监听器读最新值，避免闭包过期）。 */
+  const zenRef = useRef(zen);
+  /** onZenChange 镜像（挂载期闭包读最新实现）。 */
+  const onZenChangeRef = useRef(onZenChange);
+  /** resizeSuspended 镜像（挂载期注册一次的 ResizeObserver 闭包里读最新值）。 */
+  const resizeSuspendedRef = useRef(false);
 
   const layout = prefs.layout;
   const mode = prefs.mode;
@@ -584,22 +937,35 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
   }, [onSelect]);
 
   useEffect(() => {
+    onZenChangeRef.current = onZenChange;
+  }, [onZenChange]);
+
+  useEffect(() => {
+    zenRef.current = zen;
+  }, [zen]);
+
+  useEffect(() => {
+    resizeSuspendedRef.current = resizeSuspended;
+  }, [resizeSuspended]);
+
+  useEffect(() => {
     writePrefs(persistKey, prefs);
   }, [persistKey, prefs]);
+
+  /** FX-6：persistKey 变化（路由切换工作台，组件不重挂载）→ 重置位置存档状态。 */
+  useEffect(() => {
+    persistKeyRef.current = persistKey;
+    posRestoreDoneRef.current = false;
+    manualLayoutRef.current = false;
+    if (posSaveTimerRef.current !== null) {
+      clearTimeout(posSaveTimerRef.current);
+      posSaveTimerRef.current = null;
+    }
+  }, [persistKey]);
 
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
-
-  /** 布局完成后再 fit（cose 为异步仿真、grid/circle 有 300ms 动画，立即 fit 抓到的是布局前包围盒）。 */
-  function fitToView(cy: Core): void {
-    cy.fit(undefined, FIT_PADDING);
-    // minZoom 在构造时已设为 0.55；fit 受其约束，这里再显式钳一次作保险
-    if (cy.zoom() < MIN_ZOOM) {
-      cy.zoom(MIN_ZOOM);
-      cy.center();
-    }
-  }
 
   /**
    * 启动布局：显式传入布局类型（v0.2.2 修复 v0.2.1 的闭包陷阱——旧实现
@@ -778,19 +1144,181 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
     actionsRef.current = { traceTap: handleTraceTap, focusTap: handleFocusTap };
   });
 
-  // 模式切换 → 清掉上一模式的视觉残留
+  // FX-6：菜单 / 视图动作转发（挂载期注册一次的 cxttap、全局快捷键经 ref 读到最新实现）
   useEffect(() => {
+    menuActionsRef.current = { focusTap: contextFocusTap, traceStart: contextTraceStart };
+    viewActionsRef.current = { fitView, resetView, toggleLabels, exportPng, closeMenu };
+  });
+
+  // 模式切换 → 清掉上一模式的视觉残留（pick-a 引导横幅由渲染层从 mode/trace 派生）
+  // （FX-6 例外：右键「路径起点」——先切换到路径模式再注入起点，跳过清除）
+  useEffect(() => {
+    const pendingTrace = pendingContextTraceRef.current;
+    if (pendingTrace !== null) {
+      pendingContextTraceRef.current = null;
+      // 清上一模式的聚焦残留（traceTap 只清路径类，不清聚焦类）
+      cyRef.current?.elements().removeClass(FOCUS_CLASSES);
+      actionsRef.current.traceTap(pendingTrace);
+      return;
+    }
     clearModeArtifacts();
   }, [mode, clearModeArtifacts]);
 
-  // Esc 清除路径/聚焦（与对话框 Esc 并存：清画布痕迹无副作用）
+  /**
+   * FX-5：路径追踪/邻域聚焦是否有激活痕迹（Esc 逐级链路第二级判据）。
+   * trace 看 traceRef 起点；focus 无 React 状态（直接加类），查 .focus-dim 元素。
+   */
+  const modeArtifactsActive = useCallback((): boolean => {
+    if (traceRef.current.aId !== null) return true;
+    const cy = cyRef.current;
+    if (cy === null || cy.destroyed()) return false;
+    return cy.elements().filter('.focus-dim').nonempty();
+  }, []);
+
+  // Esc 逐级链路（FX-5，与 FX-6 协调，不一键全清）：
+  //   右键菜单开 → 先关菜单（还焦点）→ trace/focus 激活 → 清痕迹 → zen → 退 zen。
+  // 对话框（焦点陷阱）打开时 Esc 归对话框（document 级监听先于 window，这里让路）。
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      if (event.key === 'Escape') clearModeArtifacts();
+      if (event.key !== 'Escape') return;
+      if (inOpenDialog(event.target) || inOpenDialog(document.activeElement)) return;
+      if (menu !== null) {
+        viewActionsRef.current.closeMenu(true);
+        return;
+      }
+      if (modeArtifactsActive()) {
+        clearModeArtifacts();
+        return;
+      }
+      if (zen) {
+        onZenChangeRef.current?.(false);
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [clearModeArtifacts]);
+  }, [menu, zen, clearModeArtifacts, modeArtifactsActive]);
+
+  // —— FX-5：原生 Fullscreen API 两级增强 ——
+  // 进入 zen：尝试 requestFullscreen（成功 = 真全屏；无权限/不支持/非手势 → 拒绝
+  // 或抛错，静默降级为应用内 CSS zen）；监听 fullscreenchange，用户在原生全屏按
+  // Esc 退出时同步退 zen（CSS 层一并退，避免「盖着但非全屏」错乱态）。
+  // 目标元素选 document.documentElement 而非画布卡片：真全屏时目标进入浏览器
+  // 顶层（top layer，高于一切 z-index）——若用卡片会盖住 Toast(z100)；整文档
+  // 全屏则 Toast 仍按 z-index 100 浮在 zen 卡片(z60) 之上。
+  // 退出 zen（按钮/链路 Esc）：若仍在原生全屏则主动 exitFullscreen。
+  useEffect(() => {
+    if (zen) {
+      const el = document.documentElement;
+      if (typeof el.requestFullscreen === 'function') {
+        try {
+          const request = el.requestFullscreen();
+          if (request !== undefined && typeof request.then === 'function') {
+            request.then(undefined, () => undefined);
+          }
+        } catch {
+          // 旧浏览器同步抛错 → 应用内 zen 降级
+        }
+      }
+      const onFullscreenChange = (): void => {
+        if (document.fullscreenElement === null && zenRef.current) {
+          onZenChangeRef.current?.(false);
+          // 顺带收起右键菜单：菜单是瞬时 UI，不应在模式退出后仍悬浮在画布上
+          // （浏览器 Esc 退原生全屏时 keydown 被浏览器消费，页面链路收不到——
+          // 若不在此关闭，菜单会残留到退出 zen 之后）。
+          viewActionsRef.current.closeMenu(false);
+        }
+      };
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+      return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+    }
+    if (typeof document.exitFullscreen === 'function' && document.fullscreenElement !== null) {
+      try {
+        const exit = document.exitFullscreen();
+        if (exit !== undefined && typeof exit.then === 'function') {
+          exit.then(undefined, () => undefined);
+        }
+      } catch {
+        // 忽略（非全屏态调用会直接 resolve）
+      }
+    }
+    return undefined;
+  }, [zen]);
+
+  // —— FX-5：resize 补偿 ——
+  // 分栏拖拽结束（resizeSuspended 翻回 false）或 zen 切换后：补一次 cy.resize
+  // + minimap 重绘（容器尺寸变化 Cytoscape 不会自动感知；拖拽期间 ResizeObserver
+  // 被挂起，不逐帧 resize，这里一次补齐；视口 zoom/pan 保持不变）。
+  useEffect(() => {
+    if (resizeSuspended) return undefined;
+    const raf = requestAnimationFrame(() => {
+      const cy = cyRef.current;
+      if (cy === null || cy.destroyed()) return;
+      cy.resize();
+      scheduleMinimapRef.current();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [resizeSuspended, zen]);
+
+  // —— FX-6：键盘快捷键（F=适配视图、L=切换链路标签；仅画布可见时生效） ——
+  // 抢键守卫：输入框/textarea/contenteditable/对话框（焦点陷阱）内不响应；
+  // 带修饰键（Ctrl/Cmd/Alt，如 Ctrl+F 浏览器查找）不响应；按住不放不重复触发。
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return;
+      if (inOpenDialog(event.target) || inOpenDialog(document.activeElement)) return;
+      const key = event.key.toLowerCase();
+      if (key === 'f') {
+        viewActionsRef.current.closeMenu(false);
+        viewActionsRef.current.fitView();
+      } else if (key === 'l') {
+        viewActionsRef.current.closeMenu(false);
+        viewActionsRef.current.toggleLabels();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // —— FX-6：菜单外按下指针 → 关闭（捕获阶段，先于画布 tap 生效；菜单内点击不关） ——
+  useEffect(() => {
+    if (menu === null) return undefined;
+    function onPointerDown(event: PointerEvent): void {
+      const el = menuRef.current;
+      if (el !== null && event.target instanceof Node && el.contains(event.target)) return;
+      viewActionsRef.current.closeMenu(false);
+    }
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, [menu]);
+
+  // —— FX-6：菜单落位（鼠标右下出现，越界向对侧翻转；稳定后焦点入首项） ————
+  useLayoutEffect(() => {
+    if (menu === null) return;
+    const el = menuRef.current;
+    const wrap = wrapRef.current;
+    if (el === null || wrap === null) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const wrapW = wrap.clientWidth;
+    const wrapH = wrap.clientHeight;
+    let x = menu.cx + MENU_CURSOR_OFFSET;
+    if (x + w > wrapW - 4) x = menu.cx - w - MENU_CURSOR_OFFSET;
+    let y = menu.cy + MENU_CURSOR_OFFSET;
+    if (y + h > wrapH - 4) y = menu.cy - h - MENU_CURSOR_OFFSET;
+    x = Math.min(Math.max(x, 4), Math.max(4, wrapW - w - 4));
+    y = Math.min(Math.max(y, 4), Math.max(4, wrapH - h - 4));
+    if (x !== menu.x || y !== menu.y) {
+      setMenu((m) => (m === menu ? { ...m, x, y } : m));
+      return;
+    }
+    // 焦点管理：打开后焦点进入菜单（重排时焦点已在菜单内则不重复抢）
+    const active = el.ownerDocument.activeElement;
+    if (active === null || !el.contains(active)) {
+      el.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
+    }
+  }, [menu]);
 
   // —— 实例生命周期：只创建一次 ——
   useEffect(() => {
@@ -800,8 +1328,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
       elements: [],
       style: CY_STYLE as unknown as StylesheetJson,
       layout: { name: 'cose' },
-      wheelSensitivity: 0.2,
       autounselectify: true,
+      // FX-6：不再设置 wheelSensitivity（v0.2.x 曾用 0.2 调低滚轮灵敏度）——
+      // Cytoscape 对任何自定义值都会打印建议性 console warning，工业控制台
+      // 要求零警告；默认 1 即主流 Cytoscape 应用（Grafana/Kiali 同源）手感。
       // 缩放下限：fit/滚轮都不会低于该值，保证 27 节点拓扑的默认视图下标签可读
       minZoom: MIN_ZOOM,
     });
@@ -903,11 +1433,146 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
     cy.on('position', '*', scheduleMinimap);
     cy.on('layoutstop', scheduleMinimap);
 
+    // —— FX-6：右键上下文菜单（cxttap=右键松开；event.target=元素或 cy 核心） ——
+    // Cytoscape 自身已对容器 contextmenu preventDefault（原生菜单不弹出），
+    // 这里按 target 类型组装菜单项；坐标取原生事件相对 wrap 的偏移。
+    // 还焦目标：右键 pointerdown 捕获阶段（浏览器把焦点挪到 body 之前）快照
+    // 当前焦点元素，Esc 关闭时精确还原（如工具带按钮），比 cxttap 时再取
+    // （彼时焦点已被 mousedown 默认行为打到 body）更有意义。
+    const wrapEl = wrapRef.current;
+    const onWrapRightPointerDown = (e: PointerEvent): void => {
+      if (e.button !== 2) return;
+      const active = document.activeElement;
+      menuReturnFocusRef.current = active instanceof HTMLElement ? active : null;
+    };
+    if (wrapEl !== null) {
+      wrapEl.addEventListener('pointerdown', onWrapRightPointerDown, true);
+    }
+    cy.on('cxttap', (event) => {
+      const wrap = wrapRef.current;
+      if (wrap === null) return;
+      const native = event.originalEvent;
+      const rect = wrap.getBoundingClientRect();
+      const cx = native.clientX - rect.left;
+      const cyPos = native.clientY - rect.top;
+      const openMenu = (label: string, items: CanvasMenuItem[]): void => {
+        // 快照缺失（异常路径）时退回当前焦点元素
+        if (menuReturnFocusRef.current === null) {
+          const active = document.activeElement;
+          menuReturnFocusRef.current = active instanceof HTMLElement ? active : null;
+        }
+        setMenu({ cx, cy: cyPos, x: cx, y: cyPos, label, items });
+      };
+      const target = event.target as NodeSingular | EdgeSingular | Core | null | undefined;
+      if (target === cy) {
+        // 空白画布：视图菜单（空拓扑不出菜单）
+        if (cy.nodes().length === 0) return;
+        openMenu(LAB_CANVAS_MENU_CANVAS, [
+          {
+            key: 'fit',
+            label: LAB_CANVAS_CTX_FIT,
+            title: LAB_CANVAS_CTX_FIT_TITLE,
+            hint: 'F',
+            run: () => viewActionsRef.current.fitView(),
+          },
+          {
+            key: 'reset',
+            label: LAB_CANVAS_CTX_RESET,
+            title: LAB_CANVAS_CTX_RESET_TITLE,
+            run: () => viewActionsRef.current.resetView(),
+          },
+        ]);
+        return;
+      }
+      // 命中节点或边（二次收窄：Core 分支已返回）
+      const ele = target as NodeSingular | EdgeSingular | null | undefined;
+      if (ele === null || ele === undefined) return;
+      if (ele.isNode()) {
+        const id = ele.id();
+        const code = String(ele.data('code') ?? id);
+        openMenu(LAB_CANVAS_MENU_NODE, [
+          {
+            key: 'focus',
+            label: LAB_CANVAS_CTX_FOCUS,
+            title: LAB_CANVAS_CTX_FOCUS_TITLE,
+            run: () => menuActionsRef.current.focusTap(id),
+          },
+          {
+            key: 'trace',
+            label: LAB_CANVAS_CTX_TRACE,
+            title: LAB_CANVAS_CTX_TRACE_TITLE,
+            run: () => menuActionsRef.current.traceStart(id),
+          },
+          {
+            key: 'locate',
+            label: LAB_CANVAS_CTX_LOCATE,
+            title: LAB_CANVAS_CTX_LOCATE_TITLE,
+            run: () => onSelectRef.current({ kind: 'device', id }),
+          },
+          {
+            key: 'copy',
+            label: LAB_CANVAS_CTX_COPY_ID,
+            title: LAB_CANVAS_CTX_COPY_ID_TITLE,
+            run: () => void copyTextToClipboard(code),
+          },
+        ]);
+        return;
+      }
+      if (ele.isEdge()) {
+        const id = ele.id();
+        const label = String(ele.data('label') ?? '') || id;
+        openMenu(LAB_CANVAS_MENU_EDGE, [
+          {
+            key: 'locate',
+            label: LAB_CANVAS_CTX_LOCATE_LINK,
+            title: LAB_CANVAS_CTX_LOCATE_LINK_TITLE,
+            run: () => onSelectRef.current({ kind: 'link', id }),
+          },
+          {
+            key: 'copy',
+            label: LAB_CANVAS_CTX_COPY_LINK_ID,
+            title: LAB_CANVAS_CTX_COPY_LINK_ID_TITLE,
+            run: () => void copyTextToClipboard(label),
+          },
+        ]);
+      }
+    });
+
+    // —— FX-6：缩放百分比（zoom 事件 → rAF 节流合并 setState；fit/1:1 均会触发） ——
+    let zoomRaf: number | null = null;
+    let zoomPctPending = 100;
+    cy.on('zoom', () => {
+      zoomPctPending = Math.round(cy.zoom() * 100);
+      if (zoomRaf !== null) return;
+      zoomRaf = requestAnimationFrame(() => {
+        zoomRaf = null;
+        setZoomPct(zoomPctPending);
+      });
+    });
+
+    // —— FX-6：拖拽结束（free）→ 节点位置存档（160ms 合并窗口，不在 drag 过程狂写）；
+    // 纯点击（grab→free 无位移，drag 事件未触发）不落盘。 ——
+    let nodeDragMoved = false;
+    cy.on('drag', 'node', () => {
+      nodeDragMoved = true;
+    });
+    cy.on('free', 'node', () => {
+      if (!nodeDragMoved) return;
+      nodeDragMoved = false;
+      if (posSaveTimerRef.current !== null) clearTimeout(posSaveTimerRef.current);
+      posSaveTimerRef.current = setTimeout(() => {
+        posSaveTimerRef.current = null;
+        if (!cy.destroyed()) writePositions(persistKeyRef.current, cy);
+      }, POSITION_SAVE_DELAY_MS);
+    });
+
     cyRef.current = cy;
     const observer =
       typeof ResizeObserver === 'undefined'
         ? null
         : new ResizeObserver(() => {
+            // FX-5：分栏拖拽期间挂起（不逐帧重设画布缓冲，拖完由补偿 effect 补一次）
+            if (resizeSuspendedRef.current) return;
             cy.resize();
           });
     if (observer !== null && containerRef.current !== null) {
@@ -923,7 +1588,15 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
       hoverCleanupRef.current = null;
       if (hoverClearTimer !== null) clearTimeout(hoverClearTimer);
       if (minimapRaf !== null) cancelAnimationFrame(minimapRaf);
+      if (zoomRaf !== null) cancelAnimationFrame(zoomRaf);
+      if (posSaveTimerRef.current !== null) {
+        // 卸载前冲刷未落盘的位置存档（拖完 160ms 合并窗口内直接 reload/切页不丢位置）
+        clearTimeout(posSaveTimerRef.current);
+        posSaveTimerRef.current = null;
+        if (!cy.destroyed()) writePositions(persistKeyRef.current, cy);
+      }
       scheduleMinimapRef.current = () => undefined;
+      if (wrapEl !== null) wrapEl.removeEventListener('pointerdown', onWrapRightPointerDown, true);
       window.removeEventListener('resize', onWindowResize);
       observer?.disconnect();
       layoutRunRef.current?.stop();
@@ -938,8 +1611,9 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
   useEffect(() => {
     const cy = cyRef.current;
     if (cy === null) return;
-    // 数据变更后旧路径/聚焦必然过期，先清视觉再同步数据
+    // 数据变更后旧路径/聚焦/右键菜单必然过期，先清视觉再同步数据
     clearModeArtifacts();
+    setMenu(null);
     const elements = topology === null ? [] : buildElements(topology);
     const wanted = new Set(elements.map((el) => el.data.id as string));
 
@@ -963,8 +1637,30 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
     // 链路标签开关作用到（可能新加入的）边
     cy.edges().toggleClass('nolabel', !edgeLabels);
     if (addedIds.size > 0) {
-      if (layout === 'freeze') {
-        // 锁定模式：不打乱手动排布，新节点围绕质心螺旋落位
+      // FX-6：首个数据批次到达时尝试恢复位置存档（跳过自动布局，等价 freeze 语义）
+      if (!posRestoreDoneRef.current) {
+        posRestoreDoneRef.current = true;
+        const stored = readPositions(persistKeyRef.current);
+        if (stored !== null) {
+          const uncovered = new Set<string>(addedIds);
+          for (const [id, pos] of Object.entries(stored)) {
+            const node = cy.getElementById(id);
+            if (node.nonempty()) {
+              node.position(pos);
+              uncovered.delete(id);
+            }
+          }
+          // 存档之后新增的节点：围绕既有质心螺旋落位（不打乱已恢复的排布）
+          if (uncovered.size > 0) placeNewNodesSpiral(cy, uncovered);
+          manualLayoutRef.current = true;
+          fitToView(cy);
+          scheduleMinimapRef.current();
+          return;
+        }
+        manualLayoutRef.current = layout === 'freeze';
+      }
+      if (manualLayoutRef.current || layout === 'freeze') {
+        // 锁定/手动排布模式：不打乱手动排布，新节点围绕质心螺旋落位
         placeNewNodesSpiral(cy, addedIds);
         fitToView(cy);
         scheduleMinimapRef.current();
@@ -995,13 +1691,22 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
     setPrefs((p) => ({ ...p, layout: kind }));
     const cy = cyRef.current;
     if (cy === null) return;
+    // 取消未落盘的位置存档写入（布局即将重排，旧拖拽位置作废）
+    if (posSaveTimerRef.current !== null) {
+      clearTimeout(posSaveTimerRef.current);
+      posSaveTimerRef.current = null;
+    }
     if (kind === 'freeze') {
       // 锁定：停在当前排布，不动任何节点
       layoutRunRef.current?.stop();
       layoutRunRef.current = null;
+      manualLayoutRef.current = true;
       scheduleMinimapRef.current();
       return;
     }
+    // FX-6：切换到自动布局 → 清除手动位置存档（下次 reload 不再恢复旧排布）
+    clearPositions(persistKeyRef.current);
+    manualLayoutRef.current = false;
     // 显式传新 kind：状态更新是异步的，闭包里的旧值不可靠（v0.2.1 的回归根源）
     startLayout(cy, kind);
   }
@@ -1031,8 +1736,121 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
   function resetView(): void {
     const cy = cyRef.current;
     if (cy === null) return;
+    // FX-6：存在手动排布存档 → 清除并按当前布局重排（freeze 除外：无自动布局可跑，
+    // 仅缩放 1:1 + 居中；重排路径由布局 stop 回调自动 fit）
+    if (hasPositions(persistKeyRef.current)) {
+      if (posSaveTimerRef.current !== null) {
+        clearTimeout(posSaveTimerRef.current);
+        posSaveTimerRef.current = null;
+      }
+      clearPositions(persistKeyRef.current);
+      if (layout !== 'freeze') {
+        manualLayoutRef.current = false;
+        startLayout(cy, layout);
+        return;
+      }
+    }
     cy.zoom(1);
     cy.center();
+  }
+
+  // —— FX-6：PNG 快照导出（完整拓扑、2 倍分辨率、bg 填充 CANVAS_BG 保证不透明） ——
+  function exportPng(): void {
+    const cy = cyRef.current;
+    if (cy === null || cy.destroyed() || cy.nodes().length === 0) return;
+    let dataUrl = '';
+    try {
+      dataUrl = cy.png({ full: true, scale: PNG_EXPORT_SCALE, bg: CANVAS_BG, output: 'base64uri' });
+    } catch {
+      return; // 渲染异常（超大画布等）：静默放弃导出
+    }
+    if (typeof dataUrl !== 'string' || dataUrl === '') return;
+    const key = persistKeyRef.current;
+    const filename = key !== undefined && key !== '' ? `netops-topology-${key}.png` : 'netops-topology.png';
+    const anchor = document.createElement('a');
+    anchor.href = dataUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  }
+
+  /** FX-6：关闭右键菜单（restoreFocus=true 时把焦点还给打开前的元素）。 */
+  function closeMenu(restoreFocus: boolean): void {
+    if (restoreFocus) {
+      const el = menuReturnFocusRef.current;
+      if (el !== null && el.isConnected) el.focus();
+    }
+    menuReturnFocusRef.current = null;
+    setMenu(null);
+  }
+
+  /**
+   * FX-6：右键「设为路径追踪起点」——切换到路径模式并以该设备为起点。
+   * 模式切换 effect 会清上一模式残留，用 pending ref 把起点注入到切换之后
+   * （已在路径模式则直接开始新路径）。
+   */
+  function contextTraceStart(id: string): void {
+    if (modeRef.current === 'trace') {
+      actionsRef.current.traceTap(id);
+      return;
+    }
+    pendingContextTraceRef.current = id;
+    switchMode('trace');
+  }
+
+  /**
+   * FX-6：右键「邻域聚焦」——先清路径/聚焦残留再执行（等价 focus 模式点击
+   * 该节点的一跳压暗效果；模式本身不切换，一次性动作，Esc 取消）。
+   */
+  function contextFocusTap(id: string): void {
+    const cy = cyRef.current;
+    if (cy === null) return;
+    cy.elements().removeClass(TRACE_CLASSES);
+    cy.elements().removeClass(FOCUS_CLASSES);
+    traceRef.current = { aId: null, bId: null };
+    setTrace(null);
+    actionsRef.current.focusTap(id);
+  }
+
+  /** FX-6：执行菜单项动作并关闭菜单。 */
+  function runMenuItem(item: CanvasMenuItem): void {
+    closeMenu(false);
+    item.run();
+  }
+
+  /** FX-6：菜单键盘导航（↑↓/Home/End 循环、Esc 仅关菜单并还焦点（FX-5 逐级链路，
+   * 不顺手清 trace/focus——那属于下一级）、Tab 关闭放行）。 */
+  function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    const el = menuRef.current;
+    if (el === null) return;
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeMenu(true);
+      return;
+    }
+    if (event.key === 'Tab') {
+      closeMenu(false);
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+      event.stopPropagation();
+      event.preventDefault();
+      const buttons = Array.from(el.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'));
+      if (buttons.length === 0) return;
+      let next: HTMLButtonElement | undefined;
+      if (event.key === 'Home') {
+        next = buttons[0];
+      } else if (event.key === 'End') {
+        next = buttons[buttons.length - 1];
+      } else {
+        const current = buttons.findIndex((btn) => btn === document.activeElement);
+        const dir = event.key === 'ArrowDown' ? 1 : -1;
+        const idx = current === -1 ? (dir === 1 ? 0 : buttons.length - 1) : (current + dir + buttons.length) % buttons.length;
+        next = buttons[idx];
+      }
+      next?.focus();
+    }
   }
 
   // —— 缩略图指针交互：按下/拖动持续以指针位置为中心 ——
@@ -1064,15 +1882,22 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
     [topology],
   );
 
+  /** FX-5：zen 左上浮动选中详情卡（无选中/选中实体不在拓扑中 → 不显示）。 */
+  const zenInfo = useMemo(() => {
+    if (!zen || selected === null || topology === null) return null;
+    return buildZenInfo(topology, selected);
+  }, [zen, selected, topology]);
+
   const hintText =
     mode === 'trace' ? LAB_MODE_TRACE_HINT : mode === 'focus' ? LAB_MODE_FOCUS_HINT : LAB_CANVAS_HINT;
 
-  /** 路径追踪横幅文案（v0.2.2）。 */
+  /** 路径追踪横幅文案（v0.2.2；v0.2.3 pick-a 改为渲染层派生）。 */
   let traceBanner: { className: string; text: string } | null = null;
-  if (trace !== null) {
-    if (trace.stage === 'pick-a') {
-      traceBanner = { className: 'lab-canvas-trace--pick', text: LAB_TRACE_PICK_A };
-    } else if (trace.stage === 'pick-b') {
+  if (mode === 'trace' && trace === null) {
+    // 路径模式下尚未选定起点：引导横幅（数据刷新/清除路径后自然回到此态）
+    traceBanner = { className: 'lab-canvas-trace--pick', text: LAB_TRACE_PICK_A };
+  } else if (trace !== null) {
+    if (trace.stage === 'pick-b') {
       traceBanner = { className: 'lab-canvas-trace--pick', text: format(LAB_TRACE_PICK_B, { a: trace.aCode }) };
     } else if (trace.stage === 'done') {
       // 途经列表过长时折叠为「前 6 台 + 等 N 台」，避免横幅被撑爆（关键信息是跳数）
@@ -1113,8 +1938,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
     { kind: 'focus', label: LAB_MODE_FOCUS, title: '聚焦模式（点击设备，仅保留其一跳邻域）', icon: <IconModeFocus /> },
   ];
 
+  const zenCardCls: string = `lab-canvas-card card${zen ? ' lab-canvas-card--zen' : ''}`;
+
   return (
-    <div className="lab-canvas-card card" aria-label={LAB_CANVAS_LABEL}>
+    <div className={zenCardCls} aria-label={LAB_CANVAS_LABEL}>
       {/* 工具带（v0.2.2 图标化分段控件）：布局 6 态 + 交互模式 3 态 + 链路标签开关 */}
       <div className="lab-canvas-toolbar" role="toolbar" aria-label={LAB_CANVAS_LABEL}>
         <span className="lab-canvas-toolbar-label">{LAB_LAYOUT}</span>
@@ -1161,9 +1988,44 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
         >
           <IconLabels />
         </button>
+        <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
+        {/* FX-6：PNG 快照导出（空拓扑禁用） */}
+        <button
+          type="button"
+          className="canvas-tool canvas-tool--action"
+          title={LAB_CANVAS_EXPORT}
+          aria-label={LAB_CANVAS_EXPORT}
+          disabled={empty}
+          onClick={exportPng}
+        >
+          <IconCamera />
+        </button>
         <span className="lab-canvas-toolbar-hint">{hintText}</span>
+        {/* FX-5：zen 全屏工作模式（工具带最右；zen 中变为带文字的退出按钮） */}
+        {zen ? (
+          <button
+            type="button"
+            className="canvas-zen-exit"
+            title={LABWS_ZEN_EXIT}
+            aria-label={LABWS_ZEN_EXIT}
+            onClick={() => onZenChange?.(false)}
+          >
+            <IconMinimize size={14} />
+            <span>{LABWS_ZEN_EXIT_LABEL}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="canvas-tool canvas-tool--action"
+            title={LABWS_ZEN_ENTER}
+            aria-label={LABWS_ZEN_ENTER}
+            onClick={() => onZenChange?.(true)}
+          >
+            <IconExpand />
+          </button>
+        )}
       </div>
-      <div className="lab-canvas-wrap lab-canvas-wrap--dark">
+      <div ref={wrapRef} className="lab-canvas-wrap lab-canvas-wrap--dark">
         <div ref={containerRef} className="lab-canvas" />
         {/* 视图控制（右上角）与图例（左下角）：容器不拦截指针，仅控件可点 */}
         <div className="lab-canvas-overlay lab-canvas-controls" role="toolbar" aria-label={LAB_CANVAS_LABEL} title={LAB_CANVAS_ZOOM_HINT}>
@@ -1204,6 +2066,17 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
             <IconResetView />
           </button>
         </div>
+        {/* FX-6：缩放百分比 chip（缩放控制组旁，仅显示不接指针；1:1 → 100%） */}
+        {!empty && (
+          <div
+            className="lab-canvas-overlay canvas-zoom-chip"
+            role="status"
+            aria-live="off"
+            title={LAB_CANVAS_ZOOM_CURRENT}
+          >
+            {zoomPct}%
+          </div>
+        )}
         {/* FX-4：hover 信息条（左上角，避开右上角视图控件）：code · 完整名 · 状态 */}
         {hoverInfo !== null && (
           <div className="lab-canvas-overlay lab-canvas-hoverinfo" role="status">
@@ -1217,6 +2090,66 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
             <span className="hoverinfo-status">{SIM_STATUS_LABELS[hoverInfo.status]}</span>
           </div>
         )}
+        {/* FX-5：zen 左上浮动选中详情卡（位于 hover 信息条下方；无选中不显示。
+            zen 中右侧表格不可见，画布选中后信息在此不断档） */}
+        {zenInfo !== null && (
+          <div className="lab-canvas-overlay canvas-zen-info" role="status" aria-label={LABWS_ZEN_INFO_LABEL}>
+            <div className="zen-info-head">
+              <span className={`hoverinfo-dot hoverinfo-dot--${zenInfo.status}`} aria-hidden="true" />
+              <span className="zen-info-code">{zenInfo.code}</span>
+              <span className="zen-info-status">{SIM_STATUS_LABELS[zenInfo.status]}</span>
+            </div>
+            {zenInfo.name !== null && (
+              <div className="zen-info-name" title={zenInfo.name}>
+                {zenInfo.name}
+              </div>
+            )}
+            {zenInfo.kind === 'device' && (
+              <div className="zen-info-row">
+                {format(LABWS_ZEN_INFO_IFACES, {
+                  total: zenInfo.ifacesUp + zenInfo.ifacesDown,
+                  up: zenInfo.ifacesUp,
+                  down: zenInfo.ifacesDown,
+                })}
+              </div>
+            )}
+            {zenInfo.ifaceLine !== null && <div className="zen-info-row">{zenInfo.ifaceLine}</div>}
+            {zenInfo.kind === 'device' && (
+              <div className="zen-info-ipv4-block">
+                <div className="zen-info-ipv4-label">{LABWS_ZEN_INFO_IPV4}</div>
+                {zenInfo.ipv4.length === 0 ? (
+                  <div className="zen-info-row zen-info-row--muted">{LABWS_ZEN_INFO_IPV4_NONE}</div>
+                ) : (
+                  <>
+                    {zenInfo.ipv4.map((addr) => (
+                      <div key={addr} className="zen-info-ipv4">
+                        {addr}
+                      </div>
+                    ))}
+                    {zenInfo.ipv4More > 0 && (
+                      <div className="zen-info-row zen-info-row--muted">
+                        {format(LABWS_ZEN_INFO_IPV4_MORE, { n: zenInfo.ipv4More })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+            {zenInfo.kind === 'interface' && zenInfo.ifaceIpv4 !== null && (
+              <div className="zen-info-ipv4">{zenInfo.ifaceIpv4}</div>
+            )}
+            {zenInfo.linkEnds !== null && (
+              <div className="zen-info-ipv4-block">
+                <div className="zen-info-ipv4-label">{LABWS_ZEN_INFO_LINK_ENDS}</div>
+                <div className="zen-info-ends">
+                  <span className="zen-info-end">{zenInfo.linkEnds.a}</span>
+                  <span className="zen-info-arrow" aria-hidden="true">↔</span>
+                  <span className="zen-info-end">{zenInfo.linkEnds.z}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {/* 路径追踪横幅（v0.2.2，顶部居中）：待选 → 结果（跳数/途经/不可达） */}
         {traceBanner !== null && (
           <div className={`lab-canvas-overlay lab-canvas-trace ${traceBanner.className}`} role="status" aria-live="polite">
@@ -1224,9 +2157,17 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
             <button
               type="button"
               className="trace-close"
-              title={LAB_TRACE_CLEAR}
-              aria-label={LAB_TRACE_CLEAR}
-              onClick={clearModeArtifacts}
+              title={mode === 'trace' && trace === null ? LAB_TRACE_EXIT_MODE : LAB_TRACE_CLEAR}
+              aria-label={mode === 'trace' && trace === null ? LAB_TRACE_EXIT_MODE : LAB_TRACE_CLEAR}
+              onClick={() => {
+                // pick-a 引导态：横幅随路径模式存在，关闭 = 退出路径模式回选择模式；
+                // 其余态（pick-b/done/unreachable）：清除当前路径，回到引导态。
+                if (mode === 'trace' && trace === null) {
+                  switchMode('select');
+                } else {
+                  clearModeArtifacts();
+                }
+              }}
             >
               <IconClose size={12} />
             </button>
@@ -1244,6 +2185,37 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey }: Top
               onPointerUp={onMinimapPointerUp}
               onPointerCancel={onMinimapPointerUp}
             />
+          </div>
+        )}
+        {/* FX-6：右键上下文菜单（节点/边/空白三套；Esc 或点击别处关闭，
+            鼠标右下出现、越界翻转；快捷键提示列） */}
+        {menu !== null && (
+          <div
+            ref={menuRef}
+            className="canvas-menu"
+            role="menu"
+            aria-label={menu.label}
+            style={{ left: menu.x, top: menu.y }}
+            onKeyDown={onMenuKeyDown}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {menu.items.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                role="menuitem"
+                className="canvas-menu-item"
+                title={item.title}
+                onClick={() => runMenuItem(item)}
+              >
+                <span className="canvas-menu-label">{item.label}</span>
+                {item.hint !== undefined ? (
+                  <span className="canvas-menu-key" aria-hidden="true">
+                    {item.hint}
+                  </span>
+                ) : null}
+              </button>
+            ))}
           </div>
         )}
         <div className="lab-canvas-overlay lab-canvas-legend" aria-label={LAB_CANVAS_LEGEND_LABEL}>

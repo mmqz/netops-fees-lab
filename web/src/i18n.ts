@@ -26,7 +26,7 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.2.2';
+export const APP_VERSION = 'v0.2.3';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -513,7 +513,7 @@ export const LAB_MODE = '模式';
 export const LAB_MODE_SELECT = '选择';
 export const LAB_MODE_TRACE = '路径';
 export const LAB_MODE_FOCUS = '聚焦';
-export const LAB_CANVAS_LABELS = '链路标签';
+export const LAB_CANVAS_LABELS = '链路标签（快捷键 L）';
 export const LAB_CANVAS_HINT = '点击节点或连线，可在右侧定位对应条目';
 export const LAB_CANVAS_EMPTY = '暂无拓扑数据';
 
@@ -525,14 +525,76 @@ export const LAB_TRACE_PICK_B = '已选起点 {a}，点击终点设备';
 export const LAB_TRACE_DONE = '{a} → {b} · {hops} 跳 · 经 {via}';
 export const LAB_TRACE_UNREACHABLE = '{a} → {b} · 不可达（无可用链路）';
 export const LAB_TRACE_CLEAR = '清除路径';
+export const LAB_TRACE_EXIT_MODE = '退出路径模式';
 export const LAB_MINIMAP_LABEL = '缩略导航图（点击/拖动定位视图）';
 
-/** 画布缩放 / 视图控制（W2：图标按钮 + title 提示）。 */
+/** 画布缩放 / 视图控制（W2：图标按钮 + title 提示；FX-6 标注键盘快捷键）。 */
 export const LAB_CANVAS_ZOOM_IN = '放大';
 export const LAB_CANVAS_ZOOM_OUT = '缩小';
-export const LAB_CANVAS_FIT = '适配视图';
-export const LAB_CANVAS_RESET = '重置缩放（1:1）';
+export const LAB_CANVAS_FIT = '适配视图（快捷键 F）';
+export const LAB_CANVAS_RESET = '重置视图（1:1 · 清除手动排布）';
 export const LAB_CANVAS_ZOOM_HINT = '滚轮缩放 · 拖拽平移 · 框选';
+
+/** FX-6：PNG 快照导出（工具带动作按钮）。 */
+export const LAB_CANVAS_EXPORT = '导出 PNG 快照（完整拓扑 · 2 倍分辨率 · 深色底）';
+
+/** FX-6：缩放百分比指示 chip。 */
+export const LAB_CANVAS_ZOOM_CURRENT = '当前缩放比例';
+
+/** FX-6：右键上下文菜单（节点 / 边 / 空白画布三套，纯自实现无插件）。 */
+export const LAB_CANVAS_MENU_NODE = '设备操作菜单';
+export const LAB_CANVAS_MENU_EDGE = '链路操作菜单';
+export const LAB_CANVAS_MENU_CANVAS = '画布视图菜单';
+export const LAB_CANVAS_CTX_FOCUS = '邻域聚焦';
+export const LAB_CANVAS_CTX_FOCUS_TITLE = '聚焦该设备的一跳邻域（其余元素压暗，Esc 取消）';
+export const LAB_CANVAS_CTX_TRACE = '设为路径追踪起点';
+export const LAB_CANVAS_CTX_TRACE_TITLE = '切换到路径模式并以此设备为起点，再点击终点即高亮最短路径';
+export const LAB_CANVAS_CTX_LOCATE = '在表格中定位';
+export const LAB_CANVAS_CTX_LOCATE_TITLE = '选中该设备，右侧表格定位对应行';
+export const LAB_CANVAS_CTX_COPY_ID = '复制设备 ID';
+export const LAB_CANVAS_CTX_COPY_ID_TITLE = '复制设备编码（如 DEV-001）到剪贴板';
+export const LAB_CANVAS_CTX_LOCATE_LINK = '在表格中定位';
+export const LAB_CANVAS_CTX_LOCATE_LINK_TITLE = '选中该链路，右侧表格定位对应行';
+export const LAB_CANVAS_CTX_COPY_LINK_ID = '复制链路 ID';
+export const LAB_CANVAS_CTX_COPY_LINK_ID_TITLE = '复制链路标签（如 CKT-001）到剪贴板';
+export const LAB_CANVAS_CTX_FIT = '适配视图';
+export const LAB_CANVAS_CTX_FIT_TITLE = '缩放至完整拓扑可见（快捷键 F）';
+export const LAB_CANVAS_CTX_RESET = '重置视图';
+export const LAB_CANVAS_CTX_RESET_TITLE = '恢复 1:1 缩放并居中；若存在已保存的手动排布则清除并按当前布局重排';
+
+// —— FX-5：zen 全屏工作模式 + 可拖拽分栏 ——
+
+/** 工具带最右「全屏」按钮（进入 zen）。 */
+export const LABWS_ZEN_ENTER = '全屏工作模式（Esc 退出）';
+/** zen 中工具带「退出全屏」按钮的 title/aria-label。 */
+export const LABWS_ZEN_EXIT = '退出全屏工作模式（Esc）';
+/** 「退出全屏」按钮可见文案（zen 中带文字，明显可退）。 */
+export const LABWS_ZEN_EXIT_LABEL = '退出全屏';
+/** zen 左上浮动选中详情卡 aria-label。 */
+export const LABWS_ZEN_INFO_LABEL = '选中详情';
+/** 设备详情：接口 up/down 计数行。 */
+export const LABWS_ZEN_INFO_IFACES = '接口 {total}（↑{up} · ↓{down}）';
+/** 设备详情：IPv4 地址段标题。 */
+export const LABWS_ZEN_INFO_IPV4 = 'IPv4 地址';
+/** 设备无任何已配置 IPv4 时。 */
+export const LABWS_ZEN_INFO_IPV4_NONE = '未配置 IPv4';
+/** 已配置地址超出展示上限（超过 4 条折叠）。 */
+export const LABWS_ZEN_INFO_IPV4_MORE = '等 {n} 个';
+/** 链路详情：两端标题。 */
+export const LABWS_ZEN_INFO_LINK_ENDS = '两端';
+
+/** 分栏把手 aria-label。 */
+export const LAB_SPLIT_HANDLE_LABEL = '画布与面板分栏';
+/** 分栏把手 title（含当前比例与键盘微调提示）。 */
+export const LAB_SPLIT_HANDLE_TITLE = '拖拽调整画布与面板比例；← → 方向键微调（当前画布 {pct}%）';
+/** 分栏把手 aria-valuetext（读屏播报比例）。 */
+export const LAB_SPLIT_PCT_VALUE = '画布 {pct}% / 面板 {rest}%';
+/** 折叠右侧面板按钮（页头动作行）。 */
+export const LAB_SPLIT_COLLAPSE = '折叠面板';
+export const LAB_SPLIT_COLLAPSE_TITLE = '折叠右侧数据面板，画布占满工作区宽度';
+/** 折叠后的展开按钮。 */
+export const LAB_SPLIT_EXPAND = '展开面板';
+export const LAB_SPLIT_EXPAND_TITLE = '展开右侧数据面板';
 
 /** 画布图例（W2）。 */
 export const LAB_CANVAS_LEGEND_LABEL = '图例';

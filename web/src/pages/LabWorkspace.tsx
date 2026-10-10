@@ -1,13 +1,17 @@
 /**
  * 拓扑工作台页 /lab/:id：
  * - 页头：名称/描述/状态哈希 chip（mono 截断 + title 全量）/ 评分徽章 /
- *   设备·接口·链路计数 chips（up/down 分色）+ 六个动作按钮；
- * - 左 60% Cytoscape 拓扑画布 + 右 40% 标签页（设备/接口/链路/检查结果/变更集/检查点）；
+ *   设备·接口·链路计数 chips（up/down 分色）+ 七个动作按钮（含折叠面板）；
+ * - 左画布 Cytoscape + 右标签页（设备/接口/链路/检查结果/变更集/检查点）；
+ *   分栏比例可拖拽（把手 + ← → 键盘微调，localStorage 持久化）；右侧面板可
+ *   折叠（画布占满工作区宽）；画布支持 zen 全屏工作模式（Esc 退出，
+ *   sessionStorage 持久化；见 TopologyCanvas）；
  * - 画布 ↔ 表格双向选中联动；任何变更（ops/undo/restore/启停/配置）后统一刷新
  *   拓扑 + 工作台详情 + 各标签页（版本计数器）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { ApplyResult, CheckpointItem, SimOp, SimTopology, WorkspaceDetail } from '../api/types';
 import {
@@ -47,6 +51,13 @@ import {
   LABWS_HASH_LABEL,
   LABWS_NOT_FOUND,
   LABWS_UP_TITLE,
+  LAB_SPLIT_COLLAPSE,
+  LAB_SPLIT_COLLAPSE_TITLE,
+  LAB_SPLIT_EXPAND,
+  LAB_SPLIT_EXPAND_TITLE,
+  LAB_SPLIT_HANDLE_LABEL,
+  LAB_SPLIT_HANDLE_TITLE,
+  LAB_SPLIT_PCT_VALUE,
   NO_VALUE,
   TOAST_CHECKS_DONE,
   TOAST_CHECKPOINT_CREATED,
@@ -63,6 +74,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import type { ToastAction } from '../components/Toast';
 import { TopologyCanvas } from '../components/lab/TopologyCanvas';
+import { IconPanelCollapse, IconPanelExpand } from '../components/icons';
 import { OpsDialog } from '../components/lab/OpsDialog';
 import { DiffDialog } from '../components/lab/DiffDialog';
 import { DeviceTab, InterfaceTab, LinkTab } from '../components/lab/EntityTabs';
@@ -114,6 +126,81 @@ function writePersistedTab(workspaceId: string, tab: LabTab): void {
   }
 }
 
+// —— FX-5：zen 全屏 / 可拖拽分栏 / 面板折叠的持久化 ——
+
+/** 分栏比例（画布列占比 %）：clamp 范围与默认值。 */
+const SPLIT_MIN = 30;
+const SPLIT_MAX = 85;
+const SPLIT_DEFAULT = 60;
+/** 键盘微调步长（%）。 */
+const SPLIT_KEYBOARD_STEP = 2;
+/** 分栏几何（与 global.css .lab-split 一致）：两侧 gap 5px + 把手 6px = 16px。 */
+const SPLIT_GAP_PX = 5;
+const SPLIT_HANDLE_PX = 6;
+const SPLIT_GUTTER_PX = SPLIT_GAP_PX * 2 + SPLIT_HANDLE_PX;
+
+const clampSplit = (pct: number): number => Math.min(Math.max(Math.round(pct), SPLIT_MIN), SPLIT_MAX);
+
+/** 分栏比例持久化（localStorage：跨会话保留用户习惯）。 */
+function readSplitPct(workspaceId: string): number {
+  try {
+    const raw = localStorage.getItem(`netops-lab.split.${workspaceId}`);
+    if (raw !== null) {
+      const value = Number(raw);
+      if (Number.isFinite(value)) return clampSplit(value);
+    }
+  } catch {
+    // 隐私模式 / 配额异常：回退默认
+  }
+  return SPLIT_DEFAULT;
+}
+
+function writeSplitPct(workspaceId: string, pct: number): void {
+  try {
+    localStorage.setItem(`netops-lab.split.${workspaceId}`, String(clampSplit(pct)));
+  } catch {
+    // 写失败不影响功能
+  }
+}
+
+/** 右侧面板折叠持久化（localStorage，跨会话）。 */
+function readPanelCollapsed(workspaceId: string): boolean {
+  try {
+    return localStorage.getItem(`netops-lab.panel.${workspaceId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writePanelCollapsed(workspaceId: string, collapsed: boolean): void {
+  try {
+    localStorage.setItem(`netops-lab.panel.${workspaceId}`, collapsed ? '1' : '0');
+  } catch {
+    // 写失败不影响功能
+  }
+}
+
+/** zen 状态持久化（sessionStorage：刷新保持，但不跨会话——用户下次进来还想要正常布局）。 */
+function readZen(workspaceId: string): boolean {
+  try {
+    return sessionStorage.getItem(`netops-lab.zen.${workspaceId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeZen(workspaceId: string, zen: boolean): void {
+  try {
+    if (zen) {
+      sessionStorage.setItem(`netops-lab.zen.${workspaceId}`, '1');
+    } else {
+      sessionStorage.removeItem(`netops-lab.zen.${workspaceId}`);
+    }
+  } catch {
+    // 写失败不影响功能
+  }
+}
+
 function CountChip({ label, total, up, down }: { label: string; total: number; up: number; down: number }) {
   return (
     <span className="chip lab-chip-split" title={`${label} ${total}`}>
@@ -160,6 +247,25 @@ export function LabWorkspacePage() {
   const [highlightCs, setHighlightCs] = useState<string | undefined>(undefined);
   /** 取数守卫（AUD2-8）：/lab/:idA → /lab/:idB 路由复用 + refreshAll 重叠时丢弃旧响应。 */
   const loadGuard = useSeq();
+  // —— FX-5：zen 全屏 / 可拖拽分栏 / 面板折叠 ——
+  /** zen 全屏工作模式（sessionStorage 持久化，刷新保持；Esc 退出）。 */
+  const [zen, setZen] = useState(() => readZen(workspaceId));
+  /** 分栏比例（画布列 %；拖动中 rAF 节流 setState，拖完落盘 localStorage）。 */
+  const [splitPct, setSplitPct] = useState(() => readSplitPct(workspaceId));
+  /** 分栏拖拽进行中（body 光标/禁选 + 挂起画布逐帧 resize）。 */
+  const [splitDragging, setSplitDragging] = useState(false);
+  /** 右侧面板折叠（画布占满工作区宽；localStorage 持久化）。 */
+  const [panelCollapsed, setPanelCollapsed] = useState(() => readPanelCollapsed(workspaceId));
+  /** splitPct 镜像（拖动/键盘闭包读最新值）。 */
+  const splitPctRef = useRef(splitPct);
+  /** 拖拽激活镜像（React 状态渲染滞后于首帧 pointermove 时用 ref 判定）。 */
+  const splitDragActiveRef = useRef(false);
+  /** 分栏容器（拖动坐标的参照系）。 */
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  /** 拖拽 rAF 节流句柄。 */
+  const splitRafRef = useRef<number | null>(null);
+  /** 抓取点相对把手中心的偏移（拖动不跳变）。 */
+  const grabOffsetRef = useRef(0);
 
   const load = useCallback((): void => {
     if (workspaceId === '') return;
@@ -200,6 +306,15 @@ export function LabWorkspacePage() {
   useEffect(() => {
     writePersistedTab(workspaceId, tab);
   }, [workspaceId, tab]);
+
+  // 工作台切换（路由复用组件）→ 恢复各自的 zen/分栏/面板折叠偏好（FX-5）
+  useEffect(() => {
+    setZen(readZen(workspaceId));
+    const pct = readSplitPct(workspaceId);
+    splitPctRef.current = pct;
+    setSplitPct(pct);
+    setPanelCollapsed(readPanelCollapsed(workspaceId));
+  }, [workspaceId]);
 
   // —— 统一动作 ——
 
@@ -364,6 +479,108 @@ export function LabWorkspacePage() {
 
   const view = useMemo(() => buildTopologyView(topology), [topology]);
 
+  // —— FX-5：zen / 分栏拖拽 / 面板折叠 ——
+
+  const handleZenChange = useCallback(
+    (next: boolean): void => {
+      setZen(next);
+      writeZen(workspaceId, next);
+    },
+    [workspaceId],
+  );
+
+  /** 卸载安全：拖拽中离开页面（路由切换/关闭）时清 body 光标类与挂起 rAF。 */
+  useEffect(
+    () => () => {
+      document.body.classList.remove('lab-split-dragging');
+      if (splitRafRef.current !== null) cancelAnimationFrame(splitRafRef.current);
+      splitRafRef.current = null;
+    },
+    [],
+  );
+
+  /** 把手中心 X（client 坐标）：画布列宽 + 左 gap + 把手半宽。 */
+  function handleCenterX(): number {
+    const el = splitRef.current;
+    if (el === null) return 0;
+    const rect = el.getBoundingClientRect();
+    const col1 = (rect.width - SPLIT_GUTTER_PX) * (splitPctRef.current / 100);
+    return rect.left + col1 + SPLIT_GAP_PX + SPLIT_HANDLE_PX / 2;
+  }
+
+  function onHandlePointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0 || splitRef.current === null) return;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // 旧浏览器无 pointer capture：退化为点击式调整
+    }
+    grabOffsetRef.current = event.clientX - handleCenterX();
+    splitDragActiveRef.current = true;
+    setSplitDragging(true);
+    // 拖动中：全局列光标 + 禁止文本选择（body 类，结束/卸载时移除）
+    document.body.classList.add('lab-split-dragging');
+  }
+
+  function applyPctFromPointer(clientX: number): void {
+    const el = splitRef.current;
+    if (el === null) return;
+    const rect = el.getBoundingClientRect();
+    const usable = rect.width - SPLIT_GUTTER_PX;
+    if (usable <= 0) return;
+    const col1 = clientX - grabOffsetRef.current - SPLIT_GAP_PX - SPLIT_HANDLE_PX / 2 - rect.left;
+    const pct = clampSplit((col1 / usable) * 100);
+    splitPctRef.current = pct;
+    // rAF 节流 setState（每帧至多一次重渲染；拖完 pointerup 冲刷）
+    if (splitRafRef.current !== null) return;
+    splitRafRef.current = requestAnimationFrame(() => {
+      splitRafRef.current = null;
+      setSplitPct(splitPctRef.current);
+    });
+  }
+
+  function onHandlePointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!splitDragActiveRef.current) return;
+    applyPctFromPointer(event.clientX);
+  }
+
+  function onHandlePointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!splitDragActiveRef.current) return;
+    splitDragActiveRef.current = false;
+    setSplitDragging(false);
+    document.body.classList.remove('lab-split-dragging');
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // 忽略（未捕获时）
+    }
+    if (splitRafRef.current !== null) {
+      cancelAnimationFrame(splitRafRef.current);
+      splitRafRef.current = null;
+    }
+    // 冲刷最后一帧 + 落盘；TopologyCanvas 在 resizeSuspended 翻回 false 后补一次 resize
+    setSplitPct(splitPctRef.current);
+    writeSplitPct(workspaceId, splitPctRef.current);
+  }
+
+  /** 键盘微调：← → ±2%（a11y：role=separator 可聚焦）。 */
+  function onHandleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const delta = event.key === 'ArrowLeft' ? -SPLIT_KEYBOARD_STEP : SPLIT_KEYBOARD_STEP;
+    const next = clampSplit(splitPctRef.current + delta);
+    if (next === splitPctRef.current) return;
+    splitPctRef.current = next;
+    setSplitPct(next);
+    writeSplitPct(workspaceId, next);
+  }
+
+  function togglePanelCollapsed(): void {
+    const next = !panelCollapsed;
+    setPanelCollapsed(next);
+    writePanelCollapsed(workspaceId, next);
+  }
+
   function exportReport(): void {
     window.open(`/api/lab/report?workspaceId=${encodeURIComponent(workspaceId)}&format=html`, '_blank', 'noopener');
   }
@@ -403,9 +620,17 @@ export function LabWorkspacePage() {
   const counts = detail.counts;
   const score = detail.latestRun?.score ?? null;
 
+  // 注意：不能在此处（早退 return 之后）调用 useMemo——Hook 顺序必须稳定（React #310）；
+  // splitStyle 是轻量字面量，直接构造即可。
+  const pctRounded = Math.round(splitPct);
+  const splitStyle = {
+    '--split-a': `${pctRounded}fr`,
+    '--split-b': `${100 - pctRounded}fr`,
+  } as CSSProperties;
+
   return (
     <>
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card lab-pagehead">
         <div className="lab-head-meta">
           <h1 className="lab-head-name">{detail.name}</h1>
           <span className="chip chip--mono lab-hash-chip" title={`${LABWS_HASH_LABEL} ${detail.workspaceHash}`}>
@@ -447,6 +672,16 @@ export function LabWorkspacePage() {
           <button type="button" className="btn btn--secondary" onClick={exportReport}>
             {LAB_BTN_EXPORT_REPORT}
           </button>
+          {/* FX-5：折叠/展开右侧数据面板（localStorage 持久化） */}
+          <button
+            type="button"
+            className="btn btn--secondary"
+            title={panelCollapsed ? LAB_SPLIT_EXPAND_TITLE : LAB_SPLIT_COLLAPSE_TITLE}
+            onClick={togglePanelCollapsed}
+          >
+            {panelCollapsed ? <IconPanelExpand size={16} /> : <IconPanelCollapse size={16} />}
+            {panelCollapsed ? LAB_SPLIT_EXPAND : LAB_SPLIT_COLLAPSE}
+          </button>
           <Link className="btn btn--secondary" to="/lab" style={{ marginLeft: 'auto' }}>
             {LABWS_BACK_LIST}
           </Link>
@@ -454,8 +689,42 @@ export function LabWorkspacePage() {
         {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
       </div>
 
-      <div className="lab-split">
-        <TopologyCanvas topology={topology} selected={selected} onSelect={handleCanvasSelect} persistKey={workspaceId} />
+      {/* FX-5：可拖拽分栏（画布 | 6px 把手 | 面板；比例经 CSS 变量注入，折叠/zen/
+          窄屏由修饰类与媒体查询覆盖——变量不阻碍层叠）。zen 时画布卡片 fixed
+          inset:0 盖住整页，把手不渲染。 */}
+      <div
+        ref={splitRef}
+        className={`lab-split${panelCollapsed ? ' lab-split--collapsed' : ''}${zen ? ' lab-split--zen' : ''}`}
+        style={splitStyle}
+      >
+        <TopologyCanvas
+          topology={topology}
+          selected={selected}
+          onSelect={handleCanvasSelect}
+          persistKey={workspaceId}
+          zen={zen}
+          onZenChange={handleZenChange}
+          resizeSuspended={splitDragging}
+        />
+        {!panelCollapsed && !zen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={LAB_SPLIT_HANDLE_LABEL}
+            aria-valuemin={SPLIT_MIN}
+            aria-valuemax={SPLIT_MAX}
+            aria-valuenow={pctRounded}
+            aria-valuetext={format(LAB_SPLIT_PCT_VALUE, { pct: pctRounded, rest: 100 - pctRounded })}
+            title={format(LAB_SPLIT_HANDLE_TITLE, { pct: pctRounded })}
+            tabIndex={0}
+            className={`lab-split-handle${splitDragging ? ' is-dragging' : ''}`}
+            onPointerDown={onHandlePointerDown}
+            onPointerMove={onHandlePointerMove}
+            onPointerUp={onHandlePointerUp}
+            onPointerCancel={onHandlePointerUp}
+            onKeyDown={onHandleKeyDown}
+          />
+        )}
 
         <div className="card lab-panel">
           <div className="tabs" role="tablist">

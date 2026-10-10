@@ -24,7 +24,7 @@ const RuleVersion = "1.0.0"
 // AppVersion is the version of the NetOps Lab application itself, reported by
 // the health endpoint, the MCP server implementation and the CLI. v0.2.2
 // upgrades the topology canvas to multi-layout / multi-interaction modes.
-const AppVersion = "v0.2.2"
+const AppVersion = "v0.2.3"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

@@ -367,6 +367,62 @@ export function IconResetView({ size = 16, className }: IconProps) {
   );
 }
 
+/** FX-6：画布工具带 PNG 快照导出（相机）。 */
+export function IconCamera({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
+/** FX-5：zen 全屏工作模式——进入（四角外扩）。 */
+export function IconExpand({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M9 3H5.5A2.5 2.5 0 0 0 3 5.5V9" />
+      <path d="M15 3h3.5A2.5 2.5 0 0 1 21 5.5V9" />
+      <path d="M9 21H5.5A2.5 2.5 0 0 1 3 18.5V15" />
+      <path d="M15 21h3.5a2.5 2.5 0 0 0 2.5-2.5V15" />
+    </svg>
+  );
+}
+
+/** FX-5：zen 全屏工作模式——退出（四角内收）。 */
+export function IconMinimize({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M3 9h3.5A2.5 2.5 0 0 0 9 6.5V3" />
+      <path d="M21 9h-3.5A2.5 2.5 0 0 1 15 6.5V3" />
+      <path d="M3 15h3.5A2.5 2.5 0 0 1 9 17.5V21" />
+      <path d="M21 15h-3.5a2.5 2.5 0 0 0-2.5 2.5V21" />
+    </svg>
+  );
+}
+
+/** FX-5：折叠右侧面板（面板示意 + 右向箭头，面板收向右侧）。 */
+export function IconPanelCollapse({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+      <path d="m9 9 3 3-3 3" />
+    </svg>
+  );
+}
+
+/** FX-5：展开右侧面板（面板示意 + 左向箭头，面板自右侧展开）。 */
+export function IconPanelExpand({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+      <path d="m12 9-3 3 3 3" />
+    </svg>
+  );
+}
+
 /** Toast 状态图标：错误（实感更重的警示）。 */
 export function IconAlert({ size = 16, className }: IconProps) {
   return (
