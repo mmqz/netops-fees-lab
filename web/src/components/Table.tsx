@@ -3,10 +3,12 @@
  * - 泛型列定义（key / 表头 / 渲染函数 / 列宽 / 对齐）；
  * - 加载骨架行、空态行；
  * - 可选行点击与可展开行（问题清单的证据明细）；
- * - 语义化表头（th scope="col"）。
+ * - 语义化表头（th scope="col"）；
+ * - 客户端列排序（W10 / AUD-4 P1-5）：列提供 sortValue 即表头可点，
+ *   升 → 降 → 复位三态，aria-sort + 箭头指示；不动分页/展开行为。
  */
 
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { EMPTY_TEXT } from '../i18n';
 
@@ -16,6 +18,8 @@ export interface TableColumn<T> {
   render: (row: T) => ReactNode;
   width?: string;
   align?: 'left' | 'right' | 'center';
+  /** 提供即该列客户端可排序：返回排序键（数字优先，字符串按本地化比较）。 */
+  sortValue?: (row: T) => string | number;
 }
 
 interface TableProps<T> {
@@ -34,6 +38,21 @@ interface TableProps<T> {
   ariaLabel?: string;
 }
 
+/** 排序状态：dir 1=升序，-1=降序；null=未排序（原始顺序）。 */
+interface SortState {
+  key: string;
+  dir: 1 | -1;
+}
+
+/**
+ * 实体 id 的数字后缀（vd-22 / if-9 / ln-4 / cs-3 / run-11 …）：
+ * 提取结尾数字用于数值排序，无数字返回 0（稳定排序下保持相对顺序）。
+ */
+export function numericId(id: string): number {
+  const match = /(\d+)$/.exec(id);
+  return match === null ? 0 : Number(match[1]);
+}
+
 export function Table<T>(props: TableProps<T>) {
   const {
     columns,
@@ -49,8 +68,32 @@ export function Table<T>(props: TableProps<T>) {
   } = props;
 
   const [expandedKeys, setExpandedKeys] = useState<Set<string | number>>(new Set());
+  const [sort, setSort] = useState<SortState | null>(null);
 
   const clickable = onRowClick !== undefined || renderExpanded !== undefined;
+
+  /** 点击表头：升 → 降 → 复位。 */
+  function toggleSort(key: string): void {
+    setSort((prev) => {
+      if (prev === null || prev.key !== key) return { key, dir: 1 };
+      if (prev.dir === 1) return { key, dir: -1 };
+      return null;
+    });
+  }
+
+  const sortedRows = useMemo(() => {
+    if (sort === null) return rows;
+    const col = columns.find((candidate) => candidate.key === sort.key);
+    if (col === undefined || col.sortValue === undefined) return rows;
+    const factor = sort.dir;
+    const valueOf = col.sortValue;
+    return [...rows].sort((a, b) => {
+      const va = valueOf(a);
+      const vb = valueOf(b);
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * factor;
+      return String(va).localeCompare(String(vb), 'zh-Hans-CN') * factor;
+    });
+  }, [rows, columns, sort]);
 
   function toggleExpanded(key: string | number): void {
     setExpandedKeys((prev) => {
@@ -82,17 +125,35 @@ export function Table<T>(props: TableProps<T>) {
     }
   }
 
+  /** 表头单元格：可排序列渲染为按钮（aria-sort + 箭头）。 */
+  function renderHeadCell(col: TableColumn<T>): ReactNode {
+    const style = { width: col.width, textAlign: col.align } as const;
+    if (col.sortValue === undefined) {
+      return (
+        <th key={col.key} scope="col" style={style}>
+          {col.header}
+        </th>
+      );
+    }
+    const active = sort !== null && sort.key === col.key;
+    const ariaSort = active ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none';
+    return (
+      <th key={col.key} scope="col" style={style} aria-sort={ariaSort}>
+        <button type="button" className="th-sort" onClick={() => toggleSort(col.key)}>
+          {col.header}
+          <span className="th-sort-indicator" aria-hidden="true">
+            {active ? (sort.dir === 1 ? '↑' : '↓') : '⇅'}
+          </span>
+        </button>
+      </th>
+    );
+  }
+
   if (loading) {
     return (
       <table className="table" aria-busy="true" aria-label={ariaLabel}>
         <thead>
-          <tr>
-            {columns.map((col) => (
-              <th key={col.key} scope="col" style={{ width: col.width, textAlign: col.align }}>
-                {col.header}
-              </th>
-            ))}
-          </tr>
+          <tr>{columns.map(renderHeadCell)}</tr>
         </thead>
         <tbody>
           {Array.from({ length: skeletonRows }, (_, index) => (
@@ -112,23 +173,17 @@ export function Table<T>(props: TableProps<T>) {
   return (
     <table className="table" aria-label={ariaLabel}>
       <thead>
-        <tr>
-          {columns.map((col) => (
-            <th key={col.key} scope="col" style={{ width: col.width, textAlign: col.align }}>
-              {col.header}
-            </th>
-          ))}
-        </tr>
+        <tr>{columns.map(renderHeadCell)}</tr>
       </thead>
       <tbody>
-        {rows.length === 0 && (
+        {sortedRows.length === 0 && (
           <tr>
             <td colSpan={columns.length} className="table-empty">
               {emptyText}
             </td>
           </tr>
         )}
-        {rows.map((row) => {
+        {sortedRows.map((row) => {
           const key = rowKey(row);
           const expanded = renderExpanded !== undefined && expandedKeys.has(key);
           const extraClass = rowClassName === undefined ? undefined : rowClassName(row);

@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
   GraphEdge,
@@ -16,7 +17,7 @@ import type {
   ResourceItem,
   ResourceType,
 } from '../api/types';
-import { ApiError, debounce, getResource, getResourceRelations, listResources } from '../api/client';
+import { debounce, formatApiError, getResource, getResourceRelations, listResources } from '../api/client';
 import {
   BTN_EXPAND_2HOP,
   BTN_COLLAPSE_2HOP,
@@ -63,6 +64,8 @@ import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
 import { TypeChip } from '../components/TypeChip';
 import { IconSearch, IconUpload } from '../components/icons';
+import { useToast } from '../components/Toast';
+import { TOAST_COPIED } from '../i18n';
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -76,6 +79,53 @@ type DrawerTab = 'attrs' | 'source' | 'relations';
 interface ResourceDrawerProps {
   resourceId: string;
   onClose: () => void;
+}
+
+/** 抽屉里的批次 id（P2/P2-21）：短码展示 + 点击复制完整 id（title 里可见全文）。 */
+function BatchIdCell({ batchId }: { batchId: string }): ReactNode {
+  const toast = useToast();
+  const short = batchId.length > 12 ? `${batchId.slice(0, 12)}…` : batchId;
+  function copy(): void {
+    void copyText(batchId).then((ok: boolean) => {
+      if (ok) {
+        toast.show(TOAST_COPIED, 'success');
+      }
+      // 复制失败（权限被拒）：静默——title 已提供完整 id 可手动选择
+    });
+  }
+  return (
+    <button type="button" className="code-chip lab-copy-chip" title={batchId} onClick={copy}>
+      {short}
+    </button>
+  );
+}
+
+/** 剪贴板复制：Clipboard API 优先，无头环境/权限被拒时 execCommand 兜底。 */
+function copyText(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) {
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      () => legacyCopy(text),
+    );
+  }
+  return Promise.resolve(legacyCopy(text));
+}
+
+/** execCommand 兜底复制；成功返回 true，异常/失败返回 false。 */
+function legacyCopy(text: string): boolean {
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function orderedAttributes(resource: ResourceDetail): Array<[string, string]> {
@@ -114,13 +164,18 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   const [graph, setGraph] = useState<RelationGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [tab, setTab] = useState<DrawerTab>('attrs');
   const [depth2, setDepth2] = useState<RelationGraph | null>(null);
   const [loading2, setLoading2] = useState(false);
+  /** 二跳展开失败的内联错误（AUD2-13：不再静默吞掉）。 */
+  const [depth2Error, setDepth2Error] = useState<string | null>(null);
+  const [depth2ErrorDetail, setDepth2ErrorDetail] = useState<string | null>(null);
 
   const load = useCallback((): void => {
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     Promise.all([getResource(resourceId), getResourceRelations(resourceId, 1)])
       .then((results) => {
         setDetail(results[0]);
@@ -128,7 +183,9 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         setLoading(false);
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : null);
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
   }, [resourceId]);
@@ -136,18 +193,26 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   useEffect(() => {
     load();
     setDepth2(null);
+    setDepth2Error(null);
+    setDepth2ErrorDetail(null);
     setTab('attrs');
   }, [load]);
 
   function expandDepth2(): void {
     setLoading2(true);
+    setDepth2Error(null);
+    setDepth2ErrorDetail(null);
     getResourceRelations(resourceId, 2)
       .then((result) => {
         setDepth2(result);
         setLoading2(false);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        // AUD2-13：二跳展开失败 → 内联错误 + 重试，而不是让转圈无声消失
         setLoading2(false);
+        const display = formatApiError(err);
+        setDepth2Error(display.title);
+        setDepth2ErrorDetail(display.detail);
       });
   }
 
@@ -191,7 +256,7 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
           <Spinner />
         </div>
       ) : error !== null || detail === null ? (
-        <ErrorBlock message={error} onRetry={load} />
+        <ErrorBlock message={error} detail={errorDetail} onRetry={load} />
       ) : (
         <>
           <div className="drawer-summary">
@@ -248,7 +313,7 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                 </tr>
                 <tr>
                   <th scope="row">{RES_ATTR_FIRST_BATCH}</th>
-                  <td>{detail.firstBatchId === '' ? NO_VALUE : detail.firstBatchId}</td>
+                  <td>{detail.firstBatchId === '' ? NO_VALUE : <BatchIdCell batchId={detail.firstBatchId} />}</td>
                 </tr>
                 <tr>
                   <th scope="row">{RES_ATTR_UPDATED_AT}</th>
@@ -300,6 +365,9 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                 ))
               )}
               <div className="hop2">
+                {depth2Error !== null && (
+                  <ErrorBlock compact message={depth2Error} detail={depth2ErrorDetail} onRetry={expandDepth2} />
+                )}
                 {depth2 === null ? (
                   hop1Edges.length > 0 && (
                     <button
@@ -372,6 +440,7 @@ export function ResourcesPage() {
   const [data, setData] = useState<Paged<ResourceItem> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(focusId);
 
   const requestSeqRef = useRef(0);
@@ -380,6 +449,7 @@ export function ResourcesPage() {
     const seq = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     listResources({
       type: type === '' ? undefined : type,
       q: query === '' ? undefined : query,
@@ -394,7 +464,9 @@ export function ResourcesPage() {
       })
       .catch((err: unknown) => {
         if (requestSeqRef.current !== seq) return;
-        setError(err instanceof ApiError ? err.message : null);
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
   }, [type, query, status, page]);
@@ -498,7 +570,7 @@ export function ResourcesPage() {
         </div>
 
         {error !== null ? (
-          <ErrorBlock message={error} onRetry={fetchResources} />
+          <ErrorBlock message={error} detail={errorDetail} onRetry={fetchResources} />
         ) : showEmptyState ? (
           <EmptyState
             title={RES_EMPTY_TITLE}

@@ -152,7 +152,15 @@ type RunSummary struct {
 // other ops "not_attempted", inverse_json NULL for all rows). When
 // runChecks is true (the default at call sites) and the changeset applied,
 // checks run immediately (trigger auto_after_ops, changeset_id set).
+//
+// An EMPTY ops slice is rejected with domain.ErrInvalidOp before any
+// workspace or changeset machinery runs (AUD1-3: a 0-op applied changeset
+// would permanently block changeset-tier undo — DecodeOps rejects the same
+// case at every external boundary).
 func (s *Service) ApplyOps(ctx context.Context, workspaceID string, ops []Op, description string, runChecks bool) (ApplyResult, error) {
+	if len(ops) == 0 {
+		return ApplyResult{}, fmt.Errorf("sim: apply ops: ops must contain at least one operation: %w", domain.ErrInvalidOp)
+	}
 	if _, err := s.mustWorkspace(ctx, workspaceID); err != nil {
 		return ApplyResult{}, err
 	}
@@ -167,7 +175,7 @@ func (s *Service) ApplyOps(ctx context.Context, workspaceID string, ops []Op, de
 		}
 		internal = append(internal, forwardOp(op))
 	}
-	return s.applyInternal(ctx, workspaceID, internal, false, domain.ChangeSetTriggerUser, description, runChecks)
+	return s.applyInternal(ctx, workspaceID, internal, false, domain.ChangeSetTriggerUser, description, runChecks, nil)
 }
 
 // applyInternal is the single mutation path of the engine: it applies ops
@@ -175,8 +183,13 @@ func (s *Service) ApplyOps(ctx context.Context, workspaceID string, ops []Op, de
 // failed changeset on failure (step 2, second transaction) and runs the
 // auto-checks (step 3). allowRestore permits the engine-internal restore
 // ops — only the undo (P2-T3) and checkpoint-restore paths set it.
+//
+// afterInsert, when non-nil, runs INSIDE the same transaction right after
+// the changeset rows are recorded — the undo path uses it to mark the
+// target changeset reverted atomically with the undo changeset itself
+// (AUD1-8: a failure of the marker rolls the undo changeset back with it).
 func (s *Service) applyInternal(ctx context.Context, workspaceID string, ops []internalOp, allowRestore bool,
-	trigger domain.ChangeSetTrigger, description string, runChecks bool) (ApplyResult, error) {
+	trigger domain.ChangeSetTrigger, description string, runChecks bool, afterInsert func(tx *repo.Tx) error) (ApplyResult, error) {
 	// Payload validation of forward ops (restore ops are engine-produced
 	// and trusted).
 	for i, op := range ops {
@@ -202,6 +215,12 @@ func (s *Service) applyInternal(ctx context.Context, workspaceID string, ops []i
 		result ApplyResult
 		opErr  *OpError
 	)
+	// A create_link inside a checkpoint_restore changeset may re-create a
+	// parallel link (same interface pair, AUD1-1): legacy workspaces written
+	// before the duplicate-pair validation can hold such links, and the
+	// restore diff must be able to reconstruct them hash-exactly. Every
+	// other trigger (user ops) keeps the duplicate-pair rejection.
+	allowParallelLinks := trigger == domain.ChangeSetTriggerCheckpointRestore
 	// op_json of every submitted op is computed BEFORE the transaction:
 	// the failed-changeset record (§4 step 2) must carry the full op
 	// payload of every op, not just the ones already reached when the
@@ -227,7 +246,7 @@ func (s *Service) applyInternal(ctx context.Context, workspaceID string, ops []i
 
 		rows := make([]domain.ChangeSetOp, 0, len(ops))
 		for i, op := range ops {
-			inverseJSON, err := s.applyOne(ctx, tx, workspaceID, op)
+			inverseJSON, err := s.applyOne(ctx, tx, workspaceID, op, allowParallelLinks)
 			if err != nil {
 				opErr = &OpError{Index: i, Code: op.code(), Message: err.Error()}
 				return fmt.Errorf("sim: apply op %d (%s): %w", i, op.code(), err)
@@ -252,6 +271,14 @@ func (s *Service) applyInternal(ctx context.Context, workspaceID string, ops []i
 		}
 		if err := tx.ChangeSets.Insert(ctx, cs, rows); err != nil {
 			return fmt.Errorf("sim: record changeset %s: %w", csID, err)
+		}
+		if afterInsert != nil {
+			// Same-transaction post step (undo's reverted marker):
+			// a failure rolls the changeset back with it — atomic undo
+			// (AUD1-8).
+			if err := afterInsert(tx); err != nil {
+				return fmt.Errorf("sim: post-changeset step of %s: %w", csID, err)
+			}
 		}
 		result = ApplyResult{ChangeSetID: csID, Trigger: trigger.String(), OpsApplied: len(ops)}
 		return nil
@@ -295,8 +322,14 @@ func (s *Service) applyInternal(ctx context.Context, workspaceID string, ops []i
 // inverse ops in reverse seq order). allowRestore is implicit: inverse ops
 // may be restore ops. On success the returned ApplyResult carries trigger
 // and the auto-check summary like ApplyOps.
+//
+// markReverted (when non-empty) additionally marks that changeset reverted
+// IN THE SAME transaction as the undo changeset (AUD1-8): the previous
+// two-transaction design left a crash window in which the undo effects were
+// live while the target still read 'applied'; now either both land or
+// neither does. Only the undo path passes a non-empty id.
 func (s *Service) applyInverses(ctx context.Context, workspaceID string, inverses []internalOp,
-	trigger domain.ChangeSetTrigger, description string, runChecks bool) (ApplyResult, error) {
+	trigger domain.ChangeSetTrigger, description string, runChecks bool, markReverted string) (ApplyResult, error) {
 	if _, err := s.mustWorkspace(ctx, workspaceID); err != nil {
 		return ApplyResult{}, err
 	}
@@ -309,7 +342,14 @@ func (s *Service) applyInverses(ctx context.Context, workspaceID string, inverse
 				i, op.code(), domain.ErrInvalidOp)
 		}
 	}
-	return s.applyInternal(ctx, workspaceID, inverses, true, trigger, description, runChecks)
+	var afterInsert func(tx *repo.Tx) error
+	if markReverted != "" {
+		target := markReverted
+		afterInsert = func(tx *repo.Tx) error {
+			return tx.ChangeSets.MarkReverted(ctx, target, s.clock())
+		}
+	}
+	return s.applyInternal(ctx, workspaceID, inverses, true, trigger, description, runChecks, afterInsert)
 }
 
 // recordFailedChangeSet writes the failed changeset row with per-op

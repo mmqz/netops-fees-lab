@@ -41,10 +41,12 @@ type CheckpointResult struct {
 // snapshot file that nothing references (harmless; it is not visible
 // through ListCheckpoints). A crash between the id allocation and the
 // backup burns a checkpoint id (gap in cp-<n>, no state impact). The state
-// hash is read BEFORE the backup; the supported single-writer mode makes
-// the two consistent (a concurrent writer between them would record a hash
-// that no longer matches the snapshot bytes — the restore path trusts the
-// SNAPSHOT state, not the recorded hash).
+// hash is computed FROM THE SNAPSHOT after the backup (AUD1-9): the marker
+// always describes the exact bytes the restore path will open, so a
+// concurrent writer landing between a live-state read and the backup
+// completion cannot desynchronize the marker from the snapshot, and a
+// snapshot modified on disk fails the restore's marker verification instead
+// of restoring to a state the marker never described.
 func (s *Service) CreateCheckpoint(ctx context.Context, workspaceID, label string) (CheckpointResult, error) {
 	if _, err := s.mustWorkspace(ctx, workspaceID); err != nil {
 		return CheckpointResult{}, err
@@ -52,15 +54,11 @@ func (s *Service) CreateCheckpoint(ctx context.Context, workspaceID, label strin
 	if label == "" {
 		return CheckpointResult{}, fmt.Errorf("sim: create checkpoint: label required: %w", domain.ErrInvalidOp)
 	}
-	hash, err := s.WorkspaceHash(ctx, workspaceID)
-	if err != nil {
-		return CheckpointResult{}, err
-	}
 
 	// Allocate the checkpoint id in its own transaction (Allocate must not
 	// run in autocommit mode; a crash here burns at most one id).
 	var cpID string
-	err = s.db.Do(ctx, func(tx *repo.Tx) error {
+	err := s.db.Do(ctx, func(tx *repo.Tx) error {
 		n, err := tx.Sequences.Allocate(ctx, domain.SeqCheckpoint)
 		if err != nil {
 			return fmt.Errorf("allocate checkpoint id: %w", err)
@@ -77,6 +75,14 @@ func (s *Service) CreateCheckpoint(ctx context.Context, workspaceID, label strin
 	// The Online Backup API over a pooled connection (P2-0 verified the
 	// modernc.org/sqlite surface; repo.Backup wraps it).
 	if err := s.db.Backup(ctx, dst); err != nil {
+		return CheckpointResult{}, fmt.Errorf("sim: create checkpoint %s: %w", cpID, err)
+	}
+
+	// The marker hash is read from the freshly written snapshot (AUD1-9) —
+	// the exact state the restore path will open; in the supported
+	// single-writer mode it equals the live workspace hash.
+	hash, err := snapshotWorkspaceHash(ctx, dst, workspaceID)
+	if err != nil {
 		return CheckpointResult{}, fmt.Errorf("sim: create checkpoint %s: %w", cpID, err)
 	}
 
@@ -102,6 +108,23 @@ func (s *Service) CreateCheckpoint(ctx context.Context, workspaceID, label strin
 		WorkspaceHash: hash,
 		CreatedAt:     created,
 	}, nil
+}
+
+// snapshotWorkspaceHash opens a checkpoint snapshot READ-ONLY and returns
+// the canonical state hash of one workspace as stored in the snapshot —
+// the hash CreateCheckpoint records as the marker (AUD1-9: the marker
+// describes the snapshot bytes, not a possibly-racing live read).
+func snapshotWorkspaceHash(ctx context.Context, snapshotPath, workspaceID string) (string, error) {
+	snapDB, err := repo.OpenReadOnly(snapshotPath)
+	if err != nil {
+		return "", fmt.Errorf("open snapshot: %w", err)
+	}
+	defer func() { _ = snapDB.Close() }()
+	state, err := loadState(ctx, storeOfDB(snapDB), workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return state.hash()
 }
 
 // ListCheckpoints returns every checkpoint of the workspace, newest first
@@ -153,12 +176,24 @@ type RestoreResult struct {
 //  6. create links missing now (with their snapshot status/label),
 //  7. set statuses / configure addresses that differ.
 //
+// The snapshot's state hash is verified against the RECORDED marker hash
+// before anything is applied (AUD1-9: a snapshot file modified on disk
+// fails hard instead of silently restoring to a state the marker never
+// described), and after the replay the current workspace hash is verified
+// against the same snapshot hash: a restore that cannot reach the exact
+// checkpoint state fails with domain.ErrConflict instead of reporting a
+// silently incomplete success.
+//
 // Matching keys: devices by CODE, interfaces by (device code, name), links
-// by (aDevice, aInterface, zDevice, zInterface). Entities created by phases
-// 4–6 are referenced by the phases that follow — create_device has no
-// status field and create_interface/create_link reference ids, so the plan
-// predicts the ids the engine's apply transaction WILL allocate (the
-// sequences are deterministic: the k-th create in the plan is the k-th
+// by (aDevice, aInterface, zDevice, zInterface, LABEL) with per-key
+// MULTIPLICITY (AUD1-1): a key the current state holds more often than the
+// snapshot loses its surplus links (phase 1), a key the snapshot holds more
+// often gains create_link ops (phase 6) — legacy workspaces with parallel
+// links between one interface pair restore hash-exactly. Entities created
+// by phases 4–6 are referenced by the phases that follow — create_device
+// has no status field and create_interface/create_link reference ids, so
+// the plan predicts the ids the engine's apply transaction WILL allocate
+// (the sequences are deterministic: the k-th create in the plan is the k-th
 // Allocate of the changeset). Sound in the supported single-writer mode —
 // same reasoning as the materialization determinism guarantee.
 //
@@ -192,8 +227,13 @@ func (s *Service) RestoreCheckpoint(ctx context.Context, workspaceID, checkpoint
 	}
 	defer func() { _ = snapDB.Close() }()
 
-	// The snapshot's state is the ground truth of the restore (its hash must
-	// equal the recorded one — both were captured in CreateCheckpoint).
+	// The snapshot's state is the ground truth of the restore. Its hash
+	// must equal the recorded marker hash (AUD1-9): the marker is
+	// computed from the snapshot at creation time, so a mismatch means
+	// the snapshot file was modified or corrupted on disk — refuse
+	// instead of restoring to a state the marker never described. The
+	// hash is re-verified AFTER the op replay as well (see the
+	// RestoreCheckpoint doc).
 	snapState, err := loadState(ctx, storeOfDB(snapDB), workspaceID)
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: %w", checkpointID, err)
@@ -201,6 +241,10 @@ func (s *Service) RestoreCheckpoint(ctx context.Context, workspaceID, checkpoint
 	snapHash, err := snapState.hash()
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: %w", checkpointID, err)
+	}
+	if snapHash != cp.WorkspaceHash {
+		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: snapshot state hash %s != recorded checkpoint hash %s: %w",
+			checkpointID, snapHash, cp.WorkspaceHash, domain.ErrConflict)
 	}
 
 	// Current state + sequence bases, read in one transaction.
@@ -255,9 +299,18 @@ func (s *Service) RestoreCheckpoint(ctx context.Context, workspaceID, checkpoint
 
 	applied, err := s.applyInternal(ctx, workspaceID, ops, false,
 		domain.ChangeSetTriggerCheckpointRestore,
-		fmt.Sprintf("restore checkpoint %s %q", cp.ID, cp.Label), runChecks)
+		fmt.Sprintf("restore checkpoint %s %q", cp.ID, cp.Label), runChecks, nil)
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: %w", checkpointID, err)
+	}
+	// Defense-in-depth (AUD1-9): the op replay MUST land on the snapshot
+	// hash. A mismatch means the plan failed to express the full difference
+	// (or a concurrent writer mutated the workspace mid-restore) — fail hard
+	// with both hashes instead of reporting an incomplete restore as
+	// success. The applied changeset itself stays recorded for forensics.
+	if applied.WorkspaceHash != snapHash {
+		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: restore incomplete: workspace hash %s != checkpoint hash %s: %w",
+			checkpointID, applied.WorkspaceHash, snapHash, domain.ErrConflict)
 	}
 	result.ChangeSetID = applied.ChangeSetID
 	result.OpsApplied = applied.OpsApplied
@@ -275,10 +328,24 @@ func ifaceKey(deviceCode, ifaceName string) string {
 }
 
 // linkKey is the link matching key of the restore diff: the resolved
-// (aDevice, aInterface, zDevice, zInterface) 4-tuple.
+// (aDevice, aInterface, zDevice, zInterface) 4-tuple PLUS the label (the op
+// catalog can express two links between the same interface pair with
+// different labels — endpoints alone cannot tell them apart, AUD1-1).
 func linkKey(l domain.SimLink, state *simState) string {
 	a, z := state.linkEnds(l)
-	return a.deviceCode + "\x00" + a.ifaceName + "\x00" + z.deviceCode + "\x00" + z.ifaceName
+	return a.deviceCode + "\x00" + a.ifaceName + "\x00" + z.deviceCode + "\x00" + z.ifaceName + "\x00" + l.Label
+}
+
+// linkMultiset indexes a state's links by linkKey, preserving the canonical
+// numeric-id order within each key (the i-th current link of a key pairs
+// with the i-th snapshot link — deterministic multiplicity matching).
+func linkMultiset(state *simState) map[string][]domain.SimLink {
+	out := make(map[string][]domain.SimLink, len(state.links))
+	for _, l := range state.links {
+		k := linkKey(l, state)
+		out[k] = append(out[k], l)
+	}
+	return out
 }
 
 // restoreDiffOps builds the forward-op plan transforming cur into snap.
@@ -302,23 +369,23 @@ func restoreDiffOps(cur, snap *simState, vdBase, ifBase int) []internalOp {
 			snapIface[ifaceKey(d.Dev.Code, i.Name)] = i
 		}
 	}
-	curLink := map[string]domain.SimLink{}
-	snapLink := map[string]domain.SimLink{}
-	for _, l := range cur.links {
-		curLink[linkKey(l, cur)] = l
-	}
-	for _, l := range snap.links {
-		snapLink[linkKey(l, snap)] = l
-	}
+	curLinks := linkMultiset(cur) // key → current links (numeric-id order)
+	snapLinks := linkMultiset(snap)
 
-	// Phase 1: delete extra links (before their interfaces go). cur.links is
-	// in canonical numeric-id order — deterministic, and duplicate endpoint
-	// pairs (pathological, unreachable through engine ops) are handled
-	// naturally because every link row is visited.
+	// Phase 1: delete surplus links (before their interfaces go) —
+	// multiplicity-aware (AUD1-1): a key the current state holds MORE often
+	// than the snapshot loses its surplus occurrences. cur.links is in
+	// canonical numeric-id order, so the HIGHEST-id occurrences go first
+	// (deterministic); parallel links between one interface pair (legacy
+	// workspaces) are deleted down to the snapshot count.
+	curSeen := map[string]int{}
 	for _, l := range cur.links {
-		if _, ok := snapLink[linkKey(l, cur)]; !ok {
-			ops = append(ops, forwardOp(Op{Op: domain.OpDeleteLink, LinkID: l.ID}))
+		k := linkKey(l, cur)
+		curSeen[k]++
+		if curSeen[k] <= len(snapLinks[k]) {
+			continue // matched occurrence (same key, i-th of the snapshot)
 		}
+		ops = append(ops, forwardOp(Op{Op: domain.OpDeleteLink, LinkID: l.ID}))
 	}
 	// Phase 2: delete extra interfaces (device code order, then name).
 	for _, d := range cur.devices {
@@ -374,11 +441,19 @@ func restoreDiffOps(cur, snap *simState, vdBase, ifBase int) []internalOp {
 		}
 	}
 
-	// Phase 6: create missing links with their snapshot status and label
-	// (snap.links is in canonical numeric-id order).
+	// Phase 6: create deficit links with their snapshot status and label —
+	// multiplicity-aware (AUD1-1): a key the SNAPSHOT holds more often than
+	// the current state gains create_link ops for its surplus occurrences
+	// (snap.links is in canonical numeric-id order). create_link inside a
+	// checkpoint_restore changeset may duplicate an interface pair (the
+	// applier's allowParallelLinks path) so legacy parallel links rebuild
+	// hash-exactly.
+	snapSeen := map[string]int{}
 	for _, l := range snap.links {
-		if _, ok := curLink[linkKey(l, snap)]; ok {
-			continue
+		k := linkKey(l, snap)
+		snapSeen[k]++
+		if snapSeen[k] <= len(curLinks[k]) {
+			continue // matched occurrence
 		}
 		a, z := snap.linkEnds(l)
 		op := Op{
@@ -433,8 +508,18 @@ func restoreDiffOps(cur, snap *simState, vdBase, ifBase int) []internalOp {
 			}
 		}
 	}
+	// Link status: pair the i-th snapshot occurrence of a key with the i-th
+	// current occurrence (numeric-id order on both sides — deterministic;
+	// surplus occurrences on either side were deleted/created above).
+	curIdx := map[string]int{}
 	for _, l := range snap.links {
-		if curL, ok := curLink[linkKey(l, snap)]; ok && curL.Status != l.Status {
+		k := linkKey(l, snap)
+		i := curIdx[k]
+		curIdx[k] = i + 1
+		if i >= len(curLinks[k]) {
+			continue // created in phase 6 with its snapshot status
+		}
+		if curL := curLinks[k][i]; curL.Status != l.Status {
 			ops = append(ops, forwardOp(Op{
 				Op:     domain.OpSetLinkStatus,
 				LinkID: curL.ID,

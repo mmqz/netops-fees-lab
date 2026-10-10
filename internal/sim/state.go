@@ -256,14 +256,18 @@ func (s *simState) linkEnds(l domain.SimLink) (linkEnd, linkEnd) {
 	return a, z
 }
 
-// endOf resolves one interface id to its device code and name.
+// endOf resolves one interface id to its device code and name (plus the
+// device and interface statuses for the run edge snapshot's full-predicate
+// extension).
 func (s *simState) endOf(ifaceID string) linkEnd {
 	var e linkEnd
 	if iface, ok := s.ifaceByID[ifaceID]; ok {
 		e.ifaceName = iface.Name
+		e.ifaceStatus = iface.Status.String()
 		if dev, ok := s.deviceByID[iface.DeviceID]; ok {
 			e.deviceID = dev.ID
 			e.deviceCode = dev.Code
+			e.deviceStatus = dev.Status.String()
 		}
 	}
 	return e
@@ -271,16 +275,36 @@ func (s *simState) endOf(ifaceID string) linkEnd {
 
 // linkEnd is one resolved link endpoint.
 type linkEnd struct {
-	deviceID   string
-	deviceCode string
-	ifaceName  string
+	deviceID     string
+	deviceCode   string
+	ifaceName    string
+	deviceStatus string // up/down of the endpoint's device ("" when unresolvable)
+	ifaceStatus  string // up/down of the endpoint interface ("" when unresolvable)
+}
+
+// statusPtr wraps a status string as a pointer, mapping "" (endpoint
+// unresolvable — links always resolve through loadState, so this never
+// fires in practice) to a nil pointer read back as up by the diff.
+func statusPtr(status string) *string {
+	if status == "" {
+		return nil
+	}
+	s := status
+	return &s
 }
 
 // ---- run edge snapshot (check_runs.topology_json, §5) ----
 
 // topoLink is one entry of the canonical edge snapshot: ALL links (up and
 // down) in the same sort as the state-hash links array, camelCase fields
-// aDevice/aInterface/zDevice/zInterface/status/label.
+// aDevice/aInterface/zDevice/zInterface/status/label. Since v0.2.1 the
+// snapshot also records the STATUS of both endpoints' devices and
+// interfaces (AUD1-2): the run diff needs the full §5 connectivity
+// predicate (link up AND both interfaces up AND both devices up), which the
+// original six-field shape could not express. The four status fields are
+// POINTERS: v0.2.0 rows (legacy snapshot format) lack them entirely, and a
+// missing value reads back as nil — the diff treats nil as up, so legacy
+// runs keep their historical link-only diff behavior byte-for-byte.
 type topoLink struct {
 	ADevice    string `json:"aDevice"`
 	AInterface string `json:"aInterface"`
@@ -288,10 +312,18 @@ type topoLink struct {
 	ZInterface string `json:"zInterface"`
 	Status     string `json:"status"`
 	Label      string `json:"label"`
+
+	// Endpoint statuses (full-predicate extension, nil on legacy rows).
+	ADeviceStatus    *string `json:"aDeviceStatus,omitempty"`
+	AInterfaceStatus *string `json:"aInterfaceStatus,omitempty"`
+	ZDeviceStatus    *string `json:"zDeviceStatus,omitempty"`
+	ZInterfaceStatus *string `json:"zInterfaceStatus,omitempty"`
 }
 
 // topologyJSON renders the run edge snapshot as a JSON array of topoLink
-// (canonical sort).
+// (canonical sort). The workspace STATE HASH is unaffected by this format:
+// it is computed from the entity state (hashValue), never from the run
+// snapshot.
 func (s *simState) topologyJSON() (string, error) {
 	links := make([]topoLink, 0, len(s.links))
 	for _, l := range s.links {
@@ -300,6 +332,10 @@ func (s *simState) topologyJSON() (string, error) {
 			ADevice: a.deviceCode, AInterface: a.ifaceName,
 			ZDevice: z.deviceCode, ZInterface: z.ifaceName,
 			Status: l.Status.String(), Label: l.Label,
+			ADeviceStatus:    statusPtr(a.deviceStatus),
+			AInterfaceStatus: statusPtr(a.ifaceStatus),
+			ZDeviceStatus:    statusPtr(z.deviceStatus),
+			ZInterfaceStatus: statusPtr(z.ifaceStatus),
 		})
 	}
 	sort.SliceStable(links, func(i, j int) bool {
@@ -326,7 +362,8 @@ func (s *simState) topologyJSON() (string, error) {
 }
 
 // parseTopoLinks decodes a stored topology_json snapshot (used by the run
-// diff to recompute up-only reachability without replaying ops).
+// diff to recompute reachability without replaying ops; legacy rows simply
+// leave the four endpoint-status pointers nil).
 func parseTopoLinks(raw string) ([]topoLink, error) {
 	if raw == "" {
 		return nil, nil

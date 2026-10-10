@@ -15,6 +15,7 @@ import {
   applyOps,
   createCheckpoint,
   filledSeverityCounts,
+  formatApiError,
   getTopology,
   getWorkspace,
   restoreCheckpoint,
@@ -53,12 +54,14 @@ import {
   TOAST_RESTORE_DONE,
   TOAST_RESTORE_NOOP,
   TOAST_UNDO_DONE,
+  TOAST_VIEW_CHANGESETS,
   format,
 } from '../i18n';
 import { LoadingPanel } from '../components/Spinner';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
+import type { ToastAction } from '../components/Toast';
 import { TopologyCanvas } from '../components/lab/TopologyCanvas';
 import { OpsDialog } from '../components/lab/OpsDialog';
 import { DiffDialog } from '../components/lab/DiffDialog';
@@ -68,7 +71,8 @@ import { ChangeSetsTab } from '../components/lab/ChangeSetsTab';
 import { CheckpointsTab } from '../components/lab/CheckpointsTab';
 import { buildTopologyView } from '../components/lab/selection';
 import type { SelectedEntity } from '../components/lab/selection';
-import { saveLastWorkspace } from '../lastWorkspace';
+import { clearLastWorkspace, saveLastWorkspace } from '../lastWorkspace';
+import { useSeq } from '../hooks/useSeq';
 
 type LabTab = 'devices' | 'interfaces' | 'links' | 'checks' | 'changesets' | 'checkpoints';
 
@@ -85,6 +89,29 @@ function scoreChipClass(score: number): string {
   if (score >= 90) return 'chip--success';
   if (score >= 60) return 'chip--warning';
   return 'chip--error';
+}
+
+const LAB_TAB_VALUES: LabTab[] = ['devices', 'interfaces', 'links', 'checks', 'changesets', 'checkpoints'];
+
+/** 标签页选择按工作台持久化（sessionStorage，刷新后保留，P2）。 */
+function readPersistedTab(workspaceId: string): LabTab {
+  if (typeof sessionStorage === 'undefined') return 'devices';
+  try {
+    const value = sessionStorage.getItem(`netops-lab.tab.${workspaceId}`);
+    if (value !== null && (LAB_TAB_VALUES as string[]).includes(value)) return value as LabTab;
+  } catch {
+    // 隐私模式 / 配额异常：静默回退默认标签
+  }
+  return 'devices';
+}
+
+function writePersistedTab(workspaceId: string, tab: LabTab): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(`netops-lab.tab.${workspaceId}`, tab);
+  } catch {
+    // 写失败不影响功能
+  }
 }
 
 function CountChip({ label, total, up, down }: { label: string; total: number; up: number; down: number }) {
@@ -114,10 +141,12 @@ export function LabWorkspacePage() {
   const [topology, setTopology] = useState<SimTopology | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** 错误次行技术原文（FX2-4）。 */
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [version, setVersion] = useState(0);
   const [selected, setSelected] = useState<SelectedEntity | null>(null);
-  const [tab, setTab] = useState<LabTab>('devices');
+  const [tab, setTab] = useState<LabTab>(() => readPersistedTab(workspaceId));
   const [opsOpen, setOpsOpen] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
   const [undoConfirm, setUndoConfirm] = useState(false);
@@ -125,44 +154,58 @@ export function LabWorkspacePage() {
   const [checksBusy, setChecksBusy] = useState(false);
   const [undoBusy, setUndoBusy] = useState(false);
   const [cpBusy, setCpBusy] = useState(false);
-  const [focusCpInput, setFocusCpInput] = useState(false);
-
-  useEffect(() => {
-    if (workspaceId !== '') {
-      saveLastWorkspace(workspaceId);
-    }
-  }, [workspaceId]);
-
-  const refresh = useCallback((): void => {
-    setVersion((v) => v + 1);
-  }, []);
+  /** 检查点输入聚焦信号：每次点击页头按钮都 +1（AUD2-17）。 */
+  const [focusCpSignal, setFocusCpSignal] = useState(0);
+  /** toast「查看变更集」定位后要闪亮的变更集行（W9）。 */
+  const [highlightCs, setHighlightCs] = useState<string | undefined>(undefined);
+  /** 取数守卫（AUD2-8）：/lab/:idA → /lab/:idB 路由复用 + refreshAll 重叠时丢弃旧响应。 */
+  const loadGuard = useSeq();
 
   const load = useCallback((): void => {
     if (workspaceId === '') return;
+    const isCurrent = loadGuard.begin();
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     setNotFound(false);
     Promise.all([getWorkspace(workspaceId), getTopology(workspaceId)])
       .then((results) => {
+        if (!isCurrent()) return;
         setDetail(results[0]);
         setTopology(results[1]);
         setLoading(false);
+        // 仅在确认存在后持久化（避免把 404 的死 id 重新写回侧栏快捷入口——AUD2-11）
+        saveLastWorkspace(workspaceId);
       })
       .catch((err: unknown) => {
+        if (!isCurrent()) return;
         setLoading(false);
         if (err instanceof ApiError && (err.status === 404 || err.code === 'not_found')) {
           setNotFound(true);
+          clearLastWorkspace(workspaceId);
         }
-        setError(err instanceof ApiError ? err.message : String(err));
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
       });
-  }, [workspaceId]);
+  }, [workspaceId, loadGuard]);
 
   useEffect(() => {
     load();
     setSelected(null);
-  }, [load]);
+    // 工作台切换时恢复各自的标签页选择（P2）
+    setTab(readPersistedTab(workspaceId));
+  }, [load, workspaceId]);
+
+  useEffect(() => {
+    writePersistedTab(workspaceId, tab);
+  }, [workspaceId, tab]);
 
   // —— 统一动作 ——
+
+  const refresh = useCallback((): void => {
+    setVersion((v) => v + 1);
+  }, []);
 
   const refreshAll = useCallback((): void => {
     load();
@@ -171,9 +214,26 @@ export function LabWorkspacePage() {
 
   const showApiError = useCallback(
     (err: unknown): void => {
-      toast.show(err instanceof ApiError ? err.message : String(err), 'error');
+      const display = formatApiError(err);
+      toast.show(display.title, 'error', { detail: display.detail });
     },
     [toast],
+  );
+
+  /** 成功 toast 的「查看变更集」动作（W9）：跳转右侧标签页并闪光定位新变更集。 */
+  const viewChangesetsAction = useCallback(
+    (changesetId?: string): { action: ToastAction } => ({
+      action: {
+        label: TOAST_VIEW_CHANGESETS,
+        onClick: () => {
+          setTab('changesets');
+          if (changesetId !== undefined && changesetId !== '') {
+            setHighlightCs(changesetId);
+          }
+        },
+      },
+    }),
+    [],
   );
 
   const applyOpsRequest = useCallback(
@@ -182,7 +242,11 @@ export function LabWorkspacePage() {
       applyOps(workspaceId, { ops, description, runChecks: true })
         .then((result) => {
           setOpsBusy(false);
-          toast.show(format(TOAST_OPS_DONE, { id: result.changesetId, n: result.opsApplied }), 'success');
+          toast.show(
+            format(TOAST_OPS_DONE, { id: result.changesetId, n: result.opsApplied }),
+            'success',
+            viewChangesetsAction(result.changesetId),
+          );
           refreshAll();
         })
         .catch((err: unknown) => {
@@ -190,7 +254,7 @@ export function LabWorkspacePage() {
           showApiError(err);
         });
     },
-    [workspaceId, toast, refreshAll, showApiError],
+    [workspaceId, toast, refreshAll, showApiError, viewChangesetsAction],
   );
 
   const runChecksNow = useCallback((): void => {
@@ -225,6 +289,7 @@ export function LabWorkspacePage() {
           toast.show(
             format(TOAST_UNDO_DONE, { id: result.reverted, newId: result.changesetId }),
             'success',
+            viewChangesetsAction(result.changesetId),
           );
           refreshAll();
         })
@@ -233,21 +298,23 @@ export function LabWorkspacePage() {
           showApiError(err);
         });
     },
-    [workspaceId, toast, refreshAll, showApiError],
+    [workspaceId, toast, refreshAll, showApiError, viewChangesetsAction],
   );
 
   const createCheckpointNow = useCallback(
-    (label: string): void => {
+    (label: string): Promise<boolean> => {
       setCpBusy(true);
-      createCheckpoint(workspaceId, label)
+      return createCheckpoint(workspaceId, label)
         .then(() => {
           setCpBusy(false);
           toast.show(format(TOAST_CHECKPOINT_CREATED, { label }), 'success');
           refreshAll();
+          return true;
         })
         .catch((err: unknown) => {
           setCpBusy(false);
           showApiError(err);
+          return false;
         });
     },
     [workspaceId, toast, refreshAll, showApiError],
@@ -265,6 +332,7 @@ export function LabWorkspacePage() {
             toast.show(
               format(TOAST_RESTORE_DONE, { label: checkpoint.label, id: result.changesetId }),
               'success',
+              viewChangesetsAction(result.changesetId),
             );
           }
           refreshAll();
@@ -274,7 +342,7 @@ export function LabWorkspacePage() {
           showApiError(err);
         });
     },
-    [workspaceId, toast, refreshAll, showApiError],
+    [workspaceId, toast, refreshAll, showApiError, viewChangesetsAction],
   );
 
   // —— 画布选中 → 右侧切换标签并定位 ——
@@ -302,7 +370,7 @@ export function LabWorkspacePage() {
 
   function jumpToCheckpoints(): void {
     setTab('checkpoints');
-    setFocusCpInput(true);
+    setFocusCpSignal((n) => n + 1);
   }
 
   const anyBusy = opsBusy || checksBusy || undoBusy || cpBusy;
@@ -325,7 +393,7 @@ export function LabWorkspacePage() {
   }
 
   if (error !== null && detail === null) {
-    return <ErrorBlock message={error} onRetry={load} />;
+    return <ErrorBlock message={error} detail={errorDetail} onRetry={load} />;
   }
 
   if (detail === null) {
@@ -383,11 +451,11 @@ export function LabWorkspacePage() {
             {LABWS_BACK_LIST}
           </Link>
         </div>
-        {error !== null && <ErrorBlock message={error} onRetry={load} />}
+        {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
       </div>
 
       <div className="lab-split">
-        <TopologyCanvas topology={topology} selected={selected} onSelect={handleCanvasSelect} />
+        <TopologyCanvas topology={topology} selected={selected} onSelect={handleCanvasSelect} persistKey={workspaceId} />
 
         <div className="card lab-panel">
           <div className="tabs" role="tablist">
@@ -401,7 +469,7 @@ export function LabWorkspacePage() {
                 onClick={() => {
                   setTab(item.value);
                   if (item.value === 'checkpoints') {
-                    setFocusCpInput(false);
+                    setFocusCpSignal(0);
                   }
                 }}
               >
@@ -423,7 +491,14 @@ export function LabWorkspacePage() {
               <ChecksTab workspaceId={workspaceId} version={version} onRunChecks={runChecksNow} checksBusy={checksBusy} />
             )}
             {tab === 'changesets' && (
-              <ChangeSetsTab workspaceId={workspaceId} version={version} onUndo={undoLatest} undoBusy={undoBusy} />
+              <ChangeSetsTab
+                workspaceId={workspaceId}
+                version={version}
+                latestChangeset={detail.latestChangeset}
+                onUndo={undoLatest}
+                undoBusy={undoBusy}
+                highlightId={highlightCs}
+              />
             )}
             {tab === 'checkpoints' && (
               <CheckpointsTab
@@ -432,7 +507,7 @@ export function LabWorkspacePage() {
                 onCreateCheckpoint={createCheckpointNow}
                 onRestore={restoreCheckpointNow}
                 cpBusy={cpBusy}
-                focusInput={focusCpInput}
+                focusSignal={focusCpSignal}
               />
             )}
           </div>
@@ -446,7 +521,11 @@ export function LabWorkspacePage() {
         onClose={() => setOpsOpen(false)}
         onApplied={(result: ApplyResult) => {
           setOpsOpen(false);
-          toast.show(format(TOAST_OPS_DONE, { id: result.changesetId, n: result.opsApplied }), 'success');
+          toast.show(
+            format(TOAST_OPS_DONE, { id: result.changesetId, n: result.opsApplied }),
+            'success',
+            viewChangesetsAction(result.changesetId),
+          );
           refreshAll();
         }}
         onError={showApiError}

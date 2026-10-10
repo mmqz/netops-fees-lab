@@ -9,7 +9,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { BatchListItem, Paged, WorkspaceSummary } from '../api/types';
-import { ApiError, createWorkspace, deleteWorkspace, listBatches, listWorkspaces } from '../api/client';
+import {
+  createWorkspace,
+  deleteWorkspace,
+  formatApiError,
+  formatApiErrorText,
+  listBatches,
+  listWorkspaces,
+} from '../api/client';
 import {
   BTN_CREATE,
   BTN_CREATE_WORKSPACE,
@@ -19,6 +26,7 @@ import {
   LAB_BATCH_OPTION,
   LAB_BATCH_SELECT_ALL,
   LAB_BATCH_SELECT_NONE,
+  LAB_CAPPED_HINT,
   LAB_COL_ACTIONS,
   LAB_COL_CREATED_AT,
   LAB_COL_DESC,
@@ -47,7 +55,7 @@ import {
   format,
   formatDateTime,
 } from '../i18n';
-import { Table } from '../components/Table';
+import { Table, numericId } from '../components/Table';
 import type { TableColumn } from '../components/Table';
 import { Pagination } from '../components/Pagination';
 import { LoadingPanel } from '../components/Spinner';
@@ -57,7 +65,8 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { LabDialog } from '../components/lab/LabDialog';
 import { IconFlask, IconUpload } from '../components/icons';
-import { saveLastWorkspace } from '../lastWorkspace';
+import { clearLastWorkspace, saveLastWorkspace } from '../lastWorkspace';
+import { useSeq } from '../hooks/useSeq';
 
 const PAGE_SIZE = 20;
 const BATCHES_PAGE_SIZE = 100;
@@ -73,6 +82,7 @@ function CreateWorkspaceDialog({ open, onClose, onCreated }: CreateWorkspaceDial
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [batches, setBatches] = useState<BatchListItem[]>([]);
+  const [batchesCapped, setBatchesCapped] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -88,12 +98,13 @@ function CreateWorkspaceDialog({ open, onClose, onCreated }: CreateWorkspaceDial
       .then((paged: Paged<BatchListItem>) => {
         const completed = paged.items.filter((batch) => batch.status === 'completed');
         setBatches(completed);
+        setBatchesCapped(paged.total > paged.items.length);
         setSelected(new Set(completed.map((batch) => batch.id)));
         setLoading(false);
       })
       .catch((err: unknown) => {
         setLoading(false);
-        toast.show(err instanceof ApiError ? err.message : String(err), 'error');
+        toast.show(formatApiErrorText(err), 'error');
       });
   }, [open, toast]);
 
@@ -144,7 +155,8 @@ function CreateWorkspaceDialog({ open, onClose, onCreated }: CreateWorkspaceDial
       })
       .catch((err: unknown) => {
         setBusy(false);
-        toast.show(err instanceof ApiError ? err.message : String(err), 'error');
+        const display = formatApiError(err);
+        toast.show(display.title, 'error', { detail: display.detail });
       });
   }
 
@@ -210,6 +222,9 @@ function CreateWorkspaceDialog({ open, onClose, onCreated }: CreateWorkspaceDial
                 {LAB_BATCH_SELECT_NONE}
               </button>
             </div>
+            {batchesCapped && (
+              <div className="modal-note">{format(LAB_CAPPED_HINT, { n: BATCHES_PAGE_SIZE })}</div>
+            )}
             <div className="batch-check-list">
               {batches.map((batch) => (
                 <label key={batch.id} className="batch-check-item">
@@ -242,23 +257,38 @@ export function LabWorkspacesPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  /** 取数守卫（AUD2-8）。 */
+  const loadGuard = useSeq();
 
   const load = useCallback((): void => {
+    const isCurrent = loadGuard.begin();
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     listWorkspaces(page, PAGE_SIZE)
       .then((paged) => {
+        if (!isCurrent()) return;
+        // AUD2-10：删除后总页数变小 → 收敛页码（含空列表回第 1 页），再重拉
+        const pageCount = Math.max(1, Math.ceil(paged.total / Math.max(1, paged.pageSize || PAGE_SIZE)));
+        if (page > pageCount) {
+          setPage(pageCount);
+          return;
+        }
         setData(paged);
         setLoading(false);
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : null);
+        if (!isCurrent()) return;
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, [page]);
+  }, [page, loadGuard]);
 
   useEffect(() => {
     load();
@@ -272,22 +302,53 @@ export function LabWorkspacesPage() {
       .then(() => {
         setDeleteBusy(false);
         setDeleteTarget(null);
+        // AUD2-11：删除的是最近访问的工作台 → 清除侧栏快捷入口，避免死链
+        clearLastWorkspace(target.id);
         toast.show(TOAST_WORKSPACE_DELETED, 'success');
         load();
       })
       .catch((err: unknown) => {
         setDeleteBusy(false);
         setDeleteTarget(null);
-        toast.show(err instanceof ApiError ? err.message : String(err), 'error');
+        const display = formatApiError(err);
+        toast.show(display.title, 'error', { detail: display.detail });
       });
   }
 
   const columns: TableColumn<WorkspaceSummary>[] = [
-    { key: 'name', header: LAB_COL_NAME, render: (row) => <span className="cell-strong">{row.name}</span> },
-    { key: 'description', header: LAB_COL_DESC, render: (row) => (row.description === '' ? <span className="muted-note">{NO_VALUE}</span> : row.description) },
-    { key: 'devices', header: LAB_COL_DEVICES, render: (row) => row.deviceCount, align: 'right' },
-    { key: 'interfaces', header: LAB_COL_INTERFACES, render: (row) => row.interfaceCount, align: 'right' },
-    { key: 'links', header: LAB_COL_LINKS, render: (row) => row.linkCount, align: 'right' },
+    {
+      key: 'name',
+      header: LAB_COL_NAME,
+      render: (row) => <span className="cell-strong">{row.name}</span>,
+      sortValue: (row) => row.name,
+    },
+    {
+      key: 'description',
+      header: LAB_COL_DESC,
+      render: (row) => (row.description === '' ? <span className="muted-note">{NO_VALUE}</span> : row.description),
+      sortValue: (row) => row.description,
+    },
+    {
+      key: 'devices',
+      header: LAB_COL_DEVICES,
+      render: (row) => row.deviceCount,
+      align: 'right',
+      sortValue: (row) => row.deviceCount,
+    },
+    {
+      key: 'interfaces',
+      header: LAB_COL_INTERFACES,
+      render: (row) => row.interfaceCount,
+      align: 'right',
+      sortValue: (row) => row.interfaceCount,
+    },
+    {
+      key: 'links',
+      header: LAB_COL_LINKS,
+      render: (row) => row.linkCount,
+      align: 'right',
+      sortValue: (row) => row.linkCount,
+    },
     {
       key: 'score',
       header: LAB_COL_SCORE,
@@ -300,9 +361,27 @@ export function LabWorkspacesPage() {
           </span>
         ),
       align: 'right',
+      sortValue: (row) => row.lastRunScore ?? -1,
     },
-    { key: 'lastRun', header: LAB_COL_LAST_RUN, render: (row) => (row.lastRunId === null || row.lastRunId === undefined ? <span className="muted-note">{NO_VALUE}</span> : <span className="mono" title={row.lastRunId}>{row.lastRunId}</span>) },
-    { key: 'createdAt', header: LAB_COL_CREATED_AT, render: (row) => formatDateTime(row.createdAt) },
+    {
+      key: 'lastRun',
+      header: LAB_COL_LAST_RUN,
+      render: (row) =>
+        row.lastRunId === null || row.lastRunId === undefined ? (
+          <span className="muted-note">{NO_VALUE}</span>
+        ) : (
+          <span className="mono" title={row.lastRunId}>
+            {row.lastRunId}
+          </span>
+        ),
+      sortValue: (row) => numericId(row.lastRunId ?? ''),
+    },
+    {
+      key: 'createdAt',
+      header: LAB_COL_CREATED_AT,
+      render: (row) => formatDateTime(row.createdAt),
+      sortValue: (row) => Date.parse(row.createdAt),
+    },
     {
       key: 'actions',
       header: LAB_COL_ACTIONS,
@@ -326,7 +405,7 @@ export function LabWorkspacesPage() {
   }
 
   if (error !== null && data === null) {
-    return <ErrorBlock message={error} onRetry={load} />;
+    return <ErrorBlock message={error} detail={errorDetail} onRetry={load} />;
   }
 
   if (data !== null && data.total === 0 && !error) {
@@ -381,7 +460,7 @@ export function LabWorkspacesPage() {
             {BTN_CREATE_WORKSPACE}
           </button>
         </div>
-        {error !== null && <ErrorBlock message={error} onRetry={load} />}
+        {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
         <div className="table-wrap">
           <Table
             columns={columns}

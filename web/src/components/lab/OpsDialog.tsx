@@ -2,20 +2,19 @@
  * 执行操作对话框：
  * - 11 个中文操作入口（10 个 §4 前向操作，配置/清除地址拆成两项）；
  * - 动态表单：id 下拉以当前拓扑预填（设备 code·名称 / DEV:eth 接口 / 链路 A↔Z）；
- * - 客户端校验（必填、dotted-quad、前缀 0–32、链路两端不同设备）；
+ * - 客户端校验（必填、dotted-quad、前缀 0–32、链路两端不同设备；
+ *   create_interface 的可选地址/前缀与 config 分支同一套校验——AUD2-1）；
  * - JSON 模式：直接提交操作数组或 {ops,description,runChecks}（JSON.parse 校验）。
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ApplyResult, SimEntityStatus, SimOp } from '../../api/types';
-import { ApiError, applyOps } from '../../api/client';
+import { applyOps } from '../../api/client';
 import {
   BTN_CONFIRM,
   LAB_I_ADDR_PLACEHOLDER,
-  LAB_I_ERR_ADDR,
   LAB_I_ERR_BOTH,
-  LAB_I_ERR_PREFIX,
   LAB_I_F_ADDR,
   LAB_I_F_PREFIX,
   LAB_I_PREFIX_PLACEHOLDER,
@@ -57,7 +56,7 @@ import {
   format,
 } from '../../i18n';
 import { LabDialog } from './LabDialog';
-import { isValidIpv4 } from './selection';
+import { validateIpv4Pair } from './selection';
 import type { TopologyView } from './selection';
 
 /** 对话框操作入口（clear_interface_ipv4 是 config_interface_ipv4 的空参数形态）。 */
@@ -113,7 +112,8 @@ interface OpsDialogProps {
   view: TopologyView;
   onClose: () => void;
   onApplied: (result: ApplyResult) => void;
-  onError: (message: string) => void;
+  /** 提交失败（经 FX2-4 统一展示辅助处理）。 */
+  onError: (err: unknown) => void;
 }
 
 /** 表单构建结果：操作数组或阻止提交的错误文案。 */
@@ -205,6 +205,10 @@ export function OpsDialog({ open, workspaceId, view, onClose, onApplied, onError
         if (ifDeviceId === '' || ifName.trim() === '') return { error: LAB_OPS_ERR_REQUIRED };
         const op: CreateInterfaceOp = { op: 'create_interface', deviceId: ifDeviceId, name: ifName.trim() };
         if (ifStatus !== '') op.status = ifStatus as SimEntityStatus;
+        // 可选地址+前缀：与 config_interface_ipv4 同一套校验（两者同填、dotted-quad、0–32），
+        // 避免只填地址被静默丢弃 / 前缀非数字变 NaN→null→服务端 400（AUD2-1）
+        const ipv4Error = validateIpv4Pair(addr, prefix);
+        if (ipv4Error !== null) return { error: ipv4Error };
         if (addr.trim() !== '' && prefix.trim() !== '') {
           op.ipv4Addr = addr.trim();
           op.ipv4Prefix = Number(prefix);
@@ -217,12 +221,9 @@ export function OpsDialog({ open, workspaceId, view, onClose, onApplied, onError
       case 'config_interface_ipv4': {
         if (interfaceId === '') return { error: LAB_OPS_ERR_REQUIRED };
         if (addr.trim() === '' || prefix.trim() === '') return { error: LAB_I_ERR_BOTH };
-        if (!isValidIpv4(addr.trim())) return { error: LAB_I_ERR_ADDR };
-        const prefixNum = Number(prefix);
-        if (!Number.isInteger(prefixNum) || prefixNum < 0 || prefixNum > 32) {
-          return { error: LAB_I_ERR_PREFIX };
-        }
-        return { ops: [{ op: 'config_interface_ipv4', interfaceId, ipv4Addr: addr.trim(), ipv4Prefix: prefixNum }] };
+        const ipv4Error = validateIpv4Pair(addr, prefix);
+        if (ipv4Error !== null) return { error: ipv4Error };
+        return { ops: [{ op: 'config_interface_ipv4', interfaceId, ipv4Addr: addr.trim(), ipv4Prefix: Number(prefix) }] };
       }
       case 'clear_interface_ipv4':
         if (interfaceId === '') return { error: LAB_OPS_ERR_REQUIRED };
@@ -309,11 +310,7 @@ export function OpsDialog({ open, workspaceId, view, onClose, onApplied, onError
       })
       .catch((err: unknown) => {
         setBusy(false);
-        if (err instanceof ApiError) {
-          onError(err.message);
-        } else {
-          setError(String(err));
-        }
+        onError(err);
       });
   }
 
@@ -321,6 +318,9 @@ export function OpsDialog({ open, workspaceId, view, onClose, onApplied, onError
   const needInterface =
     opKind === 'set_interface_status' || opKind === 'config_interface_ipv4' || opKind === 'clear_interface_ipv4';
   const needLink = opKind === 'set_link_status' || opKind === 'delete_link';
+
+  // create_interface 的可选地址/前缀：实时校验，非法则禁用提交并内联提示
+  const liveIpv4Error = opKind === 'create_interface' && !rawMode ? validateIpv4Pair(addr, prefix) : null;
 
   function renderSelect(
     id: string,
@@ -359,6 +359,7 @@ export function OpsDialog({ open, workspaceId, view, onClose, onApplied, onError
       onClose={onClose}
       wide
       busy={busy}
+      confirmDisabled={liveIpv4Error !== null}
       confirmLabel={BTN_CONFIRM}
       onConfirm={submit}
     >
@@ -600,6 +601,11 @@ export function OpsDialog({ open, workspaceId, view, onClose, onApplied, onError
       {error !== null && (
         <div className="form-error" role="alert">
           {error}
+        </div>
+      )}
+      {error === null && liveIpv4Error !== null && (
+        <div className="form-error" role="alert">
+          {liveIpv4Error}
         </div>
       )}
     </LabDialog>

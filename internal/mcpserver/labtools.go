@@ -349,16 +349,22 @@ type checkpointItemRow struct {
 // workspaceHash, createdAt}; list → {action, items, total}; restore →
 // {action, checkpointId, label, changesetId (omitted on the no-op restore),
 // note, opsApplied, restoredToHash, workspaceHash, checks}.
+//
+// Items/Total are POINTERS so the §8 "list → {items:[…],total}" contract
+// holds for the EMPTY list too (AUD1-11): nil ⇒ omitted (create/restore),
+// non-nil ⇒ rendered — an empty list renders items: [] and total: 0, never
+// absent fields (plain omitempty would drop both when a workspace has no
+// checkpoints).
 type checkpointOutput struct {
 	Action string `json:"action"`
 
 	// create / list / restore sections.
-	CheckpointID  string              `json:"checkpointId,omitempty"`
-	Label         string              `json:"label,omitempty"`
-	WorkspaceHash string              `json:"workspaceHash,omitempty"`
-	CreatedAt     string              `json:"createdAt,omitempty"`
-	Items         []checkpointItemRow `json:"items,omitempty"`
-	Total         int                 `json:"total,omitempty"`
+	CheckpointID  string               `json:"checkpointId,omitempty"`
+	Label         string               `json:"label,omitempty"`
+	WorkspaceHash string               `json:"workspaceHash,omitempty"`
+	CreatedAt     string               `json:"createdAt,omitempty"`
+	Items         *[]checkpointItemRow `json:"items,omitempty"`
+	Total         *int                 `json:"total,omitempty"`
 
 	// restore section.
 	ChangeSetID    string          `json:"changesetId,omitempty"` // "" (no-op restore) ⇒ omitted
@@ -407,10 +413,13 @@ func labCheckpoint(ctx context.Context, svc *sim.Service, in checkpointInput) (*
 				CreatedAt:     cp.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			})
 		}
+		// Pointer fields: an empty list still renders items: [] and
+		// total: 0 (§8 — never absent).
+		total := len(items)
 		return nil, checkpointOutput{
 			Action: checkpointActionList,
-			Items:  items,
-			Total:  len(items),
+			Items:  &items,
+			Total:  &total,
 		}, nil
 	case checkpointActionRestore:
 		if in.CheckpointID == "" {

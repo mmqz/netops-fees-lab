@@ -651,7 +651,7 @@ GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
 }
 ```
 
-不可达（注入 ln-1 down 之后）：`{"reachable":false,"hops":null,"pathLength":0}`；同编码 → `{"reachable":true,"hops":[{…self}],"pathLength":0}`。未知设备编码 → 404；缺字段 → `400 {"error":{"code":"invalid_request","message":"fromDevice and toDevice are required"}}`。
+不可达（注入 ln-1 down 之后）：`{"reachable":false,"hops":[],"pathLength":0}`（v0.2.1 起空列表渲染 `[]` 而非 null）；同编码 → `{"reachable":true,"hops":[{…self}],"pathLength":0}`。未知设备编码 → 404；缺字段 → `400 {"error":{"code":"invalid_request","message":"fromDevice and toDevice are required"}}`。
 
 ## POST /api/workspaces/{id}/ops — 应用操作（变更集）
 
@@ -679,14 +679,15 @@ GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
 {"error":{"code":"op_failed","message":"op 0 (set_link_status): link not found: ln-999 [changeset cs-2 recorded as failed]"}}
 ```
 
-畸形负载 → 400 `invalid_request`。真实示例（restore_* 引擎内部操作码 / 未知操作码）：
+畸形负载 → 400 `invalid_request`。真实示例（restore_* 引擎内部操作码 / 未知操作码 / **空操作集（v0.2.1 起拒绝，不留变更集行）**）：
 
 ```
 {"error":{"code":"invalid_request","message":"sim: op 0: \"restore_link\": not a forward op code (restore_* ops are engine-internal): domain: invalid operation"}}
 {"error":{"code":"invalid_request","message":"sim: op 0: \"reboot_device\": not a forward op code (restore_* ops are engine-internal): domain: invalid operation"}}
+{"error":{"code":"invalid_request","message":"sim: decode ops request: ops must contain at least one operation: domain: invalid operation"}}
 ```
 
-（字段拼写错误、多余字段、坏类型同走 400——`DisallowUnknownFields` + 严格字段表。）
+（字段拼写错误、多余字段、坏类型、非法状态值同走 400——`DisallowUnknownFields` + 严格字段表；v0.2.1 起这些 400 均携带非空英文 message，如 `invalid request: sim: op 0: sim: invalid status \"halted\" (want up or down): domain: invalid operation`。）
 
 ## POST /api/workspaces/{id}/checks/run — 执行校验
 

@@ -14,9 +14,7 @@ import {
   LAB_I_CLEAR_HINT,
   LAB_I_CONFIG_TARGET,
   LAB_I_CONFIG_TITLE,
-  LAB_I_ERR_ADDR,
   LAB_I_ERR_BOTH,
-  LAB_I_ERR_PREFIX,
   LAB_I_F_ADDR,
   LAB_I_F_PREFIX,
   LAB_I_IPV4_UNSET,
@@ -26,7 +24,7 @@ import {
   format,
 } from '../../i18n';
 import { LabDialog } from './LabDialog';
-import { isValidIpv4 } from './selection';
+import { validateIpv4Pair } from './selection';
 import type { InterfaceRow } from './selection';
 
 interface InterfaceConfigDialogProps {
@@ -65,16 +63,13 @@ export function InterfaceConfigDialog({
       setError(LAB_I_ERR_BOTH);
       return;
     }
-    if (!isValidIpv4(addr.trim())) {
-      setError(LAB_I_ERR_ADDR);
+    // 与 OpsDialog/新建接口共用同一套纯函数校验（AUD2-1/FX2-2）
+    const ipv4Error = validateIpv4Pair(addr, prefix);
+    if (ipv4Error !== null) {
+      setError(ipv4Error);
       return;
     }
-    const prefixNum = Number(prefix);
-    if (!Number.isInteger(prefixNum) || prefixNum < 0 || prefixNum > 32) {
-      setError(LAB_I_ERR_PREFIX);
-      return;
-    }
-    onSubmit([{ op: 'config_interface_ipv4', interfaceId: iface.id, ipv4Addr: addr.trim(), ipv4Prefix: prefixNum }]);
+    onSubmit([{ op: 'config_interface_ipv4', interfaceId: iface.id, ipv4Addr: addr.trim(), ipv4Prefix: Number(prefix) }]);
   }
 
   function clearAddr(): void {

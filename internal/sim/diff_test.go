@@ -85,11 +85,14 @@ func TestRunDiff(t *testing.T) {
 			t.Fatalf("findingsRemoved contains %s, want only CHK-005", f.CheckCode)
 		}
 	}
-	// connectivityLost: the CKT-002 cut splits the link-level universe
-	// {DEV-001..DEV-021} into {DEV-001, DEV-002} vs the other 19 — 2×19
-	// pairs lost, including the 2-hop pair.
-	if len(diff.ConnectivityLost) != 38 {
-		t.Fatalf("connectivityLost = %d pairs, want 38: %+v", len(diff.ConnectivityLost), diff.ConnectivityLost)
+	// connectivityLost: the CKT-002 cut splits the live universe. With the
+	// full §5 predicate (v0.2.1, AUD1-2) the baseline live components are
+	// {DEV-001..DEV-014} (the down devices DEV-015/016/019 cut the chain
+	// beyond), plus {DEV-017, DEV-018} and {DEV-020, DEV-021}; after the
+	// fault the big component splits into {DEV-001, DEV-002} vs
+	// {DEV-003..DEV-014} — 2×12 = 24 pairs lost, including the 2-hop pair.
+	if len(diff.ConnectivityLost) != 24 {
+		t.Fatalf("connectivityLost = %d pairs, want 24: %+v", len(diff.ConnectivityLost), diff.ConnectivityLost)
 	}
 	if len(diff.ConnectivityGained) != 0 {
 		t.Fatalf("connectivityGained = %d, want 0", len(diff.ConnectivityGained))
@@ -120,8 +123,8 @@ func TestRunDiff(t *testing.T) {
 	if len(diff.FindingsAdded) != 2 {
 		t.Fatalf("findingsAdded = %d, want 2 (the two CHK-005 rows back): %+v", len(diff.FindingsAdded), diff.FindingsAdded)
 	}
-	if len(diff.ConnectivityGained) != 38 {
-		t.Fatalf("connectivityGained = %d pairs, want 38: %+v", len(diff.ConnectivityGained), diff.ConnectivityGained)
+	if len(diff.ConnectivityGained) != 24 {
+		t.Fatalf("connectivityGained = %d pairs, want 24: %+v", len(diff.ConnectivityGained), diff.ConnectivityGained)
 	}
 	seen = false
 	for _, pair := range diff.ConnectivityGained {

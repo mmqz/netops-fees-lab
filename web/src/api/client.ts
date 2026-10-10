@@ -49,7 +49,7 @@ import type {
   WorkspaceDetail,
   WorkspaceSummary,
 } from './types';
-import { ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
+import { ERR_API_CHECKPOINT_MISSING_FILE, ERR_API_CONFLICT, ERR_API_INVALID_REQUEST, ERR_API_NOT_FOUND, ERR_API_NOT_LATEST, ERR_API_OP_FAILED, ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
 
 const BASE = '/api';
 
@@ -61,13 +61,69 @@ const BASE = '/api';
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** 后端原始 message（可能为空串——AUD2-3/FX2-4：apply 校验 400 常空消息）。 */
+  readonly backendMessage: string;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, backendMessage?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.backendMessage = backendMessage ?? message;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 错误友好展示（FX2-4）
+// ---------------------------------------------------------------------------
+
+/** 错误码 → 中文主题行；英文技术原文作为次行（detail）保留。 */
+export interface ApiErrorDisplay {
+  title: string;
+  detail: string | null;
+}
+
+const API_ERROR_TITLES: Record<string, string> = {
+  invalid_request: ERR_API_INVALID_REQUEST,
+  op_failed: ERR_API_OP_FAILED,
+  not_found: ERR_API_NOT_FOUND,
+  not_latest: ERR_API_NOT_LATEST,
+  conflict: ERR_API_CONFLICT,
+  checkpoint_missing_file: ERR_API_CHECKPOINT_MISSING_FILE,
+};
+
+/** 消息是否为英文技术文案（后端 §7 约定英文；出现 CJK 视为已本地化）。 */
+function isTechnicalEnglish(message: string): boolean {
+  return !/[\u4e00-\u9fff]/.test(message);
+}
+
+/**
+ * 所有错误展示面的统一入口（FX2-4）：
+ * - 空消息/英文技术消息 → 中文主题行 + 原文作次行；
+ * - 中文消息 → 原样作为主题行；
+ * - 非 ApiError → String 兜底。
+ * 兼容 FX-1 修复前后（后端带不带 message 均可）。
+ */
+export function formatApiError(err: unknown): ApiErrorDisplay {
+  if (!(err instanceof ApiError)) {
+    return { title: err instanceof Error ? err.message : String(err), detail: null };
+  }
+  if (err.code === 'network_error') return { title: ERR_NETWORK, detail: null };
+  if (err.code === 'bad_response') return { title: ERR_BAD_RESPONSE, detail: null };
+  const raw = err.backendMessage;
+  if (raw === '' || raw === ERR_NETWORK || raw === ERR_BAD_RESPONSE) {
+    return { title: API_ERROR_TITLES[err.code] ?? err.message, detail: null };
+  }
+  if (isTechnicalEnglish(raw)) {
+    return { title: API_ERROR_TITLES[err.code] ?? err.message, detail: raw };
+  }
+  return { title: raw, detail: null };
+}
+
+/** 纯文本场景（form-error 等）：主题行 + 原文拼成单行。 */
+export function formatApiErrorText(err: unknown): string {
+  const display = formatApiError(err);
+  return display.detail === null ? display.title : `${display.title}（${display.detail}）`;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +151,7 @@ function numOf(rec: Record<string, unknown>, key: string): number | undefined {
 async function parseApiError(res: Response): Promise<ApiError> {
   let code = `http_${res.status}`;
   let message = format(ERR_HTTP_FALLBACK, { status: res.status });
+  let backendMessage = '';
   try {
     const body: unknown = await res.json();
     const root = asRecord(body);
@@ -103,12 +160,15 @@ async function parseApiError(res: Response): Promise<ApiError> {
       const parsedCode = strOf(envelope, 'code');
       const parsedMessage = strOf(envelope, 'message');
       if (parsedCode !== undefined && parsedCode !== '') code = parsedCode;
-      if (parsedMessage !== undefined && parsedMessage !== '') message = parsedMessage;
+      if (parsedMessage !== undefined && parsedMessage !== '') {
+        message = parsedMessage;
+        backendMessage = parsedMessage;
+      }
     }
   } catch {
     // 响应体不是 JSON：保留回退文案
   }
-  return new ApiError(res.status, code, message);
+  return new ApiError(res.status, code, message, backendMessage);
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {

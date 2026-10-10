@@ -5,6 +5,7 @@
  */
 
 import type { SimEntityStatus, SimTopology, TopologyEdge, TopologyNode } from '../../api/types';
+import { LAB_I_ERR_ADDR, LAB_I_ERR_BOTH, LAB_I_ERR_PREFIX } from '../../i18n';
 
 /** 选中实体：画布点击或表格行点击时互相定位。 */
 export interface SelectedEntity {
@@ -101,13 +102,35 @@ export function buildTopologyView(topology: SimTopology | null): TopologyView {
   return { nodes, edges, interfaces, links, linkCountByInterface };
 }
 
-/** 点分十进制 IPv4 校验（四段 0–255）。 */
+/**
+ * 点分十进制 IPv4 校验（四段 0–255）。
+ * 每段拒绝前导零（"0" 合法，"01"/"010" 非法）——与 Go netip.ParseAddr
+ * 的严格规则对齐，否则客户端放过、服务端 400（AUD2-2）。
+ */
 export function isValidIpv4(value: string): boolean {
   const parts = value.split('.');
   if (parts.length !== 4) return false;
   return parts.every((part) => {
     if (!/^\d{1,3}$/.test(part)) return false;
+    if (part.length > 1 && part.startsWith('0')) return false;
     const num = Number(part);
     return num >= 0 && num <= 255;
   });
+}
+
+/**
+ * 可选 IPv4 地址+前缀对的统一校验（AUD2-1/FX2-1）：
+ * - 两者均空 → 合法（表示不配置/清除）；
+ * - 只填其一 → LAB_I_ERR_BOTH；地址非 dotted-quad → LAB_I_ERR_ADDR；
+ * - 前缀非 0–32 整数 → LAB_I_ERR_PREFIX。
+ * 纯函数：OpsDialog 与 InterfaceConfigDialog 共用，保证两处行为一致。
+ * （仓库无 vitest 测试运行器，不新增；用 node 对本模块做过手工断言，见 FX-2 工作日志。）
+ */
+export function validateIpv4Pair(addr: string, prefix: string): string | null {
+  if (addr.trim() === '' && prefix.trim() === '') return null;
+  if (addr.trim() === '' || prefix.trim() === '') return LAB_I_ERR_BOTH;
+  if (!isValidIpv4(addr.trim())) return LAB_I_ERR_ADDR;
+  const prefixNum = Number(prefix);
+  if (!Number.isInteger(prefixNum) || prefixNum < 0 || prefixNum > 32) return LAB_I_ERR_PREFIX;
+  return null;
 }

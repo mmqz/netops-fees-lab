@@ -6,8 +6,9 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { CheckResultRow, CheckRunDetail, CheckRunItem } from '../../api/types';
-import { ApiError, filledSeverityCounts, getCheckRun, listChecks } from '../../api/client';
+import type { ReactNode } from 'react';
+import type { CheckResultRow, CheckRunDetail, CheckRunItem, SimCheckCode } from '../../api/types';
+import { filledSeverityCounts, formatApiError, getCheckRun, listChecks } from '../../api/client';
 import {
   BTN_PROCESSING,
   LAB_BTN_RUN_CHECKS,
@@ -18,6 +19,7 @@ import {
   LAB_C_DETAIL,
   LAB_C_EMPTY_DETAIL,
   LAB_C_HISTORY,
+  LAB_CAPPED_HINT,
   LAB_C_NO_FINDINGS,
   LAB_C_NO_RUNS,
   LAB_C_ONLY_FINDINGS,
@@ -34,14 +36,47 @@ import {
   CHECK_TRIGGER_LABELS,
   format,
   formatDateTime,
+  formatRelativeTime,
 } from '../../i18n';
 import { Table } from '../Table';
 import type { TableColumn } from '../Table';
+import { CHECK_CATALOG, translateCheckMessage } from './checkCatalog';
 import { ErrorBlock } from '../ErrorBlock';
 import { SeverityBadge } from '../SeverityBadge';
 import { Spinner } from '../Spinner';
+import { useSeq } from '../../hooks/useSeq';
 
 const PAGE_SIZE = 20;
+
+/** 级别排序序（error 最重 → passed 最轻）；DiffDialog 复用。 */
+export const SEVERITY_RANK: Record<string, number> = { error: 0, warning: 1, info: 2 };
+
+/** 检查项列渲染（W3）：mono 编码 chip + title 提示检查项中文解释；DiffDialog 复用。 */
+export function CheckCodeChip({ code }: { code: SimCheckCode }): ReactNode {
+  const entry = CHECK_CATALOG[code];
+  return (
+    <span className="chip chip--mono" title={entry === undefined ? undefined : entry.hint}>
+      {code}
+      {entry === undefined ? (SIM_CHECK_LABELS[code] !== undefined ? ` ${SIM_CHECK_LABELS[code]}` : '') : ` ${entry.title}`}
+    </span>
+  );
+}
+
+/** 消息列（W3）：中文主行 + 英文原文次行（引擎消息确定性解析，未命中回退仅英文）；DiffDialog 复用。 */
+export function CheckMessage({ row }: { row: { checkCode: SimCheckCode; message: string } }): ReactNode {
+  const zh = translateCheckMessage(row.checkCode, row.message);
+  if (zh === null) {
+    return <span>{row.message}</span>;
+  }
+  return (
+    <span>
+      <span className="cell-strong">{zh}</span>
+      <span className="muted-note" style={{ display: 'block', marginTop: 1 }} title={row.message}>
+        {row.message}
+      </span>
+    </span>
+  );
+}
 
 interface ChecksTabProps {
   workspaceId: string;
@@ -53,27 +88,42 @@ interface ChecksTabProps {
 
 export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: ChecksTabProps) {
   const [runs, setRuns] = useState<CheckRunItem[]>([]);
+  const [runsCapped, setRunsCapped] = useState(false);
   const [runId, setRunId] = useState('');
   const [detail, setDetail] = useState<CheckRunDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailErrorText, setDetailErrorText] = useState<string | null>(null);
+  const [detailVersion, setDetailVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [onlyFindings, setOnlyFindings] = useState(true);
+  /** 取数守卫（AUD2-8）：运行列表与运行详情各自独立计数，下拉快速切换时丢弃旧详情。 */
+  const runsGuard = useSeq();
+  const detailGuard = useSeq();
 
   const loadRuns = useCallback((): void => {
+    const isCurrent = runsGuard.begin();
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     listChecks(workspaceId, 1, PAGE_SIZE)
       .then((paged) => {
+        if (!isCurrent()) return;
         setRuns(paged.items);
+        setRunsCapped(paged.total > paged.items.length);
         setLoading(false);
         setRunId((prev) => (prev === '' || paged.items.every((item) => item.runId !== prev) ? paged.items[0]?.runId ?? '' : prev));
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : null);
+        if (!isCurrent()) return;
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, [workspaceId]);
+  }, [workspaceId, runsGuard]);
 
   useEffect(() => {
     loadRuns();
@@ -82,20 +132,30 @@ export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: Che
   useEffect(() => {
     if (runId === '') {
       setDetail(null);
+      setDetailError(null);
+      setDetailErrorText(null);
       return;
     }
+    const isCurrent = detailGuard.begin();
     setDetailLoading(true);
+    setDetailError(null);
+    setDetailErrorText(null);
     getCheckRun(workspaceId, runId)
       .then((result) => {
+        if (!isCurrent()) return;
         setDetail(result);
         setDetailLoading(false);
       })
       .catch((err: unknown) => {
+        if (!isCurrent()) return;
         setDetail(null);
         setDetailLoading(false);
-        setError(err instanceof ApiError ? err.message : null);
+        // AUD2-14：详情加载失败时记录错误态，表格不再以「无问题」空态误导
+        const display = formatApiError(err);
+        setDetailError(display.title);
+        setDetailErrorText(display.detail);
       });
-  }, [workspaceId, runId]);
+  }, [workspaceId, runId, detailVersion, detailGuard]);
 
   const currentRun: CheckRunItem | undefined = runs.find((item) => item.runId === runId);
 
@@ -105,22 +165,20 @@ export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: Che
       header: LAB_C_COL_SEV,
       render: (row) => (row.passed ? <span className="chip chip--success">{LAB_C_PASSED}</span> : <SeverityBadge severity={row.severity} />),
       width: '90px',
+      sortValue: (row) => (row.passed ? 3 : (SEVERITY_RANK[row.severity] ?? 9)),
     },
     {
       key: 'checkCode',
       header: LAB_C_COL_CHECK,
-      render: (row) => (
-        <span className="chip chip--mono">
-          {row.checkCode}
-          {SIM_CHECK_LABELS[row.checkCode] !== undefined ? ` ${SIM_CHECK_LABELS[row.checkCode]}` : ''}
-        </span>
-      ),
+      render: (row) => <CheckCodeChip code={row.checkCode} />,
+      sortValue: (row) => row.checkCode,
     },
-    { key: 'message', header: LAB_C_COL_MESSAGE, render: (row) => row.message },
+    { key: 'message', header: LAB_C_COL_MESSAGE, render: (row) => <CheckMessage row={row} /> },
     {
       key: 'entity',
       header: LAB_C_COL_ENTITY,
-      render: (row) => (row.entityId === null || row.entityId === undefined ? '' : <span className="mono">{row.entityId}</span>),
+      render: (row) => (row.entityId === null || row.entityId === undefined ? '' : <span className="code-chip" title={row.entityId}>{row.entityId}</span>),
+      sortValue: (row) => row.entityId ?? '',
     },
   ];
 
@@ -128,7 +186,7 @@ export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: Che
 
   return (
     <div>
-      {error !== null && <ErrorBlock message={error} onRetry={loadRuns} />}
+      {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={loadRuns} />}
       <div className="lab-checks-head">
         <label className="filter-field">
           <span className="filter-label">{LAB_C_HISTORY}</span>
@@ -148,6 +206,9 @@ export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: Che
               </option>
             ))}
           </select>
+          {runsCapped && (
+            <span className="muted-note">{format(LAB_CAPPED_HINT, { n: PAGE_SIZE })}</span>
+          )}
         </label>
         {currentRun !== undefined && (
           <>
@@ -164,8 +225,8 @@ export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: Che
             <span className="muted-note">
               {LAB_C_TRIGGER}：{formatTrigger(currentRun.trigger)}
             </span>
-            <span className="muted-note">
-              {LAB_C_STARTED_AT}：{formatDateTime(currentRun.startedAt)}
+            <span className="muted-note" title={formatDateTime(currentRun.startedAt)}>
+              {LAB_C_STARTED_AT}：{formatRelativeTime(currentRun.startedAt)}
             </span>
           </>
         )}
@@ -195,6 +256,13 @@ export function ChecksTab({ workspaceId, version, onRunChecks, checksBusy }: Che
         <div className="loading-panel">
           <Spinner />
         </div>
+      ) : detailError !== null ? (
+        // AUD2-14：详情加载失败 → 错误块（可重试），不渲染「无问题」空态表格
+        <ErrorBlock
+          message={detailError}
+          detail={detailErrorText}
+          onRetry={() => setDetailVersion((v) => v + 1)}
+        />
       ) : (
         <div className="table-wrap">
           <Table

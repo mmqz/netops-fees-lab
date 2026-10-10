@@ -14,8 +14,11 @@ import (
 // of the state, mutates the state, and returns the computed inverse JSON —
 // computed BEFORE the mutation for deletes (captured pre-state per
 // PROJECT_BRIEF_P2 §4). Failures are semantic (unknown entity, duplicate
-// code, self loop …) and roll the whole changeset back.
-func (s *Service) applyOne(ctx context.Context, tx *repo.Tx, workspaceID string, op internalOp) (string, error) {
+// code, self loop …) and roll the whole changeset back. allowParallelLinks
+// permits create_link to add a SECOND link between the same interface pair;
+// only the checkpoint-restore path sets it (AUD1-1 defense-in-depth — the
+// restore diff must be able to rebuild legacy parallel links hash-exactly).
+func (s *Service) applyOne(ctx context.Context, tx *repo.Tx, workspaceID string, op internalOp, allowParallelLinks bool) (string, error) {
 	switch {
 	case op.restoreDevice != nil:
 		return s.applyRestoreDevice(ctx, tx, workspaceID, op.restoreDevice)
@@ -41,7 +44,7 @@ func (s *Service) applyOne(ctx context.Context, tx *repo.Tx, workspaceID string,
 	case domain.OpDeleteInterface:
 		return s.applyDeleteInterface(ctx, tx, workspaceID, op.forward)
 	case domain.OpCreateLink:
-		return s.applyCreateLink(ctx, tx, workspaceID, op.forward)
+		return s.applyCreateLink(ctx, tx, workspaceID, op.forward, allowParallelLinks)
 	case domain.OpSetLinkStatus:
 		return s.applySetLinkStatus(ctx, tx, workspaceID, op.forward)
 	case domain.OpDeleteLink:
@@ -304,8 +307,14 @@ func (s *Service) applyDeleteInterface(ctx context.Context, tx *repo.Tx, workspa
 
 // applyCreateLink inserts a link between two interfaces; both must exist
 // in the workspace, be distinct and sit on DIFFERENT devices (a self loop
-// is a semantic failure). The inverse is delete_link {linkId}.
-func (s *Service) applyCreateLink(ctx context.Context, tx *repo.Tx, workspaceID string, op Op) (string, error) {
+// is a semantic failure). A link between the SAME interface pair (either
+// direction) already existing is a semantic failure too (AUD1-1, documented
+// strengthening: PROJECT_BRIEF_P2 §4's create_link row pins distinct
+// interfaces on different devices but is silent on parallel links, which
+// previously defeated checkpoint restore) — UNLESS allowParallelLinks is
+// set (checkpoint_restore trigger: rebuilding legacy parallel states).
+// The inverse is delete_link {linkId}.
+func (s *Service) applyCreateLink(ctx context.Context, tx *repo.Tx, workspaceID string, op Op, allowParallelLinks bool) (string, error) {
 	a, err := getInterface(ctx, tx, workspaceID, op.AInterfaceID)
 	if err != nil {
 		return "", err
@@ -319,6 +328,11 @@ func (s *Service) applyCreateLink(ctx context.Context, tx *repo.Tx, workspaceID 
 	}
 	if a.DeviceID == z.DeviceID {
 		return "", fmt.Errorf("self loop: both interfaces are on device %s", a.DeviceID)
+	}
+	if !allowParallelLinks {
+		if err := rejectDuplicatePair(ctx, tx, a, z); err != nil {
+			return "", err
+		}
 	}
 	n, err := tx.Sequences.Allocate(ctx, domain.SeqLink)
 	if err != nil {
@@ -456,6 +470,24 @@ func (s *Service) applyRestoreLink(ctx context.Context, tx *repo.Tx, workspaceID
 }
 
 // ---- shared helpers ----
+
+// rejectDuplicatePair fails with op_failed semantics when a link between
+// the two interfaces (either direction) already exists (AUD1-1). It runs
+// INSIDE the apply transaction, after the interface-existence checks and
+// before the insert, so a rejected changeset rolls back atomically.
+func rejectDuplicatePair(ctx context.Context, tx *repo.Tx, a, z domain.SimInterface) error {
+	touching, err := tx.SimLinks.ListTouchingInterface(ctx, a.ID)
+	if err != nil {
+		return fmt.Errorf("check links of interface %s: %w", a.ID, err)
+	}
+	for _, l := range touching {
+		if (l.AInterfaceID == a.ID && l.ZInterfaceID == z.ID) ||
+			(l.AInterfaceID == z.ID && l.ZInterfaceID == a.ID) {
+			return fmt.Errorf("link already exists between interfaces %s and %s", a.ID, z.ID)
+		}
+	}
+	return nil
+}
 
 // linksTouching collects the links touching any of the interfaces, deduped
 // and ordered by numeric id (a link cannot touch two interfaces of the same

@@ -195,7 +195,7 @@ func TestInverseOps(t *testing.T) {
 	inverses := []internalOp{
 		invIface, // inverse of delete_interface (re-creates if-15 + ln-8)
 	}
-	undoRes, err := svc.applyInverses(ctx, ws, inverses, domain.ChangeSetTriggerUndo, "undo of "+csDelIface.ChangeSetID, false)
+	undoRes, err := svc.applyInverses(ctx, ws, inverses, domain.ChangeSetTriggerUndo, "undo of "+csDelIface.ChangeSetID, false, "")
 	if err != nil {
 		t.Fatalf("applyInverses(iface): %v", err)
 	}
@@ -216,7 +216,7 @@ func TestInverseOps(t *testing.T) {
 	// re-create its link (the forward inverse of the delete_link step was
 	// restore_link — apply it as well, in reverse order of the deletes:
 	// delete_device → restore_device; delete_link → restore_link).
-	if _, err := svc.applyInverses(ctx, ws, []internalOp{invDev, inv}, domain.ChangeSetTriggerUndo, "undo of deletes", false); err != nil {
+	if _, err := svc.applyInverses(ctx, ws, []internalOp{invDev, inv}, domain.ChangeSetTriggerUndo, "undo of deletes", false, ""); err != nil {
 		t.Fatalf("applyInverses(device, link): %v", err)
 	}
 	if hash := mustHash(t, svc, ws); hash != hashAfterCreate {

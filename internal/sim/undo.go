@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
 )
 
 // UndoResult is the response of a successful Undo: the NEW changeset that
@@ -25,9 +24,13 @@ type UndoResult struct {
 // tier 2 of the three-tier undo): the target changeset's recorded inverse
 // ops are applied in REVERSE seq order as ONE NEW changeset (trigger "undo",
 // description "undo of <id>", restore ops allowed — the engine's
-// applyInverses path), then the target is marked status 'reverted' with
-// reverted_at = now. The undo changeset records its own computed inverses,
-// so undo-of-undo works (undo the undo changeset itself).
+// applyInverses path), and the target is marked status 'reverted' with
+// reverted_at = now IN THE SAME transaction as the undo changeset (AUD1-8:
+// the marker used to land in a second transaction, leaving a crash window
+// where the undo effects were live while the target still read 'applied';
+// now the undo changeset and the marker commit atomically — a failure of
+// either rolls both back). The undo changeset records its own computed
+// inverses, so undo-of-undo works (undo the undo changeset itself).
 //
 // changesetID "" targets the workspace's latest applied changeset. Errors:
 // unknown workspace/changeset (or a changeset of another workspace) ⇒ an
@@ -115,23 +118,9 @@ func (s *Service) Undo(ctx context.Context, workspaceID, changesetID string, run
 	}
 
 	applied, err := s.applyInverses(ctx, workspaceID, inverses, domain.ChangeSetTriggerUndo,
-		fmt.Sprintf("undo of %s", targetID), runChecks)
+		fmt.Sprintf("undo of %s", targetID), runChecks, targetID)
 	if err != nil {
 		return UndoResult{}, fmt.Errorf("sim: undo %s: %w", targetID, err)
-	}
-
-	// Mark the target reverted. This is the step right after the undo
-	// changeset committed: applyInverses owns its transaction (P2-T2,
-	// shared by every mutation path — the same-transaction variant would
-	// require duplicating the changeset machinery), so the marker lands in
-	// its own immediately following transaction. A crash in that tiny window
-	// leaves the target 'applied' but LIFO-protected: the newer undo
-	// changeset is the latest applied one, so the target can never be
-	// reverted twice, and the undo-of-undo path stays coherent.
-	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
-		return tx.ChangeSets.MarkReverted(ctx, targetID, s.clock())
-	}); err != nil {
-		return UndoResult{}, fmt.Errorf("sim: undo %s: mark reverted: %w", targetID, err)
 	}
 
 	return UndoResult{

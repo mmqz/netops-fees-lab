@@ -26,7 +26,7 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.2.0';
+export const APP_VERSION = 'v0.2.1';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -86,6 +86,14 @@ export const ERR_NETWORK = '网络请求失败，请检查服务是否可用';
 export const ERR_HTTP_FALLBACK = '请求失败（HTTP {status}）';
 export const ERR_BAD_RESPONSE = '服务返回数据格式异常';
 export const ROOT_MOUNT_ERROR = '未找到应用挂载节点 #root';
+
+// 4xx 友好中文主题行（FX2-4）：后端错误码 → 中文引导，原文技术细节作为次行保留
+export const ERR_API_INVALID_REQUEST = '请求参数无效，操作被拒绝';
+export const ERR_API_OP_FAILED = '操作执行失败';
+export const ERR_API_NOT_FOUND = '请求的对象不存在';
+export const ERR_API_NOT_LATEST = '目标已不是最新状态，操作被拒绝';
+export const ERR_API_CONFLICT = '状态冲突，操作被拒绝';
+export const ERR_API_CHECKPOINT_MISSING_FILE = '检查点快照文件缺失，无法恢复';
 
 // ---------------------------------------------------------------------------
 // 业务标签映射（枚举值 → 中文）
@@ -377,6 +385,29 @@ export const SIM_CHECK_LABELS: Record<SimCheckCode, string> = {
   'CHK-005': '接口未配置地址',
 };
 
+/** 检查项中文解释（checkCatalog：展示在编码 chip 的 title 提示上）。 */
+export const SIM_CHECK_HINTS: Record<SimCheckCode, string> = {
+  'CHK-001': '同一 IPv4 地址被多个处于运行状态的接口同时配置（错误）',
+  'CHK-002': '两个已配置接口的子网相互重叠，分为完全相同 / 包含 / 部分重叠（错误）',
+  'CHK-003': '处于运行状态的设备没有任何可用链路，成为孤岛（警告）',
+  'CHK-004': '按可用链路划分连通分量，存在与最大分区失联的设备分区（提示）',
+  'CHK-005': '处于运行状态的接口尚未配置 IPv4 地址（提示）',
+};
+
+/** CHK-002 重叠类型 → 中文（引擎 kind 字段）。 */
+export const SIM_OVERLAP_KIND_LABELS: Record<string, string> = {
+  identical: '完全相同',
+  contains: '包含',
+  partial: '部分重叠',
+};
+
+/** 检查消息中文模板（checkCatalog 按引擎消息正则解析后回填；未命中回退英文原文）。 */
+export const SIM_MSG_DUP_ADDR = 'IPv4 地址 {addr} 被 {n} 个接口同时配置';
+export const SIM_MSG_OVERLAP = '网段 {a} 与 {b} 重叠（{kind}）';
+export const SIM_MSG_ISOLATED = '设备 {code} 为孤岛（没有任何可用链路）';
+export const SIM_MSG_PARTITION = '{n} 台设备组成的分区与主分区失联';
+export const SIM_MSG_UNCONFIGURED = '接口 {device}/{name} 尚未配置 IPv4 地址';
+
 // —— 工作台列表页（/lab） ——
 
 export const LAB_COL_NAME = '名称';
@@ -444,6 +475,11 @@ export const TOAST_CHECKPOINT_CREATED = '检查点已创建：{label}';
 export const TOAST_RESTORE_DONE = '已恢复到检查点「{label}」（变更集 {id}）';
 export const TOAST_RESTORE_NOOP = '已处于该检查点状态，未产生新变更集';
 
+/** 成功 toast 的动作链接（W9）：跳转变更集标签页。 */
+export const TOAST_VIEW_CHANGESETS = '查看变更集';
+/** 点击复制成功后的轻提示（P2：批次 uuid 短码复制）。 */
+export const TOAST_COPIED = '已复制到剪贴板';
+
 export const LAB_UNDO_TITLE = '确认撤销最近变更';
 export const LAB_UNDO_MESSAGE =
   '将撤销最近的已应用变更集，其反向操作会作为一个新的变更集执行。是否继续？';
@@ -457,6 +493,12 @@ export const LAB_TAB_CHECKS = '检查结果';
 export const LAB_TAB_CHANGESETS = '变更集';
 export const LAB_TAB_CHECKPOINTS = '检查点';
 
+/** 实体表格客户端筛选（P2：40 接口列表检索）。 */
+export const LAB_FILTER_DEVICES = '筛选设备（编码 / 名称）';
+export const LAB_FILTER_INTERFACES = '筛选接口（设备 / 名称 / 地址）';
+export const LAB_FILTER_LINKS = '筛选链路（标签 / 端点）';
+export const LAB_FILTER_NO_MATCH = '没有符合筛选的条目';
+
 // —— 画布 ——
 
 export const LAB_CANVAS_LABEL = '拓扑画布';
@@ -466,6 +508,21 @@ export const LAB_LAYOUT_GRID = '网格';
 export const LAB_LAYOUT_CIRCLE = '环形';
 export const LAB_CANVAS_HINT = '点击节点或连线，可在右侧定位对应条目';
 export const LAB_CANVAS_EMPTY = '暂无拓扑数据';
+
+/** 画布缩放 / 视图控制（W2：图标按钮 + title 提示）。 */
+export const LAB_CANVAS_ZOOM_IN = '放大';
+export const LAB_CANVAS_ZOOM_OUT = '缩小';
+export const LAB_CANVAS_FIT = '适配视图';
+export const LAB_CANVAS_RESET = '重置缩放（1:1）';
+export const LAB_CANVAS_ZOOM_HINT = '滚轮缩放 · 拖拽平移 · 框选';
+
+/** 画布图例（W2）。 */
+export const LAB_CANVAS_LEGEND_LABEL = '图例';
+export const LAB_LEGEND_DEVICE_UP = '运行设备';
+export const LAB_LEGEND_DEVICE_DOWN = '停机设备';
+export const LAB_LEGEND_IFACE_FAULT = '接口故障';
+export const LAB_LEGEND_LINK_UP = '正常链路';
+export const LAB_LEGEND_LINK_DOWN = '中断链路';
 
 // —— 设备标签页 ——
 
@@ -557,7 +614,7 @@ export const LAB_OPS_RAW_PLACEHOLDER =
 export const LAB_OPS_RAW_PARSE_ERROR = 'JSON 解析失败：{message}';
 export const LAB_OPS_RAW_NOT_ARRAY = 'JSON 顶层必须是操作数组或 {ops:[…]} 对象';
 export const LAB_OPS_RAW_NO_OPS = '操作数组不能为空';
-export const LAB_OPS_RAW_HINT = '高级模式：直接提交 §4 操作 JSON（数组或 {ops,description,runChecks} 对象）';
+export const LAB_OPS_RAW_HINT = '高级模式：直接提交操作 JSON（数组或 {ops,description,runChecks} 对象）';
 
 export const OP_LABEL_CREATE_DEVICE = '新建设备';
 export const OP_LABEL_SET_DEVICE_STATUS = '启停设备';
@@ -582,6 +639,8 @@ export const LAB_C_TRIGGER = '触发方式';
 export const LAB_C_STARTED_AT = '开始时间';
 export const LAB_C_HISTORY = '历史运行';
 export const LAB_C_RUN_OPTION = '{runId} · {time} · {score} 分';
+/** 下拉取数命中条数上限时的提示（AUD2-15）。 */
+export const LAB_CAPPED_HINT = '仅显示最近 {n} 条';
 export const LAB_C_ONLY_FINDINGS = '仅显示问题';
 export const LAB_C_NO_RUNS = '尚未运行过校验，点击「运行校验」生成第一份结果';
 export const LAB_C_NO_FINDINGS = '该次运行没有发现问题';
@@ -612,6 +671,10 @@ export const LAB_DIFF_COL_CHECK = '检查项';
 export const LAB_DIFF_COL_SEV = '级别';
 export const LAB_DIFF_COL_MESSAGE = '消息';
 export const LAB_DIFF_ERR_REQUIRED = '请选择两个不同的校验运行';
+
+/** 连通性对列表默认收起（W8）：「共 N 对，点击展开」/「收起列表」。 */
+export const LAB_DIFF_PAIRS_EXPAND = '共 {n} 对，点击展开';
+export const LAB_DIFF_PAIRS_COLLAPSE = '收起列表';
 
 // —— 变更集标签页 ——
 
@@ -680,4 +743,29 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** 相对时间文案（P2：<24h 显示「x 分钟前」，完整时间放 title）。 */
+export const TIME_JUST_NOW = '刚刚';
+export const TIME_MINUTES_AGO = '{n} 分钟前';
+export const TIME_HOURS_AGO = '{n} 小时前';
+export const TIME_DAYS_AGO = '{n} 天前';
+
+/**
+ * 相对时间：小于 24h → 「x 分钟/小时前」，7 天内 → 「x 天前」，
+ * 更早回退绝对时间。配合 title=formatDateTime(iso) 使用。
+ */
+export function formatRelativeTime(iso?: string | null): string {
+  if (!iso) return NO_VALUE;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) return TIME_JUST_NOW;
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return format(TIME_MINUTES_AGO, { n: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return format(TIME_HOURS_AGO, { n: hours });
+  const days = Math.floor(hours / 24);
+  if (days <= 7) return format(TIME_DAYS_AGO, { n: days });
+  return formatDateTime(iso);
 }

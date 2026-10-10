@@ -26,7 +26,7 @@ import type {
   SheetAnalysis,
   Severity,
 } from '../api/types';
-import { ApiError, filledIssueCounts, listBatchRows, submitMapping, uploadWorkbook } from '../api/client';
+import { ApiError, filledIssueCounts, formatApiErrorText, listBatchRows, submitMapping, uploadWorkbook } from '../api/client';
 import {
   BATCH_STATUS_LABELS,
   BTN_IMPORT_ANOTHER,
@@ -430,7 +430,7 @@ export function ImportWizardPage() {
         })
         .catch((err: unknown) => {
           setUploading(false);
-          const message = err instanceof ApiError ? err.message : ERR_NETWORK;
+          const message = err instanceof ApiError ? formatApiErrorText(err) : ERR_NETWORK;
           setUploadError(message);
           toast.show(message, 'error');
         });
@@ -504,7 +504,7 @@ export function ImportWizardPage() {
       })
       .catch((err: unknown) => {
         setSubmitting(false);
-        const message = err instanceof ApiError ? err.message : ERR_NETWORK;
+        const message = err instanceof ApiError ? formatApiErrorText(err) : ERR_NETWORK;
         toast.show(message, 'error');
       });
   }
@@ -519,7 +519,7 @@ export function ImportWizardPage() {
           setRowsLoading(false);
         })
         .catch((err: unknown) => {
-          setRowsError(err instanceof ApiError ? err.message : null);
+          setRowsError(err instanceof ApiError ? formatApiErrorText(err) : null);
           setRowsLoading(false);
         });
     },

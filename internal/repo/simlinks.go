@@ -9,6 +9,12 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 )
 
+// simIDOrderAsc orders global per-kind sequence ids ("<kind>-<n>", fixed
+// prefix per table) numerically ASCENDING: longer ids carry bigger n, and
+// within one length lexicographic order equals numeric order. Plain
+// `ORDER BY id` would sort "ln-10" before "ln-2" (AUD1-13).
+const simIDOrderAsc = `LENGTH(id) ASC, id ASC`
+
 // SimLinkRepo persists the simulated links between two interfaces. ResourceID
 // "" is stored as SQL NULL (no lineage circuit resource). The DDL enforces
 // a_interface_id <> z_interface_id (self loops are rejected at the storage
@@ -75,12 +81,13 @@ func (r *SimLinkRepo) GetByID(ctx context.Context, id string) (domain.SimLink, e
 	return l, nil
 }
 
-// ListByWorkspace returns every link of the workspace, ordered by id
-// ascending. Ids are globally monotonic (ln-<n>), so this is also
-// creation order.
+// ListByWorkspace returns every link of the workspace ordered by NUMERIC
+// id ascending (ln-2 before ln-10, see simIDOrderAsc). Ids are globally
+// monotonic, so this is also creation order. loadState re-sorts defensively
+// (its own numeric sort) — future callers get the correct order directly.
 func (r *SimLinkRepo) ListByWorkspace(ctx context.Context, workspaceID string) ([]domain.SimLink, error) {
 	rows, err := r.q.QueryContext(ctx,
-		`SELECT `+simLinkColumns+` FROM links WHERE workspace_id = ? ORDER BY id`, workspaceID)
+		`SELECT `+simLinkColumns+` FROM links WHERE workspace_id = ? ORDER BY `+simIDOrderAsc, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("repo: list links of workspace %s: %w", workspaceID, err)
 	}
@@ -100,11 +107,11 @@ func (r *SimLinkRepo) ListByWorkspace(ctx context.Context, workspaceID string) (
 }
 
 // ListTouchingInterface returns every link whose A or Z endpoint is the
-// given interface, ordered by id ascending.
+// given interface, ordered by numeric id ascending (simIDOrderAsc).
 func (r *SimLinkRepo) ListTouchingInterface(ctx context.Context, interfaceID string) ([]domain.SimLink, error) {
 	rows, err := r.q.QueryContext(ctx,
 		`SELECT `+simLinkColumns+` FROM links
-WHERE a_interface_id = ? OR z_interface_id = ? ORDER BY id`,
+WHERE a_interface_id = ? OR z_interface_id = ? ORDER BY `+simIDOrderAsc,
 		interfaceID, interfaceID)
 	if err != nil {
 		return nil, fmt.Errorf("repo: list links touching interface %s: %w", interfaceID, err)

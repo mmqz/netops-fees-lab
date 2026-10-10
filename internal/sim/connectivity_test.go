@@ -72,8 +72,8 @@ func TestPathBasics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Path(unreachable): %v", err)
 	}
-	if p.Reachable || p.PathLength != 0 || p.Hops != nil {
-		t.Fatalf("unreachable path = %+v, want reachable=false nil hops", p)
+	if p.Reachable || p.PathLength != 0 || len(p.Hops) != 0 {
+		t.Fatalf("unreachable path = %+v, want reachable=false with EMPTY hops ([] on the wire, never null)", p)
 	}
 
 	// Unknown codes ⇒ ErrNotFound.

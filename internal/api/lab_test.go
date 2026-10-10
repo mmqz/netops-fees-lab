@@ -663,10 +663,10 @@ func TestAPILabFullFlow(t *testing.T) {
 	// ---- POST ops: the 3-op fault (two duplicate addresses + link down) —
 	// auto-checks attached to the changeset.
 	opsFault := `{"ops":[
-		{"op":"config_interface_ipv4","interfaceId":"if-1","ipv4Addr":"10.0.0.1","ipv4Prefix":24},
-		{"op":"config_interface_ipv4","interfaceId":"if-4","ipv4Addr":"10.0.0.1","ipv4Prefix":24},
-		{"op":"set_link_status","linkId":"ln-2","status":"down"}
-	],"description":"fault injection"}`
+                {"op":"config_interface_ipv4","interfaceId":"if-1","ipv4Addr":"10.0.0.1","ipv4Prefix":24},
+                {"op":"config_interface_ipv4","interfaceId":"if-4","ipv4Addr":"10.0.0.1","ipv4Prefix":24},
+                {"op":"set_link_status","linkId":"ln-2","status":"down"}
+        ],"description":"fault injection"}`
 	resp, body = doRequest(t, srv, http.MethodPost, wsPath+"/ops", []byte(opsFault), "application/json")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ops fault: status = %d, want 200\nbody: %s", resp.StatusCode, body)
@@ -743,7 +743,8 @@ func TestAPILabFullFlow(t *testing.T) {
 	}
 
 	// ---- ops malformed: unknown code, restore op, bad value, bad type,
-	// broken JSON, missing ops — all 400 invalid_request, no state change.
+	// broken JSON, missing ops, EMPTY and NULL ops arrays — all 400
+	// invalid_request, no state change.
 	for name, opsBody := range map[string]string{
 		"unknown op code": `{"ops":[{"op":"explode","deviceId":"vd-1"}]}`,
 		"restore op":      `{"ops":[{"op":"restore_link","link":{"id":"ln-1"}}]}`,
@@ -752,17 +753,39 @@ func TestAPILabFullFlow(t *testing.T) {
 		"field typo":      `{"ops":[{"op":"set_link_status","linId":"ln-1","status":"down"}]}`,
 		"broken JSON":     `{`,
 		"missing ops":     `{"description":"no ops"}`,
+		"empty ops":       `{"ops":[]}`,
+		"null ops":        `{"ops":null}`,
 	} {
 		resp, body = doRequest(t, srv, http.MethodPost, wsPath+"/ops", []byte(opsBody), "application/json")
 		expectError(t, "ops malformed: "+name, resp, body, http.StatusBadRequest, "invalid_request")
+		// FX1-E (AUD2-3): the 400 envelope must carry a NON-EMPTY
+		// message — v0.2.0's simErrorMessages had no invalid_request
+		// entry and apply-op 400s answered "" (the UI rendered a
+		// generic 请求失败).
+		var erMsg errorResp
+		decodeJSON(t, "ops malformed: "+name, body, &erMsg)
+		if strings.TrimSpace(erMsg.Error.Message) == "" {
+			t.Errorf("ops malformed: %s: error.message is empty, want the engine's rejection text", name)
+		}
+	}
+	// FX1-A (AUD1-3) wire proof: the empty-ops rejection names the exact
+	// reason, and none of the 400s above wrote a changeset row — the
+	// changesets list below pins the total at exactly cs-1 (applied) +
+	// cs-2 (failed, from the semantic-failure case that follows).
+	resp, body = doRequest(t, srv, http.MethodPost, wsPath+"/ops", []byte(`{"ops":[]}`), "application/json")
+	expectError(t, "ops empty array (replay)", resp, body, http.StatusBadRequest, "invalid_request")
+	var erEmpty errorResp
+	decodeJSON(t, "ops empty array (replay)", body, &erEmpty)
+	if !strings.Contains(erEmpty.Error.Message, "ops must contain at least one operation") {
+		t.Errorf("ops empty array: error.message = %q, want the at-least-one-operation wording", erEmpty.Error.Message)
 	}
 
 	// ---- ops semantic failure: bogus link id ⇒ 422 op_failed with the §7
 	// message format; state untouched (hash unchanged).
 	opsBad := `{"ops":[
-		{"op":"set_device_status","deviceId":"vd-5","status":"down"},
-		{"op":"set_link_status","linkId":"ln-99","status":"down"}
-	]}`
+                {"op":"set_device_status","deviceId":"vd-5","status":"down"},
+                {"op":"set_link_status","linkId":"ln-99","status":"down"}
+        ]}`
 	resp, body = doRequest(t, srv, http.MethodPost, wsPath+"/ops", []byte(opsBad), "application/json")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("ops semantic failure: status = %d, want 422\nbody: %s", resp.StatusCode, body)
@@ -884,8 +907,13 @@ func TestAPILabFullFlow(t *testing.T) {
 			t.Fatalf("diff finding misses key %q (has %v)", key, findingKeys)
 		}
 	}
-	if len(diff.ConnectivityLost) != 38 || len(diff.ConnectivityGained) != 0 {
-		t.Fatalf("diff connectivity lost/gained = %d/%d, want 38/0", len(diff.ConnectivityLost), len(diff.ConnectivityGained))
+	// Full §5 predicate (v0.2.1, AUD1-2): the baseline live components are
+	// {DEV-001..DEV-014} (+ {DEV-017,DEV-018} and {DEV-020,DEV-021} behind
+	// the down devices DEV-015/016/019); the ln-2 fault splits the big
+	// component into {DEV-001,DEV-002} vs {DEV-003..DEV-014} — 24 lost
+	// pairs (previously 38 under the link-only predicate).
+	if len(diff.ConnectivityLost) != 24 || len(diff.ConnectivityGained) != 0 {
+		t.Fatalf("diff connectivity lost/gained = %d/%d, want 24/0", len(diff.ConnectivityLost), len(diff.ConnectivityGained))
 	}
 	if diff.ConnectivityGained == nil { // must render as [], not null
 		t.Fatalf("diff connectivityGained is null, want an empty array")
@@ -1002,10 +1030,10 @@ func TestAPILabFullFlow(t *testing.T) {
 
 	// Break the state (status flips + a delete) without running checks.
 	opsBreak := `{"ops":[
-		{"op":"set_link_status","linkId":"ln-3","status":"down"},
-		{"op":"set_device_status","deviceId":"vd-6","status":"down"},
-		{"op":"delete_link","linkId":"ln-4"}
-	],"runChecks":false}`
+                {"op":"set_link_status","linkId":"ln-3","status":"down"},
+                {"op":"set_device_status","deviceId":"vd-6","status":"down"},
+                {"op":"delete_link","linkId":"ln-4"}
+        ],"runChecks":false}`
 	resp, body = doRequest(t, srv, http.MethodPost, wsPath+"/ops", []byte(opsBreak), "application/json")
 	decodeJSON(t, "ops break", body, &applied)
 	if applied.ChangeSetID != "cs-6" || applied.OpsApplied != 3 {
@@ -1084,8 +1112,8 @@ func TestAPILabFullFlow(t *testing.T) {
 	}
 	var report labReportResp
 	decodeJSON(t, "lab report json", body, &report)
-	if report.GeneratedAt == "" || report.EngineVersion != "v0.2.0" {
-		t.Fatalf("lab report meta = %s/%s, want a timestamp and engineVersion v0.2.0",
+	if report.GeneratedAt == "" || report.EngineVersion != "v0.2.1" {
+		t.Fatalf("lab report meta = %s/%s, want a timestamp and engineVersion v0.2.1",
 			report.GeneratedAt, report.EngineVersion)
 	}
 	if report.Workspace.ID != ws || report.Workspace.Name != "lab-e2e" ||

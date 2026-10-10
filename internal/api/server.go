@@ -60,8 +60,12 @@ type Server struct {
 }
 
 // New returns a Server bound to db; uploads are stored under
-// <dataDir>/uploads (created lazily on the first upload). dataDir may be
-// empty when uploads are not served (no directory is created then).
+// <dataDir>/uploads (created lazily on the first upload). dataDir must be
+// non-empty for the import upload route to work — the analyze step reads
+// the workbook back from the stored path, so an empty dataDir leaves
+// POST /api/imports failing on every upload (AUD1-10). All call sites
+// (app.New with its "./data" default, the tests with t.TempDir()) pass a
+// real directory.
 func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
 	simSvc := sim.New(db)
 	return &Server{
@@ -104,7 +108,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/report", s.handleReport)
 	mux.HandleFunc("GET /api/topology/check", s.handleTopologyCheck)
 
-	// Simulation workbench (PROJECT_BRIEF_P2 Â§7). The sim engine owns ALL
+	// Simulation workbench (PROJECT_BRIEF_P2 §7). The sim engine owns ALL
 	// writes to the sim tables; the handlers only decode, call and project.
 	mux.HandleFunc("GET /api/workspaces", s.handleWorkspacesList)
 	mux.HandleFunc("POST /api/workspaces", s.handleWorkspacesCreate)
@@ -203,6 +207,10 @@ func (r *statusRecorder) Flush() {
 		f.Flush()
 	}
 }
+
+// Unwrap exposes the wrapped writer so http.ResponseController reaches its
+// capabilities (the doc comment above claims it — now it is real).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 // respondJSON writes v as an indented UTF-8 JSON body with the given status.
 func respondJSON(w http.ResponseWriter, status int, v any) {

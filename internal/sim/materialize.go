@@ -173,7 +173,12 @@ func (s *Service) Materialize(ctx context.Context, name, description string, bat
 			if !scopeSet[res.FirstBatchID] {
 				continue
 			}
-			aEnd, zEnd, ok := circuitEndpoints(ctx, tx, res.ID)
+			aEnd, zEnd, ok, err := circuitEndpoints(ctx, tx, res.ID)
+			if err != nil {
+				// A storage error must not silently drop the circuit's
+				// link (AUD1-5): materialize is atomic-complete or fails.
+				return fmt.Errorf("sim: materialize: endpoints of circuit %s: %w", res.NaturalKey, err)
+			}
 			if !ok {
 				continue // missing endpoint relation(s)
 			}
@@ -261,11 +266,13 @@ func (s *Service) materializePort(ctx context.Context, tx *repo.Tx, workspaceID,
 }
 
 // circuitEndpoints resolves a circuit resource's a_end and z_end relations
-// to device resource ids. ok is false when an endpoint relation is missing.
-func circuitEndpoints(ctx context.Context, tx *repo.Tx, circuitID string) (aEnd, zEnd string, ok bool) {
+// to device resource ids. ok is false when an endpoint relation is missing;
+// err is non-nil when the relation read itself failed (propagated — never
+// masked as a missing endpoint, AUD1-5).
+func circuitEndpoints(ctx context.Context, tx *repo.Tx, circuitID string) (aEnd, zEnd string, ok bool, err error) {
 	rels, err := tx.Relations.ListByResource(ctx, circuitID)
 	if err != nil {
-		return "", "", false
+		return "", "", false, fmt.Errorf("list relations of circuit %s: %w", circuitID, err)
 	}
 	for _, rel := range rels {
 		switch rel.Type {
@@ -276,9 +283,9 @@ func circuitEndpoints(ctx context.Context, tx *repo.Tx, circuitID string) (aEnd,
 		}
 	}
 	if aEnd == "" || zEnd == "" {
-		return "", "", false
+		return "", "", false, nil
 	}
-	return aEnd, zEnd, true
+	return aEnd, zEnd, true, nil
 }
 
 // deviceStatusOfResource maps the resource status onto the entity status:

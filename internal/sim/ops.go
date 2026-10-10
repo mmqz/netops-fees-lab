@@ -85,8 +85,11 @@ var opAllowedFields = map[string][]string{
 // top-level fields such as description/runChecks are ignored) into []Op.
 // Unknown op codes, restore_* codes (engine-internal, PROJECT_BRIEF_P2 §1.8)
 // and malformed field types yield an error wrapping domain.ErrInvalidOp with
-// the offending op index. Payload value validation happens in ValidateOp at
-// apply time.
+// the offending op index. An EMPTY ops array is rejected the same way
+// (AUD1-3: an applied 0-op changeset would brick changeset-tier undo —
+// Undo("") targets it and fails "no op rows" while its very existence
+// 409-blocks every older changeset). Payload value validation happens in
+// ValidateOp at apply time.
 func DecodeOps(raw []byte) ([]Op, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &top); err != nil {
@@ -100,6 +103,9 @@ func DecodeOps(raw []byte) ([]Op, error) {
 	if err := json.Unmarshal(opsRaw, &items); err != nil {
 		return nil, fmt.Errorf("sim: decode ops request: %q must be an array: %w: %w",
 			"ops", domain.ErrInvalidOp, err)
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("sim: decode ops request: ops must contain at least one operation: %w", domain.ErrInvalidOp)
 	}
 
 	ops := make([]Op, 0, len(items))

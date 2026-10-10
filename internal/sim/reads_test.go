@@ -67,8 +67,9 @@ func TestWorkspaceHashShape(t *testing.T) {
 		t.Fatalf("workspace hash = %s, want sha256 of the pinned canonical JSON (%s)", hash, wantHash)
 	}
 
-	// The run's topology_json edge snapshot: same six fields, ALL links,
-	// canonical sort.
+	// The run's topology_json edge snapshot: same six fields plus the four
+	// endpoint-status fields of the v0.2.1 full-predicate extension, ALL
+	// links, canonical sort.
 	run, err := svc.RunChecks(ctx, ws, domain.CheckTriggerManual)
 	if err != nil {
 		t.Fatalf("RunChecks: %v", err)
@@ -77,12 +78,13 @@ func TestWorkspaceHashShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	wantTopo := `[{"aDevice":"A","aInterface":"eth0","zDevice":"B","zInterface":"eth0","status":"up","label":"L"}]`
+	wantTopo := `[{"aDevice":"A","aInterface":"eth0","zDevice":"B","zInterface":"eth0","status":"up","label":"L","aDeviceStatus":"up","aInterfaceStatus":"up","zDeviceStatus":"up","zInterfaceStatus":"up"}]`
 	if stored.TopologyJSON != wantTopo {
 		t.Fatalf("topology_json = %s, want %s", stored.TopologyJSON, wantTopo)
 	}
 
-	// A down link still appears in the snapshot (ALL links incl. down).
+	// A down link still appears in the snapshot (ALL links incl. down) with
+	// its endpoint statuses.
 	applyOK(t, svc, ws, []Op{{Op: domain.OpSetLinkStatus, LinkID: "ln-1", Status: "down"}})
 	run, err = svc.RunChecks(ctx, ws, domain.CheckTriggerManual)
 	if err != nil {
@@ -92,7 +94,7 @@ func TestWorkspaceHashShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	wantTopo = `[{"aDevice":"A","aInterface":"eth0","zDevice":"B","zInterface":"eth0","status":"down","label":"L"}]`
+	wantTopo = `[{"aDevice":"A","aInterface":"eth0","zDevice":"B","zInterface":"eth0","status":"down","label":"L","aDeviceStatus":"up","aInterfaceStatus":"up","zDeviceStatus":"up","zInterfaceStatus":"up"}]`
 	if stored.TopologyJSON != wantTopo {
 		t.Fatalf("topology_json with a down link = %s, want %s", stored.TopologyJSON, wantTopo)
 	}

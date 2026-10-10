@@ -15,7 +15,7 @@ import type {
   RuleCode,
   Severity,
 } from '../api/types';
-import { ApiError, listBatches, listIssues } from '../api/client';
+import { formatApiError, listBatches, listIssues } from '../api/client';
 import {
   APP_GENERATED_LABEL,
   BATCH_STATUS_LABELS,
@@ -36,6 +36,7 @@ import {
   ISS_FILTER_RULE,
   ISS_FILTER_SEVERITY,
   ISS_SOURCE_TEXT,
+  LAB_CAPPED_HINT,
   NAV_ISSUES,
   NO_VALUE,
   RULE_LABELS,
@@ -75,16 +76,21 @@ export function IssuesPage() {
   const [page, setPage] = useState(1);
 
   const [batches, setBatches] = useState<BatchListItem[] | null>(null);
+  const [batchesCapped, setBatchesCapped] = useState(false);
   const [data, setData] = useState<Paged<IssueItem> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   const requestSeqRef = useRef(0);
 
   // 批次下拉选项（辅助数据：失败不阻塞页面，仅缺失该筛选器）
   useEffect(() => {
     listBatches(1, BATCH_OPTION_LIMIT)
-      .then((paged) => setBatches(paged.items))
+      .then((paged) => {
+        setBatches(paged.items);
+        setBatchesCapped(paged.total > paged.items.length);
+      })
       .catch(() => setBatches([]));
   }, []);
 
@@ -98,6 +104,7 @@ export function IssuesPage() {
     const seq = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     listIssues({
       batchId: batchId === '' ? undefined : batchId,
       severity: severity === '' ? undefined : severity,
@@ -112,7 +119,9 @@ export function IssuesPage() {
       })
       .catch((err: unknown) => {
         if (requestSeqRef.current !== seq) return;
-        setError(err instanceof ApiError ? err.message : null);
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
   }, [batchId, severity, ruleCode, page]);
@@ -239,13 +248,16 @@ export function IssuesPage() {
               </option>
             ))}
           </select>
+          {batchesCapped && (
+            <span className="muted-note">{format(LAB_CAPPED_HINT, { n: BATCH_OPTION_LIMIT })}</span>
+          )}
         </label>
       </div>
 
       <div className="muted-note table-hint">{ISS_EXPAND_HINT}</div>
 
       {error !== null ? (
-        <ErrorBlock message={error} onRetry={fetchIssues} />
+        <ErrorBlock message={error} detail={errorDetail} onRetry={fetchIssues} />
       ) : (
         <>
           <Table

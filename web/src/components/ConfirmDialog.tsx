@@ -1,10 +1,12 @@
 /**
  * 确认对话框（危险操作如批次回滚）：
  * ESC / 遮罩点击取消；确认中（busy）禁用全部按钮。
+ * AUD2-12：body 滚动锁定 + 焦点陷阱 + 焦点归还由 useModalA11y 提供。
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { BTN_CANCEL, BTN_CONFIRM, BTN_PROCESSING } from '../i18n';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -29,7 +31,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const modalRef = useModalA11y(open);
 
   useEffect(() => {
     if (!open) return;
@@ -39,7 +41,6 @@ export function ConfirmDialog({
       }
     };
     document.addEventListener('keydown', onKey);
-    cancelRef.current?.focus();
     return () => document.removeEventListener('keydown', onKey);
   }, [open, busy, onCancel]);
 
@@ -49,16 +50,17 @@ export function ConfirmDialog({
     <div className="modal-root" role="presentation">
       <div className="modal-overlay" aria-hidden="true" onClick={() => (busy ? undefined : onCancel())} />
       <div
+        ref={modalRef}
         className="modal"
         role="alertdialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
       >
         <h3 className="modal-title">{title}</h3>
         <p className="modal-message">{message}</p>
         <div className="modal-actions">
           <button
-            ref={cancelRef}
             type="button"
             className="btn btn--secondary"
             disabled={busy}

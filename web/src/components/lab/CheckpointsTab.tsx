@@ -1,13 +1,14 @@
 /**
  * 检查点标签页：
- * - 顶部创建行（标签输入 + [创建检查点]，空标签客户端拦截）；
+ * - 顶部创建行（标签输入 + [创建检查点]，空标签客户端拦截；服务端确认
+ *   成功后才清空输入——AUD2-16）；
  * - 列表（id mono / 标签 / 状态哈希 chip 截断 + title 全量 / 创建时间）；
  * - [恢复] 确认（警告：作为新变更集执行）→ 父级 onRestore（no-op → info toast）。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckpointItem } from '../../api/types';
-import { ApiError, listCheckpoints } from '../../api/client';
+import { formatApiError, listCheckpoints } from '../../api/client';
 import {
   BTN_PROCESSING,
   LAB_BTN_CREATE_CHECKPOINT,
@@ -26,22 +27,25 @@ import {
   LAB_CP_TABLE_LABEL,
   format,
   formatDateTime,
+  formatRelativeTime,
 } from '../../i18n';
 import { Table } from '../Table';
 import type { TableColumn } from '../Table';
 import { ErrorBlock } from '../ErrorBlock';
 import { Spinner } from '../Spinner';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { useSeq } from '../../hooks/useSeq';
 
 interface CheckpointsTabProps {
   workspaceId: string;
   /** 父级刷新计数：任何变更后 +1。 */
   version: number;
-  onCreateCheckpoint: (label: string) => void;
+  /** 创建回调：成功 resolve(true)，失败 resolve(false)——成功后才清空输入（AUD2-16）。 */
+  onCreateCheckpoint: (label: string) => Promise<boolean>;
   onRestore: (checkpoint: CheckpointItem) => void;
   cpBusy: boolean;
-  /** 为真时聚焦创建输入（页头「创建检查点」跳转入口）。 */
-  focusInput?: boolean;
+  /** 聚焦信号：每次点击页头「创建检查点」都会 +1（AUD2-17）。 */
+  focusSignal?: number;
 }
 
 export function CheckpointsTab({
@@ -50,39 +54,48 @@ export function CheckpointsTab({
   onCreateCheckpoint,
   onRestore,
   cpBusy,
-  focusInput = false,
+  focusSignal = 0,
 }: CheckpointsTabProps) {
   const [items, setItems] = useState<CheckpointItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [labelError, setLabelError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<CheckpointItem | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  /** 取数守卫（AUD2-8）。 */
+  const loadGuard = useSeq();
 
   const load = useCallback((): void => {
+    const isCurrent = loadGuard.begin();
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     listCheckpoints(workspaceId)
       .then((result) => {
+        if (!isCurrent()) return;
         setItems(result.items);
         setLoading(false);
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : null);
+        if (!isCurrent()) return;
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, [workspaceId]);
+  }, [workspaceId, loadGuard]);
 
   useEffect(() => {
     load();
   }, [load, version]);
 
   useEffect(() => {
-    if (focusInput) {
+    if (focusSignal > 0) {
       inputRef.current?.focus();
     }
-  }, [focusInput]);
+  }, [focusSignal]);
 
   function submitCreate(): void {
     const trimmed = label.trim();
@@ -91,8 +104,12 @@ export function CheckpointsTab({
       return;
     }
     setLabelError(null);
-    onCreateCheckpoint(trimmed);
-    setLabel('');
+    // AUD2-16：服务端确认成功后才清空输入，失败时保留已输入的标签
+    void onCreateCheckpoint(trimmed).then((ok: boolean) => {
+      if (ok) {
+        setLabel('');
+      }
+    });
   }
 
   function confirmRestore(): void {
@@ -114,7 +131,7 @@ export function CheckpointsTab({
         </span>
       ),
     },
-    { key: 'createdAt', header: LAB_CP_COL_CREATED, render: (row) => formatDateTime(row.createdAt) },
+    { key: 'createdAt', header: LAB_CP_COL_CREATED, render: (row) => <span title={formatDateTime(row.createdAt)}>{formatRelativeTime(row.createdAt)}</span> },
     {
       key: 'actions',
       header: LAB_COL_ACTIONS,
@@ -134,7 +151,7 @@ export function CheckpointsTab({
 
   return (
     <div>
-      {error !== null && <ErrorBlock message={error} onRetry={load} />}
+      {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
       <div className="lab-cp-create">
         <input
           ref={inputRef}

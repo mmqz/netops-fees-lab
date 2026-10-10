@@ -190,14 +190,19 @@ func detailKey(checkCode, detailJSON string) string {
 	}
 }
 
-// snapshotReachablePairs recomputes the up-only reachability pairs of one
-// run from its stored topology_json edge snapshot: the device universe is
+// snapshotReachablePairs recomputes the reachable device pairs of one run
+// from its stored topology_json edge snapshot: the device universe is
 // every code appearing as a link endpoint (any link, up or down); two
-// devices form a pair when BFS over the snapshot's UP links connects
-// them. Pair keys are "a\x00b" with a < b. Note: the pinned six-field
-// snapshot shape carries link status only, so the diff's reachability
-// predicate is link-up — device/interface down effects surface as CHK-003/
-// CHK-004 findings instead (documented in the worklog).
+// devices form a pair when BFS over the snapshot's LIVE edges connects
+// them. Pair keys are "a\x00b" with a < b.
+//
+// Live is the FULL §5 connectivity predicate (AUD1-2): link up AND both
+// interfaces up AND both devices up — the same predicate Path/CHK-003/CHK-004
+// apply, so a set_device_status/set_interface_status fault now surfaces in
+// connectivityLost exactly like a link fault. Legacy snapshot rows (v0.2.0
+// six-field format) carry no endpoint statuses; a missing status reads as
+// up, reproducing the historical link-only behavior — diffs between legacy
+// runs are unchanged, only new runs get the full predicate.
 func snapshotReachablePairs(topoJSON string) (map[string]bool, error) {
 	links, err := parseTopoLinks(topoJSON)
 	if err != nil {
@@ -208,7 +213,7 @@ func snapshotReachablePairs(topoJSON string) (map[string]bool, error) {
 	for _, l := range links {
 		universe[l.ADevice] = true
 		universe[l.ZDevice] = true
-		if l.Status != "up" {
+		if !l.live() {
 			continue
 		}
 		if adj[l.ADevice] == nil {
@@ -221,7 +226,7 @@ func snapshotReachablePairs(topoJSON string) (map[string]bool, error) {
 		adj[l.ZDevice][l.ADevice] = true
 	}
 
-	// Connected components over up links (deterministic; the pair set is
+	// Connected components over live edges (deterministic; the pair set is
 	// order-independent anyway).
 	component := map[string]int{}
 	cid := 0
@@ -258,6 +263,22 @@ func snapshotReachablePairs(topoJSON string) (map[string]bool, error) {
 		}
 	}
 	return pairs, nil
+}
+
+// live reports whether a snapshot edge counts as a live connection under
+// the full §5 connectivity predicate: link up AND both interfaces up AND
+// both devices up. The four endpoint statuses are nil on legacy (v0.2.0)
+// snapshot rows — a missing value is treated as up.
+func (l topoLink) live() bool {
+	return l.Status == "up" &&
+		upOrMissing(l.ADeviceStatus) && upOrMissing(l.AInterfaceStatus) &&
+		upOrMissing(l.ZDeviceStatus) && upOrMissing(l.ZInterfaceStatus)
+}
+
+// upOrMissing reports whether a nullable endpoint status is up (nil = legacy
+// row / unresolvable ⇒ up).
+func upOrMissing(s *string) bool {
+	return s == nil || *s == "up"
 }
 
 // pairOfKey renders a "a\x00b" pair key as a PairRef.

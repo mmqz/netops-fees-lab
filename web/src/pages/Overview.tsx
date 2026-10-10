@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { BatchListItem, IssueCounts, Paged, StatsResponse } from '../api/types';
-import { ApiError, deleteBatch, filledIssueCounts, getStats, listBatches, runValidate } from '../api/client';
+import { ApiError, deleteBatch, filledIssueCounts, formatApiError, getStats, listBatches, runValidate } from '../api/client';
 import {
   BTN_IMPORT_DATA,
   BTN_ROLLBACK,
@@ -92,12 +92,14 @@ function OverviewBody() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<BatchListItem | null>(null);
   const [rollbackBusy, setRollbackBusy] = useState(false);
 
   const load = useCallback((): void => {
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     Promise.all([getStats(), runValidate().catch(() => null), listBatches(1, RECENT_BATCH_LIMIT)])
       .then((results) => {
         const [stats, validateResult, batches] = results;
@@ -110,7 +112,9 @@ function OverviewBody() {
         setLoading(false);
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : null);
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
   }, []);
@@ -136,7 +140,8 @@ function OverviewBody() {
         if (err instanceof ApiError && err.code === 'batch_in_use') {
           toast.show(TOAST_BATCH_IN_USE, 'error');
         } else {
-          toast.show(err instanceof ApiError ? err.message : String(err), 'error');
+          const display = formatApiError(err);
+          toast.show(display.title, 'error', { detail: display.detail });
         }
       });
   }
@@ -146,7 +151,7 @@ function OverviewBody() {
   }
 
   if (error !== null || data === null) {
-    return <ErrorBlock message={error} onRetry={load} />;
+    return <ErrorBlock message={error} detail={errorDetail} onRetry={load} />;
   }
 
   const { stats, counts, score, batches } = data;

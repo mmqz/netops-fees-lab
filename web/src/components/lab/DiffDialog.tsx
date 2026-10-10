@@ -1,14 +1,19 @@
 /**
  * 前后对比对话框：
  * - 两个运行下拉（默认：最近两次运行，旧→新）；
+ * - W8：默认两次运行就绪后自动生成对比（免掉演示路径上的一次点击，
+ *   手动改选后仍可点「生成对比」重跑）；
  * - GET /checks/{runId}/diff?compareTo= → 评分变化徽章、新增问题（红底）、
- *   消失问题（绿底）、连通性丢失/恢复 pair chips，各分区独立空态。
+ *   消失问题（绿底）、连通性丢失/恢复 pair chips（默认收起为「共 N 对」
+ *   chip，点击展开，W8），各分区独立空态；
+ * - W3：检查项/消息列中文主行 + 英文原文次行。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CheckRunItem, DiffResult } from '../../api/types';
-import { ApiError, diffRuns, listChecks } from '../../api/client';
+import { ApiError, diffRuns, formatApiErrorText, listChecks } from '../../api/client';
 import {
+  LAB_CAPPED_HINT,
   LAB_DIFF_BTN_RUN,
   LAB_DIFF_ADDED,
   LAB_DIFF_COL_CHECK,
@@ -24,6 +29,8 @@ import {
   LAB_DIFF_FROM,
   LAB_DIFF_NOT_ENOUGH,
   LAB_DIFF_PAIR,
+  LAB_DIFF_PAIRS_COLLAPSE,
+  LAB_DIFF_PAIRS_EXPAND,
   LAB_DIFF_REMOVED,
   LAB_DIFF_RUN_OPTION,
   LAB_DIFF_SAME_RUN,
@@ -31,15 +38,16 @@ import {
   LAB_DIFF_TITLE,
   LAB_DIFF_TO,
   LOADING_TEXT,
-  SIM_CHECK_LABELS,
   format,
   formatDateTime,
 } from '../../i18n';
 import { LabDialog } from './LabDialog';
+import { useSeq } from '../../hooks/useSeq';
 import { SeverityBadge } from '../SeverityBadge';
 import { Table } from '../Table';
 import type { TableColumn } from '../Table';
-import type { DiffFinding } from '../../api/types';
+import { CheckCodeChip, CheckMessage, SEVERITY_RANK } from './ChecksTab';
+import type { DiffFinding, DiffPair } from '../../api/types';
 
 const RUNS_PAGE_SIZE = 50;
 
@@ -47,7 +55,7 @@ interface DiffDialogProps {
   open: boolean;
   workspaceId: string;
   onClose: () => void;
-  onError: (message: string) => void;
+  onError: (err: unknown) => void;
 }
 
 function runOptionLabel(run: CheckRunItem): string {
@@ -70,16 +78,54 @@ const findingColumns: TableColumn<DiffFinding>[] = [
   {
     key: 'checkCode',
     header: LAB_DIFF_COL_CHECK,
-    render: (row) => (
-      <span className="chip chip--mono">
-        {row.checkCode}
-        {SIM_CHECK_LABELS[row.checkCode] !== undefined ? ` ${SIM_CHECK_LABELS[row.checkCode]}` : ''}
-      </span>
-    ),
+    render: (row) => <CheckCodeChip code={row.checkCode} />,
+    sortValue: (row) => row.checkCode,
   },
-  { key: 'severity', header: LAB_DIFF_COL_SEV, render: (row) => <SeverityBadge severity={row.severity} /> },
-  { key: 'message', header: LAB_DIFF_COL_MESSAGE, render: (row) => row.message },
+  {
+    key: 'severity',
+    header: LAB_DIFF_COL_SEV,
+    render: (row) => <SeverityBadge severity={row.severity} />,
+    sortValue: (row) => SEVERITY_RANK[row.severity] ?? 9,
+  },
+  { key: 'message', header: LAB_DIFF_COL_MESSAGE, render: (row) => <CheckMessage row={row} /> },
 ];
+
+/** 连通性对列表（W8）：默认收起为「共 N 对」chip，点击展开完整列表。 */
+function PairChips({ pairs, variant }: { pairs: DiffPair[]; variant: 'lost' | 'gained' }) {
+  const [expanded, setExpanded] = useState(false);
+  const chipClass = variant === 'lost' ? 'chip--error' : 'chip--success';
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className={`chip ${chipClass} lab-pair-toggle`}
+        aria-expanded={false}
+        onClick={() => setExpanded(true)}
+      >
+        {format(LAB_DIFF_PAIRS_EXPAND, { n: pairs.length })}
+      </button>
+    );
+  }
+  return (
+    <div>
+      <div className="lab-pair-chips">
+        {pairs.map((pair, index) => (
+          <span className={`chip ${chipClass}`} key={index}>
+            {format(LAB_DIFF_PAIR, { from: pair.fromDevice, to: pair.toDevice })}
+          </span>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="lab-pair-collapse"
+        aria-expanded={true}
+        onClick={() => setExpanded(false)}
+      >
+        {LAB_DIFF_PAIRS_COLLAPSE}
+      </button>
+    </div>
+  );
+}
 
 function ScoreDelta({ delta }: { delta: number }) {
   const sign = delta > 0 ? '+' : delta < 0 ? '−' : '±';
@@ -95,23 +141,32 @@ function ScoreDelta({ delta }: { delta: number }) {
 export function DiffDialog({ open, workspaceId, onClose, onError }: DiffDialogProps) {
   const [runs, setRuns] = useState<CheckRunItem[]>([]);
   const [runsLoading, setRunsLoading] = useState(true);
+  const [runsCapped, setRunsCapped] = useState(false);
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** W8：默认两次运行就绪后自动生成一次（每次打开重置；手动改选后仍可点按钮重跑）。 */
+  const autoRanRef = useRef(false);
+  /** 取数守卫（AUD2-8）：快速开关对话框时丢弃旧响应。 */
+  const runsGuard = useSeq();
   const loadRuns = useCallback((): void => {
+    const isCurrent = runsGuard.begin();
     setRunsLoading(true);
     listChecks(workspaceId, 1, RUNS_PAGE_SIZE)
       .then((paged) => {
+        if (!isCurrent()) return;
         setRuns(paged.items);
+        setRunsCapped(paged.total > paged.items.length);
         setRunsLoading(false);
       })
       .catch((err: unknown) => {
+        if (!isCurrent()) return;
         setRunsLoading(false);
-        setError(err instanceof ApiError ? err.message : String(err));
+        setError(err instanceof ApiError ? formatApiErrorText(err) : String(err));
       });
-  }, [workspaceId]);
+  }, [workspaceId, runsGuard]);
 
   // 打开时拉取运行历史，默认选中最近两次（旧 → 新）
   useEffect(() => {
@@ -120,40 +175,50 @@ export function DiffDialog({ open, workspaceId, onClose, onError }: DiffDialogPr
     setError(null);
     setFromId('');
     setToId('');
+    autoRanRef.current = false;
     loadRuns();
   }, [open, loadRuns]);
 
+  const runDiff = useCallback(
+    (from: string, to: string): void => {
+      if (from === '' || to === '') {
+        setError(LAB_DIFF_ERR_REQUIRED);
+        return;
+      }
+      if (from === to) {
+        setError(LAB_DIFF_SAME_RUN);
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      diffRuns(workspaceId, from, to)
+        .then((result) => {
+          setBusy(false);
+          setDiff(result);
+        })
+        .catch((err: unknown) => {
+          setBusy(false);
+          onError(err);
+        });
+    },
+    [workspaceId, onError],
+  );
+
+  // 默认选中最近两次（旧 → 新）；W8：就绪即自动生成一次对比（演示路径少一次点击）
   useEffect(() => {
-    if (runs.length >= 2) {
-      setFromId((prev) => (prev === '' ? runs[1].runId : prev));
-      setToId((prev) => (prev === '' ? runs[0].runId : prev));
+    if (runs.length < 2) return;
+    const defaultFrom = runs[1].runId;
+    const defaultTo = runs[0].runId;
+    setFromId((prev) => (prev === '' ? defaultFrom : prev));
+    setToId((prev) => (prev === '' ? defaultTo : prev));
+    if (!autoRanRef.current) {
+      autoRanRef.current = true;
+      runDiff(defaultFrom, defaultTo);
     }
-  }, [runs]);
+  }, [runs, runDiff]);
 
   function submit(): void {
-    if (fromId === '' || toId === '') {
-      setError(LAB_DIFF_ERR_REQUIRED);
-      return;
-    }
-    if (fromId === toId) {
-      setError(LAB_DIFF_SAME_RUN);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    diffRuns(workspaceId, fromId, toId)
-      .then((result) => {
-        setBusy(false);
-        setDiff(result);
-      })
-      .catch((err: unknown) => {
-        setBusy(false);
-        if (err instanceof ApiError) {
-          onError(err.message);
-        } else {
-          setError(String(err));
-        }
-      });
+    runDiff(fromId, toId);
   }
 
   return (
@@ -210,6 +275,9 @@ export function DiffDialog({ open, workspaceId, onClose, onError }: DiffDialogPr
               </select>
             </div>
           </div>
+          {runsCapped && (
+            <div className="modal-note">{format(LAB_CAPPED_HINT, { n: RUNS_PAGE_SIZE })}</div>
+          )}
         </>
       )}
 
@@ -272,13 +340,7 @@ export function DiffDialog({ open, workspaceId, onClose, onError }: DiffDialogPr
             {diff.connectivityLost.length === 0 ? (
               <div className="muted-note">{LAB_DIFF_EMPTY_LOST}</div>
             ) : (
-              <div className="lab-pair-chips">
-                {diff.connectivityLost.map((pair, index) => (
-                  <span className="chip chip--error" key={index}>
-                    {format(LAB_DIFF_PAIR, { from: pair.fromDevice, to: pair.toDevice })}
-                  </span>
-                ))}
-              </div>
+              <PairChips pairs={diff.connectivityLost} variant="lost" />
             )}
           </div>
 
@@ -290,13 +352,7 @@ export function DiffDialog({ open, workspaceId, onClose, onError }: DiffDialogPr
             {diff.connectivityGained.length === 0 ? (
               <div className="muted-note">{LAB_DIFF_EMPTY_GAINED}</div>
             ) : (
-              <div className="lab-pair-chips">
-                {diff.connectivityGained.map((pair, index) => (
-                  <span className="chip chip--success" key={index}>
-                    {format(LAB_DIFF_PAIR, { from: pair.fromDevice, to: pair.toDevice })}
-                  </span>
-                ))}
-              </div>
+              <PairChips pairs={diff.connectivityGained} variant="gained" />
             )}
           </div>
         </>

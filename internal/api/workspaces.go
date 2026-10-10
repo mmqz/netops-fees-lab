@@ -6,14 +6,14 @@
 //
 // Error-code mapping (§6/§7, engine sentinels of internal/domain):
 //
-//	bad JSON / empty required field / malformed op  → 400 invalid_request
-//	unknown workspace / run / changeset / batch     → 404 not_found
-//	duplicate workspace name                        → 409 conflict
-//	undo of a non-latest changeset                  → 409 not_latest
-//	already-reverted / failed undo target           → 409 conflict
-//	missing checkpoint snapshot file                → 409 checkpoint_missing_file
-//	selection without device resources              → 422 no_source_resources
-//	semantic op failure (rolled back, recorded)     → 422 op_failed
+//      bad JSON / empty required field / malformed op  → 400 invalid_request
+//      unknown workspace / run / changeset / batch     → 404 not_found
+//      duplicate workspace name                        → 409 conflict
+//      undo of a non-latest changeset                  → 409 not_latest
+//      already-reverted / failed undo target           → 409 conflict
+//      missing checkpoint snapshot file                → 409 checkpoint_missing_file
+//      selection without device resources              → 422 no_source_resources
+//      semantic op failure (rolled back, recorded)     → 422 op_failed
 //
 // Pagination follows the Phase 1 clamp (page ≥ 1, pageSize default 20,
 // max 100) through parsePagination.
@@ -33,7 +33,10 @@ import (
 	"github.com/mmqz/netops-lab/internal/sim"
 )
 
-// simErrorMessages maps the §7 error codes to their English messages.
+// simErrorMessages maps the §7 error codes to their English messages. The
+// two dynamic codes get meaningful fallbacks; respondSimError overrides
+// them with the engine's own message (invalid_request) or the composed
+// op_failed text so the envelope never ships an empty message (AUD2-3).
 var simErrorMessages = map[string]string{
 	"not_latest":              "changeset is not the latest applied changeset of the workspace (undo is LIFO)",
 	"checkpoint_missing_file": "checkpoint snapshot file is missing on disk",
@@ -41,11 +44,16 @@ var simErrorMessages = map[string]string{
 	"not_found":               "requested workspace or object not found",
 	"conflict":                "operation conflicts with the current state",
 	"internal":                "internal server error, see server log",
+	"invalid_request":         "invalid request",
+	"op_failed":               "operation failed",
 }
 
 // respondSimError maps a sim-engine error to (status, §7 code, English
 // message) and writes the envelope. 500-class failures are logged with the
-// error and stack, exactly like respondErrorFor.
+// error and stack, exactly like respondErrorFor. invalid_request and
+// op_failed carry the engine's own (dynamic) message — the static map only
+// provides the fallback — so apply-time validation 400s and semantic 422s
+// never answer an empty message (AUD2-3).
 func (s *Server) respondSimError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code := mapSimError(err)
 	if status >= 500 && s.log != nil {
@@ -56,7 +64,21 @@ func (s *Server) respondSimError(w http.ResponseWriter, r *http.Request, err err
 			"stack", string(debug.Stack()),
 		)
 	}
-	respondError(w, status, code, simErrorMessages[code])
+	message := simErrorMessages[code]
+	switch code {
+	case "invalid_request":
+		message = "invalid request: " + err.Error()
+	case "op_failed":
+		var opErr *sim.OpError
+		if errors.As(err, &opErr) {
+			message = opFailedMessage(opErr)
+		} else {
+			// Every op_failed maps through *OpError; keep a meaningful
+			// fallback should a new path surface.
+			message = "operation failed: " + err.Error()
+		}
+	}
+	respondError(w, status, code, message)
 }
 
 // mapSimError converts a sim/repo error into the §7 (status, code) pair.

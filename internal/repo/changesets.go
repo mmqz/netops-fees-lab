@@ -189,16 +189,30 @@ ORDER BY `+simIDOrderDesc+` LIMIT ? OFFSET ?`,
 
 // MarkReverted marks the changeset reverted with the given revert time.
 // The engine decides revertibility (LIFO — only the latest applied
-// changeset); the repo only records the transition. A missing changeset
+// changeset); the repo only records the transition. The UPDATE carries a
+// status guard (applied → reverted, AUD1-8): a changeset that is already
+// reverted or failed is NEVER re-marked (its reverted_at cannot be
+// overwritten), answering domain.ErrConflict instead. A missing changeset
 // returns an error wrapping domain.ErrNotFound.
 func (r *ChangeSetRepo) MarkReverted(ctx context.Context, id string, revertedAt time.Time) error {
 	res, err := r.q.ExecContext(ctx,
-		`UPDATE changesets SET status = ?, reverted_at = ? WHERE id = ?`,
-		domain.ChangeSetStatusReverted.String(), formatTime(revertedAt.UTC()), id)
+		`UPDATE changesets SET status = ?, reverted_at = ? WHERE id = ? AND status = ?`,
+		domain.ChangeSetStatusReverted.String(), formatTime(revertedAt.UTC()), id,
+		domain.ChangeSetStatusApplied.String())
 	if err != nil {
 		return fmt.Errorf("repo: mark changeset %s reverted: %w", id, err)
 	}
-	return requireUpdated(res, "changeset", id)
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("repo: mark changeset %s reverted: %w", id, err)
+	} else if n == 1 {
+		return nil
+	}
+	// Zero rows: either the changeset does not exist (ErrNotFound) or its
+	// status is no longer applied (ErrConflict — the guard refused).
+	if _, err := r.GetByID(ctx, id); err != nil {
+		return err
+	}
+	return fmt.Errorf("repo: mark changeset %s reverted: changeset is not applied: %w", id, domain.ErrConflict)
 }
 
 // CountByWorkspace returns the total number of changesets of the workspace.

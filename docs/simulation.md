@@ -50,7 +50,7 @@
 | `set_interface_status` | `interfaceId`, `status` | — | `set_interface_status {interfaceId, status: prev}` |
 | `config_interface_ipv4` | `interfaceId`, `ipv4Addr`, `ipv4Prefix` | 同设同空；`null/null` = 清除配置；非空则合法四段 + 0–32 | `config_interface_ipv4 {interfaceId, prev…}` |
 | `delete_interface` | `interfaceId` | — | `restore_interface`（接口 + 其链路） |
-| `create_link` | `aInterfaceId`, `zInterfaceId`, `status?`, `label?` | 两接口存在且**属于不同设备**（自环 ⇒ op_failed） | `delete_link {linkId}` |
+| `create_link` | `aInterfaceId`, `zInterfaceId`, `status?`, `label?` | 两接口存在且**属于不同设备**（自环 ⇒ op_failed）；**同接口对不允许第二条链路**（任一方向，⇒ op_failed；v0.2.1 起，闭环检查点恢复的并行链路歧义） | `delete_link {linkId}` |
 | `set_link_status` | `linkId`, `status` | — | `set_link_status {linkId, status: prev}` |
 | `delete_link` | `linkId` | — | `restore_link`（链路行） |
 
@@ -66,6 +66,10 @@
 1. 逐操作校验 → 迁移 → 记录 `(seq, op_code, op_json, inverse_json, 'applied')`；变更集行最后落库。
 2. 任何语义失败（实体不存在/重复/自环…）→ **整个事务回滚**（状态与变更集行都不落），随后第二个事务记录**失败变更集**：`ops_applied=0`、失败操作 `failed`、其余 `not_attempted`、`inverse_json` 全 NULL。
 3. 应用成功且 `runChecks=true`（默认）→ 立即自动校验（trigger `auto_after_ops`，绑定该变更集）。
+
+**空操作集拒绝（v0.2.1 起）**：`{"ops":[]}` / `{"ops":null}` 在解码边界即被拒绝（400 `invalid_request`，消息 `ops must contain at least one operation`）——不留任何变更集行。此前版本会落一条 0 操作的已应用变更集，使变更集级 undo 被 409 `not_latest` 永久阻塞。
+
+**并发安全（v0.2.1 起）**：DSN 追加 `_txlock=immediate`（所有事务以写模式开启，消除 WAL 下读→写升级的 SQLITE_BUSY 竞争）+ 事务开启 3 次有界重试（50–100ms 退避）。
 
 失败响应（HTTP 422 `op_failed`，真实输出）：
 
@@ -111,6 +115,8 @@
 
 检查点文件落在 `<dbdir>/checkpoints/<workspaceId>/<cpId>.db`（路径相对库目录存储）；删除工作区时级联清理。快照文件缺失 → 409 `checkpoint_missing_file`。
 
+**检查点完整性（v0.2.1 起）**：创建时快照内嵌状态哈希 marker（从快照重算，而非信任库内当前值）；恢复前校验 marker 与记录的 `workspaceHash` 一致（不一致 ⇒ 409，快照被篡改/库漂移不可恢复）；恢复后复核实际哈希 == 记录哈希，失败 ⇒ 409（删除-重建计划不完整）。恢复的链路匹配键含 label 并按多重集对比（防御旧库中的重复对链路）。
+
 **恢复即前向操作变更集**的理由与"删除-重建"计划（links→interfaces→devices 先删后建、再对齐状态/地址）见 ADR-0008。
 
 ## 5. 前后对比（run diff）
@@ -119,7 +125,7 @@
 
 - **问题匹配键**（对 id 漂移免疫，按 check 提取业务键）：CHK-001 `addr`；CHK-002 排序后的 (aDevice/name, zDevice/name) 端点对；CHK-003 设备编码；CHK-004 排序后的成员编码集；CHK-005 `deviceCode/name`。
 - `findingsAdded` / `findingsRemoved`：按匹配键集合差；`scoreDelta = to.score − from.score`。
-- **连通性**：分别从两次运行存的 `topology_json` 快照重算 up 链路可达对（无向、按分量两两组合），`connectivityLost` / `connectivityGained`（空数组渲染 `[]` 而非 null）。
+- **连通性（完整谓词）**：分别从两次运行存的 `topology_json` 快照重算可达对（无向、按分量两两组合），谓词为 **设备 up × 接口 up × 链路 up**（§5 一致）——`set_device_status` / `set_interface_status` 注入的故障同样产生 `connectivityLost`。快照在 v0.2.1 起携带 4 个可选端点状态字段（指针，nil = up），旧格式快照（v0.2.0）自动回退为「视为 up」，与历史 diff 字节级一致；`connectivityLost` / `connectivityGained` 空数组渲染 `[]` 而非 null。
 - 同一运行对比两次 → 400；跨工作区 → 404。
 
 演示故障（run-1 → run-2）的真实 diff：`scoreDelta −6`；新增 [CHK-001, CHK-003]；消失 [CHK-005 ×2]；连通性丢失 **20 对**（DEV-001 与其余 20 台设备的全部 pair，含 DEV-001/DEV-003）；恢复 0 对。撤销后反向 diff 显示 findingsRemoved/connectivityGained 恢复。

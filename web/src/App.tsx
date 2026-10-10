@@ -174,28 +174,41 @@ function NotFoundPage() {
   );
 }
 
+/** /lab/:id（拓扑工作台）为全出血宽版；其余页面保持 1200px 阅读宽度（W1）。 */
+function isWorkbenchRoute(pathname: string): boolean {
+  return /^\/lab\/[^/]+/.test(pathname);
+}
+
+function AppShell() {
+  const location = useLocation();
+  const fullBleed = isWorkbenchRoute(location.pathname);
+  return (
+    <div className="app-shell">
+      <Sidebar />
+      <div className="app-main">
+        <TopBar />
+        <main className={fullBleed ? 'app-content app-content--full' : 'app-content'}>
+          <Routes>
+            <Route path="/" element={<OverviewPage />} />
+            <Route path="/import" element={<ImportWizardPage />} />
+            <Route path="/resources" element={<ResourcesPage />} />
+            <Route path="/issues" element={<IssuesPage />} />
+            <Route path="/report" element={<ReportPage />} />
+            <Route path="/lab" element={<LabWorkspacesPage />} />
+            <Route path="/lab/:id" element={<LabWorkspacePage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <ToastProvider>
-        <div className="app-shell">
-          <Sidebar />
-          <div className="app-main">
-            <TopBar />
-            <main className="app-content">
-              <Routes>
-                <Route path="/" element={<OverviewPage />} />
-                <Route path="/import" element={<ImportWizardPage />} />
-                <Route path="/resources" element={<ResourcesPage />} />
-                <Route path="/issues" element={<IssuesPage />} />
-                <Route path="/report" element={<ReportPage />} />
-                <Route path="/lab" element={<LabWorkspacesPage />} />
-                <Route path="/lab/:id" element={<LabWorkspacePage />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </main>
-          </div>
-        </div>
+        <AppShell />
       </ToastProvider>
     </BrowserRouter>
   );

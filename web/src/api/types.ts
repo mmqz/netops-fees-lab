@@ -81,8 +81,8 @@ export interface HealthResponse {
 
 export interface ColumnAnalysis {
   header: string;
-  /** §9 契约含 index；后端当前实现省略，前端不依赖该字段。 */
-  index?: number;
+  /** 1-based Excel 列位置（A=1；后端 analyze 始终发出该字段）。 */
+  index: number;
   samples: string[];
   suggestedField: string;
   confidence: number;
@@ -145,11 +145,15 @@ export interface ImportResultResponse {
 export interface BatchListItem {
   id: string;
   workbookName: string;
+  /** 工作簿内容摘要（后端始终发出）。 */
+  sha256: string;
   status: BatchStatus;
   rowsTotal: number;
   rowsImported: number;
   rowsSkipped: number;
   rowsFailed: number;
+  /** 失败原因（无失败时空串，后端始终发出）。 */
+  error: string;
   startedAt: string;
   finishedAt?: string | null;
 }
@@ -438,7 +442,8 @@ export interface WorkspaceDetail {
   name: string;
   description: string;
   status: WorkspaceStatus;
-  sourceBatchIds: string[];
+  /** 无来源批次时后端发 null（nil 切片直出）。 */
+  sourceBatchIds: string[] | null;
   counts: WorkspaceCounts;
   workspaceHash: string;
   latestChangeset: {
@@ -481,8 +486,10 @@ export interface TopologyNode {
     id: string;
     name: string;
     status: SimEntityStatus;
-    ipv4Addr: string | null;
-    ipv4Prefix: number | null;
+    /** 未配置 = 空串（线上始终是 string，非 null）。 */
+    ipv4Addr: string;
+    /** 未配置 = -1（线上始终是 number，非 null）。 */
+    ipv4Prefix: number;
   }>;
 }
 
@@ -566,7 +573,8 @@ export interface CheckResultRow {
   entityKind?: string | null;
   entityId?: string | null;
   message: string;
-  detail: Record<string, unknown>;
+  /** 详情为空时后端发 null（json.RawMessage 直出）。 */
+  detail: Record<string, unknown> | null;
 }
 
 /** GET /api/workspaces/{id}/checks/{runId} 详情。 */
@@ -588,7 +596,8 @@ export interface DiffFinding {
   checkCode: SimCheckCode;
   severity: Severity;
   message: string;
-  detail: Record<string, unknown>;
+  /** 详情为空时后端发 null（json.RawMessage 直出）。 */
+  detail: Record<string, unknown> | null;
 }
 
 /** diff 端点摘要（from/to）。 */
@@ -599,14 +608,20 @@ export interface DiffRunSummary {
   counts: PartialSeverityCounts;
 }
 
+/** 连通性丢失/恢复的一个设备对（设备编码）。 */
+export interface DiffPair {
+  fromDevice: string;
+  toDevice: string;
+}
+
 /** GET …/checks/{runId}/diff?compareTo= → 前后对比。 */
 export interface DiffResult {
   from: DiffRunSummary;
   to: DiffRunSummary;
   findingsAdded: DiffFinding[];
   findingsRemoved: DiffFinding[];
-  connectivityLost: Array<{ fromDevice: string; toDevice: string }>;
-  connectivityGained: Array<{ fromDevice: string; toDevice: string }>;
+  connectivityLost: DiffPair[];
+  connectivityGained: DiffPair[];
   scoreDelta: number;
 }
 

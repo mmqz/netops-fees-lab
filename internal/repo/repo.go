@@ -13,10 +13,21 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net/url"
+	"time"
 
-	_ "modernc.org/sqlite" // pure-Go SQLite driver, registers driver name "sqlite"
+	"modernc.org/sqlite"             // pure-Go SQLite driver, registers driver name "sqlite"
+	sqlite3 "modernc.org/sqlite/lib" // SQLITE_* result codes
 )
+
+// beginBusyAttempts bounds the retry of a transaction BEGIN that returned
+// SQLITE_BUSY (AUD1-4): with _txlock=immediate every BEGIN takes the write
+// lock up front, so the busy_timeout already absorbed the common contention;
+// the retry below is the last line of defense for the rare case where a
+// writer held the lock for the whole timeout window.
+const beginBusyAttempts = 3
 
 // DBTX is the minimal query interface shared by *sql.DB (autocommit mode)
 // and *sql.Tx (transaction mode). All repositories accept it so the same
@@ -59,9 +70,20 @@ type DB struct {
 // must exist. The DSN carries the pragmas mandated by PROJECT_BRIEF §5
 // (busy_timeout=5000, journal_mode=WAL, foreign_keys=ON — the latter is
 // per-connection, hence repeated on every pooled connection).
+//
+// Two storage-layer decisions harden the DSN beyond the pragmas (AUD1-4):
+//
+//   - the path is percent-encoded as a file: URI path component, so a path
+//     containing '?' or '#' cannot truncate the DSN or drop the pragmas
+//     (SQLite decodes the escapes when it opens the file), and
+//   - every transaction begins IMMEDIATE (_txlock=immediate, honored by
+//     modernc.org/sqlite v1.60.1): a BEGIN that takes the write lock up
+//     front cannot fail with SQLITE_BUSY on the deferred read→write
+//     upgrade, which used to lose check runs when concurrent HTTP requests
+//     raced (the pool stays unbounded — readers never block in WAL mode).
 func Open(path string) (*DB, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", path)
-	sqlDB, err := sql.Open("sqlite", dsn)
+	sqlDB, err := sql.Open("sqlite", dsnOf(path,
+		"_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"))
 	if err != nil {
 		return nil, fmt.Errorf("repo: open %s: %w", path, err)
 	}
@@ -120,15 +142,64 @@ type Tx struct {
 	Checkpoints    *CheckpointRepo
 }
 
+// dsnOf builds the SQLite DSN of path: a file: URI with the path component
+// percent-encoded (spaces, '?', '#', '%' and every other URI-special byte)
+// followed by the given query parameters. For plain ASCII paths the encoding
+// is the identity, so existing DSNs are byte-identical; a path with a literal
+// '?' or '#' would otherwise truncate the DSN and silently drop every pragma
+// (SQLite percent-decodes the path when it opens the file — modernc.org/sqlite
+// passes file: names to sqlite3_open_v2 whole with SQLITE_OPEN_URI).
+func dsnOf(path, query string) string {
+	return "file:" + (&url.URL{Path: path}).EscapedPath() + "?" + query
+}
+
+// isBusyError reports whether err is an SQLITE_BUSY result of the modernc
+// driver — including extended busy codes such as SQLITE_BUSY_SNAPSHOT, whose
+// primary code (rc & 0xff) is still SQLITE_BUSY.
+func isBusyError(err error) bool {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
+	}
+	return false
+}
+
+// beginTx starts a transaction, retrying a bounded number of times when the
+// BEGIN returns SQLITE_BUSY (the modernc driver applies the DSN's
+// _txlock=immediate, so a busy BEGIN means another pooled connection held
+// the write lock for the whole busy_timeout window).
+func (d *DB) beginTx(ctx context.Context) (*sql.Tx, error) {
+	var lastErr error
+	for attempt := 0; attempt < beginBusyAttempts; attempt++ {
+		sqlTx, err := d.sql.BeginTx(ctx, nil)
+		if err == nil {
+			return sqlTx, nil
+		}
+		lastErr = err
+		if !isBusyError(err) {
+			return nil, fmt.Errorf("repo: begin transaction: %w", err)
+		}
+		backoff := time.Duration(50*(attempt+1)) * time.Millisecond // 50ms, 100ms
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("repo: begin transaction: %w", ctx.Err())
+		case <-time.After(backoff):
+		}
+	}
+	return nil, fmt.Errorf("repo: begin transaction (SQLITE_BUSY, %d attempts): %w", beginBusyAttempts, lastErr)
+}
+
 // Do runs fn inside a single transaction. If fn returns an error, the
-// transaction is rolled back and the error is returned unchanged. If fn
-// panics, the transaction is rolled back and the panic is re-raised. On
-// success the transaction is committed. This is the Stage 0 atomicity
-// primitive that guarantees no partial writes.
+// transaction is rolled back and the error is returned unchanged — even
+// when the rollback itself fails, the ORIGINAL error is preserved as the
+// wrapped cause so sentinel checks (domain.ErrNotFound, ErrOpFailed, …)
+// keep working. If fn panics, the transaction is rolled back and the panic
+// is re-raised. On success the transaction is committed. This is the Stage 0
+// atomicity primitive that guarantees no partial writes.
 func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
-	sqlTx, err := d.sql.BeginTx(ctx, nil)
+	sqlTx, err := d.beginTx(ctx)
 	if err != nil {
-		return fmt.Errorf("repo: begin transaction: %w", err)
+		return err
 	}
 	tx := &Tx{
 		Batches:        &BatchRepo{q: sqlTx},
@@ -154,7 +225,9 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 	}()
 	if err := fn(tx); err != nil {
 		if rbErr := sqlTx.Rollback(); rbErr != nil {
-			return fmt.Errorf("repo: rollback after error %q failed: %w", err.Error(), rbErr)
+			// The rollback failing must not mask the original error: keep it
+			// wrapped (sentinels survive) and quote the rollback failure.
+			return fmt.Errorf("repo: %w (rollback also failed: %v)", err, rbErr)
 		}
 		return err
 	}

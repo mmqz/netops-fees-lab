@@ -29,7 +29,9 @@ type PathResult struct {
 // codes) over the live-edge graph and returns the deterministic BFS path.
 // Unknown codes yield an error wrapping domain.ErrNotFound; identical codes
 // are reachable with a single-node path (length 0). A non-reachable pair
-// carries nil hops and length 0.
+// carries an EMPTY (never null) hops array and length 0 — the §7
+// []-never-null normalization (AUD1-12; the frontend types declare hops as
+// a non-nullable array).
 func (s *Service) Path(ctx context.Context, workspaceID, fromDeviceCode, toDeviceCode string) (PathResult, error) {
 	if _, err := s.mustWorkspace(ctx, workspaceID); err != nil {
 		return PathResult{}, err
@@ -106,7 +108,8 @@ func bfsPath(state *simState, fromCode, toCode string) (PathResult, error) {
 		}
 	}
 	if !found {
-		return PathResult{}, nil
+		// hops renders as [] on the wire (never null) — see the Path doc.
+		return PathResult{Reachable: false, Hops: []PathHop{}}, nil
 	}
 
 	// Walk the parent chain back from to, then reverse.

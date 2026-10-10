@@ -5,7 +5,7 @@
  * - 所有单操作变更经父级 applyOps 提交（统一 toast + 刷新）。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { SimEntityStatus, SimOp, TopologyNode } from '../../api/types';
 import { isUnconfiguredIPv4 } from './selection';
@@ -23,6 +23,10 @@ import {
   LAB_D_DOWN_MESSAGE,
   LAB_D_DOWN_TITLE,
   LAB_D_TABLE_LABEL,
+  LAB_FILTER_DEVICES,
+  LAB_FILTER_INTERFACES,
+  LAB_FILTER_LINKS,
+  LAB_FILTER_NO_MATCH,
   LAB_I_COL_DEVICE,
   LAB_I_COL_IPV4,
   LAB_I_COL_LINKS,
@@ -55,7 +59,38 @@ import type { TableColumn } from '../Table';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { SimStatusChip } from './SimStatusChip';
 import { InterfaceConfigDialog } from './InterfaceConfigDialog';
+import { IconSearch } from '../icons';
 import type { InterfaceRow, LinkRow, SelectedEntity, TopologyView } from './selection';
+
+/** 实体状态排序序（运行在前）。 */
+const STATUS_RANK: Record<SimEntityStatus, number> = { up: 0, down: 1 };
+
+/** 实体表格客户端筛选框（P2）：搜索框 + 清除由 type=search 原生提供。 */
+function TabFilter({
+  placeholder,
+  value,
+  onChange,
+}: {
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="lab-tab-filter">
+      <div className="search-box">
+        <IconSearch size={14} />
+        <input
+          className="input input--sm"
+          type="search"
+          value={value}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
 
 /** 行选中联动：高亮 + 滚动定位到对应行。 */
 function useRowScroll(
@@ -88,12 +123,25 @@ interface DeviceRow extends TopologyNode {
 export function DeviceTab({ view, selected, onSelect, applyOps, opsBusy }: EntityTabProps) {
   const containerRef = useRowScroll(selected, 'device');
   const [confirmTarget, setConfirmTarget] = useState<DeviceRow | null>(null);
+  const [filter, setFilter] = useState('');
 
-  const rows: DeviceRow[] = view.nodes.map((node) => ({
-    ...node,
-    interfaceCount: node.interfaces.length,
-    ipv4Count: node.interfaces.filter((iface) => !isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix)).length,
-  }));
+  const rows: DeviceRow[] = useMemo(
+    () =>
+      view.nodes.map((node) => ({
+        ...node,
+        interfaceCount: node.interfaces.length,
+        ipv4Count: node.interfaces.filter((iface) => !isUnconfiguredIPv4(iface.ipv4Addr, iface.ipv4Prefix)).length,
+      })),
+    [view],
+  );
+
+  const filtered = useMemo(() => {
+    const keyword = filter.trim().toLowerCase();
+    if (keyword === '') return rows;
+    return rows.filter(
+      (row) => row.code.toLowerCase().includes(keyword) || row.name.toLowerCase().includes(keyword),
+    );
+  }, [rows, filter]);
 
   function confirmDown(): void {
     const target = confirmTarget;
@@ -106,11 +154,33 @@ export function DeviceTab({ view, selected, onSelect, applyOps, opsBusy }: Entit
   }
 
   const columns: TableColumn<DeviceRow>[] = [
-    { key: 'code', header: LAB_D_COL_CODE, render: (row) => <span className="cell-strong mono">{row.code}</span> },
-    { key: 'name', header: LAB_D_COL_NAME, render: (row) => row.name },
-    { key: 'status', header: LAB_D_COL_STATUS, render: (row) => <SimStatusChip status={row.status} /> },
-    { key: 'interfaceCount', header: LAB_D_COL_IFACES, render: (row) => row.interfaceCount, align: 'right' },
-    { key: 'ipv4Count', header: LAB_D_COL_IPV4, render: (row) => row.ipv4Count, align: 'right' },
+    {
+      key: 'code',
+      header: LAB_D_COL_CODE,
+      render: (row) => <span className="cell-strong mono">{row.code}</span>,
+      sortValue: (row) => row.code,
+    },
+    { key: 'name', header: LAB_D_COL_NAME, render: (row) => row.name, sortValue: (row) => row.name },
+    {
+      key: 'status',
+      header: LAB_D_COL_STATUS,
+      render: (row) => <SimStatusChip status={row.status} />,
+      sortValue: (row) => STATUS_RANK[row.status],
+    },
+    {
+      key: 'interfaceCount',
+      header: LAB_D_COL_IFACES,
+      render: (row) => row.interfaceCount,
+      align: 'right',
+      sortValue: (row) => row.interfaceCount,
+    },
+    {
+      key: 'ipv4Count',
+      header: LAB_D_COL_IPV4,
+      render: (row) => row.ipv4Count,
+      align: 'right',
+      sortValue: (row) => row.ipv4Count,
+    },
     {
       key: 'actions',
       header: LAB_COL_ACTIONS,
@@ -144,11 +214,13 @@ export function DeviceTab({ view, selected, onSelect, applyOps, opsBusy }: Entit
 
   return (
     <div ref={containerRef}>
+      <TabFilter placeholder={LAB_FILTER_DEVICES} value={filter} onChange={setFilter} />
       <div className="table-wrap">
         <Table
           columns={columns}
-          rows={rows}
+          rows={filtered}
           rowKey={(row) => row.id}
+          emptyText={filter.trim() === '' ? undefined : LAB_FILTER_NO_MATCH}
           onRowClick={(row) => onSelect({ kind: 'device', id: row.id })}
           rowClassName={(row) =>
             [
@@ -178,6 +250,18 @@ export function InterfaceTab({ view, selected, onSelect, applyOps, opsBusy }: En
   const containerRef = useRowScroll(selected, 'interface');
   const [configTarget, setConfigTarget] = useState<InterfaceRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InterfaceRow | null>(null);
+  const [filter, setFilter] = useState('');
+
+  const filtered = useMemo(() => {
+    const keyword = filter.trim().toLowerCase();
+    if (keyword === '') return view.interfaces;
+    return view.interfaces.filter(
+      (row) =>
+        row.deviceCode.toLowerCase().includes(keyword) ||
+        row.name.toLowerCase().includes(keyword) ||
+        (row.ipv4Addr !== null && row.ipv4Addr.includes(keyword)),
+    );
+  }, [view, filter]);
 
   function ifaceLabel(row: InterfaceRow): string {
     return format(LAB_I_LABEL, { device: row.deviceCode, name: row.name });
@@ -210,9 +294,24 @@ export function InterfaceTab({ view, selected, onSelect, applyOps, opsBusy }: En
   }
 
   const columns: TableColumn<InterfaceRow>[] = [
-    { key: 'device', header: LAB_I_COL_DEVICE, render: (row) => <span className="mono">{row.deviceCode}</span> },
-    { key: 'name', header: LAB_I_COL_NAME, render: (row) => <span className="cell-strong">{row.name}</span> },
-    { key: 'status', header: LAB_I_COL_STATUS, render: (row) => <SimStatusChip status={row.status} /> },
+    {
+      key: 'device',
+      header: LAB_I_COL_DEVICE,
+      render: (row) => <span className="mono">{row.deviceCode}</span>,
+      sortValue: (row) => row.deviceCode,
+    },
+    {
+      key: 'name',
+      header: LAB_I_COL_NAME,
+      render: (row) => <span className="cell-strong">{row.name}</span>,
+      sortValue: (row) => row.name,
+    },
+    {
+      key: 'status',
+      header: LAB_I_COL_STATUS,
+      render: (row) => <SimStatusChip status={row.status} />,
+      sortValue: (row) => STATUS_RANK[row.status],
+    },
     {
       key: 'ipv4',
       header: LAB_I_COL_IPV4,
@@ -222,8 +321,15 @@ export function InterfaceTab({ view, selected, onSelect, applyOps, opsBusy }: En
         ) : (
           <span className="mono">{format(LAB_I_IPV4_VALUE, { addr: row.ipv4Addr, prefix: row.ipv4Prefix ?? 0 })}</span>
         ),
+      sortValue: (row) => row.ipv4Addr ?? '',
     },
-    { key: 'linkCount', header: LAB_I_COL_LINKS, render: (row) => row.linkCount, align: 'right' },
+    {
+      key: 'linkCount',
+      header: LAB_I_COL_LINKS,
+      render: (row) => row.linkCount,
+      align: 'right',
+      sortValue: (row) => row.linkCount,
+    },
     {
       key: 'actions',
       header: LAB_COL_ACTIONS,
@@ -271,11 +377,13 @@ export function InterfaceTab({ view, selected, onSelect, applyOps, opsBusy }: En
 
   return (
     <div ref={containerRef}>
+      <TabFilter placeholder={LAB_FILTER_INTERFACES} value={filter} onChange={setFilter} />
       <div className="table-wrap">
         <Table
           columns={columns}
-          rows={view.interfaces}
+          rows={filtered}
           rowKey={(row) => row.id}
+          emptyText={filter.trim() === '' ? undefined : LAB_FILTER_NO_MATCH}
           onRowClick={(row) => onSelect({ kind: 'interface', id: row.id })}
           rowClassName={(row) =>
             [
@@ -311,6 +419,20 @@ export function InterfaceTab({ view, selected, onSelect, applyOps, opsBusy }: En
 export function LinkTab({ view, selected, onSelect, applyOps, opsBusy }: EntityTabProps) {
   const containerRef = useRowScroll(selected, 'link');
   const [deleteTarget, setDeleteTarget] = useState<LinkRow | null>(null);
+  const [filter, setFilter] = useState('');
+
+  const filtered = useMemo(() => {
+    const keyword = filter.trim().toLowerCase();
+    if (keyword === '') return view.links;
+    return view.links.filter(
+      (row) =>
+        row.label.toLowerCase().includes(keyword) ||
+        row.aDeviceCode.toLowerCase().includes(keyword) ||
+        row.zDeviceCode.toLowerCase().includes(keyword) ||
+        row.aInterfaceName.toLowerCase().includes(keyword) ||
+        row.zInterfaceName.toLowerCase().includes(keyword),
+    );
+  }, [view, filter]);
 
   function endpoint(row: LinkRow, side: 'a' | 'z'): string {
     return format(LAB_L_ENDPOINT, {
@@ -350,10 +472,26 @@ export function LinkTab({ view, selected, onSelect, applyOps, opsBusy }: EntityT
         ) : (
           <span className="cell-strong mono">{row.label}</span>
         ),
+      sortValue: (row) => row.label,
     },
-    { key: 'a', header: LAB_L_COL_A, render: (row) => <span className="mono">{endpoint(row, 'a')}</span> },
-    { key: 'z', header: LAB_L_COL_Z, render: (row) => <span className="mono">{endpoint(row, 'z')}</span> },
-    { key: 'status', header: LAB_L_COL_STATUS, render: (row) => <SimStatusChip status={row.status} /> },
+    {
+      key: 'a',
+      header: LAB_L_COL_A,
+      render: (row) => <span className="mono">{endpoint(row, 'a')}</span>,
+      sortValue: (row) => row.aDeviceCode,
+    },
+    {
+      key: 'z',
+      header: LAB_L_COL_Z,
+      render: (row) => <span className="mono">{endpoint(row, 'z')}</span>,
+      sortValue: (row) => row.zDeviceCode,
+    },
+    {
+      key: 'status',
+      header: LAB_L_COL_STATUS,
+      render: (row) => <SimStatusChip status={row.status} />,
+      sortValue: (row) => STATUS_RANK[row.status],
+    },
     {
       key: 'actions',
       header: LAB_COL_ACTIONS,
@@ -393,11 +531,13 @@ export function LinkTab({ view, selected, onSelect, applyOps, opsBusy }: EntityT
 
   return (
     <div ref={containerRef}>
+      <TabFilter placeholder={LAB_FILTER_LINKS} value={filter} onChange={setFilter} />
       <div className="table-wrap">
         <Table
           columns={columns}
-          rows={view.links}
+          rows={filtered}
           rowKey={(row) => row.id}
+          emptyText={filter.trim() === '' ? undefined : LAB_FILTER_NO_MATCH}
           onRowClick={(row) => onSelect({ kind: 'link', id: row.id })}
           rowClassName={(row) =>
             [

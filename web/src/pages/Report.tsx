@@ -9,14 +9,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { BatchListItem } from '../api/types';
-import { ApiError, getReportHtml, getReportJson, listBatches, runValidate } from '../api/client';
+import { formatApiError, getReportHtml, getReportJson, listBatches, runValidate } from '../api/client';
 import {
   BATCH_STATUS_LABELS,
+  LAB_CAPPED_HINT,
   BTN_DOWNLOAD_HTML,
   BTN_DOWNLOAD_JSON,
   BTN_REFRESH,
   BTN_REVALIDATE,
-  ERR_NETWORK,
   format,
   RPT_DISCLAIMER,
   RPT_FILE_EXT_HTML,
@@ -55,9 +55,11 @@ export function ReportPage() {
 
   const [selectedBatch, setSelectedBatch] = useState<string>(urlBatchId);
   const [batches, setBatches] = useState<BatchListItem[] | null>(null);
+  const [batchesCapped, setBatchesCapped] = useState(false);
   const [html, setHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [validating, setValidating] = useState(false);
   const [downloadingJson, setDownloadingJson] = useState(false);
 
@@ -67,20 +69,26 @@ export function ReportPage() {
 
   useEffect(() => {
     listBatches(1, BATCH_OPTION_LIMIT)
-      .then((paged) => setBatches(paged.items))
+      .then((paged) => {
+        setBatches(paged.items);
+        setBatchesCapped(paged.total > paged.items.length);
+      })
       .catch(() => setBatches([]));
   }, []);
 
   const load = useCallback((): void => {
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     getReportHtml(selectedBatch === '' ? undefined : selectedBatch)
       .then((text) => {
         setHtml(text);
         setLoading(false);
       })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.message : null);
+        const display = formatApiError(err);
+        setError(display.title);
+        setErrorDetail(display.detail);
         setLoading(false);
       });
   }, [selectedBatch]);
@@ -103,7 +111,8 @@ export function ReportPage() {
       })
       .catch((err: unknown) => {
         setValidating(false);
-        toast.show(err instanceof ApiError ? err.message : ERR_NETWORK, 'error');
+        const display = formatApiError(err);
+        toast.show(display.title, 'error', { detail: display.detail });
       });
   }
 
@@ -125,7 +134,8 @@ export function ReportPage() {
       })
       .catch((err: unknown) => {
         setDownloadingJson(false);
-        toast.show(err instanceof ApiError ? err.message : ERR_NETWORK, 'error');
+        const display = formatApiError(err);
+        toast.show(display.title, 'error', { detail: display.detail });
       });
   }
 
@@ -151,6 +161,9 @@ export function ReportPage() {
               </option>
             ))}
           </select>
+          {batchesCapped && (
+            <span className="muted-note">{format(LAB_CAPPED_HINT, { n: BATCH_OPTION_LIMIT })}</span>
+          )}
         </label>
         <div className="report-actions">
           <button type="button" className="btn btn--secondary" onClick={load} disabled={loading}>
@@ -195,7 +208,7 @@ export function ReportPage() {
             <span className="loading-text">{RPT_LOADING}</span>
           </div>
         ) : error !== null ? (
-          <ErrorBlock message={error} onRetry={load} />
+          <ErrorBlock message={error} detail={errorDetail} onRetry={load} />
         ) : (
           <iframe
             className="report-frame"

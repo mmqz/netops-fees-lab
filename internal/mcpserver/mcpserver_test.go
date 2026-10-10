@@ -462,6 +462,28 @@ func TestMCPLabApplyOps(t *testing.T) {
 		t.Errorf("apply bogus_op: error message = %q, want the engine's not-a-forward-op rejection", msg)
 	}
 
+	// FX1-A (AUD1-3): an EMPTY ops array is a tool error — the typed ops
+	// round-trip through sim.DecodeOps, which rejects {"ops":[]} with
+	// invalid_request BEFORE any changeset row exists (an applied 0-op
+	// changeset would permanently brick changeset-tier undo). A null ops
+	// field is a tool error as well (input schema or the same decoder
+	// gate, depending on the SDK's null handling).
+	msg = callToolError(t, session, "lab_apply_ops", map[string]any{
+		"workspaceId": ws.WorkspaceID,
+		"ops":         []any{},
+		"description": "must be rejected",
+	})
+	if !strings.Contains(msg, "invalid_request") {
+		t.Errorf("apply empty ops: error message = %q, want the invalid_request code prefix", msg)
+	}
+	if !strings.Contains(msg, "ops must contain at least one operation") {
+		t.Errorf("apply empty ops: error message = %q, want the engine's empty-ops rejection text", msg)
+	}
+	callToolError(t, session, "lab_apply_ops", map[string]any{
+		"workspaceId": ws.WorkspaceID,
+		"ops":         nil,
+	})
+
 	// Unknown workspace: the §7 not_found vocabulary.
 	msg = callToolError(t, session, "lab_apply_ops", map[string]any{
 		"workspaceId": "no-such-workspace",
@@ -730,6 +752,26 @@ func TestMCPLabCheckpoint(t *testing.T) {
 	db := importSeededWorkbooks(t)
 	ws := materializeLabWorkspace(t, db)
 	session := startSession(t, db)
+
+	// Empty list (AUD1-11): a workspace with zero checkpoints renders
+	// items: [] and total: 0 — the §8 list contract holds for the empty
+	// case too (v0.2.0's omitempty dropped both fields and answered a
+	// bare {"action":"list"}).
+	empty := callTool(t, session, "lab_checkpoint", map[string]any{
+		"workspaceId": ws.WorkspaceID,
+		"action":      "list",
+	})
+	if got := str(t, "empty list", empty, "action"); got != "list" {
+		t.Errorf("empty list: action = %q, want list", got)
+	}
+	if got := num(t, "empty list", empty, "total"); got != 0 {
+		t.Errorf("empty list: total = %v, want 0", got)
+	}
+	if items, present := empty["items"]; !present || items == nil {
+		t.Errorf("empty list: items = %#v (present=%v), want a present EMPTY array (never null/absent)", items, present)
+	} else if arr, ok := items.([]any); !ok || len(arr) != 0 {
+		t.Errorf("empty list: items = %#v, want an empty array", items)
+	}
 
 	// create: no checks run for a create (§8 — checks only on restore).
 	created := callTool(t, session, "lab_checkpoint", map[string]any{

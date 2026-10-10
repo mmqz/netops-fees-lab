@@ -80,7 +80,9 @@ func (d *DB) Backup(ctx context.Context, dstPath string) error {
 // Attempted writes fail at the SQLite level (mode=ro) — read methods behave
 // exactly like on a writable DB.
 func OpenReadOnly(path string) (*DB, error) {
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(5000)", path)
+	// dsnOf percent-encodes the path (AUD1-7): a snapshot directory
+	// containing '?' or '#' must not truncate the DSN and drop mode=ro.
+	dsn := dsnOf(path, "mode=ro&_pragma=busy_timeout(5000)")
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("repo: open read-only %s: %w", path, err)

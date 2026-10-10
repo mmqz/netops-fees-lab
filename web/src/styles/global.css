@@ -14,9 +14,16 @@
   --primary-tint: rgba(47, 95, 224, 0.12);
   --error: #d64545;
   --error-hover: #b93a3a;
-  --warning: #c77d06;
+  --warning: #C77D0A;
   --info: #3a7bd5;
   --success: #1f9d55;
+  /* 浅色/淡底上的可读文字色（W7：chips 达 WCAG AA ≥4.5:1；基色用于边框/按钮/大字号） */
+  --warning-text: #8a5a06;
+  --success-text: #147a41;
+  --error-text: #b03030;
+  --info-text: #2c62a8;
+  --pool-text: #0b6b62;
+  --circuit-text: #5b3fd1;
   --radius: 8px;
   --shadow: 0 1px 3px rgba(23, 35, 58, 0.08);
   --shadow-lg: 0 8px 24px rgba(23, 35, 58, 0.16);
@@ -112,6 +119,11 @@ button {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+}
+
+/* 全出血变体（W1）：仅拓扑工作台 /lab/:id 使用——阅读型页面保持 1200px 居中 */
+.app-content--full {
+  max-width: none;
 }
 
 /* ------------------------------------------------------------------ 侧栏 */
@@ -400,14 +412,26 @@ button {
 
 /* ------------------------------------------------------------------ 表格 */
 
+/*
+ * 表头吸顶的生效条件（AUD2-5）：th 的粘性定位吸附到「最近的可滚动祖先」。
+ * 默认 overflow-x:auto 会让 .table-wrap 本身成为滚动容器（而它从不垂直滚动），
+ * 于是表头永远不吸顶。在真正垂直滚动的容器内（右栏 .lab-panel-body、宽弹窗
+ * .modal--wide .modal-body）取消 wrap 的 overflow，让 th 吸附到外层滚动容器上。
+ */
 .table-wrap {
   overflow-x: auto;
+}
+
+.lab-panel-body .table-wrap,
+.modal--wide .modal-body .table-wrap {
+  overflow: visible;
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .table thead th {
@@ -420,6 +444,41 @@ button {
   padding: 8px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+}
+
+/* 可排序表头（W10）：升 → 降 → 复位三态，aria-sort + 箭头指示 */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.th-sort:hover {
+  color: var(--primary);
+}
+
+.th-sort:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.th-sort-indicator {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+th[aria-sort="ascending"] .th-sort-indicator,
+th[aria-sort="descending"] .th-sort-indicator {
+  color: var(--primary);
 }
 
 .table tbody td {
@@ -478,6 +537,17 @@ button {
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 数字面（W6）：评分/计数/分页等指标统一等宽数字对齐 */
+.num,
+.chip,
+.stat-value,
+.pagination-total,
+.lab-score-delta,
+.bar-value {
+  font-variant-numeric: tabular-nums;
 }
 
 /* 骨架行 */
@@ -527,6 +597,10 @@ button {
 
 .chip--mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* W6：编码/哈希等 mono 徽章加淡底细边，读作「代码芯片」 */
+  background: #eef2f8;
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
 }
 
 .chip--primary {
@@ -536,22 +610,22 @@ button {
 
 .chip--success {
   background: rgba(31, 157, 85, 0.12);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .chip--error {
   background: rgba(214, 69, 69, 0.12);
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .chip--warning {
   background: rgba(199, 125, 6, 0.12);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .chip--info {
   background: rgba(58, 123, 213, 0.12);
-  color: var(--info);
+  color: var(--info-text);
 }
 
 .chip--muted {
@@ -566,12 +640,49 @@ button {
 
 .chip--pool {
   background: rgba(14, 147, 132, 0.12);
-  color: #0e9384;
+  color: var(--pool-text);
 }
 
 .chip--circuit {
   background: rgba(124, 92, 252, 0.12);
-  color: #7c5cfc;
+  color: var(--circuit-text);
+}
+
+/* 表格内的实体 id 代码芯片（W3：vd-22 / if-9 / ln-4 / cs-3 …） */
+.code-chip {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  background: #eef2f8;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* 可点击的短码芯片（P2：批次 uuid 点击复制） */
+button.code-chip {
+  border: 1px solid var(--border);
+  background: #eef2f8;
+  color: var(--text);
+  cursor: copy;
+  font: inherit;
+  font-size: 12px;
+}
+
+button.code-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+button.code-chip:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 /* ------------------------------------------------------------------ 按钮 */
@@ -677,6 +788,23 @@ a.btn:hover {
   font-family: inherit;
   font-size: 14px;
   padding: 0 12px;
+}
+
+/* 原生 select 统一令牌化（P2）：去系统外观 + 自绘 chevron + 右侧留位 */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235c6b85' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+}
+
+.select:disabled {
+  background-color: var(--bg);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .input:focus,
@@ -1093,8 +1221,59 @@ a.btn:hover {
   border-left-color: var(--info);
 }
 
+.toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.toast-icon--success {
+  color: var(--success-text);
+  background: rgba(31, 157, 85, 0.14);
+}
+
+.toast-icon--error {
+  color: var(--error-text);
+  background: rgba(214, 69, 69, 0.14);
+}
+
+.toast-icon--info {
+  color: var(--info-text);
+  background: rgba(58, 123, 213, 0.14);
+}
+
 .toast-message {
   flex: 1;
+}
+
+/* 次行技术原文（后端英文消息，FX2-4） */
+.toast-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* 可选动作链接（FX2 预留，后续任务接线） */
+.toast-action {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.toast-action:hover {
+  background: var(--primary-tint);
 }
 
 .toast-close {
@@ -1406,6 +1585,21 @@ a.btn:hover {
   min-width: 120px;
 }
 
+/* 次行技术原文（后端英文消息，FX2-4） */
+.error-block-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* 紧凑变体（抽屉/行内，AUD2-13） */
+.error-block--compact {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 .error-block svg {
   flex-shrink: 0;
 }
@@ -1425,7 +1619,7 @@ a.btn:hover {
 .banner--warning {
   background: rgba(199, 125, 6, 0.1);
   border: 1px solid rgba(199, 125, 6, 0.35);
-  color: #8a5a06;
+  color: var(--warning-text);
   font-weight: 600;
 }
 
@@ -1565,6 +1759,21 @@ a.btn:hover {
   position: relative;
   flex: 1;
   min-height: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  overflow: hidden;
+}
+
+/*
+ * 深色工程面板（W5）：仅画布区域深色，页面其余保持浅色主题。
+ * 分层：点阵网格 + 顶部主色微光 + 近黑深蓝底；底色必须与
+ * TopologyCanvas.tsx 的 CANVAS_BG 常量一致（label halo 颜色）。
+ * 回退浅色只需删除 --dark 修饰类并同步组件内调色常量。
+ */
+.lab-canvas-wrap--dark {
+  background:
+    radial-gradient(rgba(125, 162, 255, 0.13) 1px, transparent 1.6px) 0 0 / 22px 22px,
+    radial-gradient(900px 380px at 50% 0%, rgba(47, 95, 224, 0.12), transparent 65%),
+    #0e1626;
 }
 
 .lab-canvas {
@@ -1580,6 +1789,168 @@ a.btn:hover {
   justify-content: center;
   color: var(--muted);
   font-size: 13px;
+}
+
+.lab-canvas-wrap--dark .lab-canvas-empty {
+  color: #8da0bf;
+}
+
+/* 悬浮层公共：容器不接指针（平移/框选不受遮挡），仅控件自身可点（W2） */
+.lab-canvas-overlay {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  pointer-events: none;
+}
+
+/* 右上角视图控制：放大 / 缩小 / 适配 / 重置 */
+.lab-canvas-controls {
+  top: 10px;
+  right: 10px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.canvas-ctrl {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(125, 162, 255, 0.35);
+  background: rgba(14, 22, 38, 0.88);
+  color: #c9d6ec;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.canvas-ctrl:hover {
+  background: rgba(47, 95, 224, 0.4);
+  border-color: #7da2ff;
+  color: #fff;
+}
+
+.canvas-ctrl:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 1px;
+}
+
+/* 左下角图例：设备/接口/链路状态（FX-4：chip 加呼吸感，容器收窄内衬） */
+.lab-canvas-legend {
+  left: 10px;
+  bottom: 10px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 20px);
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 20, 36, 0.85);
+  font-size: 12px;
+  color: #c9d6ec;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-dot--up {
+  background: #dce6f7;
+  border: 1px solid #8fa6ce;
+}
+
+/* 与 TopologyCanvas NODE_DOWN_FILL #d13c33 同步（FX-4） */
+.legend-dot--down {
+  background: #d13c33;
+}
+
+.legend-dot--fault {
+  background: #dce6f7;
+  border: 2px solid #f2a93b;
+}
+
+/* 与 EDGE_UP_COLOR #7387ab / 2.5px 同步（FX-4） */
+.legend-line {
+  width: 20px;
+  height: 0;
+  border-top: 2.5px solid #7387ab;
+  flex-shrink: 0;
+}
+
+.legend-line--down {
+  border-top: 3px dashed #f2554a;
+}
+
+/*
+ * 悬停节点信息条（FX-4）：左上角「DEV-xxx · 完整名 · 状态」。
+ * 代替原节点下方长名标签（27 节点聚簇噪音）；避开右上角视图控件。
+ */
+.lab-canvas-hoverinfo {
+  top: 10px;
+  left: 10px;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 150px);
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 20, 36, 0.85);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: #c3cdd9;
+}
+
+.hoverinfo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hoverinfo-dot--up {
+  background: var(--success);
+}
+
+.hoverinfo-dot--down {
+  background: var(--error);
+}
+
+.hoverinfo-code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  font-weight: 600;
+  color: #e8eefb;
+}
+
+.hoverinfo-sep {
+  color: #5c6f92;
+}
+
+.hoverinfo-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c3cdd9;
+}
+
+.hoverinfo-status {
+  color: #c3cdd9;
 }
 
 /* 右侧面板 */
@@ -1654,6 +2025,20 @@ a.btn:hover {
 .lab-row-selected > td {
   background: rgba(47, 95, 224, 0.12) !important;
   box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* 变更集行闪光（W9：toast「查看变更集」定位后一次性高亮渐退） */
+@keyframes row-flash {
+  0% {
+    background: rgba(125, 162, 255, 0.4);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.lab-row-highlight > td {
+  animation: row-flash 2.4s ease-out 1;
 }
 
 /* 停机行弱化 */
@@ -1783,6 +2168,51 @@ a.btn:hover {
   margin-top: 8px;
 }
 
+/* 连通性对列表收起态（W8）：「共 N 对，点击展开」chip 按钮 */
+.lab-pair-toggle {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.lab-pair-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.lab-pair-collapse {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
+.lab-pair-collapse:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* 实体标签页客户端筛选框（P2） */
+.lab-tab-filter {
+  display: flex;
+  align-items: center;
+  padding: 0 12px 10px;
+}
+
+.lab-tab-filter .search-box {
+  flex: 1;
+  max-width: 260px;
+}
+
+.input--sm {
+  height: 30px;
+  font-size: 13px;
+}
+
 .lab-score-delta {
   font-size: 18px;
   font-weight: 700;
@@ -1867,7 +2297,7 @@ a.btn:hover {
   min-width: 0;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1080px) {
   .lab-split {
     grid-template-columns: 1fr;
   }
@@ -1877,12 +2307,51 @@ a.btn:hover {
     height: auto;
   }
 
+  /* 堆叠视图下画布固定高度（≥420px，随视口伸缩） */
   .lab-canvas-wrap {
-    height: 420px;
+    height: clamp(420px, 48vh, 640px);
     flex: none;
   }
 
   .lab-panel-body {
     max-height: 480px;
+  }
+}
+
+/* ------------------------------------------------------------------ 滚动条与动效 */
+
+/* 细滚动条（P2）：webkit + Firefox 兼容 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c3ccd9 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #c3ccd9;
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #aab5c6;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* prefers-reduced-motion（P2）：全局关闭动画/过渡；画布布局动画由组件 matchMedia 关闭 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
