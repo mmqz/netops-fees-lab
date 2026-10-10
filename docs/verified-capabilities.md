@@ -87,9 +87,9 @@
 | 前端四项（9a9e2d0） | tsc/build 门禁 + 运行时冒烟（Overview 动态渲染 4 类型含 port；Report 竞态注入验证；侧栏 mock health 版本回落；ImportWizard IP 键告警显示） | 留档 F2 子代理工作记录 |
 | 真实样例合规文档化（R3-C5） | README 合规横幅加 samples/ 例外条款（中英双语）；新增 samples/README.md（来源/授权/披露）与 docs/natural-keys.md（R4 裁决落地） | 红线「no real network data」的已文档化偏差（项目所有者授权） |
 
-### ⚠️ 未验证（v0.3.2 诚实声明）
+### ✅ CI 运行态（推送后补记，2026-10-10）
 
-- **CI 运行态**：本轮三个提交（404161b / 96b8c74 / 9a9e2d0）**尚未推送**——GitHub Actions 暂无对应运行记录，**待推送后补记**（不预填 run 编号）。本地已实测上述六项门禁。
+- 84294e3（本轮全部四个提交的最终态）→ GitHub Actions **run 38056776554 全绿**（go: gofmt/vet/207 tests；web: tsc strict + vite）；fd648df / 145fdb8 / 237bb28 历史三提交 CI 亦均 success（runs 38045557197 / 38036448565 / 38029092684）——v0.3.1 提交的 CI 运行态缺口（R3-C6）一并闭环。
 - 其余未验证事项（部署态 TeleAgent MCP 调用 / Windows/macOS 构建 / 长时并发负载）与 v0.3.0 段一致，无变化。
 
 ## ✅ 已验证（2026-10-10，v0.3.0 地理视图版 · linux/amd64 · 2 核沙箱）
