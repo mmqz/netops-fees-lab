@@ -1,11 +1,11 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **8**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型与 v8 port 换键为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **9**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键与 v9 base_station 类型为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
 - **ID**：TEXT。P1 聚合 `前缀_<uuid>`：`res_`（资源）、`rel_`（关系）、`src_`（来源引用）、`bat_`（导入批次）、`iss_`（问题），生成见 `internal/domain` 的 `NewID`；P2 仿真实体 `前缀-<n>`（全局序列，见文末 §6）。工作区为 UUID。
-- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_name|port_name`（v8 换键，见文末 v7/v8 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
+- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_name|port_name`（v8 换键，见文末 v7/v8 节）、base_station 用**条件键** `base_station_code`（编码空时兜底 `city|base_station_name`，跳空值，记 W004；v9 落地，见文末 v9 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
 - **时间戳**：一律 **UTC RFC3339 字符串**（如 `2026-10-09T12:04:40Z`）。
 - **JSON 列**：`attributes` / `raw` / `evidence` / `mapping` 均为 TEXT 存 JSON 对象（默认 `'{}'`）。
 
@@ -429,3 +429,33 @@ R4 审查定性 P1：旧键 `device_ip|port_name` 的设备侧是 IP，设备重
 - **幂等**：对已换键行重算结果恒等（新键的 `|` 前分量即设备侧，回代不变）；账本（schema_migrations）跳过已应用版本。
 - **不动 `updated_at`**：属模式级身份修复而非业务变更，迁移时刻由 `schema_migrations.applied_at` 记录。
 - 语义提示：旧键保留的存量行与新键导入的同端口行互不判重（键不同）——需清理旧行时回滚其批次再重导即可；详见 [natural-keys.md](natural-keys.md) §4。
+
+# DDL v9 — base_station 资源类型（resources CHECK 扩容）
+
+> Migration `9` name `base_station_resource_type`（`internal/repo/migrations_v9.go`，经 `init()` 自注册追加 + 按版本排序，机制同 v4–v8；migrations.go 字面量列表不动）。**当前 schema version = 9**。
+
+## 12. 基站资源（base_station schema）与条件自然键
+
+面向真实无线基站工作簿（`samples/telecom-base-station.xlsx`：14 真实业务列，无地市列）。**条件自然键**：主键 `base_station_code`（非必填）；编码空时键退化为 `(city, base_station_name)` 按序拼接、跳过空值（真实表 → 纯名称；含地市列的表 → `地市|名称`），行照常导入并记 **W004** 治理 issue（warning，evidence：type / natural_key / missing_fields / fallback_fields）。E002 仅约束 `base_station_name`（Required）；E001/幂等判重都在解析后的最终键上。`base_station_ip` 为 **string 值列**（真实值带 /30 掩码，如 `172.7.10.125/30`；IP 属可变属性不作身份）；`uplink_a_ip`/`gateway_ip` 为 KindIPv4。无 ref 字段（自含导出，同 port 的 device_ip 决策），不派生关系；展示名钉定 `base_station_name`。键退化机制由 `mapping.TypeSpec.KeyFallbackFields` 通用声明驱动（键解析不硬编码类型名），base_station 是首个使用者——字段表与同义词见 `internal/mapping/schema.go` 的 `baseStationSpec`，行为细节见 [import-and-validation.md](import-and-validation.md) §12。
+
+### 12.1 DDL v9 全文（FK 安全的表重建，v7 同构）
+
+```sql
+CREATE TABLE resources_new (
+  id TEXT PRIMARY KEY,
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('device','ip_pool','circuit','port','base_station')),
+  natural_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  attributes TEXT NOT NULL DEFAULT '{}',
+  status TEXT,
+  first_batch_id TEXT NOT NULL REFERENCES import_batches(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (resource_type, natural_key)
+);
+INSERT INTO resources_new (…全列…) SELECT …全列… FROM resources;
+DROP TABLE resources;
+ALTER TABLE resources_new RENAME TO resources;
+```
+
+与 v7 完全同构的 `ForeignKeysOff` 重建（专用连接事务外 `PRAGMA foreign_keys=OFF` → 事务内重建 → `PRAGMA foreign_key_check` 门禁 → 恢复 FK ON）：v9 之前 base_station INSERT 被 CHECK 拒绝（`TestMigrationV9AddsBaseStation` 钉死该回归）；迁移后既有行（含 port 行）逐字节保留、`first_batch_id` FK 仍强制、`Open` 幂等。base_station 无 relations / 无工作台侧实体（RelationType 封闭集不动）。

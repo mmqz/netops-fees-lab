@@ -900,3 +900,307 @@ func TestPortCompositeKeyValidate(t *testing.T) {
 		})
 	}
 }
+
+// ---- base_station (conditional natural key, v0.4 W2-D) ----
+
+// baseStationSheetName is a sheet name whose 基站 hint suggests the
+// base_station type (the real sheet family: 无线基站…表).
+const baseStationSheetName = "无线基站表"
+
+// baseStationHeaders are the REAL column layout of the base-station export
+// (samples/telecom-base-station.xlsx, owner-provided session paste): 14
+// business columns, NO 地市 column.
+var baseStationHeaders = []string{"基站类型", "无线基站名称", "基站编码", "电联共享", "归属A IP", "环", "链", "归属A名称", "归属A端口", "网关IP", "基站IP", "描述", "工单号", "备注"}
+
+// baseStationHeadersWithCity adds the 地市 scope column a future sheet may
+// carry (the fallback key then becomes 地市|无线基站名称 instead of the bare
+// name).
+var baseStationHeadersWithCity = append([]string{"地市"}, baseStationHeaders...)
+
+// baseStationSheetMapping builds a complete, valid base_station sheet
+// mapping against the real column layout: the PRIMARY key column is
+// base_station_code (the conditional fallback is spec-driven, not a mapping
+// input), the required field base_station_name is mapped.
+func baseStationSheetMapping() SheetMapping {
+	return SheetMapping{
+		Sheet:        baseStationSheetName,
+		Action:       ActionImport,
+		ResourceType: domain.ResourceTypeBaseStation,
+		KeyColumns:   []string{"base_station_code"},
+		ColumnMapping: map[string]string{
+			"base_station_type": "基站类型",
+			"base_station_name": "无线基站名称",
+			"base_station_code": "基站编码",
+			"sharing":           "电联共享",
+			"uplink_a_ip":       "归属A IP",
+			"ring":              "环",
+			"chain":             "链",
+			"uplink_a_name":     "归属A名称",
+			"uplink_a_port":     "归属A端口",
+			"gateway_ip":        "网关IP",
+			"base_station_ip":   "基站IP",
+			"description":       "描述",
+			"work_order":        "工单号",
+			"remark":            "备注",
+		},
+	}
+}
+
+// TestBaseStationSpec pins the base_station schema: the conditional natural
+// key (optional code primary + [city, base_station_name] fallback), the
+// display-name override, the Kinds of the three IP columns (base_station_ip
+// is a string — the real values carry /30 masks — while uplink_a_ip and
+// gateway_ip stay strict IPv4), and — for EVERY spec of the registry — that
+// KeyFallbackFields reference existing fields (a typo in a fallback field
+// name would silently degrade every key of the type; this is the load-bearing
+// validation the importer cannot perform at runtime).
+func TestBaseStationSpec(t *testing.T) {
+	spec, ok := SpecByType(domain.ResourceTypeBaseStation)
+	if !ok {
+		t.Fatal("base_station spec missing from Specs")
+	}
+	if spec.Type != domain.ResourceTypeBaseStation || spec.SheetHint != "基站" {
+		t.Errorf("spec identity = %s/%q, want base_station/基站", spec.Type, spec.SheetHint)
+	}
+	if got := spec.NameField(); got != "base_station_name" {
+		t.Errorf("NameField(base_station) = %q, want base_station_name (override)", got)
+	}
+	if !reflect.DeepEqual(spec.KeyFallbackFields, []string{"city", "base_station_name"}) {
+		t.Errorf("KeyFallbackFields = %v, want [city base_station_name]", spec.KeyFallbackFields)
+	}
+	if got := spec.NaturalKeyNames(); !reflect.DeepEqual(got, []string{"base_station_code"}) {
+		t.Errorf("NaturalKeyNames = %v, want [base_station_code]", got)
+	}
+	if f, _ := spec.Field("base_station_code"); f.Required {
+		t.Error("base_station_code must NOT be Required (the real sheet's code column is empty; empty code degrades the key, W004)")
+	}
+	if f, _ := spec.Field("base_station_name"); !f.Required || f.NaturalKey {
+		t.Error("base_station_name must be Required and non-key (the E002 anchor and fallback component)")
+	}
+	for _, tc := range []struct {
+		field string
+		want  FieldKind
+	}{
+		{"base_station_ip", KindString}, // real values carry /30 masks — NOT KindIPv4
+		{"uplink_a_ip", KindIPv4},
+		{"gateway_ip", KindIPv4},
+	} {
+		f, found := spec.Field(tc.field)
+		if !found {
+			t.Fatalf("spec misses field %s", tc.field)
+		}
+		if f.Kind != tc.want {
+			t.Errorf("%s kind = %q, want %q", tc.field, f.Kind, tc.want)
+		}
+	}
+	// No ref fields: the station sheet is a self-contained export, like port.
+	for _, f := range spec.Fields {
+		if f.Kind == KindRef {
+			t.Errorf("base_station must not carry ref fields (found %s)", f.Name)
+		}
+	}
+	// Registry-wide KeyFallbackFields validation: every referenced field
+	// must exist in the same spec (order is the fallback join order).
+	for _, s := range Specs {
+		for _, name := range s.KeyFallbackFields {
+			if _, found := s.Field(name); !found {
+				t.Errorf("spec %s: KeyFallbackFields references unknown field %q", s.Type, name)
+			}
+		}
+	}
+}
+
+// TestSuggestTypeBaseStation pins the 基站 sheet hint and the Specs order
+// rule (earlier hints win).
+func TestSuggestTypeBaseStation(t *testing.T) {
+	cases := []struct {
+		sheet string
+		want  domain.ResourceType
+		ok    bool
+	}{
+		{baseStationSheetName, domain.ResourceTypeBaseStation, true},
+		{"基站", domain.ResourceTypeBaseStation, true},
+		{"无线基站资源表", domain.ResourceTypeBaseStation, true},
+		{"Sheet1", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := SuggestType(tc.sheet)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("SuggestType(%q) = (%q, %v), want (%q, %v)", tc.sheet, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// TestBaseStationSuggest covers the suggestion ladder on a typed 基站 sheet:
+// the real column layout maps onto the base_station fields at synonym
+// confidence, and a sheet WITH the 地市 column also suggests city (the
+// reserved scope field).
+func TestBaseStationSuggest(t *testing.T) {
+	// Every real header maps to a field at synonym confidence.
+	sug := Suggest(baseStationSheetName, baseStationHeaders)
+	want := []string{
+		"base_station_type", "base_station_name", "base_station_code", "sharing",
+		"uplink_a_ip", "ring", "chain", "uplink_a_name", "uplink_a_port",
+		"gateway_ip", "base_station_ip", "description", "work_order", "remark",
+	}
+	if len(sug) != len(want) {
+		t.Fatalf("Suggest returned %d suggestions, want %d", len(sug), len(want))
+	}
+	for i, w := range want {
+		if sug[i].Field != w || sug[i].Confidence != ConfidenceSynonym {
+			t.Errorf("suggestion[%d] = %s@%v, want %s@%v", i, sug[i].Field, sug[i].Confidence, w, ConfidenceSynonym)
+		}
+	}
+	// Exact / normalized tiers and the reserved scope column.
+	cases := []struct {
+		name     string
+		sheet    string
+		header   string
+		wantFld  string
+		wantConf float64
+	}{
+		{"exact field name", baseStationSheetName, "base_station_code", "base_station_code", 1.0},
+		{"normalized case field name", baseStationSheetName, "BASE_STATION_NAME", "base_station_name", 0.9},
+		{"city scope column", "基站表-含地市", "地市", "city", 0.75},
+		{"city alt synonym", "基站表-含地市", "城市", "city", 0.75},
+		{"device-only field not suggested", baseStationSheetName, "管理IP", "", 0},
+		{"port field not suggested", baseStationSheetName, "端口名称", "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Suggest(tc.sheet, []string{tc.header})
+			if len(got) != 1 {
+				t.Fatalf("Suggest returned %d suggestions, want 1", len(got))
+			}
+			if got[0].Field != tc.wantFld || got[0].Confidence != tc.wantConf {
+				t.Errorf("Suggest(%q, %q) = %q/%v, want %q/%v",
+					tc.sheet, tc.header, got[0].Field, got[0].Confidence, tc.wantFld, tc.wantConf)
+			}
+		})
+	}
+}
+
+// TestSuggestMappingBaseStation pins the prefill: a 基站 sheet gets action
+// import, keyColumns = the primary natural key [base_station_code], every
+// real column mapped — and the suggested mapping VALIDATES as-is (the
+// required field is mapped by the synonym ladder; the optional code column
+// is mapped too, so real empty-code rows reach the W004 path).
+func TestSuggestMappingBaseStation(t *testing.T) {
+	m := SuggestMapping([]SheetInfo{{Name: baseStationSheetName, Headers: baseStationHeaders}})
+	if len(m.Sheets) != 1 {
+		t.Fatalf("SuggestMapping returned %d sheets, want 1", len(m.Sheets))
+	}
+	sm := m.Sheets[0]
+	if sm.Action != ActionImport || sm.ResourceType != domain.ResourceTypeBaseStation {
+		t.Fatalf("suggested sheet = %s/%s, want import/base_station", sm.Action, sm.ResourceType)
+	}
+	if !reflect.DeepEqual(sm.KeyColumns, []string{"base_station_code"}) {
+		t.Errorf("keyColumns = %v, want [base_station_code] (the primary key, not the fallback)", sm.KeyColumns)
+	}
+	if len(sm.ColumnMapping) != len(baseStationHeaders) {
+		t.Errorf("columnMapping has %d entries, want %d (every real column)", len(sm.ColumnMapping), len(baseStationHeaders))
+	}
+	if err := Validate(m, map[string][]string{baseStationSheetName: baseStationHeaders}); err != nil {
+		t.Errorf("suggested mapping must validate as-is: %v", err)
+	}
+}
+
+// TestBaseStationKeyValidate pins the mapping contract of the conditional
+// key: keyColumns stays the PRIMARY natural key [base_station_code] (the
+// fallback is spec-driven, never a mapping input), the optional code column
+// may be left unmapped (real sheets carry an empty code column), the
+// required name column must be mapped, and city maps when the sheet carries
+// the scope column.
+func TestBaseStationKeyValidate(t *testing.T) {
+	headers := map[string][]string{
+		baseStationSheetName: baseStationHeaders,
+		"基站表-含地市":            baseStationHeadersWithCity,
+	}
+	for k, v := range testHeaders {
+		headers[k] = v
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(m *Mapping)
+		wantErr   bool
+		wantField string
+	}{
+		{
+			name: "happy path with primary key column",
+			mutate: func(m *Mapping) {
+				m.Sheets = append(m.Sheets, baseStationSheetMapping())
+			},
+		},
+		{
+			name: "fallback fields as key columns are rejected",
+			mutate: func(m *Mapping) {
+				sm := baseStationSheetMapping()
+				sm.KeyColumns = []string{"city", "base_station_name"}
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "keyColumns",
+		},
+		{
+			name: "code column left unmapped is valid (optional, real empty-code sheets)",
+			mutate: func(m *Mapping) {
+				sm := baseStationSheetMapping()
+				delete(sm.ColumnMapping, "base_station_code")
+				m.Sheets = append(m.Sheets, sm)
+			},
+		},
+		{
+			name: "unmapped required name field is rejected",
+			mutate: func(m *Mapping) {
+				sm := baseStationSheetMapping()
+				delete(sm.ColumnMapping, "base_station_name")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "base_station_name",
+		},
+		{
+			name: "city scope column maps on a sheet that carries it",
+			mutate: func(m *Mapping) {
+				sm := baseStationSheetMapping()
+				sm.Sheet = "基站表-含地市"
+				sm.ColumnMapping["city"] = "地市"
+				m.Sheets = append(m.Sheets, sm)
+			},
+		},
+		{
+			name: "unknown target field is rejected",
+			mutate: func(m *Mapping) {
+				sm := baseStationSheetMapping()
+				sm.ColumnMapping["lng"] = "环"
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "lng",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Mapping{}
+			tc.mutate(&m)
+			err := Validate(m, headers)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("Validate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Validate: want error, got nil")
+			}
+			var fe *FieldError
+			if !errors.As(err, &fe) {
+				t.Fatalf("Validate error %v is not *FieldError", err)
+			}
+			if fe.Field != tc.wantField {
+				t.Errorf("FieldError.Field = %q, want %q", fe.Field, tc.wantField)
+			}
+		})
+	}
+}

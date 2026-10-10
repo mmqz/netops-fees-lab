@@ -96,7 +96,7 @@ var rowPhaseCodes = []string{
 	domain.RuleDuplicateKey, domain.RuleMissingRequiredField,
 	domain.RuleInvalidReference, domain.RuleInvalidFormat,
 	domain.RuleOrphanRecord, domain.RuleUnknownStatusValue,
-	domain.RuleCircuitSelfLoop,
+	domain.RuleCircuitSelfLoop, domain.RuleKeyFallback,
 }
 
 // batchIssues lists all issues attributed to a batch.
@@ -1366,4 +1366,354 @@ func TestRecoverInterruptedBatches(t *testing.T) {
 	if err != nil || bLate.Status != domain.BatchStatusCompleted {
 		t.Errorf("late terminal write: status = %s (err %v), want completed", bLate.Status, err)
 	}
+}
+
+// ---- base_station (conditional natural key + W004, v0.4 W2-D) ----
+
+// sheetSpec names one sheet and its raw string rows (row 0 = header) for
+// writeMultiSheetWorkbook.
+type sheetSpec struct {
+	name string
+	rows [][]string
+}
+
+// writeMultiSheetWorkbook builds an xlsx file with the given sheets in
+// order, at a temp path. The first sheet reuses (and renames) the default
+// Sheet1; further sheets are created with NewSheet.
+func writeMultiSheetWorkbook(t *testing.T, sheets []sheetSpec) string {
+	t.Helper()
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	for i, sh := range sheets {
+		if i == 0 {
+			if err := f.SetSheetName("Sheet1", sh.name); err != nil {
+				t.Fatalf("rename default sheet: %v", err)
+			}
+		} else {
+			if _, err := f.NewSheet(sh.name); err != nil {
+				t.Fatalf("new sheet %q: %v", sh.name, err)
+			}
+		}
+		for r, row := range sh.rows {
+			for c, v := range row {
+				cell, err := excelize.CoordinatesToCellName(c+1, r+1)
+				if err != nil {
+					t.Fatalf("cell name: %v", err)
+				}
+				if err := f.SetCellStr(sh.name, cell, v); err != nil {
+					t.Fatalf("write %s: %v", cell, err)
+				}
+			}
+		}
+	}
+	path := filepath.Join(t.TempDir(), "workbook.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("save workbook: %v", err)
+	}
+	return path
+}
+
+// baseStationSheetName is a sheet name whose 基站 hint suggests the
+// base_station type.
+const baseStationSheetName = "无线基站表"
+
+// baseStationCitySheetName carries the 地市 scope column (future sheet
+// shape): the fallback key then becomes 地市|无线基站名称.
+const baseStationCitySheetName = "基站表-含地市"
+
+// baseStationRealHeaders mirrors the REAL column layout of the owner-provided
+// 无线基站 export (samples/telecom-base-station.xlsx): 14 business columns,
+// NO 地市 column.
+var baseStationRealHeaders = []string{"基站类型", "无线基站名称", "基站编码", "电联共享", "归属A IP", "环", "链", "归属A名称", "归属A端口", "网关IP", "基站IP", "描述", "工单号", "备注"}
+
+// baseStationCityHeaders prepends the 地市 column to the real layout.
+var baseStationCityHeaders = append([]string{"地市"}, baseStationRealHeaders...)
+
+// baseStationMapping builds the confirmed mapping for one base_station
+// sheet; withCity adds the 地市 scope column (the city sheet carries it).
+// KeyColumns stay the PRIMARY natural key [base_station_code] — the fallback
+// is spec-driven, never a mapping input.
+func baseStationMapping(sheet string, withCity bool) mapping.Mapping {
+	cm := map[string]string{
+		"base_station_type": "基站类型",
+		"base_station_name": "无线基站名称",
+		"base_station_code": "基站编码",
+		"sharing":           "电联共享",
+		"uplink_a_ip":       "归属A IP",
+		"ring":              "环",
+		"chain":             "链",
+		"uplink_a_name":     "归属A名称",
+		"uplink_a_port":     "归属A端口",
+		"gateway_ip":        "网关IP",
+		"base_station_ip":   "基站IP",
+		"description":       "描述",
+		"work_order":        "工单号",
+		"remark":            "备注",
+	}
+	if withCity {
+		cm["city"] = "地市"
+	}
+	return mapping.Mapping{Sheets: []mapping.SheetMapping{{
+		Sheet:         sheet,
+		Action:        mapping.ActionImport,
+		ResourceType:  domain.ResourceTypeBaseStation,
+		KeyColumns:    []string{"base_station_code"},
+		ColumnMapping: cm,
+	}}}
+}
+
+// TestImportBaseStationConditionalKey drives the real 无线基站 sheet shape
+// (14 columns, no 地市) plus a city-scoped variant through the importer,
+// pinning the conditional natural key of base_station:
+//
+//   - a row WITH 基站编码 takes the primary key (base_station_code, globally
+//     unique — code row and name-fallback row never collide);
+//   - a row with an EMPTY code degrades the key to the fallback fields
+//     (city, base_station_name), skipping empties: without the 地市 column
+//     the key is the bare station name; WITH the column it is 地市|名称, and
+//     the same name in two cities yields TWO resources (scope semantics);
+//   - every degraded row records W004 (identity-key degradation, warning —
+//     the row still imports) with the used key and the missing field in the
+//     evidence; E001 dedup runs on the FINAL key (a coded row and a
+//     name-fallback twin are distinct identities);
+//   - E002 fires on the required base_station_name only (the code is
+//     optional); a bad 归属A IP fails E004 while the masked 基站IP
+//     (172.7.10.125/30, KindString) lands in attributes;
+//   - re-import is idempotent (0 imported / 4 skipped / 4 failed, W004 not
+//     re-recorded) and a device import in the same database reconciles the
+//     per-batch accounting with W004 and W002 coexisting across batches.
+func TestImportBaseStationConditionalKey(t *testing.T) {
+	svc, db := newService(t)
+	ctx := context.Background()
+
+	// The real row (session paste): code EMPTY, name 动力机房2, masked
+	// 基站IP — its fallback key is the bare name + W004.
+	realRow := []string{"宏基站", "动力机房2", "", "是", "4.28.2.3", "环1", "链1", "枢纽楼A4", "gei_1/11", "12.17.10.126", "172.7.10.125/30", "BBU接入", "202366", ""}
+	// A coded row: primary key = base_station_code, no W004.
+	codedRow := []string{"宏基站", "会展中心B1", "BTS-HLJ-0001", "否", "4.28.1.10", "环1", "链2", "枢纽楼A4", "gei_1/12", "12.17.10.126", "172.7.11.8/30", "BBU接入", "202367", ""}
+	// Same name, empty code: same FALLBACK key → E001 against row 2.
+	dupNameRow := []string{"宏基站", "动力机房2", "", "是", "4.28.2.4", "环1", "链1", "枢纽楼A4", "gei_1/11", "12.17.10.126", "172.7.10.126/30", "BBU接入", "202366", ""}
+	// Empty 无线基站名称 (the only required field) → E002.
+	noNameRow := []string{"宏基站", "", "", "是", "4.28.2.5", "环1", "链1", "枢纽楼A4", "gei_1/11", "12.17.10.126", "172.7.10.127/30", "", "", ""}
+	// Bad 归属A IP → E004 (the masked 基站IP of this row must NOT be the
+	// failure — KindString accepts it).
+	badUplinkRow := []string{"宏基站", "学府路2", "", "是", "999.28.2.6", "环2", "链1", "枢纽楼A4", "gei_1/13", "12.17.10.126", "172.7.10.128/30", "", "202368", ""}
+
+	// City-scoped sheet (地市 first): same name in two cities = two keys;
+	// the third row repeats (哈尔滨, 花园小区1) → E001 against row 2.
+	cityRowA := []string{"哈尔滨", "宏基站", "花园小区1", "", "是", "4.28.3.1", "环3", "链3", "和兴路A2", "gei_2/1", "12.17.20.1", "172.7.20.1/30", "BBU接入", "202369", ""}
+	cityRowB := []string{"齐齐哈尔", "宏基站", "花园小区1", "", "是", "4.28.3.2", "环3", "链3", "和兴路A2", "gei_2/2", "12.17.20.1", "172.7.20.2/30", "BBU接入", "202370", ""}
+	cityRowDup := []string{"哈尔滨", "宏基站", "花园小区1", "", "是", "4.28.3.3", "环3", "链3", "和兴路A2", "gei_2/3", "12.17.20.1", "172.7.20.3/30", "BBU接入", "202369", ""}
+
+	path := writeMultiSheetWorkbook(t, []sheetSpec{
+		{name: baseStationSheetName, rows: [][]string{
+			baseStationRealHeaders, // row 1: header
+			realRow,                // row 2: imported, key 动力机房2 (fallback) + W004
+			codedRow,               // row 3: imported, key BTS-HLJ-0001 (primary)
+			dupNameRow,             // row 4: E001 (fallback key dup of row 2)
+			noNameRow,              // row 5: E002 base_station_name
+			badUplinkRow,           // row 6: E004 uplink_a_ip
+		}},
+		{name: baseStationCitySheetName, rows: [][]string{
+			baseStationCityHeaders, // row 1: header
+			cityRowA,               // row 2: imported, key 哈尔滨|花园小区1 + W004
+			cityRowB,               // row 3: imported, key 齐齐哈尔|花园小区1 + W004
+			cityRowDup,             // row 4: E001 (scoped key dup of row 2)
+		}},
+	})
+
+	a, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	// The sheet names carry the 基站 hint: both sheets are suggested as
+	// base_station imports with every column prefilled (the city sheet maps
+	// the 地市 column, the real sheet does not).
+	for _, sm := range a.SuggestedMapping.Sheets {
+		if sm.Action != mapping.ActionImport || sm.ResourceType != domain.ResourceTypeBaseStation {
+			t.Fatalf("suggested mapping for %q = %s/%s, want import/base_station", sm.Sheet, sm.Action, sm.ResourceType)
+		}
+	}
+
+	m := baseStationMapping(baseStationSheetName, false)
+	m.Sheets = append(m.Sheets, baseStationMapping(baseStationCitySheetName, true).Sheets...)
+	sum, err := svc.Execute(ctx, a.BatchID, m)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if sum.Status != domain.BatchStatusCompleted ||
+		sum.RowsTotal != 8 || sum.RowsImported != 4 || sum.RowsSkipped != 0 || sum.RowsFailed != 4 {
+		t.Fatalf("summary = %+v, want completed 8 total / 4 imported / 0 skipped / 4 failed", sum)
+	}
+	if sum.IssuesBySeverity[domain.SeverityError] != 4 || sum.IssuesBySeverity[domain.SeverityWarning] != 3 {
+		t.Fatalf("issues by severity = %v, want error 4 (2xE001+E002+E004) / warning 3 (W004)", sum.IssuesBySeverity)
+	}
+
+	// Row accounting: per sheet, per Excel row number.
+	rr, _, err := db.RowResults.List(ctx, repo.RowResultFilter{BatchID: a.BatchID})
+	if err != nil || len(rr) != 8 {
+		t.Fatalf("row results = %d (err %v), want 8", len(rr), err)
+	}
+	bySheetRow := map[string]domain.RowResult{}
+	for _, r := range rr {
+		bySheetRow[r.Sheet+"\x00"+strconv.Itoa(r.RowNumber)] = r
+	}
+	for _, tc := range []struct{ sheet, row, status, code string }{
+		{baseStationSheetName, "2", "imported", ""},
+		{baseStationSheetName, "3", "imported", ""},
+		{baseStationSheetName, "4", "failed", domain.RuleDuplicateKey},
+		{baseStationSheetName, "5", "failed", domain.RuleMissingRequiredField},
+		{baseStationSheetName, "6", "failed", domain.RuleInvalidFormat},
+		{baseStationCitySheetName, "2", "imported", ""},
+		{baseStationCitySheetName, "3", "imported", ""},
+		{baseStationCitySheetName, "4", "failed", domain.RuleDuplicateKey},
+	} {
+		got := bySheetRow[tc.sheet+"\x00"+tc.row]
+		if got.Status != domain.RowStatus(tc.status) || got.RuleCode != tc.code {
+			t.Errorf("%s row %s = %s/%q, want %s/%q", tc.sheet, tc.row, got.Status, got.RuleCode, tc.status, tc.code)
+		}
+	}
+
+	// Issue evidence: W004 pins the used key and the missing field; E001
+	// carries the FINAL (resolved) key; E002 names the required field; E004
+	// the bad uplink IP.
+	issues := batchIssues(t, db, a.BatchID)
+	if len(issues) != 7 {
+		t.Fatalf("batch issues = %d, want 7 (3x W004 + 2x E001 + E002 + E004)", len(issues))
+	}
+	w004Keys := map[string]bool{}
+	var e001Keys []string
+	var e002, e004 domain.Issue
+	for _, iss := range issues {
+		switch iss.RuleCode {
+		case domain.RuleKeyFallback:
+			w004Keys[iss.Evidence["natural_key"]] = true
+			if iss.Severity != domain.SeverityWarning || iss.EntityID == "" || iss.SourceRefID == nil {
+				t.Errorf("W004 issue must be a row warning with source ref, got %+v", iss)
+			}
+			if iss.Evidence["type"] != "base_station" || iss.Evidence["missing_fields"] != "base_station_code" ||
+				iss.Evidence["fallback_fields"] != "city,base_station_name" {
+				t.Errorf("W004 evidence = %v, want missing base_station_code via city,base_station_name", iss.Evidence)
+			}
+		case domain.RuleDuplicateKey:
+			if iss.Evidence["type"] != "base_station" {
+				t.Errorf("E001 evidence type = %q, want base_station", iss.Evidence["type"])
+			}
+			e001Keys = append(e001Keys, iss.Evidence["natural_key"])
+		case domain.RuleMissingRequiredField:
+			e002 = iss
+		case domain.RuleInvalidFormat:
+			e004 = iss
+		}
+	}
+	for _, want := range []string{"动力机房2", "哈尔滨|花园小区1", "齐齐哈尔|花园小区1"} {
+		if !w004Keys[want] {
+			t.Errorf("W004 missing for fallback key %q, got %v", want, w004Keys)
+		}
+	}
+	if !contains(e001Keys, "动力机房2") || !contains(e001Keys, "哈尔滨|花园小区1") {
+		t.Errorf("E001 keys = %v, want the resolved fallback keys 动力机房2 and 哈尔滨|花园小区1", e001Keys)
+	}
+	if e002.Evidence["field"] != "base_station_name" || e002.Evidence["row_number"] != "5" {
+		t.Errorf("E002 evidence = %v, want field base_station_name at row 5", e002.Evidence)
+	}
+	if e004.Evidence["field"] != "uplink_a_ip" || e004.Evidence["raw_value"] != "999.28.2.6" || e004.Evidence["row_number"] != "6" {
+		t.Errorf("E004 evidence = %v, want uplink_a_ip=999.28.2.6 at row 6", e004.Evidence)
+	}
+
+	// Resources: the real row's identity is the bare name (fallback), the
+	// masked 基站IP lands in attributes (KindString), the code is absent
+	// from attrs (key field), the display name comes from the override.
+	res1, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeBaseStation, "动力机房2")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(base_station, 动力机房2): %v", err)
+	}
+	if res1.Name != "动力机房2" || res1.Status != "" {
+		t.Errorf("resource = name %q status %q, want 动力机房2/empty (no enum field)", res1.Name, res1.Status)
+	}
+	for field, want := range map[string]string{
+		"base_station_ip": "172.7.10.125/30", "uplink_a_ip": "4.28.2.3", "gateway_ip": "12.17.10.126",
+		"uplink_a_name": "枢纽楼A4", "uplink_a_port": "gei_1/11", "work_order": "202366",
+		"sharing": "是", "ring": "环1", "chain": "链1", "base_station_type": "宏基站",
+		"description": "BBU接入", "base_station_name": "动力机房2",
+	} {
+		if res1.Attributes[field] != want {
+			t.Errorf("attrs[%s] = %q, want %q", field, res1.Attributes[field], want)
+		}
+	}
+	if _, isKey := res1.Attributes["base_station_code"]; isKey {
+		t.Errorf("attrs must not contain the key field base_station_code: %v", res1.Attributes)
+	}
+
+	// The coded row keeps the PRIMARY key and its display name.
+	res2, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeBaseStation, "BTS-HLJ-0001")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(base_station, BTS-HLJ-0001): %v", err)
+	}
+	if res2.Name != "会展中心B1" || res2.Attributes["base_station_name"] != "会展中心B1" {
+		t.Errorf("coded row = name %q attrs %v, want display name 会展中心B1", res2.Name, res2.Attributes)
+	}
+	if _, isKey := res2.Attributes["base_station_code"]; isKey {
+		t.Errorf("coded row attrs must not contain base_station_code: %v", res2.Attributes)
+	}
+
+	// Scope semantics: the same station name in two cities = two resources.
+	for _, key := range []string{"哈尔滨|花园小区1", "齐齐哈尔|花园小区1"} {
+		if _, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeBaseStation, key); err != nil {
+			t.Errorf("GetByTypeKey(base_station, %s): %v", key, err)
+		}
+	}
+	if n, _ := db.Resources.CountByType(ctx); n[domain.ResourceTypeBaseStation] != 4 {
+		t.Errorf("base_station resources = %d, want 4", n[domain.ResourceTypeBaseStation])
+	}
+
+	// Idempotent re-import: the four identities skip, the four bad rows
+	// fail deterministically, W004 is NOT re-recorded (skipped rows record
+	// nothing — same semantics as W001/W002).
+	a2, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze 2: %v", err)
+	}
+	sum2, err := svc.Execute(ctx, a2.BatchID, m)
+	if err != nil {
+		t.Fatalf("Execute 2: %v", err)
+	}
+	if sum2.RowsImported != 0 || sum2.RowsSkipped != 4 || sum2.RowsFailed != 4 || sum2.RowsTotal != 8 {
+		t.Fatalf("run 2 = %d/%d/%d/%d, want 0/4/4/8 (imported/skipped/failed/total)",
+			sum2.RowsImported, sum2.RowsSkipped, sum2.RowsFailed, sum2.RowsTotal)
+	}
+	if sum2.IssuesBySeverity[domain.SeverityWarning] != 0 || sum2.IssuesBySeverity[domain.SeverityError] != 4 {
+		t.Fatalf("run 2 issues = %v, want error 4 / warning 0 (W004 not re-recorded)", sum2.IssuesBySeverity)
+	}
+
+	// Multi-issue coexistence + per-batch accounting: a device import in the
+	// same database adds W002/E-seeds of its own; both batches reconcile and
+	// the single-key device behavior is untouched (no '|' leaks).
+	_, dSum := importWorkbook(t, svc, "devices.xlsx")
+	if dSum.RowsImported != 27 || dSum.RowsFailed != 3 || dSum.RowsSkipped != 0 {
+		t.Fatalf("device import = %d/%d/%d, want 27/3/0", dSum.RowsImported, dSum.RowsFailed, dSum.RowsSkipped)
+	}
+	if dSum.IssuesBySeverity[domain.SeverityWarning] != 1 || dSum.IssuesBySeverity[domain.SeverityError] != 3 {
+		t.Fatalf("device batch issues = %v, want error 3 / warning 1 (W002)", dSum.IssuesBySeverity)
+	}
+	if n, _ := db.Resources.CountByType(ctx); n[domain.ResourceTypeDevice] != 27 {
+		t.Errorf("device resources = %d, want 27", n[domain.ResourceTypeDevice])
+	}
+	dev, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, "DEV-001")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(device, DEV-001): %v", err)
+	}
+	if dev.NaturalKey != "DEV-001" || strings.Contains(dev.NaturalKey, "|") {
+		t.Errorf("device natural key = %q, want bare DEV-001 (single-key join is a no-op)", dev.NaturalKey)
+	}
+}
+
+// contains reports whether ss holds s.
+func contains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

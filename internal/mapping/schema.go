@@ -283,6 +283,21 @@ type TypeSpec struct {
 	// device_name is the scope component of the natural key, not the
 	// port's name. Empty = the heuristic applies unchanged.
 	NameFieldOverride string
+	// KeyFallbackFields names the fields building the natural key when a
+	// PRIMARY key field's value is empty (conditional natural key,
+	// v0.4; referenced by field name, order = join order). While every
+	// primary key value is non-empty, the key is the classic join of the
+	// natural-key fields (spec order, '|'). When ANY is empty, the key
+	// is rebuilt from these fields' values in the declared order,
+	// SKIPPING empty values (an unmapped/empty scope field degrades the
+	// key to the remaining components — e.g. a base-station sheet without
+	// a 地市 column degrades to the bare station name), and the importer
+	// records a W004 warning for the identity-key degradation. The first
+	// user is base_station (base_station_code primary, city +
+	// base_station_name fallback); empty = the classic unconditional
+	// key. Every referenced field must exist in Fields (pinned by
+	// TestBaseStationSpec validation of all Specs).
+	KeyFallbackFields []string
 	// Fields lists the target fields in canonical order.
 	Fields []FieldSpec
 }
@@ -453,11 +468,68 @@ var portSpec = TypeSpec{
 	},
 }
 
+// baseStationSpec is the wireless base-station schema (v0.4, W2-D): the real
+// 无线基站 export (samples/telecom-base-station.xlsx). The natural key is
+// CONDITIONAL (R4 ruling, natural-keys.md §4): the primary key field
+// base_station_code (基站编码, system-issued, globally unique) is OPTIONAL —
+// the real sheet's code column exists but the values are empty — so the spec
+// declares KeyFallbackFields [city, base_station_name]: when the code is
+// empty the key degrades to 地市|无线基站名称 (empty values skipped: the real
+// sheet carries NO 地市 column, so its key is the bare station name) and the
+// importer records W004 (身份键退化). E002 required applies to
+// base_station_name only; base_station_code/city stay optional. The base
+// station IP is a KindString VALUE column, deliberately NOT KindIPv4: real
+// cells carry a subnet mask suffix (172.7.10.125/30) and the address is a
+// mutable attribute, never identity (E004 would reject the masked form).
+// uplink_a_ip/gateway_ip are real IPv4 columns and stay KindIPv4. No ref
+// fields: the station sheet is a self-contained export (same rationale as
+// port's device_ip), so base_station derives no relations. NameFieldOverride
+// pins the display name to base_station_name (the code is the key, the
+// human name is the station's name).
+var baseStationSpec = TypeSpec{
+	Type:              domain.ResourceTypeBaseStation,
+	SheetHint:         "基站",
+	NameFieldOverride: "base_station_name",
+	KeyFallbackFields: []string{"city", "base_station_name"},
+	Fields: []FieldSpec{
+		{Name: "base_station_type", Label: "基站类型", Kind: KindString,
+			Synonyms: []string{"基站类型", "基站类别"}},
+		{Name: "base_station_name", Label: "无线基站名称", Required: true, Kind: KindString,
+			Synonyms: []string{"无线基站名称", "基站名称", "基站名", "名称"}},
+		{Name: "base_station_code", Label: "基站编码", NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"基站编码", "基站编号", "基站ID", "基站代码"}},
+		// 地市 is NOT in the real sheet's column set — the synonym
+		// reserves the scope field for future sheets that carry it
+		// (the fallback key then becomes 地市|名称 instead of bare
+		// 名称). An unmapped column simply yields an empty value.
+		{Name: "city", Label: "地市", Kind: KindString,
+			Synonyms: []string{"地市", "城市", "归属地"}},
+		{Name: "sharing", Label: "电联共享", Kind: KindString,
+			Synonyms: []string{"电联共享", "共享", "电信联通共享"}},
+		{Name: "uplink_a_ip", Label: "归属A IP", Kind: KindIPv4,
+			Synonyms: []string{"归属A IP", "归属A IP地址", "归属A_ip"}},
+		{Name: "ring", Label: "环", Kind: KindString, Synonyms: []string{"环", "所属环"}},
+		{Name: "chain", Label: "链", Kind: KindString, Synonyms: []string{"链", "所属链"}},
+		{Name: "uplink_a_name", Label: "归属A名称", Kind: KindString,
+			Synonyms: []string{"归属A名称", "归属A 名称", "上联A名称"}},
+		{Name: "uplink_a_port", Label: "归属A端口", Kind: KindString,
+			Synonyms: []string{"归属A端口", "归属A 端口", "上联A端口"}},
+		{Name: "gateway_ip", Label: "网关IP", Kind: KindIPv4,
+			Synonyms: []string{"网关IP", "网关ip", "网关地址"}},
+		{Name: "base_station_ip", Label: "基站IP", Kind: KindString,
+			Synonyms: []string{"基站IP", "基站ip", "基站IP地址"}},
+		{Name: "description", Label: "描述", Kind: KindString, Synonyms: []string{"描述"}},
+		{Name: "work_order", Label: "工单号", Kind: KindString,
+			Synonyms: []string{"工单号", "工单编号", "工单"}},
+		{Name: "remark", Label: "备注", Kind: KindString, Synonyms: []string{"备注"}},
+	},
+}
+
 // Specs lists the resource type schemas in canonical order (device,
-// ip_pool, circuit, port). The order is the deterministic tie-breaker of
-// SuggestType and of the suggestion fallback for untyped sheets. Treat the
-// list as read-only.
-var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec}
+// ip_pool, circuit, port, base_station). The order is the deterministic
+// tie-breaker of SuggestType and of the suggestion fallback for untyped
+// sheets. Treat the list as read-only.
+var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec}
 
 // SpecByType returns the schema of t; ok is false for unknown types.
 func SpecByType(t domain.ResourceType) (TypeSpec, bool) {

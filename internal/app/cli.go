@@ -491,7 +491,7 @@ func splitQueryArgs(args []string) (dbPath, sub string, subArgs []string, err er
 func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("query resources")
 	q := fs.String("q", "", "搜索关键词（natural_key/name/attributes 模糊匹配）")
-	typ := fs.String("type", "", "资源类型：device / ip_pool / circuit / port")
+	typ := fs.String("type", "", "资源类型：device / ip_pool / circuit / port / base_station")
 	status := fs.String("status", "", "状态过滤")
 	page := fs.Int("page", 1, "页码（1 起）")
 	pageSize := fs.Int("pageSize", query.DefaultPageSize, "每页条数（最大 100）")
@@ -505,7 +505,7 @@ func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stder
 	if *typ != "" {
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
-			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port，收到 %q", *typ), usage: usage.String()}
+			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station，收到 %q", *typ), usage: usage.String()}
 		}
 		filter.Type = t
 	}

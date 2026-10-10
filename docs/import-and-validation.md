@@ -59,6 +59,7 @@
 | W001 | 孤儿记录 | 警告 | 可选关系字段留空（assigned_device） | type, field |
 | W002 | 状态值未知 | 警告 | status 非空不在枚举内（行导入，状态丢弃） | type, field, raw_value, allowed |
 | W003 | 电路自环 | 警告 | a_end == z_end（两端都解析成功） | circuit_code, device |
+| W004 | 身份键退化 | 警告 | 条件自然键类型的主键字段值任一为空，键退化为兜底字段拼接（行照常导入；base_station：基站编码缺失 → 地市\|无线基站名称 兜底，缺地市列则为纯名称） | type, natural_key, missing_fields, fallback_fields |
 
 **集合级（全局）**（对全库状态计算，可重算，`batch_id IS NULL`，报告中 `applicationGenerated: true`）：
 
@@ -153,3 +154,14 @@ port（设备端口）是 v0.3.1 引入的第四类资源类型，面向真实�
 - 幂等：第二次运行找不到瞬态批次，复位 0 条；
 - 与并发导入共存：导入的终态写在其导入事务内，之后完成的其他进程导入会覆盖复位结果（可容忍的假阳性按设计接受）；
 - **MCP 进程不自愈**（`netopslab mcp` 不调用复位）——避免与并行 HTTP 进程的真实在途导入互相误伤；自愈仅在确定本进程无在途导入的入口（cmd 层）运行。
+
+## 12. base_station 资源类型与条件自然键（v0.4，W2-D）
+
+base_station（基站）是 v0.4 引入的第五类资源类型，面向真实无线基站工作簿（样例 `samples/telecom-base-station.xlsx`，真实表头 14 列：基站类型/无线基站名称/基站编码/电联共享/归属A IP/环/链/归属A名称/归属A端口/网关IP/基站IP/描述/工单号/备注，**无地市列**；授权与披露见其目录内 README）：
+
+- **条件自然键（R4 裁决落地）**：主键 `base_station_code`（基站编码）**非必填**——真实表编码列存在但值为空。编码非空 → 键 = 编码（全局唯一）；**编码为空 → 键退化为兜底字段 `(city, base_station_name)` 按序拼接、跳过空值**（真实表无地市列 → 纯名称；映射了地市列 → `地市|名称`，同名不同地市为两个资源）。**每次退化记 W004**（warning：行照常导入），evidence：`type / natural_key（所用兜底键）/ missing_fields（缺失主键字段）/ fallback_fields`。E002 仅约束 Required 字段（`base_station_name`）；E001 批内判重与幂等 skip 均在**解析后的最终键**上判定——编码行与名称兜底行天然异键。机制通用（`mapping.TypeSpec.KeyFallbackFields` 声明驱动，键解析不硬编码类型名），base_station 是首个使用者。
+- **`base_station_ip` 为 string 值列**（非 ipv4）：真实值带掩码（如 `172.7.10.125/30`），且 IP 属可变属性不作身份——KindIPv4 会因 E004 误拒掩码形态。`uplink_a_ip` / `gateway_ip` 为真实 IPv4 列，保持 KindIPv4（坏值 → E004）。
+- **无 ref 字段**：基站表是自含导出（归属A名称/端口为自由文本，同 port 的 device_ip 决策），不派生关系；展示名钉定 `base_station_name`（NameFieldOverride）。
+- **主键字段不进 attributes**（`base_station_code` 同 port 键字段待遇）；兜底字段 `city` / `base_station_name` 是普通字段，落库后可在 attributes 中检视。
+- 样例实测（CLI，两表 8 行）：4 imported（真实行 动力机房2 兜底键 + 编码行 BTS-HLJ-0001 + 哈尔滨|花园小区1 + 齐齐哈尔|花园小区1）/ 4 failed（2×E001 兜底键重复、E002 名称空、E004 归属A IP 坏值）+ 3×W004；重导幂等（0 新增 / 4 skipped / 4 failed，W004 不重记——skipped 行不记警告，与 W002 同语义）。
+- 键策略与稳定性裁决见 [natural-keys.md](natural-keys.md) §4/§5；schema v9（resources CHECK 扩容）见 [data-model.md](data-model.md) §12。

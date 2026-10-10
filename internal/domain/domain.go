@@ -43,6 +43,7 @@ const (
 	RuleOrphanRecord         = "W001" // optional relation field left empty (row)
 	RuleUnknownStatusValue   = "W002" // status not in the known enum (row)
 	RuleCircuitSelfLoop      = "W003" // circuit a_end == z_end (row)
+	RuleKeyFallback          = "W004" // natural key degraded to fallback fields (row)
 	RuleUnlinkedDevice       = "I001" // device with zero relations (set)
 )
 

@@ -68,6 +68,24 @@ export const TYPE_SPECS: Record<ResourceType, FieldSpec[]> = {
     { field: 'geo_lng', required: false, naturalKey: false, kind: 'lng' },
     { field: 'geo', required: false, naturalKey: false, kind: 'geo' },
   ],
+  base_station: [
+    { field: 'base_station_type', required: false, naturalKey: false, kind: 'string' },
+    { field: 'base_station_name', required: true, naturalKey: false, kind: 'string' },
+    { field: 'base_station_code', required: false, naturalKey: true, kind: 'string' },
+    { field: 'city', required: false, naturalKey: false, kind: 'string' },
+    { field: 'sharing', required: false, naturalKey: false, kind: 'string' },
+    { field: 'uplink_a_ip', required: false, naturalKey: false, kind: 'ipv4' },
+    { field: 'ring', required: false, naturalKey: false, kind: 'string' },
+    { field: 'chain', required: false, naturalKey: false, kind: 'string' },
+    { field: 'uplink_a_name', required: false, naturalKey: false, kind: 'string' },
+    { field: 'uplink_a_port', required: false, naturalKey: false, kind: 'string' },
+    { field: 'gateway_ip', required: false, naturalKey: false, kind: 'ipv4' },
+    // 基站IP 为 string：真实值带 /30 掩码（如 172.7.10.125/30），且 IP 属可变属性不作身份（避免 E004 误拒）
+    { field: 'base_station_ip', required: false, naturalKey: false, kind: 'string' },
+    { field: 'description', required: false, naturalKey: false, kind: 'string' },
+    { field: 'work_order', required: false, naturalKey: false, kind: 'string' },
+    { field: 'remark', required: false, naturalKey: false, kind: 'string' },
+  ],
 };
 
 /** 字段中文名（未知字段回退为字段名本身）。 */
@@ -92,3 +110,14 @@ export function naturalKeyFields(type: ResourceType): string[] {
 export function requiredFields(type: ResourceType): FieldSpec[] {
   return TYPE_SPECS[type].filter((f) => f.required);
 }
+
+/**
+ * 条件自然键的兜底字段镜像（后端 TypeSpec.KeyFallbackFields，按字段名、序即拼接序）。
+ * 主自然键字段值**全非空** → 键=主键字段拼接（现行机制）；**任一为空** → 键=兜底字段值
+ * 按序拼接、跳过空值，并发 W004 治理 issue（行照常导入）。base_station 是首个使用者
+ * （编码缺失 → 地市|无线基站名称 兜底，缺地市列则退化为纯名称）；空 = 无条件键类型。
+ * 仅用于展示键提示（ImportWizard），实际键解析以后端为准。
+ */
+export const KEY_FALLBACK_FIELDS: Partial<Record<ResourceType, string[]>> = {
+  base_station: ['city', 'base_station_name'],
+};

@@ -42,7 +42,7 @@ type Summary struct {
 //     validation failure leaves the batch awaiting_mapping and returns a
 //     typed *mapping.FieldError (the user must fix the mapping);
 //   - every data row of every import sheet is normalized via the §6 schema
-//     and the row-phase rules (E001-E004, W001-W003) decide the outcome
+//     and the row-phase rules (E001-E004, W001-W004) decide the outcome
 //     imported / skipped / failed;
 //   - ALL writes of ALL import sheets (resources, relations, source refs,
 //     row results, issues, counts, final status) go through ONE
@@ -225,7 +225,7 @@ type sheetState struct {
 	nameField string
 }
 
-// pendingWarning is a row-phase warning (W001/W002/W003) collected while the
+// pendingWarning is a row-phase warning (W001-W004) collected while the
 // row is processed. It becomes an issue only if the row is imported — a
 // failed or skipped row records nothing (idempotent re-import therefore
 // never re-records warnings of skipped rows).
@@ -293,6 +293,62 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	// "<device_name>|<port_name>" (migration v8 rebased the device side
 	// from device_ip; the IP lives on as a required ipv4 value column).
 	key := strings.Join(keyVals, "|")
+
+	// Conditional natural key (v0.4, W004): a type whose primary key may
+	// legitimately be empty declares KeyFallbackFields. While every
+	// primary key value is non-empty, the joined key stands (the classic
+	// path above). When ANY primary key value is empty, the key is rebuilt
+	// from the fallback fields' values in declared order, SKIPPING empty
+	// ones (a sheet without the scope column — e.g. the real 无线基站
+	// export carries no 地市 column — degrades the key to the bare
+	// station name), and a W004 warning records the identity-key
+	// degradation (W level: the row still imports). E001 dedup and the
+	// idempotency lookup below run on the FINAL key, so a coded row and
+	// a name-fallback row are distinct identities by construction. The
+	// mechanism is spec-driven — no type or field name is matched here
+	// (base_station is merely the first user).
+	if len(st.spec.KeyFallbackFields) > 0 {
+		var missing []string
+		keyNames := st.spec.NaturalKeyNames() // parallel to keyVals (spec order)
+		for i, v := range keyVals {
+			if v == "" {
+				missing = append(missing, keyNames[i])
+			}
+		}
+		if len(missing) > 0 {
+			parts := make([]string, 0, len(st.spec.KeyFallbackFields))
+			for _, name := range st.spec.KeyFallbackFields {
+				if v := vals[name]; v != "" {
+					parts = append(parts, v)
+				}
+			}
+			key = strings.Join(parts, "|")
+			if key == "" {
+				// Defensive: the row has no identity at all — the
+				// primary key field is empty AND every fallback
+				// field is empty. Unreachable for base_station
+				// (its name fallback field is Required and E002
+				// has already failed such rows); fail as E002 on
+				// the primary key field that triggered the
+				// degradation.
+				return st.failRow(ctx, row, results, domain.RuleMissingRequiredField,
+					fmt.Sprintf("身份键为空：%s.%s 缺失且兜底字段（%s）均为空", rt, missing[0],
+						strings.Join(st.spec.KeyFallbackFields, ", ")),
+					map[string]string{"type": rt, "field": missing[0], "raw_value": ""})
+			}
+			warns = append(warns, pendingWarning{
+				code: domain.RuleKeyFallback,
+				msg: fmt.Sprintf("身份键退化：%s.%s 缺失，使用兜底键 %q（兜底字段：%s）",
+					rt, strings.Join(missing, "/"), key, strings.Join(st.spec.KeyFallbackFields, ", ")),
+				evidence: map[string]string{
+					"type":            rt,
+					"natural_key":     key,
+					"missing_fields":  strings.Join(missing, ","),
+					"fallback_fields": strings.Join(st.spec.KeyFallbackFields, ","),
+				},
+			})
+		}
+	}
 
 	// E004 / W002: value formats. A bad ipv4/cidr/int fails the row; an
 	// unknown enum (status) value is a warning — the row imports, the status
@@ -576,6 +632,10 @@ func (st *sheetState) resourceName(vals map[string]string, key string) string {
 // attributes returns the normalized non-empty values of every mapped field
 // except the natural key and the enum (status) fields — the status value
 // lives in Resource.Status (and is dropped entirely when unknown, W002).
+// For a conditional-key type the primary key field (base_station_code) is
+// excluded like any key field, while the FALLBACK fields (city,
+// base_station_name) are ordinary fields and stay visible in attrs — the
+// key components of a degraded identity remain inspectable on the resource.
 func (st *sheetState) attributes(vals map[string]string) map[string]string {
 	attrs := map[string]string{}
 	for _, f := range st.spec.Fields {

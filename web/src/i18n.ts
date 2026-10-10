@@ -106,6 +106,7 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
   ip_pool: 'IP地址池',
   circuit: '传输电路',
   port: '设备端口',
+  base_station: '基站',
 };
 
 /**
@@ -142,6 +143,7 @@ export const RULE_LABELS: Record<RuleCode, string> = {
   W001: '孤儿记录',
   W002: '未知状态值',
   W003: '电路自环',
+  W004: '身份键退化',
   I001: '未关联设备',
 };
 
@@ -196,6 +198,20 @@ export const FIELD_LABELS: Record<string, string> = {
   geo_lat: '纬度',
   geo_lng: '经度',
   geo: '经纬度',
+  base_station_type: '基站类型',
+  base_station_name: '无线基站名称',
+  base_station_code: '基站编码',
+  sharing: '电联共享',
+  uplink_a_ip: '归属A IP',
+  ring: '环',
+  chain: '链',
+  uplink_a_name: '归属A名称',
+  uplink_a_port: '归属A端口',
+  gateway_ip: '网关IP',
+  base_station_ip: '基站IP',
+  description: '描述',
+  work_order: '工单号',
+  remark: '备注',
 };
 
 export const FIELD_KIND_LABELS: Record<string, string> = {
@@ -299,6 +315,9 @@ export const IMP_NATURAL_KEY_NAME_SCOPE =
 /** port 复合键专属正向提示（migration v8 起）：键已锚定设备名称，IP 重划不再分裂。 */
 export const IMP_NATURAL_KEY_PORT_COMPOSITE =
   '端口键 = 设备名称|端口名称：设备重划 IP 不再影响资源身份（设备IP 为普通值列）';
+/** 条件自然键提示（base_station，v0.4）：编码缺失时键退化为兜底字段并记 W004。 */
+export const IMP_NATURAL_KEY_FALLBACK =
+  '基站键 = 基站编码（全局唯一）；编码为空时退化为 地市|无线基站名称 兜底键（缺地市列则为纯名称），并记录 W004 治理问题（行照常导入）';
 export const IMP_VALIDATION_TITLE = '请先完成以下必填映射：';
 export const IMP_ERR_REQUIRED_UNMAPPED = '工作表「{sheet}」：必填字段「{field}」尚未映射';
 export const IMP_ROWS_INFO = '数据行 {rows} 行，跳过空行 {empty} 行';

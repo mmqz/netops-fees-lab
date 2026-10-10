@@ -9,7 +9,7 @@ func SeverityForCode(code string) (Severity, bool) {
 	case RuleDuplicateKey, RuleMissingRequiredField, RuleInvalidReference,
 		RuleInvalidFormat, RuleSubnetOverlap, RuleDuplicateAddress:
 		return SeverityError, true
-	case RuleOrphanRecord, RuleUnknownStatusValue, RuleCircuitSelfLoop:
+	case RuleOrphanRecord, RuleUnknownStatusValue, RuleCircuitSelfLoop, RuleKeyFallback:
 		return SeverityWarning, true
 	case RuleUnlinkedDevice:
 		return SeverityInfo, true

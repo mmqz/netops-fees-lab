@@ -1,5 +1,5 @@
 /**
- * 资源类型徽章：网元设备 / IP地址池 / 传输电路 / 设备端口。
+ * 资源类型徽章：网元设备 / IP地址池 / 传输电路 / 设备端口 / 基站。
  */
 
 import type { ResourceType } from '../api/types';
@@ -10,6 +10,7 @@ const TYPE_VARIANTS: Record<ResourceType, string> = {
   ip_pool: 'chip--pool',
   circuit: 'chip--circuit',
   port: 'chip--port',
+  base_station: 'chip--base-station',
 };
 
 export function TypeChip({ type }: { type: ResourceType }) {

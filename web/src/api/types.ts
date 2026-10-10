@@ -10,7 +10,7 @@
 // 枚举（取值与 internal/domain 常量一致）
 // ---------------------------------------------------------------------------
 
-export type ResourceType = 'device' | 'ip_pool' | 'circuit' | 'port';
+export type ResourceType = 'device' | 'ip_pool' | 'circuit' | 'port' | 'base_station';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -34,6 +34,7 @@ export type RuleCode =
   | 'W001'
   | 'W002'
   | 'W003'
+  | 'W004'
   | 'I001';
 
 export type RelationType = 'assigned_to' | 'a_end' | 'z_end';

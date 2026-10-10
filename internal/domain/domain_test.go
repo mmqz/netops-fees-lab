@@ -17,6 +17,7 @@ func TestRuleCodes(t *testing.T) {
 		"W001": RuleOrphanRecord,
 		"W002": RuleUnknownStatusValue,
 		"W003": RuleCircuitSelfLoop,
+		"W004": RuleKeyFallback,
 		"I001": RuleUnlinkedDevice,
 	}
 	for code, constVal := range got {
@@ -35,6 +36,11 @@ func TestRuleCodes(t *testing.T) {
 		if SetLevelRuleCodes[i] != c {
 			t.Errorf("SetLevelRuleCodes[%d] = %q, want %q", i, SetLevelRuleCodes[i], c)
 		}
+	}
+	// W004 (natural key degraded to fallback fields) is a row-phase WARNING:
+	// the row still imports, the degradation is recorded as an issue.
+	if sev, ok := SeverityForCode(RuleKeyFallback); !ok || sev != SeverityWarning {
+		t.Errorf("SeverityForCode(W004) = (%v, %v), want (warning, true)", sev, ok)
 	}
 }
 
@@ -62,7 +68,7 @@ func TestEnumRoundTrips(t *testing.T) {
 		invalid string
 	}
 	cases := []testCase{
-		{"ResourceType", []string{"device", "ip_pool", "circuit"}, "vlan"},
+		{"ResourceType", []string{"device", "ip_pool", "circuit", "port", "base_station"}, "vlan"},
 		{"RelationType", []string{"assigned_to", "a_end", "z_end"}, "peer_of"},
 		{"BatchStatus", []string{"analyzing", "awaiting_mapping", "importing", "completed", "failed", "rolled_back"}, "paused"},
 		{"RowStatus", []string{"imported", "skipped", "failed"}, "pending"},

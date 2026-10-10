@@ -257,7 +257,7 @@ HTTP/1.1 409 Conflict
 
 ## GET /api/resources?type=&q=&status=&page=&pageSize= — 资源检索
 
-`type` 可取 `device` / `ip_pool` / `circuit` / `port`（v0.3.1 起 port 入封闭集；非法值 → 400 `bad_request`）。`q` 对 natural_key / name / attributes 值做不区分大小写包含匹配；默认按类型分组、每组自然键排序（首页 circuit-first 为排序副作用）。示例 `?pageSize=2`：
+`type` 可取 `device` / `ip_pool` / `circuit` / `port` / `base_station`（v0.3.1 起 port、v0.4 起 base_station 入封闭集；非法值 → 400 `bad_request`）。`q` 对 natural_key / name / attributes 值做不区分大小写包含匹配；默认按类型分组、每组自然键排序（首页 circuit-first 为排序副作用）。示例 `?pageSize=2`：
 
 ```json
 {
@@ -322,6 +322,8 @@ HTTP/1.1 409 Conflict
 `raw` 即原始 Excel 行（表头→值）。
 
 **port 类型的复合自然键（v0.3.1 引入；migration v8 换键）**：port 资源的 `naturalKey` 是复合键 `device_name|port_name` 按此顺序以 `|` 拼接落库（例如 `B2|bvi2.1008`，取自真实样例 `samples/telecom-port-multi-header.xlsx`：设备名称 B2 + 端口名 bvi2.1008）；检索/幂等判重（E001/skip）均以拼接后的完整键匹配。单键类型（device/ip_pool/circuit）拼接退化为原值，行为不变。键的设备侧自 migration v8 起锚定设备**名称**而非 IP（设备重划 IP 不再分裂资源；`device_ip` 为必填 ipv4 值列，落在 `attributes` 中）——稳定性评估见 [natural-keys.md](natural-keys.md)。
+
+**base_station 的条件自然键（v0.4 引入，W004）**：基站的主自然键字段是 `base_station_code`（基站编码，非必填——真实表编码列存在但值常为空）。编码值**非空**时 `naturalKey` = 编码（全局唯一）；**为空**时键退化为兜底字段 `(city, base_station_name)` 按序以 `|` 拼接、跳过空值——工作簿无地市列（真实形态）即退化为纯名称（如真实样例的 `动力机房2`），映射了地市列则为 `哈尔滨|花园小区1`。行照常导入并记 **W004**（身份键退化，warning 级）治理 issue，evidence 含 `natural_key`（所用兜底键）、`missing_fields`（缺失的主键字段）、`fallback_fields`。E001 判重与幂等 skip 都在解析后的最终键上判定：编码行与同名兜底行是两个身份。基站IP 真实值带 /30 掩码，为 string 值列（可变属性，非身份）；条件键机制由 spec 声明（`TypeSpec.KeyFallbackFields`）驱动，见 [natural-keys.md](natural-keys.md) §4/§5。
 
 ## GET /api/resources/{id}/relations?depth=1|2 — 关系子图（BFS）
 

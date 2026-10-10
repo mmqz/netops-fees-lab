@@ -8,22 +8,25 @@ type ResourceType string
 
 // Resource types.
 const (
-	ResourceTypeDevice  ResourceType = "device"
-	ResourceTypeIPPool  ResourceType = "ip_pool"
-	ResourceTypeCircuit ResourceType = "circuit"
-	ResourceTypePort    ResourceType = "port"
+	ResourceTypeDevice      ResourceType = "device"
+	ResourceTypeIPPool      ResourceType = "ip_pool"
+	ResourceTypeCircuit     ResourceType = "circuit"
+	ResourceTypePort        ResourceType = "port"
+	ResourceTypeBaseStation ResourceType = "base_station"
 )
 
 // String implements fmt.Stringer.
 func (t ResourceType) String() string { return string(t) }
 
 // IsValid reports whether t is a known resource type. The values must stay
-// in sync with the resources table CHECK constraint (migrations v1 + v6:
-// 'device', 'ip_pool', 'circuit', 'port'). port resources carry no derived
-// relations (RelationType has no port case).
+// in sync with the resources table CHECK constraint (migrations v1 + v6 +
+// v9: 'device', 'ip_pool', 'circuit', 'port', 'base_station'). port and
+// base_station resources carry no derived relations (RelationType has no
+// such cases).
 func (t ResourceType) IsValid() bool {
 	switch t {
-	case ResourceTypeDevice, ResourceTypeIPPool, ResourceTypeCircuit, ResourceTypePort:
+	case ResourceTypeDevice, ResourceTypeIPPool, ResourceTypeCircuit, ResourceTypePort,
+		ResourceTypeBaseStation:
 		return true
 	}
 	return false

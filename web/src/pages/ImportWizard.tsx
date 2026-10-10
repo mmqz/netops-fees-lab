@@ -59,6 +59,7 @@ import {
   IMP_NATURAL_KEY_HINT,
   IMP_NATURAL_KEY_IP_SHORT,
   IMP_NATURAL_KEY_IP_WARNING,
+  IMP_NATURAL_KEY_FALLBACK,
   IMP_NATURAL_KEY_NAME_SCOPE,
   IMP_NATURAL_KEY_PORT_COMPOSITE,
   IMP_NATURAL_KEY_TAG,
@@ -89,7 +90,7 @@ import {
   ROW_STATUS_LABELS,
   SEVERITY_LABELS,
 } from '../i18n';
-import { fieldsForType, fieldLabel, naturalKeyFields, requiredFields } from '../schema';
+import { fieldsForType, fieldLabel, KEY_FALLBACK_FIELDS, naturalKeyFields, requiredFields } from '../schema';
 import type { FieldSpec } from '../schema';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
@@ -278,6 +279,14 @@ function isPortCompositeKey(type: ResourceType): boolean {
   return type === 'port';
 }
 
+/** 该类型是否声明了条件自然键兜底且兜底含名称字段（base_station：
+ *  主键 base_station_code 不会命中 hasNameNaturalKey，需独立判定）：展示
+ *  键退化语义提示（编码缺失 → 地市|名称 兜底 + W004 治理问题）。 */
+function hasConditionalKeyFallback(type: ResourceType): boolean {
+  const fallback = KEY_FALLBACK_FIELDS[type] ?? [];
+  return fallback.length > 0 && fallback.some((field) => field.includes('name'));
+}
+
 function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChange }: SheetCardProps) {
   const enabled = draft.action === 'import';
   const mappedCount = Object.keys(draft.columnMapping).length;
@@ -411,6 +420,11 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
             <span className="key-note key-note--info">
               <IconInfo size={14} />
               <span>{IMP_NATURAL_KEY_PORT_COMPOSITE}</span>
+            </span>
+          ) : hasConditionalKeyFallback(draft.resourceType) ? (
+            <span className="key-note key-note--info">
+              <IconInfo size={14} />
+              <span>{IMP_NATURAL_KEY_FALLBACK}</span>
             </span>
           ) : (
             hasNameNaturalKey(draft.resourceType) && (
