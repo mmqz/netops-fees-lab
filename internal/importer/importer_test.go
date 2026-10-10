@@ -795,6 +795,73 @@ func TestRollbackBatch(t *testing.T) {
 	}
 }
 
+// TestRollbackInUseCheckHoldsWriteTransaction pins the R2-P2-1 fix: the
+// in-use check runs INSIDE the rollback transaction (BEGIN IMMEDIATE), so
+// the write lock is already held the moment the check completes. A write
+// from a second connection that references the checked batch's entities can
+// no longer slip between the check and the deletions — the old layout ran
+// the check before the transaction, leaving exactly that window open.
+//
+// The test pauses the rollback right after its in-use check (via the
+// test-only hook) and observes whether a concurrent relation INSERT is
+// blocked: blocked ⇒ the lock (and therefore the check) is in-transaction.
+func TestRollbackInUseCheckHoldsWriteTransaction(t *testing.T) {
+	svc, db := newService(t)
+	ctx := context.Background()
+	aDev, _ := importWorkbook(t, svc, "devices.xlsx")
+	aPool, _ := importWorkbook(t, svc, "ippools.xlsx") // its relations reference devices
+
+	// Two device resources of the checked batch for the concurrent insert.
+	devs, _, err := db.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeDevice})
+	if err != nil || len(devs) < 2 {
+		t.Fatalf("search devices: %v (%d)", err, len(devs))
+	}
+	var rel domain.Relation
+	rel.ID = domain.NewID("rel")
+	rel.Type = domain.RelationTypeAEnd // unique (from, to, type) triple
+	rel.FromResourceID = devs[1].ID
+	rel.ToResourceID = devs[0].ID
+	rel.FirstBatchID = aPool.BatchID
+	rel.CreatedAt = time.Now().UTC()
+
+	insertDone := make(chan error, 1)
+	svc.setRollbackCheckHook(func() error {
+		// Second pooled connection: the INSERT must block on the write
+		// lock held by the rollback transaction. If the check ran
+		// outside the transaction (regression), no lock is held and
+		// the INSERT completes immediately.
+		go func() {
+			insertDone <- db.Relations.Insert(ctx, rel)
+		}()
+		select {
+		case err := <-insertDone:
+			return fmt.Errorf("concurrent write finished during the in-use window (check outside transaction?): %v", err)
+		case <-time.After(750 * time.Millisecond):
+			return nil // still blocked ⇒ write lock held at check time
+		}
+	})
+
+	// Devices batch is in use (ippool relations): refused, nothing deleted.
+	if err := svc.Rollback(ctx, aDev.BatchID); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("rollback of in-use devices batch = %v, want domain.ErrConflict", err)
+	}
+	b, err := db.Batches.Get(ctx, aDev.BatchID)
+	if err != nil || b.Status != domain.BatchStatusCompleted {
+		t.Errorf("devices batch after refused rollback = %s (err %v), want completed", b.Status, err)
+	}
+	if n, _ := db.Resources.CountByType(ctx); n[domain.ResourceTypeDevice] != 27 {
+		t.Errorf("device resources after refused rollback = %d, want 27", n[domain.ResourceTypeDevice])
+	}
+
+	// Drain the background INSERT: once the rollback transaction ends the
+	// lock is released and the insert must complete promptly (no deadlock).
+	select {
+	case <-insertDone:
+	case <-time.After(10 * time.Second):
+		t.Error("concurrent insert never unblocked after the rollback transaction ended")
+	}
+}
+
 // TestAnalyzeErrors covers the analyze failure path: an unreadable
 // (non-xlsx) workbook marks the batch failed and returns a typed error; a
 // missing file returns an error without creating any batch.
@@ -1207,5 +1274,90 @@ func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
 	}
 	if dev.NaturalKey != "DEV-001" || strings.Contains(dev.NaturalKey, "|") {
 		t.Errorf("device natural key = %q, want bare DEV-001 (single-key join is a no-op)", dev.NaturalKey)
+	}
+}
+
+// TestRecoverInterruptedBatches pins the R1-D6 crash-window self-heal:
+// batches stuck in the transient pipeline states (analyzing, importing)
+// are reset to failed with the interrupted reason; the stable
+// awaiting_mapping state, terminal batches and other batches' imports are
+// untouched; a second run heals nothing. It also pins the tolerated
+// false-positive semantics: an import that finishes AFTER a heal
+// overwrites the healed failed status with its real terminal status.
+func TestRecoverInterruptedBatches(t *testing.T) {
+	svc, db := newService(t)
+	ctx := context.Background()
+	aDev, _ := importWorkbook(t, svc, "devices.xlsx") // completed (terminal)
+
+	ts := time.Date(2026, 10, 9, 9, 30, 0, 0, time.UTC)
+	batches := map[string]domain.BatchStatus{
+		"bat_stuck_imp": domain.BatchStatusImporting,
+		"bat_stuck_ana": domain.BatchStatusAnalyzing,
+		"bat_waiting":   domain.BatchStatusAwaitingMapping,
+		"bat_failed":    domain.BatchStatusFailed,
+		"bat_rolled":    domain.BatchStatusRolledBack,
+	}
+	for id, status := range batches {
+		b := domain.ImportBatch{
+			ID:             id,
+			WorkbookName:   id + ".xlsx",
+			WorkbookSHA256: "sha_" + id,
+			Status:         status,
+			RuleVersion:    domain.RuleVersion,
+			StartedAt:      ts,
+		}
+		if err := db.Batches.Create(ctx, b); err != nil {
+			t.Fatalf("Create %s: %v", id, err)
+		}
+	}
+
+	n, err := svc.RecoverInterrupted(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("RecoverInterrupted = %d, %v; want 2 (analyzing + importing)", n, err)
+	}
+	for _, id := range []string{"bat_stuck_imp", "bat_stuck_ana"} {
+		b, err := db.Batches.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get %s after heal: %v", id, err)
+		}
+		if b.Status != domain.BatchStatusFailed || b.FinishedAt == nil {
+			t.Errorf("%s after heal = %s (finishedAt %v), want failed with finished_at", id, b.Status, b.FinishedAt)
+		}
+		if !strings.Contains(b.Error, "interrupted") {
+			t.Errorf("%s error after heal = %q, want the interrupted reason", id, b.Error)
+		}
+	}
+	// The stable user-input state and terminal states keep their status.
+	for _, id := range []string{"bat_waiting", "bat_failed", "bat_rolled"} {
+		b, err := db.Batches.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get %s after heal: %v", id, err)
+		}
+		if b.Status != batches[id] {
+			t.Errorf("%s after heal = %s, want untouched %s", id, b.Status, batches[id])
+		}
+		if b.FinishedAt != nil && id == "bat_waiting" {
+			t.Errorf("%s got finished_at stamped by the heal", id)
+		}
+	}
+	bDev, err := db.Batches.Get(ctx, aDev.BatchID)
+	if err != nil || bDev.Status != domain.BatchStatusCompleted {
+		t.Errorf("imported devices batch after heal = %s (err %v), want completed", bDev.Status, err)
+	}
+
+	// Idempotent: the transient set is empty now.
+	if n, err := svc.RecoverInterrupted(ctx); err != nil || n != 0 {
+		t.Fatalf("second RecoverInterrupted = %d, %v; want 0", n, err)
+	}
+
+	// Late terminal write wins over a heal (tolerated false positive: the
+	// import of another process was in flight and completes afterwards —
+	// execute.go writes its terminal status inside the import transaction).
+	if err := db.Batches.UpdateStatus(ctx, "bat_stuck_imp", domain.BatchStatusCompleted); err != nil {
+		t.Fatalf("late terminal write: %v", err)
+	}
+	bLate, err := db.Batches.Get(ctx, "bat_stuck_imp")
+	if err != nil || bLate.Status != domain.BatchStatusCompleted {
+		t.Errorf("late terminal write: status = %s (err %v), want completed", bLate.Status, err)
 	}
 }

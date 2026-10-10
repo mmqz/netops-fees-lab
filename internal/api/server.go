@@ -6,7 +6,8 @@
 //   - reports failures through the uniform error envelope
 //     {"error":{"code","message"}} with proper status codes
 //     (400 bad_request/validation, 404 not_found, 409 batch_in_use/conflict,
-//     413 too_large, 422 not_xlsx/empty_workbook, 500 internal).
+//     413 too_large, 422 not_xlsx/empty_workbook/workbook_too_large, 500
+//     internal).
 //
 // Cross-cutting concerns live in the middleware stack installed by Routes:
 // panic recovery (500 + logged stack, no leak to the client) and request
@@ -60,12 +61,12 @@ type Server struct {
 }
 
 // New returns a Server bound to db; uploads are stored under
-// <dataDir>/uploads (created lazily on the first upload). dataDir must be
-// non-empty for the import upload route to work — the analyze step reads
-// the workbook back from the stored path, so an empty dataDir leaves
-// POST /api/imports failing on every upload (AUD1-10). All call sites
-// (app.New with its "./data" default, the tests with t.TempDir()) pass a
-// real directory.
+// <dataDir>/uploads (created lazily on the first upload). An empty dataDir
+// leaves POST /api/imports failing FAST with a 500 "dataDir 未配置" error
+// at the handler entry: the analyze step reads the workbook back from the
+// stored path, so without a data root the upload route can never succeed
+// (AUD1-10). All call sites (app.New with its "./data" default, the tests
+// with t.TempDir()) pass a real directory.
 func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
 	simSvc := sim.New(db)
 	return &Server{
@@ -249,7 +250,9 @@ func respondErrorf(w http.ResponseWriter, status int, code, format string, args 
 
 // mapServiceError converts a service/repo error into (status, code,
 // message): *mapping.FieldError → 400 validation (the message carries the
-// sheet/field detail the UI points at); workbook sentinels → 422;
+// sheet/field detail the UI points at); workbook sentinels → 422
+// (not_xlsx / empty_workbook / workbook_too_large — the decompressed-size
+// guard of the workbook parser);
 // domain.ErrNotFound → 404; domain.ErrConflict → 409. Anything else is a
 // 500 (the caller logs it).
 func mapServiceError(err error) (status int, code string, message string) {
@@ -262,6 +265,9 @@ func mapServiceError(err error) (status int, code string, message string) {
 		return http.StatusUnprocessableEntity, "not_xlsx", "文件不是有效的 xlsx 工作簿"
 	case errors.Is(err, workbook.ErrEmptyWorkbook):
 		return http.StatusUnprocessableEntity, "empty_workbook", "工作簿不包含任何数据行"
+	case errors.Is(err, workbook.ErrWorkbookTooLarge):
+		return http.StatusUnprocessableEntity, "workbook_too_large",
+			"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound, "not_found", "请求的对象不存在"
 	case errors.Is(err, domain.ErrConflict):

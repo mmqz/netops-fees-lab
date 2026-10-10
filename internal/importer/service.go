@@ -31,6 +31,14 @@ type Service struct {
 	// production; it is only settable from within the package (see
 	// export_test.go).
 	afterSheet func(sheet string) error
+
+	// rollbackCheckHook, when non-nil, is invoked inside the rollback
+	// transaction immediately after the in-use check (while the BEGIN
+	// IMMEDIATE write lock is held). It exists exclusively for the
+	// TOCTOU regression test (R2-P2-1), which observes the lock from a
+	// second connection at that point; it is nil in production and only
+	// settable from within the package (see export_test.go).
+	rollbackCheckHook func() error
 }
 
 // New returns a Service bound to db.

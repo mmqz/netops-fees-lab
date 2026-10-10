@@ -185,6 +185,37 @@ func (r *BatchRepo) SetMapping(ctx context.Context, id string, mappingJSON strin
 	return requireUpdated(res, "batch", id)
 }
 
+// MarkInterruptedImportsFailed resets every batch stuck in a TRANSIENT
+// pipeline state (analyzing, importing — the crash windows of the import
+// pipeline) to failed with the given reason, stamps finished_at once
+// (COALESCE) and returns the number of reset batches. It is the
+// crash-window self-heal (R1-D6) invoked at serve startup and at the CLI
+// import entry (via importer.Service.RecoverInterrupted).
+//
+// awaiting_mapping is deliberately NOT in the target set: it is the stable
+// "user has not confirmed the mapping yet" state, not a crash window, and
+// must survive process restarts. Terminal statuses are excluded by the same
+// WHERE clause, so the heal is idempotent (a second run updates 0 rows)
+// and can never touch finished imports. A healed batch that was in fact an
+// in-flight import of another process gets its real terminal status
+// written afterwards by that import's own transaction (execute.go).
+func (r *BatchRepo) MarkInterruptedImportsFailed(ctx context.Context, reason string) (int64, error) {
+	res, err := r.q.ExecContext(ctx,
+		`UPDATE import_batches
+SET status = ?, error = ?, finished_at = COALESCE(finished_at, ?)
+WHERE status IN (?, ?)`,
+		domain.BatchStatusFailed.String(), nullString(reason), formatTime(time.Now().UTC()),
+		domain.BatchStatusAnalyzing.String(), domain.BatchStatusImporting.String())
+	if err != nil {
+		return 0, fmt.Errorf("repo: mark interrupted imports failed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("repo: mark interrupted imports failed: rows affected: %w", err)
+	}
+	return n, nil
+}
+
 // requireUpdated verifies that an UPDATE matched exactly one row and
 // returns domain.ErrNotFound otherwise.
 func requireUpdated(res sql.Result, kind, key string) error {

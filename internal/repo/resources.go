@@ -230,6 +230,18 @@ func (r *ResourceRepo) ListByBatch(ctx context.Context, batchID string) ([]domai
 	return out, nil
 }
 
+// CountByBatch returns the number of resources whose first_batch_id equals
+// batchID (COUNT aggregate — same scope as ListByBatch). The rollback
+// route's delete-response accounting uses it instead of a full List.
+func (r *ResourceRepo) CountByBatch(ctx context.Context, batchID string) (int, error) {
+	var n int
+	if err := r.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM resources WHERE first_batch_id = ?`, batchID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count resources of batch %s: %w", batchID, err)
+	}
+	return n, nil
+}
+
 // DeleteByBatch deletes all resources created by batchID and returns the
 // number of deleted rows. Relations referencing those resources are removed
 // by the foreign key ON DELETE CASCADE; relations owned by the batch but

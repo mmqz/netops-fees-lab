@@ -133,3 +133,41 @@ func TestRowResultInsertBatchChunks(t *testing.T) {
 		t.Errorf("row numbers = %d..%d, want 2..%d", got[0].RowNumber, got[n-1].RowNumber, n+1)
 	}
 }
+
+// TestRowResultCountByBatchMatchesList pins the COUNT aggregate used by the
+// rollback route's delete-response accounting (R2-P3-2): CountByBatch must
+// equal the number of rows a full List would return for the same batch.
+func TestRowResultCountByBatchMatchesList(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedDevices(t, db, 1)
+
+	results := make([]domain.RowResult, 0, 9)
+	for i := 2; i <= 10; i++ {
+		results = append(results, domain.RowResult{
+			BatchID:   "bat_1",
+			Sheet:     "设备清单",
+			RowNumber: i,
+			Status:    domain.RowStatusImported,
+			EntityID:  fmt.Sprintf("res_%03d", i-1),
+		})
+	}
+	if err := db.RowResults.InsertBatch(ctx, results); err != nil {
+		t.Fatalf("InsertBatch: %v", err)
+	}
+
+	n, err := db.RowResults.CountByBatch(ctx, "bat_1")
+	if err != nil {
+		t.Fatalf("CountByBatch: %v", err)
+	}
+	listed, total, err := db.RowResults.List(ctx, RowResultFilter{BatchID: "bat_1"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if n != len(listed) || n != total || n != 9 {
+		t.Errorf("CountByBatch = %d, List = %d rows / total %d, want all 9", n, len(listed), total)
+	}
+	if n, err := db.RowResults.CountByBatch(ctx, "bat_none"); err != nil || n != 0 {
+		t.Errorf("CountByBatch(missing batch) = %d, %v; want 0", n, err)
+	}
+}

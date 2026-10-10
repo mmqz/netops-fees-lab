@@ -123,6 +123,8 @@ func cliErrorCode(err error) string {
 		return "not_xlsx"
 	case errors.Is(err, workbook.ErrEmptyWorkbook):
 		return "empty_workbook"
+	case errors.Is(err, workbook.ErrWorkbookTooLarge):
+		return "workbook_too_large"
 	case errors.Is(err, domain.ErrNotFound):
 		return "not_found"
 	case errors.Is(err, domain.ErrConflict):
@@ -175,7 +177,20 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer func() { _ = a.Close() }()
-	return a.Run(context.Background())
+	ctx := context.Background()
+
+	// Crash-window self-heal (R1-D6): serve startup has no in-flight import
+	// of THIS process, so any batch still in a transient state (analyzing /
+	// importing) is debris of a crashed previous run — reset it to
+	// failed(interrupted). An import of another process that completes later
+	// overwrites the heal with its own terminal status (execute.go writes
+	// the terminal state inside its transaction).
+	if n, err := a.Importer.RecoverInterrupted(ctx); err != nil {
+		return fmt.Errorf("recover interrupted imports: %w", err)
+	} else if n > 0 {
+		a.Log.Info("recovered interrupted import batches", "count", n)
+	}
+	return a.Run(ctx)
 }
 
 // cmdAnalyze implements `netopslab analyze --file`: OFFLINE workbook
@@ -250,6 +265,17 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 	}
 	defer func() { _ = a.Close() }()
 	ctx := context.Background()
+
+	// Crash-window self-heal (R1-D6) before starting OUR import: this
+	// process now owns the import pipeline, so transient-state debris of
+	// earlier crashed runs is reset to failed(interrupted) first. (The
+	// offline `analyze` command has no database and cannot heal — it never
+	// creates a batch either.)
+	if n, err := a.Importer.RecoverInterrupted(ctx); err != nil {
+		return fmt.Errorf("recover interrupted imports: %w", err)
+	} else if n > 0 {
+		a.Log.Info("recovered interrupted import batches", "count", n)
+	}
 
 	res, err := a.Importer.Analyze(ctx, *file)
 	if err != nil {

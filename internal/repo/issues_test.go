@@ -204,3 +204,29 @@ func TestIssueDeleteByBatch(t *testing.T) {
 
 // ptr is a tiny helper for *string literals.
 func ptr(s string) *string { return &s }
+
+// TestIssueCountByBatchMatchesList pins the COUNT aggregate used by the
+// rollback route's delete-response accounting (R2-P3-2): CountByBatch must
+// equal the number of row-phase issues a List with the same batch filter
+// would return (set-level issues excluded on both sides).
+func TestIssueCountByBatchMatchesList(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedIssues(t, db)
+
+	batch := "bat_1"
+	n, err := db.Issues.CountByBatch(ctx, batch)
+	if err != nil {
+		t.Fatalf("CountByBatch: %v", err)
+	}
+	listed, total, err := db.Issues.List(ctx, IssueFilter{BatchID: &batch})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if n != len(listed) || n != total || n != 3 {
+		t.Errorf("CountByBatch = %d, List = %d rows / total %d, want all 3", n, len(listed), total)
+	}
+	if n, err := db.Issues.CountByBatch(ctx, "bat_none"); err != nil || n != 0 {
+		t.Errorf("CountByBatch(missing batch) = %d, %v; want 0", n, err)
+	}
+}

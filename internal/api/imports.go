@@ -36,7 +36,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // dataDir/uploads/<sha256>_<name>.xlsx (content-addressed, overwriting an
 // identical prior upload), then analyzed via the importer with the user's
 // original file name as the batch's display name (202 + Analysis JSON).
+// An unconfigured (empty) dataDir fails fast with 500: the analyze step
+// reads the workbook back from the stored path, so a relative "uploads/…"
+// path could never work (AUD1-10 residue, now guarded at the entry).
 func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
+	if s.dataDir == "" {
+		s.log.Error("import upload rejected: dataDir is not configured",
+			"method", r.Method, "path", r.URL.Path)
+		respondError(w, http.StatusInternalServerError, "internal",
+			"服务器未配置上传存储目录（dataDir），无法处理导入上传")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		var maxErr *http.MaxBytesError
@@ -84,17 +94,15 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 	// Content-addressed storage: <sha256>_<original name>.xlsx.
 	sum := sha256.Sum256(data)
 	stored := filepath.Join(s.dataDir, "uploads", hex.EncodeToString(sum[:])+"_"+name)
-	if s.dataDir != "" {
-		if err := os.MkdirAll(filepath.Join(s.dataDir, "uploads"), 0o755); err != nil {
-			s.log.Error("create uploads dir failed", "error", err.Error())
-			respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
-			return
-		}
-		if err := os.WriteFile(stored, data, 0o644); err != nil {
-			s.log.Error("store upload failed", "error", err.Error(), "path", stored)
-			respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
-			return
-		}
+	if err := os.MkdirAll(filepath.Join(s.dataDir, "uploads"), 0o755); err != nil {
+		s.log.Error("create uploads dir failed", "error", err.Error())
+		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
+		return
+	}
+	if err := os.WriteFile(stored, data, 0o644); err != nil {
+		s.log.Error("store upload failed", "error", err.Error(), "path", stored)
+		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
+		return
 	}
 
 	a, err := s.importer.AnalyzeNamed(r.Context(), stored, name)

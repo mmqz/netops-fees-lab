@@ -150,6 +150,18 @@ func (r *RowResultRepo) CountsByBatch(ctx context.Context, batchID string) (map[
 	return counts, nil
 }
 
+// CountByBatch returns the number of row results of batchID (COUNT
+// aggregate — the delete-response accounting of the rollback route, which
+// must not materialize the whole sheet for a len()).
+func (r *RowResultRepo) CountByBatch(ctx context.Context, batchID string) (int, error) {
+	var n int
+	if err := r.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM import_row_results WHERE batch_id = ?`, batchID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count row results of batch %s: %w", batchID, err)
+	}
+	return n, nil
+}
+
 // DeleteByBatch deletes all row results of batchID (batch rollback) and
 // returns the number of deleted rows.
 func (r *RowResultRepo) DeleteByBatch(ctx context.Context, batchID string) (int64, error) {

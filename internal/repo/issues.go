@@ -195,6 +195,19 @@ func (r *IssueRepo) CountBySeverity(ctx context.Context, batchID *string) (map[d
 	return counts, nil
 }
 
+// CountByBatch returns the number of row-phase issues attributed to
+// batchID (COUNT aggregate; set-level issues with batch_id NULL are
+// excluded — same scope as List with IssueFilter{BatchID}). The rollback
+// route's delete-response accounting uses it instead of a full List.
+func (r *IssueRepo) CountByBatch(ctx context.Context, batchID string) (int, error) {
+	var n int
+	if err := r.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM issues WHERE batch_id = ?`, batchID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count issues of batch %s: %w", batchID, err)
+	}
+	return n, nil
+}
+
 // stringsToAny converts []string to []any for query arguments.
 func stringsToAny(ss []string) []any {
 	out := make([]any, len(ss))

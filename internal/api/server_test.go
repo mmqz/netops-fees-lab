@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -26,8 +27,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmqz/netops-lab/internal/api"
 	"github.com/mmqz/netops-lab/internal/app"
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 )
 
@@ -1173,5 +1176,34 @@ func TestAPIImportBodyLimit(t *testing.T) {
 	decodeJSON(t, "oversize upload", body, &er)
 	if er.Error.Code != "too_large" {
 		t.Errorf("oversize upload: error.code = %q, want too_large", er.Error.Code)
+	}
+}
+
+// TestAPIUploadWithoutDataDirFailsFast pins the R2-P3-4 fix: a server wired
+// with an EMPTY dataDir rejects the upload at the handler entry with a 500
+// explaining the missing configuration, instead of silently storing to a
+// relative "uploads/…" path that the analyze step could never read back.
+func TestAPIUploadWithoutDataDirFailsFast(t *testing.T) {
+	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	if err != nil {
+		t.Fatalf("repo.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(api.New(log, db, "").Routes())
+	t.Cleanup(srv.Close)
+
+	resp, body := uploadFile(t, srv, "devices.xlsx", readTestdata(t, "devices.xlsx"))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("upload without dataDir: status = %d, want 500\nbody: %s", resp.StatusCode, body)
+	}
+	var er errorResp
+	decodeJSON(t, "upload without dataDir", body, &er)
+	if er.Error.Code != "internal" {
+		t.Errorf("upload without dataDir: error.code = %q, want internal", er.Error.Code)
+	}
+	if !strings.Contains(er.Error.Message, "dataDir") {
+		t.Errorf("upload without dataDir: message %q should name the missing dataDir configuration", er.Error.Message)
 	}
 }

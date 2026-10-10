@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -403,5 +404,93 @@ func TestReadMissingFile(t *testing.T) {
 	_, err := Read(filepath.Join(t.TempDir(), "does-not-exist.xlsx"))
 	if err == nil || errors.Is(err, ErrNotXLSX) || errors.Is(err, ErrEmptyWorkbook) {
 		t.Errorf("Read(missing file) error = %v, want a plain read error", err)
+	}
+}
+
+// --- parse limits (zip-bomb guard, R2-P2-2) ---
+
+// setLimits lowers the parse limits for this test and restores the
+// production defaults afterwards.
+func setLimits(t *testing.T, rows, cells int) {
+	t.Helper()
+	oldRows, oldCells := MaxRowsPerSheet, MaxCellsPerWorkbook
+	MaxRowsPerSheet, MaxCellsPerWorkbook = rows, cells
+	t.Cleanup(func() {
+		MaxRowsPerSheet, MaxCellsPerWorkbook = oldRows, oldCells
+	})
+}
+
+// writeSheetWorkbook saves an xlsx whose sheets (in order) have the given
+// row counts, every row carrying cols filled cells (row 1 is the header).
+func writeSheetWorkbook(t *testing.T, cols int, sheetRows ...int) string {
+	t.Helper()
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	for si, n := range sheetRows {
+		sheet := "Sheet1"
+		if si > 0 {
+			name := fmt.Sprintf("Sheet%d", si+1)
+			if _, err := f.NewSheet(name); err != nil {
+				t.Fatalf("NewSheet(%q): %v", name, err)
+			}
+			sheet = name
+		}
+		for r := 1; r <= n; r++ {
+			values := make([]string, cols)
+			for c := range values {
+				values[c] = fmt.Sprintf("s%dr%dc%d", si, r, c)
+			}
+			if err := f.SetSheetRow(sheet, fmt.Sprintf("A%d", r), &values); err != nil {
+				t.Fatalf("SetSheetRow(%q, A%d): %v", sheet, r, err)
+			}
+		}
+	}
+	path := filepath.Join(t.TempDir(), "sized.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("SaveAs: %v", err)
+	}
+	return path
+}
+
+// TestReadRejectsWorkbookExceedingRowLimit lowers MaxRowsPerSheet and
+// asserts that a workbook with more worksheet rows is rejected through the
+// ErrWorkbookTooLarge error chain (R2-P2-2).
+func TestReadRejectsWorkbookExceedingRowLimit(t *testing.T) {
+	setLimits(t, 10, 1_000_000)
+	// 12 rows > limit 10 — the abort must fire while streaming, before
+	// the whole sheet is materialized.
+	path := writeSheetWorkbook(t, 2, 12)
+	_, err := Read(path)
+	if !errors.Is(err, ErrWorkbookTooLarge) {
+		t.Fatalf("Read(12 rows, limit 10) error = %v, want wrapped ErrWorkbookTooLarge", err)
+	}
+	if err != nil && (errors.Is(err, ErrNotXLSX) || errors.Is(err, ErrEmptyWorkbook)) {
+		t.Errorf("row-limit error also matches another sentinel: %v", err)
+	}
+	// Within the limit the same workbook parses fine.
+	setLimits(t, 20, 1_000_000)
+	wb, err := Read(writeSheetWorkbook(t, 2, 12))
+	if err != nil {
+		t.Fatalf("Read(12 rows, limit 20): %v", err)
+	}
+	if wb.Sheets[0].DataRows != 11 {
+		t.Errorf("data rows = %d, want 11 (12 rows incl. header)", wb.Sheets[0].DataRows)
+	}
+}
+
+// TestReadRejectsWorkbookExceedingCellLimit lowers MaxCellsPerWorkbook and
+// asserts the limit accumulates ACROSS sheets: each sheet alone stays under
+// it, only the sum breaches and aborts with ErrWorkbookTooLarge.
+func TestReadRejectsWorkbookExceedingCellLimit(t *testing.T) {
+	setLimits(t, 1_000_000, 20)
+	// One sheet of 5 rows × 3 cols = 15 cells ≤ 20: parses fine.
+	if _, err := Read(writeSheetWorkbook(t, 3, 5)); err != nil {
+		t.Fatalf("Read(single sheet, 15 cells, limit 20): %v", err)
+	}
+	// Two sheets (15 + 12 = 27 cells > 20): rejected while reading the
+	// second sheet — the workbook-wide counter is what fires.
+	_, err := Read(writeSheetWorkbook(t, 3, 5, 4))
+	if !errors.Is(err, ErrWorkbookTooLarge) {
+		t.Fatalf("Read(two sheets, 27 cells, limit 20) error = %v, want wrapped ErrWorkbookTooLarge", err)
 	}
 }

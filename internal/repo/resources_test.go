@@ -257,3 +257,27 @@ func TestResourceCounts(t *testing.T) {
 		t.Errorf("CountByStatus = %v (NULL status must be excluded)", byStatus)
 	}
 }
+
+// TestResourceCountByBatchMatchesList pins the COUNT aggregate used by the
+// rollback route's delete-response accounting (R2-P3-2): CountByBatch must
+// equal the number of resources ListByBatch would load for the same batch.
+func TestResourceCountByBatchMatchesList(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedDevices(t, db, 7) // 7 resources of bat_1
+
+	n, err := db.Resources.CountByBatch(ctx, "bat_1")
+	if err != nil {
+		t.Fatalf("CountByBatch: %v", err)
+	}
+	listed, err := db.Resources.ListByBatch(ctx, "bat_1")
+	if err != nil {
+		t.Fatalf("ListByBatch: %v", err)
+	}
+	if n != len(listed) || n != 7 {
+		t.Errorf("CountByBatch = %d, ListByBatch = %d rows, want both 7", n, len(listed))
+	}
+	if n, err := db.Resources.CountByBatch(ctx, "bat_none"); err != nil || n != 0 {
+		t.Errorf("CountByBatch(missing batch) = %d, %v; want 0", n, err)
+	}
+}

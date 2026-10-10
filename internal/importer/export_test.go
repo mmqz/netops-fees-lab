@@ -10,3 +10,11 @@ package importer
 func (s *Service) setAfterSheetHook(fn func(sheet string) error) {
 	s.afterSheet = fn
 }
+
+// setRollbackCheckHook installs the observation hook used by the rollback
+// TOCTOU regression test (R2-P2-1): fn runs inside the rollback transaction
+// immediately after the in-use check, while the BEGIN IMMEDIATE write lock
+// is held; an error returned by fn aborts (and rolls back) the rollback.
+func (s *Service) setRollbackCheckHook(fn func() error) {
+	s.rollbackCheckHook = fn
+}

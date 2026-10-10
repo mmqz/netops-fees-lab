@@ -6,6 +6,11 @@
 // ignored), keep the REAL 1-based Excel row number of every data row
 // (row 1 is the header, data starts at row 2), skip fully-empty rows, and
 // trim trailing empty rows.
+//
+// Parsing is bounded (zip-bomb guard, R2-P2-2): sheets are streamed row by
+// row instead of being materialized whole, and two limits abort the parse —
+// MaxRowsPerSheet rows per sheet and MaxCellsPerWorkbook cells across the
+// whole workbook. Exceeding a limit returns (wrapped) ErrWorkbookTooLarge.
 package workbook
 
 import (
@@ -28,6 +33,26 @@ var ErrNotXLSX = errors.New("workbook: not a valid xlsx file")
 // ErrEmptyWorkbook is returned when the file parses but contains no sheet
 // with at least one data row.
 var ErrEmptyWorkbook = errors.New("workbook: no sheet with data rows")
+
+// ErrWorkbookTooLarge is returned (wrapped) when the workbook exceeds one
+// of the parse limits: more than MaxRowsPerSheet rows in one sheet, or more
+// than MaxCellsPerWorkbook materialized cells across all sheets. The
+// compressed upload size limit (10MB in the HTTP API) says nothing about
+// the DECOMPRESSED size — a highly compressed xlsx could otherwise expand
+// to memory-hostile dimensions (zip bomb), because every cell of every
+// sheet used to be materialized at once.
+var ErrWorkbookTooLarge = errors.New("workbook: exceeds size limits")
+
+// Parse limits (zip-bomb guard). Package-level variables so tests can lower
+// them; production code only reads them. A limit <= 0 disables that bound.
+var (
+	// MaxRowsPerSheet bounds the number of worksheet rows (including the
+	// header row) materialized for one sheet.
+	MaxRowsPerSheet = 100_000
+	// MaxCellsPerWorkbook bounds the total number of materialized cells
+	// across all sheets of the workbook.
+	MaxCellsPerWorkbook = 5_000_000
+)
 
 // Workbook is a parsed .xlsx file.
 type Workbook struct {
@@ -71,7 +96,9 @@ type Row struct {
 
 // Read parses the .xlsx file at path. It returns a workbook whose SHA256
 // is the hash of the file bytes. Errors wrap ErrNotXLSX for unreadable
-// files and ErrEmptyWorkbook for files without any data.
+// files, ErrEmptyWorkbook for files without any data and ErrWorkbookTooLarge
+// when the file exceeds the parse limits (see MaxRowsPerSheet /
+// MaxCellsPerWorkbook).
 func Read(path string) (*Workbook, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -87,7 +114,9 @@ func Read(path string) (*Workbook, error) {
 	return wb, nil
 }
 
-// parseBytes parses xlsx bytes without file metadata.
+// parseBytes parses xlsx bytes without file metadata. Each sheet is
+// streamed (excelize row iterator) under the MaxRowsPerSheet /
+// MaxCellsPerWorkbook limits; a breach aborts with ErrWorkbookTooLarge.
 func parseBytes(data []byte) (*Workbook, error) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
@@ -95,11 +124,13 @@ func parseBytes(data []byte) (*Workbook, error) {
 	}
 	defer func() { _ = f.Close() }()
 	wb := &Workbook{}
+	cells := 0
 	for _, name := range f.GetSheetList() {
-		raw, err := f.GetRows(name)
+		raw, used, err := sheetRows(f, name, cells)
 		if err != nil {
-			return nil, fmt.Errorf("workbook: read sheet %q: %w", name, err)
+			return nil, err
 		}
+		cells += used
 		wb.Sheets = append(wb.Sheets, BuildSheet(name, raw))
 	}
 	for i := range wb.Sheets {
@@ -108,6 +139,47 @@ func parseBytes(data []byte) (*Workbook, error) {
 		}
 	}
 	return nil, fmt.Errorf("%w: %d sheet(s) parsed", ErrEmptyWorkbook, len(wb.Sheets))
+}
+
+// sheetRows streams one worksheet and returns its raw rows exactly as
+// excelize's GetRows would (row 1 first, interior gaps as empty slices,
+// trailing empty rows trimmed), plus the number of materialized cells. It
+// mirrors the GetRows collection loop statement for statement, so parsing
+// semantics are identical — but it aborts with ErrWorkbookTooLarge as soon
+// as the sheet passes MaxRowsPerSheet rows or the workbook (cellsBefore +
+// this sheet) passes MaxCellsPerWorkbook, instead of materializing the
+// whole sheet first.
+func sheetRows(f *excelize.File, name string, cellsBefore int) ([][]string, int, error) {
+	rows, err := f.Rows(name)
+	if err != nil {
+		return nil, 0, fmt.Errorf("workbook: read sheet %q: %w", name, err)
+	}
+	results, cur, maxVal, cells := make([][]string, 0, 64), 0, 0, 0
+	for rows.Next() {
+		cur++
+		if MaxRowsPerSheet > 0 && cur > MaxRowsPerSheet {
+			_ = rows.Close()
+			return nil, 0, fmt.Errorf("%w: sheet %q has more than %d rows", ErrWorkbookTooLarge, name, MaxRowsPerSheet)
+		}
+		row, err := rows.Columns()
+		if err != nil {
+			break
+		}
+		if len(row) > 0 {
+			if emptyRows := cur - maxVal - 1; emptyRows > 0 {
+				results = append(results, make([][]string, emptyRows)...)
+			}
+			results = append(results, row)
+			maxVal = cur
+			cells += len(row)
+			if MaxCellsPerWorkbook > 0 && cellsBefore+cells > MaxCellsPerWorkbook {
+				_ = rows.Close()
+				return nil, 0, fmt.Errorf("%w: workbook exceeds %d cells while reading sheet %q",
+					ErrWorkbookTooLarge, MaxCellsPerWorkbook, name)
+			}
+		}
+	}
+	return results[:maxVal], cells, rows.Close()
 }
 
 // BuildSheet converts positional raw rows (raw[i] is Excel row i+1, as

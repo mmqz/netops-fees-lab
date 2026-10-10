@@ -227,11 +227,16 @@ type rollbackResponse struct {
 // completed batch. domain.ErrConflict becomes 409 batch_in_use. After a
 // successful rollback the set-level validation recomputes so E005/E006/I001
 // reflect the post-rollback state (same automatic rule as after an import).
+//
+// The deleted-counts are COUNT aggregates (repo *CountByBatch), not full
+// List + len(): a big workbook's DELETE response must not pay for loading
+// every row result and issue (R2-P3-2). The response JSON shape is
+// unchanged.
 func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ctx := r.Context()
 
-	resources, err := s.db.Resources.ListByBatch(ctx, id)
+	resources, err := s.db.Resources.CountByBatch(ctx, id)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return
@@ -246,12 +251,12 @@ func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 		s.respondErrorFor(w, r, err, "")
 		return
 	}
-	rowResults, _, err := s.db.RowResults.List(ctx, repo.RowResultFilter{BatchID: id})
+	rowResults, err := s.db.RowResults.CountByBatch(ctx, id)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return
 	}
-	batchIssues, _, err := s.db.Issues.List(ctx, repo.IssueFilter{BatchID: &id})
+	batchIssues, err := s.db.Issues.CountByBatch(ctx, id)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return
@@ -279,11 +284,11 @@ func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 		BatchID: id,
 		Status:  domain.BatchStatusRolledBack.String(),
 		Deleted: rollbackCounts{
-			Resources:  len(resources),
+			Resources:  resources,
 			Relations:  relations,
 			SourceRefs: sourceRefs,
-			RowResults: len(rowResults),
-			Issues:     len(batchIssues),
+			RowResults: rowResults,
+			Issues:     batchIssues,
 		},
 	})
 }
