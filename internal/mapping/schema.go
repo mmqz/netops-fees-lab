@@ -393,11 +393,51 @@ var circuitSpec = TypeSpec{
 	},
 }
 
-// Specs lists the three resource type schemas in canonical order (device,
-// ip_pool, circuit). The order is the deterministic tie-breaker of
+// portSpec is the device-port schema (v0.3.1): the telecom port workbooks of
+// the real-network samples (端口流量监控表 / 端口资源表). The natural key is
+// COMPOSITE — device_ip + port_name — because a port name repeats across
+// devices; the importer joins the key values with '|' in natural-key order
+// (single-key types are byte-identical to the classic behaviour).
+// device_ip deliberately stays an ipv4 value column (not a device ref): the
+// port workbook is a self-contained export whose device rows may not exist
+// (yet) in the resource base, and E003 on a missing device would reject the
+// whole port sheet.
+var portSpec = TypeSpec{
+	Type:      domain.ResourceTypePort,
+	SheetHint: "端口",
+	Fields: []FieldSpec{
+		{Name: "device_ip", Label: "设备IP", Required: true, NaturalKey: true, Kind: KindIPv4,
+			Synonyms: []string{"设备IP地址", "设备ip", "设备IP", "网元IP"}},
+		{Name: "port_name", Label: "端口名称", Required: true, NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"端口名称", "端口名", "端口"}},
+		{Name: "port_desc", Label: "端口描述", Kind: KindString, Synonyms: []string{"端口描述"}},
+		{Name: "port_type", Label: "端口类型", Kind: KindString, Synonyms: []string{"端口类型"}},
+		{Name: "bandwidth_mbps", Label: "带宽Mbps", Kind: KindInt, // no IntMin: real sheets carry 0
+			Synonyms: []string{"端口带宽", "端口速率(M)", "端口速率", "速率", "带宽Mbps"}},
+		{Name: "admin_status", Label: "管理状态", Kind: KindString, Synonyms: []string{"管理状态"}},
+		{Name: "oper_status", Label: "运行状态", Kind: KindString, Synonyms: []string{"运行状态"}},
+		{Name: "device_type", Label: "设备类型", Kind: KindString, Synonyms: []string{"设备类型"}},
+		{Name: "city", Label: "地市", Kind: KindString, Synonyms: []string{"地市", "城市"}},
+		{Name: "district", Label: "区县", Kind: KindString, Synonyms: []string{"区县", "县区"}},
+		{Name: "vendor", Label: "厂家", Kind: KindString, Synonyms: []string{"厂家", "厂商"}},
+		{Name: "model", Label: "型号", Kind: KindString, Synonyms: []string{"型号", "设备型号"}},
+		{Name: "record_date", Label: "日期", Kind: KindString, Synonyms: []string{"日期", "采集日期"}},
+		// Geographic position (optional): same columns/kinds as device, so a
+		// base-station port sheet can carry 经纬度 the same way.
+		{Name: "geo_lat", Label: "纬度", Kind: KindLat,
+			Synonyms: []string{"纬度", "lat", "LAT", "GPS纬度", "北纬"}},
+		{Name: "geo_lng", Label: "经度", Kind: KindLng,
+			Synonyms: []string{"经度", "lng", "lon", "LON", "GPS经度", "东经"}},
+		{Name: "geo", Label: "经纬度", Kind: KindGeo,
+			Synonyms: []string{"经纬度", "装机经纬度", "坐标", "GPS坐标", "位置"}},
+	},
+}
+
+// Specs lists the resource type schemas in canonical order (device,
+// ip_pool, circuit, port). The order is the deterministic tie-breaker of
 // SuggestType and of the suggestion fallback for untyped sheets. Treat the
 // list as read-only.
-var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec}
+var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec}
 
 // SpecByType returns the schema of t; ok is false for unknown types.
 func SpecByType(t domain.ResourceType) (TypeSpec, bool) {

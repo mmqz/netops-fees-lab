@@ -687,3 +687,200 @@ func TestSplitGeoLatLng(t *testing.T) {
 		t.Errorf("FormatGeoFloat(-50) = %q, want -50", got)
 	}
 }
+
+// ---- port resource type (schema v7) ----
+
+// portSheetName is a sheet name whose 端口 hint suggests the port type.
+const portSheetName = "端口资源表"
+
+// portHeadersA are the leading columns of the real telecom sheet's header
+// row A (samples/telecom-port-multi-header.xlsx).
+var portHeadersA = []string{"地市", "区县", "设备名称", "设备ip", "端口", "端口ip", "端口带宽", "端口类型", "端口描述", "厂家", "型号", "日期"}
+
+// portSheetMapping builds a complete, valid port sheet mapping: composite
+// natural key (device_ip, port_name) and the real header row A columns.
+func portSheetMapping() SheetMapping {
+	return SheetMapping{
+		Sheet:        portSheetName,
+		Action:       ActionImport,
+		ResourceType: domain.ResourceTypePort,
+		KeyColumns:   []string{"device_ip", "port_name"},
+		ColumnMapping: map[string]string{
+			"device_ip":      "设备ip",
+			"port_name":      "端口",
+			"port_desc":      "端口描述",
+			"port_type":      "端口类型",
+			"bandwidth_mbps": "端口带宽",
+			"city":           "地市",
+			"vendor":         "厂家",
+			"model":          "型号",
+			"record_date":    "日期",
+		},
+	}
+}
+
+// TestPortSuggest covers the suggestion ladder on a typed 端口 sheet: every
+// confidence tier (exact 1.0, normalized 0.9, synonym 0.75) plus the real
+// header row A columns and the traffic-metric columns that must yield no
+// suggestion.
+func TestPortSuggest(t *testing.T) {
+	cases := []struct {
+		name     string
+		sheet    string
+		header   string
+		wantFld  string
+		wantConf float64
+	}{
+		{"exact field name", portSheetName, "device_ip", "device_ip", 1.0},
+		{"normalized case field name", portSheetName, "DEVICE_IP", "device_ip", 0.9},
+		{"normalized spaces field name", portSheetName, " port_name ", "port_name", 0.9},
+		{"header A device ip", portSheetName, "设备ip", "device_ip", 0.75},
+		{"header B device ip", portSheetName, "设备IP地址", "device_ip", 0.75},
+		{"header A port", portSheetName, "端口", "port_name", 0.75},
+		{"header B port name", portSheetName, "端口名称", "port_name", 0.75},
+		{"header A bandwidth", portSheetName, "端口带宽", "bandwidth_mbps", 0.75},
+		{"header B bandwidth", portSheetName, "端口速率(M)", "bandwidth_mbps", 0.75},
+		{"header A port type", portSheetName, "端口类型", "port_type", 0.75},
+		{"header A port desc", portSheetName, "端口描述", "port_desc", 0.75},
+		{"header A vendor", portSheetName, "厂家", "vendor", 0.75},
+		{"header A model", portSheetName, "型号", "model", 0.75},
+		{"header A city", portSheetName, "地市", "city", 0.75},
+		{"header A date", portSheetName, "日期", "record_date", 0.75},
+		{"traffic metric column has no suggestion", portSheetName, "接收速率ipv6", "", 0},
+		{"device-only field not suggested on port sheet", portSheetName, "设备编码", "", 0},
+		{"untyped sheet falls through to port field", "Sheet1", "端口名称", "port_name", 0.75},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Suggest(tc.sheet, []string{tc.header})
+			if len(got) != 1 {
+				t.Fatalf("Suggest returned %d suggestions, want 1", len(got))
+			}
+			if got[0].Field != tc.wantFld || got[0].Confidence != tc.wantConf {
+				t.Errorf("Suggest(%q, %q) = %q/%v, want %q/%v",
+					tc.sheet, tc.header, got[0].Field, got[0].Confidence, tc.wantFld, tc.wantConf)
+			}
+		})
+	}
+}
+
+// TestSuggestTypePort pins the port sheet hint and the Specs order rule:
+// 端口 suggests port unless an earlier hint (设备) matches first.
+func TestSuggestTypePort(t *testing.T) {
+	cases := []struct {
+		sheet string
+		want  domain.ResourceType
+		ok    bool
+	}{
+		{portSheetName, domain.ResourceTypePort, true},
+		{"端口", domain.ResourceTypePort, true},
+		{"端口流量监控表", domain.ResourceTypePort, true},
+		{"设备端口表", domain.ResourceTypeDevice, true}, // device hint wins (Specs order)
+		{"Sheet1", "", false},                      // real sheet name: no hint
+	}
+	for _, tc := range cases {
+		got, ok := SuggestType(tc.sheet)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("SuggestType(%q) = (%q, %v), want (%q, %v)", tc.sheet, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// TestPortCompositeKeyValidate pins the composite natural key of the port
+// type: keyColumns must be EXACTLY [device_ip port_name] — a single key, a
+// swapped order or source-header names are all rejected — and the valid
+// mapping passes with the required key fields mapped.
+func TestPortCompositeKeyValidate(t *testing.T) {
+	headers := map[string][]string{}
+	for k, v := range testHeaders {
+		headers[k] = v
+	}
+	headers[portSheetName] = portHeadersA
+
+	cases := []struct {
+		name      string
+		mutate    func(m *Mapping)
+		wantErr   bool
+		wantField string
+	}{
+		{
+			name: "happy path with composite key",
+			mutate: func(m *Mapping) {
+				m.Sheets = append(m.Sheets, portSheetMapping())
+			},
+		},
+		{
+			name: "single key column is rejected",
+			mutate: func(m *Mapping) {
+				sm := portSheetMapping()
+				sm.KeyColumns = []string{"device_ip"}
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "keyColumns",
+		},
+		{
+			name: "swapped key order is rejected",
+			mutate: func(m *Mapping) {
+				sm := portSheetMapping()
+				sm.KeyColumns = []string{"port_name", "device_ip"}
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "keyColumns",
+		},
+		{
+			name: "source headers as key columns are rejected",
+			mutate: func(m *Mapping) {
+				sm := portSheetMapping()
+				sm.KeyColumns = []string{"设备ip", "端口"}
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "keyColumns",
+		},
+		{
+			name: "unmapped required key field device_ip",
+			mutate: func(m *Mapping) {
+				sm := portSheetMapping()
+				delete(sm.ColumnMapping, "device_ip")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "device_ip",
+		},
+		{
+			name: "unmapped required key field port_name",
+			mutate: func(m *Mapping) {
+				sm := portSheetMapping()
+				delete(sm.ColumnMapping, "port_name")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "port_name",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Mapping{}
+			tc.mutate(&m)
+			err := Validate(m, headers)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("Validate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Validate: want error, got nil")
+			}
+			var fe *FieldError
+			if !errors.As(err, &fe) {
+				t.Fatalf("Validate error %v is not *FieldError", err)
+			}
+			if fe.Field != tc.wantField {
+				t.Errorf("FieldError.Field = %q, want %q", fe.Field, tc.wantField)
+			}
+		})
+	}
+}

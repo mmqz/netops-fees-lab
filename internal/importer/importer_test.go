@@ -17,6 +17,8 @@ import (
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 	"github.com/mmqz/netops-lab/internal/workbook"
+
+	"github.com/xuri/excelize/v2"
 )
 
 // testdataPath returns the path of a committed test artifact relative to
@@ -984,5 +986,226 @@ func TestServiceClock(t *testing.T) {
 	svc.Now = nil
 	if svc.clock().Before(fixed) {
 		t.Errorf("clock() with nil hook should fall back to time.Now")
+	}
+}
+
+// writeWorkbookFile builds an xlsx file with one sheet of raw string rows
+// (row 0 = header) at a temp path and returns the path. It mirrors the
+// testfixtures generator's excelize usage for synthetic test sheets.
+func writeWorkbookFile(t *testing.T, sheet string, rows [][]string) string {
+	t.Helper()
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	if sheet != "Sheet1" {
+		if err := f.SetSheetName("Sheet1", sheet); err != nil {
+			t.Fatalf("rename default sheet: %v", err)
+		}
+	}
+	for r, row := range rows {
+		for c, v := range row {
+			cell, err := excelize.CoordinatesToCellName(c+1, r+1)
+			if err != nil {
+				t.Fatalf("cell name: %v", err)
+			}
+			if err := f.SetCellStr(sheet, cell, v); err != nil {
+				t.Fatalf("write %s: %v", cell, err)
+			}
+		}
+	}
+	path := filepath.Join(t.TempDir(), "workbook.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("save workbook: %v", err)
+	}
+	return path
+}
+
+// portHeadersA mirrors the real telecom sheet's header row A
+// (samples/telecom-port-multi-header.xlsx, Sheet1): 12 business columns.
+var portHeadersA = []string{"地市", "区县", "设备名称", "设备ip", "端口", "端口ip", "端口带宽", "端口类型", "端口描述", "厂家", "型号", "日期"}
+
+// portMapping builds the confirmed mapping for the port type: composite key
+// (device_ip, port_name) against the header row A columns.
+func portMapping(sheet string) mapping.Mapping {
+	return mapping.Mapping{Sheets: []mapping.SheetMapping{{
+		Sheet:        sheet,
+		Action:       mapping.ActionImport,
+		ResourceType: domain.ResourceTypePort,
+		KeyColumns:   []string{"device_ip", "port_name"},
+		ColumnMapping: map[string]string{
+			"device_ip":      "设备ip",
+			"port_name":      "端口",
+			"port_desc":      "端口描述",
+			"port_type":      "端口类型",
+			"bandwidth_mbps": "端口带宽",
+			"city":           "地市",
+			"vendor":         "厂家",
+			"model":          "型号",
+			"record_date":    "日期",
+		},
+	}}}
+}
+
+// TestImportPortCompositeKeyAndHeaderRepeat drives the real telecom sheet
+// shape through the importer: a verbatim repeated header row (multi-segment
+// export concatenation) is skipped with a dedicated message and no issue,
+// the composite natural key (device_ip, port_name) drives E001 and
+// idempotent re-import, missing key fields fail E002 per field, and
+// bandwidth 0 imports (no IntMin on the port schema). A single-key device
+// import in the same database pins the legacy natural-key behavior.
+func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
+	svc, db := newService(t)
+	ctx := context.Background()
+
+	data1 := []string{"", "", "B2", "12.1.53.24", "bvi2.1008", "", "0", "业务口", "BBU_CT_1333", "中兴", "9000-3E", "2026-10-09"}
+	data2 := []string{"", "", "道西30米1", "4.8.2.5", "xgei-1/1/0/2.186", "", "1000", "业务口", "BBU_CU_108709", "中兴", "6120H-BL", "2026-10-09"}
+	noPort := []string{"", "", "X1", "5.6.7.8", "", "", "100", "业务口", "D", "华为", "S", "2026-10-09"}
+	noIP := []string{"", "", "X2", "", "gei-1/1/0/8", "", "100", "业务口", "D2", "华为", "S", "2026-10-09"}
+	rows := [][]string{
+		portHeadersA, // row 1: header A
+		data1,        // row 2: imported (bandwidth 0!)
+		portHeadersA, // row 3: verbatim repeated header row
+		data2,        // row 4: imported
+		data2,        // row 5: E001 duplicate of row 4 (same composite key)
+		noPort,       // row 6: E002 port_name empty
+		noIP,         // row 7: E002 device_ip empty
+	}
+	path := writeWorkbookFile(t, "Sheet1", rows)
+
+	a, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	// The real sheet name carries no type hint: the suggested mapping skips
+	// it and the user confirms the port mapping manually.
+	if a.SuggestedMapping.Sheets[0].Action != mapping.ActionSkip {
+		t.Fatalf("suggested action for Sheet1 = %q, want skip (no type hint)", a.SuggestedMapping.Sheets[0].Action)
+	}
+	sum, err := svc.Execute(ctx, a.BatchID, portMapping("Sheet1"))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if sum.Status != domain.BatchStatusCompleted ||
+		sum.RowsTotal != 6 || sum.RowsImported != 2 || sum.RowsSkipped != 1 || sum.RowsFailed != 3 {
+		t.Fatalf("summary = %+v, want completed 6 total / 2 imported / 1 skipped / 3 failed", sum)
+	}
+
+	// Row results: row 3 is the repeated header row.
+	rr, _, err := db.RowResults.List(ctx, repo.RowResultFilter{BatchID: a.BatchID})
+	if err != nil || len(rr) != 6 {
+		t.Fatalf("row results = %d (err %v), want 6", len(rr), err)
+	}
+	byRow := map[int]domain.RowResult{}
+	for _, r := range rr {
+		byRow[r.RowNumber] = r
+	}
+	headerRow := byRow[3]
+	if headerRow.Status != domain.RowStatusSkipped || headerRow.RuleCode != "" ||
+		!strings.Contains(headerRow.Message, "重复表头") {
+		t.Errorf("repeated header row result = %+v, want skipped without rule code and 重复表头 message", headerRow)
+	}
+	if headerRow.EntityID != "" {
+		t.Errorf("repeated header row entity id = %q, want empty", headerRow.EntityID)
+	}
+	if byRow[2].Status != domain.RowStatusImported || byRow[4].Status != domain.RowStatusImported {
+		t.Errorf("data rows 2/4 = %s/%s, want imported", byRow[2].Status, byRow[4].Status)
+	}
+	if byRow[5].Status != domain.RowStatusFailed || byRow[5].RuleCode != domain.RuleDuplicateKey {
+		t.Errorf("row 5 = %s/%s, want failed E001", byRow[5].Status, byRow[5].RuleCode)
+	}
+	if byRow[6].Status != domain.RowStatusFailed || byRow[6].RuleCode != domain.RuleMissingRequiredField {
+		t.Errorf("row 6 = %s/%s, want failed E002", byRow[6].Status, byRow[6].RuleCode)
+	}
+	if byRow[7].Status != domain.RowStatusFailed || byRow[7].RuleCode != domain.RuleMissingRequiredField {
+		t.Errorf("row 7 = %s/%s, want failed E002", byRow[7].Status, byRow[7].RuleCode)
+	}
+
+	// The repeated header row records NO issue; E001/E002 evidence carries
+	// the composite key.
+	issues := batchIssues(t, db, a.BatchID)
+	if len(issues) != 3 {
+		t.Fatalf("batch issues = %d, want 3 (E001 + 2x E002, header row records nothing)", len(issues))
+	}
+	var e001 domain.Issue
+	e002ByRow := map[string]domain.Issue{}
+	for _, iss := range issues {
+		switch iss.RuleCode {
+		case domain.RuleDuplicateKey:
+			e001 = iss
+		case domain.RuleMissingRequiredField:
+			e002ByRow[iss.Evidence["row_number"]] = iss
+		}
+	}
+	if e001.ID == "" || len(e002ByRow) != 2 {
+		t.Fatalf("missing E001/E002 issues: %+v", issues)
+	}
+	wantKey := "4.8.2.5|xgei-1/1/0/2.186"
+	if e001.Evidence["natural_key"] != wantKey || e001.Evidence["row_number"] != "5" ||
+		e001.Evidence["conflicting_row_number"] != "4" || e001.Evidence["type"] != "port" {
+		t.Errorf("E001 evidence = %v, want key %q conflicting row 4", e001.Evidence, wantKey)
+	}
+	// E002 reports the empty key field BY NAME: port_name at row 6,
+	// device_ip at row 7.
+	if e := e002ByRow["6"]; e.Evidence["field"] != "port_name" {
+		t.Errorf("E002(row 6) field = %q, want port_name", e.Evidence["field"])
+	}
+	if e := e002ByRow["7"]; e.Evidence["field"] != "device_ip" {
+		t.Errorf("E002(row 7) field = %q, want device_ip", e.Evidence["field"])
+	}
+
+	// Port resources: joined natural key, name from port_name, attributes
+	// carry the non-key fields (bandwidth 0 stored, keys never in attrs).
+	res1, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "12.1.53.24|bvi2.1008")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(port): %v", err)
+	}
+	if res1.Type != domain.ResourceTypePort || res1.Name != "bvi2.1008" {
+		t.Errorf("port resource = %s/%q, want port/bvi2.1008", res1.Type, res1.Name)
+	}
+	for field, want := range map[string]string{
+		"port_type": "业务口", "port_desc": "BBU_CT_1333", "bandwidth_mbps": "0",
+		"vendor": "中兴", "model": "9000-3E", "record_date": "2026-10-09",
+	} {
+		if res1.Attributes[field] != want {
+			t.Errorf("port attrs[%s] = %q, want %q", field, res1.Attributes[field], want)
+		}
+	}
+	if _, isKey := res1.Attributes["device_ip"]; isKey {
+		t.Errorf("port attrs must not contain the key field device_ip: %v", res1.Attributes)
+	}
+	if _, isKey := res1.Attributes["port_name"]; isKey {
+		t.Errorf("port attrs must not contain the key field port_name: %v", res1.Attributes)
+	}
+	if n, _ := db.Resources.CountByType(ctx); n[domain.ResourceTypePort] != 2 {
+		t.Errorf("port resources = %d, want 2 (bandwidth 0 imports)", n[domain.ResourceTypePort])
+	}
+
+	// Idempotent re-import: the same workbook skips the two existing rows,
+	// skips the header row again, and repeats the three deterministic
+	// failures.
+	a2, err := svc.Analyze(ctx, path)
+	if err != nil {
+		t.Fatalf("Analyze 2: %v", err)
+	}
+	sum2, err := svc.Execute(ctx, a2.BatchID, portMapping("Sheet1"))
+	if err != nil {
+		t.Fatalf("Execute 2: %v", err)
+	}
+	if sum2.RowsImported != 0 || sum2.RowsSkipped != 3 || sum2.RowsFailed != 3 || sum2.RowsTotal != 6 {
+		t.Fatalf("run 2 = %d/%d/%d/%d, want 0/3/3/6 (imported/skipped/failed/total)",
+			sum2.RowsImported, sum2.RowsSkipped, sum2.RowsFailed, sum2.RowsTotal)
+	}
+
+	// Single-key regression: a device import in the same database keeps the
+	// bare device_code natural key (the composite join must not leak a "|").
+	_, dSum := importWorkbook(t, svc, "devices.xlsx")
+	if dSum.RowsImported != 27 {
+		t.Fatalf("device import regression: imported = %d, want 27", dSum.RowsImported)
+	}
+	dev, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, "DEV-001")
+	if err != nil {
+		t.Fatalf("GetByTypeKey(device, DEV-001): %v", err)
+	}
+	if dev.NaturalKey != "DEV-001" || strings.Contains(dev.NaturalKey, "|") {
+		t.Errorf("device natural key = %q, want bare DEV-001 (single-key join is a no-op)", dev.NaturalKey)
 	}
 }

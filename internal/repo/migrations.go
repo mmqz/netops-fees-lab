@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -13,6 +14,18 @@ type Migration struct {
 	Version int
 	Name    string
 	SQL     string
+	// ForeignKeysOff runs the migration with PRAGMA foreign_keys=OFF. It is
+	// required by table REBUILDS (SQLite cannot ALTER a CHECK constraint in
+	// place): with enforcement on, DROP TABLE of a parent table runs an
+	// implicit DELETE that fires the children's ON DELETE CASCADE/SET NULL
+	// actions and would silently destroy rows, and RENAME would validate the
+	// transiently inconsistent schema. The flag follows the simplified safe
+	// variant of SQLite's official 12-step ALTER procedure: the pragma is
+	// flipped OUTSIDE the transaction on one dedicated connection, the
+	// rebuild runs inside the transaction, a foreign_key_check gate verifies
+	// integrity before commit, and the pragma is restored afterwards. Only
+	// migrations that actually rebuild parent tables may set it.
+	ForeignKeysOff bool
 }
 
 // migrations is the ordered, append-only list of schema versions. DDL is
@@ -156,8 +169,13 @@ func (d *DB) applyMigrations(ctx context.Context) error {
 }
 
 // applyMigration runs one migration and records it in schema_migrations
-// inside the same transaction.
+// inside the same transaction. ForeignKeysOff migrations run on a dedicated
+// connection (see the Migration struct doc); every other migration runs on
+// the connection pool exactly as before.
 func (d *DB) applyMigration(ctx context.Context, m Migration) error {
+	if m.ForeignKeysOff {
+		return d.applyMigrationFKOff(ctx, m)
+	}
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("repo: migration %d (%s): begin: %w", m.Version, m.Name, err)
@@ -166,15 +184,89 @@ func (d *DB) applyMigration(ctx context.Context, m Migration) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("repo: migration %d (%s): exec: %w", m.Version, m.Name, err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?,?,?)`,
-		m.Version, m.Name, formatTime(time.Now().UTC()),
-	); err != nil {
+	if err := recordMigration(ctx, tx, m); err != nil {
 		_ = tx.Rollback()
-		return fmt.Errorf("repo: migration %d (%s): record: %w", m.Version, m.Name, err)
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("repo: migration %d (%s): commit: %w", m.Version, m.Name, err)
 	}
 	return nil
+}
+
+// applyMigrationFKOff executes a ForeignKeysOff migration on one dedicated
+// pooled connection: PRAGMA foreign_keys is disabled outside any
+// transaction (it is a no-op inside one), the SQL plus the bookkeeping
+// insert run in one transaction on that same connection, PRAGMA
+// foreign_key_check must come back empty before the commit, and the pragma
+// is restored afterwards so the connection returns to the pool with
+// enforcement re-enabled — the simplified safe form of SQLite's official
+// 12-step ALTER procedure.
+func (d *DB) applyMigrationFKOff(ctx context.Context, m Migration) error {
+	conn, err := d.sql.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("repo: migration %d (%s): acquire connection: %w", m.Version, m.Name, err)
+	}
+	// Close returns the connection to the pool; the deferred restore keeps
+	// its foreign_keys state identical to a freshly opened one.
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("repo: migration %d (%s): disable foreign keys: %w", m.Version, m.Name, err)
+	}
+	var restoreErr error
+	defer func() {
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); err != nil {
+			restoreErr = fmt.Errorf("repo: migration %d (%s): re-enable foreign keys: %w", m.Version, m.Name, err)
+		}
+	}()
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("repo: migration %d (%s): begin: %w", m.Version, m.Name, err)
+	}
+	if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("repo: migration %d (%s): exec: %w", m.Version, m.Name, err)
+	}
+	// Integrity gate of the 12-step procedure, run INSIDE the transaction so
+	// a violation rolls the whole migration back instead of leaving an
+	// applied but broken schema behind.
+	if err := requireNoFKViolations(ctx, tx, m); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := recordMigration(ctx, tx, m); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("repo: migration %d (%s): commit: %w", m.Version, m.Name, err)
+	}
+	return restoreErr
+}
+
+// recordMigration inserts the bookkeeping row of m into schema_migrations.
+func recordMigration(ctx context.Context, tx *sql.Tx, m Migration) error {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?,?,?)`,
+		m.Version, m.Name, formatTime(time.Now().UTC()),
+	); err != nil {
+		return fmt.Errorf("repo: migration %d (%s): record: %w", m.Version, m.Name, err)
+	}
+	return nil
+}
+
+// requireNoFKViolations fails when PRAGMA foreign_key_check reports any row
+// (a violated foreign key somewhere in the database).
+func requireNoFKViolations(ctx context.Context, tx *sql.Tx, m Migration) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("repo: migration %d (%s): foreign_key_check: %w", m.Version, m.Name, err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return fmt.Errorf("repo: migration %d (%s): foreign key violation after rebuild", m.Version, m.Name)
+	}
+	return rows.Err()
 }

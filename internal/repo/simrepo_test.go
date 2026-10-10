@@ -209,15 +209,15 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 
 	db2, err := Open(path)
 	if err != nil {
-		t.Fatalf("second Open (v5 → v6): %v", err)
+		t.Fatalf("second Open (v5 → v6 → v7): %v", err)
 	}
 	defer db2.Close()
 	var maxV int
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 6 {
-		t.Errorf("max schema version after upgrade = %d, want 6", maxV)
+	if maxV != 7 {
+		t.Errorf("max schema version after upgrade = %d, want 7", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -242,6 +242,27 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 		t.Errorf("geo round-trip after upgrade = %v/%v, want %v/%v", got.GeoLat, got.GeoLng, lat, lng)
 	}
 
+	// v7 (port resource type): the rebuilt resources CHECK accepts 'port'.
+	// Before v7 the same INSERT failed with a CHECK constraint error — the
+	// regression the migration exists to fix. The rebuild also preserved the
+	// FK graph: first_batch_id still enforces its reference.
+	batchID := "bat_v7_port"
+	if err := db2.Do(ctx, func(tx *Tx) error {
+		if err := tx.Batches.Create(ctx, newBatch(batchID, simTS)); err != nil {
+			return err
+		}
+		return tx.Resources.Insert(ctx, domain.Resource{
+			Type: domain.ResourceTypePort, NaturalKey: "12.1.53.24|bvi2.1008",
+			Name: "bvi2.1008", Attributes: map[string]string{"vendor": "中兴"},
+			FirstBatchID: batchID, CreatedAt: simTS, UpdatedAt: simTS,
+		})
+	}); err != nil {
+		t.Fatalf("insert port resource after v7 upgrade: %v", err)
+	}
+	if _, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "12.1.53.24|bvi2.1008"); err != nil {
+		t.Fatalf("GetByTypeKey(port) after v7 upgrade: %v", err)
+	}
+
 	// Reopening again must be a no-op (idempotent migration).
 	db3, err := Open(path)
 	if err != nil {
@@ -251,8 +272,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 6 {
-		t.Errorf("max schema version after reopen = %d, want 6", maxV)
+	if maxV != 7 {
+		t.Errorf("max schema version after reopen = %d, want 7", maxV)
 	}
 }
 

@@ -24,7 +24,7 @@ func (s *Server) handleResourcesList(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("type"); raw != "" {
 		t, err := domain.ParseResourceType(raw)
 		if err != nil {
-			respondErrorf(w, http.StatusBadRequest, "bad_request", "type 参数 %q 不是 device/ip_pool/circuit", raw)
+			respondErrorf(w, http.StatusBadRequest, "bad_request", "type 参数 %q 不是 device/ip_pool/circuit/port", raw)
 			return
 		}
 		filter.Type = t

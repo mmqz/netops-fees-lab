@@ -154,15 +154,14 @@ func (s *Service) executeSheets(ctx context.Context, tx *repo.Tx, batch domain.I
 		}
 		sheet, ok := byName[sm.Sheet]
 		spec, specOK := mapping.SpecByType(sm.ResourceType)
-		keyField, keyOK := spec.NaturalKeyField()
-		if !ok || !specOK || !keyOK {
+		keyNames := spec.NaturalKeyNames()
+		if !ok || !specOK || len(keyNames) == 0 {
 			// Validate already guarantees these; defensive only.
 			return counts, fmt.Errorf("importer: sheet %q (type %s) failed validation", sm.Sheet, sm.ResourceType)
 		}
 		st.spec = spec
 		st.sheet = sheet
 		st.sm = sm
-		st.keyField = keyField.Name
 		st.nameField = spec.NameField()
 
 		results := make([]domain.RowResult, 0, len(sheet.Rows))
@@ -223,7 +222,6 @@ type sheetState struct {
 	spec      mapping.TypeSpec
 	sheet     *workbook.Sheet
 	sm        *mapping.SheetMapping
-	keyField  string
 	nameField string
 }
 
@@ -249,7 +247,20 @@ type resolvedRef struct {
 // failed rows and return nil.
 func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results *[]domain.RowResult) error {
 	vals := st.mappedValues(row)
-	// Combined 经纬度 split (device sheets only — the geo field exists in
+	// Repeated header row (v0.3.1): multi-segment exports (the real telecom
+	// sheets) splice the header row back into the data area. Skip it before
+	// any rule runs — it is not a data row and must not fail E002/E004.
+	if st.isRepeatedHeaderRow(row) {
+		*results = append(*results, domain.RowResult{
+			BatchID:   st.batch.ID,
+			Sheet:     st.sheet.Name,
+			RowNumber: row.Number,
+			Status:    domain.RowStatusSkipped,
+			Message:   "跳过重复表头行（多段导出拼接）",
+		})
+		return nil
+	}
+	// Combined 经纬度 split (device/port sheets — the geo field exists in
 	// no other schema): when the combined column is mapped and the split
 	// 纬度/经度 columns are not both provided from their own columns, derive
 	// geo_lat/geo_lng now, BEFORE the E004 loop, so the derived values pass
@@ -257,24 +268,29 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	// columns. An unparseable combined value is left un-split and fails
 	// E004 on the geo field below.
 	splitGeoCombined(vals)
-	key := vals[st.keyField]
 	rt := st.spec.Type.String()
 	var warns []pendingWarning
 
-	// E002: the natural key must be present.
-	if key == "" {
-		return st.failRow(ctx, row, results, domain.RuleMissingRequiredField,
-			fmt.Sprintf("必填字段 %s.%s 为空", rt, st.keyField),
-			map[string]string{"type": rt, "field": st.keyField, "raw_value": ""})
-	}
-	// E002: every other required field must be present.
+	// E002: every required field must be present — the natural key field(s)
+	// first (spec field order; key fields lead every schema, so single-key
+	// types keep their historic error order), then the other required
+	// fields. Key values are collected on the way for the composite join.
+	var keyVals []string
 	for _, f := range st.spec.Fields {
-		if f.Required && !f.NaturalKey && vals[f.Name] == "" {
+		if f.Required && vals[f.Name] == "" {
 			return st.failRow(ctx, row, results, domain.RuleMissingRequiredField,
 				fmt.Sprintf("必填字段 %s.%s 为空", rt, f.Name),
 				map[string]string{"type": rt, "field": f.Name, "raw_value": ""})
 		}
+		if f.NaturalKey {
+			keyVals = append(keyVals, vals[f.Name])
+		}
 	}
+	// Composite natural key (v0.3.1): key values joined by "|" in spec
+	// field order. A single-key type joins one element — the joined key is
+	// exactly the historic single-field key, so device/ip_pool/circuit
+	// behave (and hash) identically. Port's key is "<device_ip>|<port_name>".
+	key := strings.Join(keyVals, "|")
 
 	// E004 / W002: value formats. A bad ipv4/cidr/int fails the row; an
 	// unknown enum (status) value is a warning — the row imports, the status
@@ -509,6 +525,28 @@ func splitGeoCombined(vals map[string]string) {
 	}
 	vals["geo_lat"] = mapping.FormatGeoFloat(lat)
 	vals["geo_lng"] = mapping.FormatGeoFloat(lng)
+}
+
+// isRepeatedHeaderRow reports whether row repeats the sheet's header row
+// verbatim (multi-segment export concatenation, e.g. row 3 of the real
+// telecom port sheet): at least 3 non-empty cells and EVERY non-empty cell
+// equal to its column header. A genuine data row whose values merely
+// coincide with a few headers stays below the 3-cell bar (fully-empty rows
+// never reach the importer); a header row of another export style (header
+// B of the multi-header sheet) differs in at least one mapped cell and
+// flows through the normal rules, failing E002/E004 with clear evidence.
+func (st *sheetState) isRepeatedHeaderRow(row workbook.Row) bool {
+	nonEmpty := 0
+	for header, v := range row.Values {
+		if v == "" {
+			continue
+		}
+		nonEmpty++
+		if v != header {
+			return false
+		}
+	}
+	return nonEmpty >= 3
 }
 
 // mappedValues extracts the trimmed raw value of every mapped target field
