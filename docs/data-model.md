@@ -366,3 +366,50 @@ ALTER TABLE virtual_devices ADD COLUMN geo_lng REAL;  -- nullable，NULL = 无�
 - 拓扑 API（`sim/reads.go`）：`TopologyNode.GeoLat/GeoLng *float64`，JSON `geoLat`/`geoLng`（`omitempty` —— 无位置节点不带键）。
 - 撤销路径：`delete_device` 的逆操作快照 `DeviceSnap` 携带 `geoLat`/`geoLng`（camelCase；v6 之前的 inverse_json 行缺键解码为 nil，恢复成无位置——无害，geo 不入哈希）。
 - **已知边界（诚实清单）**：检查点恢复重建被删设备走 `create_device`（封闭操作面无 geo 字段）→ 该设备坐标不随快照重建（哈希不受影响，撤销路径不受影响）；前端 2D/3D 地图视图随下一任务交付。
+
+# DDL v7 — port 资源类型（真实电信端口表导入）
+
+> Migration `7` name `port_resource_type`（`internal/repo/migrations_v7.go`，经 `init()` 追加 + 按版本排序注册，机制同 v4/v5/v6）。**当前 schema version = 7**（本文之上的 v6 章节描述保持历史原貌）。`resources` 表的 `resource_type` CHECK 扩展 `'port'`；其余表不动（port 无 Phase 1 工作台实体、无派生关系）。
+
+## 10. 设备端口资源（port schema）
+
+面向真实电信端口工作簿（`samples/telecom-port-multi-header.xlsx`：端口流量监控表 / 端口资源表两种表头形态）。**复合自然键**：`device_ip + port_name`（端口名跨设备重复，必须连同设备 IP 才唯一）；导入器按 spec 字段序以 `|` 连接键值落 `resources.natural_key`（如 `12.1.53.24|bvi2.1008`）。**单键类型零扰动**：单元素 join 恒等原值，device/ip_pool/circuit 的键、E001 证据、幂等重导行为逐字节不变（同库回归测试钉死）。
+
+### 10.1 目标 schema（全部可选字段除键外）
+
+| 字段 | 标签 | Kind | 约束 | 同义词（节选） |
+| --- | --- | --- | --- | --- |
+| `device_ip` | 设备IP | ipv4 | **必填·自然键** | 设备IP地址, 设备ip, 设备IP, 网元IP |
+| `port_name` | 端口名称 | string | **必填·自然键** | 端口名称, 端口名, 端口 |
+| `port_desc` / `port_type` / `admin_status` / `oper_status` / `device_type` / `district` / `record_date` | … | string | — | 端口描述 / 端口类型 / 管理状态 / 运行状态 / 设备类型 / 区县 / 日期 |
+| `bandwidth_mbps` | 带宽Mbps | int | **无 IntMin**（真实表带宽可为 0） | 端口带宽, 端口速率(M), 速率 |
+| `city` / `vendor` / `model` | … | string | — | 地市, 城市通用同义词族 |
+| `geo_lat` / `geo_lng` / `geo` | 纬度/经度/经纬度 | lat/lng/geo | 同设备 §9.1 | 同设备 §9.1（基站端口表可携带坐标） |
+
+设计决策：`device_ip` 保持 ipv4 值列（**非 device ref**）——端口工作簿是自含导出，其设备行可能尚未入库，E003 引用失败会拒绝整表；端口与设备的关联由 IP 值匹配承担，不建派生关系（`relation_type` 枚举不动）。sheet 名含 `端口` 提示 port 类型（`设备端口表` 类含 `设备` 的名字仍按 Specs 顺序提示 device——确定性优先）。
+
+### 10.2 重复表头行（多段导出拼接）
+
+真实多表头工作簿会把表头行拼回数据区（样例 Sheet1 的第 3 行与首行表头逐字相同）。导入器在行规则之前检测：**≥3 个非空单元格且每个非空单元格等于其列头** → 判定重复表头行，行结果 `skipped`（message `跳过重复表头行（多段导出拼接）`，rule_code 留空，不记 issue）。另一种表头形态（表头 B）与表头 A 至少一个映射列不同 → 走正常行规则，E002/E004 失败且证据清晰（样例第 5/6 行即此路径）。
+
+### 10.3 DDL v7 全文（FK 安全的表重建）
+
+```sql
+CREATE TABLE resources_new (
+  id TEXT PRIMARY KEY,
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('device','ip_pool','circuit','port')),
+  natural_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  attributes TEXT NOT NULL DEFAULT '{}',
+  status TEXT,
+  first_batch_id TEXT NOT NULL REFERENCES import_batches(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (resource_type, natural_key)
+);
+INSERT INTO resources_new (…全列…) SELECT …全列… FROM resources;
+DROP TABLE resources;
+ALTER TABLE resources_new RENAME TO resources;
+```
+
+SQLite 无法 ALTER CHECK，需重建表；`DROP TABLE resources` 在外键约束开启时会触发隐式 DELETE（relations 的 ON DELETE CASCADE、sim 表的 SET NULL——静默丢数据）。v7 为首个 `ForeignKeysOff` 迁移：专用连接**事务外** `PRAGMA foreign_keys=OFF` → 事务内重建 → `PRAGMA foreign_key_check` 空结果门禁（违例即整体回滚）→ commit 后恢复 FK ON 归还连接池。普通迁移路径行为逐字节不变。

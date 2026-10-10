@@ -85,7 +85,7 @@ import {
   ROW_STATUS_LABELS,
   SEVERITY_LABELS,
 } from '../i18n';
-import { fieldsForType, fieldLabel, naturalKeyField, requiredFields } from '../schema';
+import { fieldsForType, fieldLabel, naturalKeyFields, requiredFields } from '../schema';
 import type { FieldSpec } from '../schema';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
@@ -171,7 +171,7 @@ function buildMapping(drafts: SheetDraft[]): MappingModel {
             sheet: draft.sheet,
             action: 'import',
             resourceType: draft.resourceType,
-            keyColumns: [naturalKeyField(draft.resourceType)],
+            keyColumns: naturalKeyFields(draft.resourceType),
             columnMapping: draft.columnMapping,
           }
         : { sheet: draft.sheet, action: 'skip' },
@@ -364,7 +364,7 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
             </span>
             <span className="muted-note">
               {format(IMP_NATURAL_KEY_HINT, {
-                field: fieldLabel(naturalKeyField(draft.resourceType)),
+                field: naturalKeyFields(draft.resourceType).map(fieldLabel).join(' + '),
               })}
             </span>
           </div>

@@ -2,6 +2,26 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.3.1] — 2026-10-10
+
+**真实表格导入 + 3D 比例修复版**（用户需求驱动：「这个是可导入的多个表格示例，还有这个 3D 地图太过于大了，应该根据所有的点调整默认展示比例」）。
+
+### 修复 — 3D 地图默认视野（用户点名的核心 bug）
+- **根因**（三层，逐层排查收敛）：① 首批数据 fitBounds 与视图切换 easeTo 并发互相打断——相机停在 DEFAULT_CENTER 而非数据区；② MapLibre 的 pitch 感知 fitBounds「恰好容纳」解在大倾角下过于保守（黑龙江数据实测 zoom 2.84 ≈ 全球视野，塔群挤成一撮占屏宽 ~3%）；③ `fitGeoBounds` 读瞬时 pitch 在「挂载即 3D」时误判为 2D。
+- **修复**：`fitGeoBounds(map, data, view)` 按**目标视图**适配；3D 分支弃用黑盒解，改用**墨卡托几何直解** `zoomForBBox3D`（bbox 弧度宽/高 × 容器像素 × 斜视压缩系数 → 塔群占屏宽 ~55%、等效高 ~30%，clamp [3, 7.2]），center 取质心 + 18% 纬度北移（pitch 58 的地面投影中心偏下补偿）；挂载初始 pitch/bearing 按目标视图设置（消除切换动画与首批 fit 的竞态）；2D↔3D 切换保留 zoom ±1.3 补偿（等效覆盖守恒）。
+- **验证**：相机实测 (zoom 7.2, center 124.59/50.65, pitch 58) 与手算公式解**逐项吻合**；VLM 终评四项全过（塔群居中长条分布、塔/标签/链路可辨、构图专业无渲染错误）；F 键「适配视图」同路径生效。
+
+### 新增 — port 资源类型（真实电信端口工作簿导入）
+- 真实样例入库 `samples/telecom-port-multi-header.xlsx`（一个 sheet 内两种表头形态 + 逐字重复表头行的多段导出拼接）；导入端到端：2 imported（含带宽 0）/ 1 skipped（重复表头）/ 2 failed（表头 B 行走正常 E004 证据链）。
+- migration **v7**（`port_resource_type`，首个 `ForeignKeysOff` 迁移）：resources 的 CHECK 重建扩展 `'port'`（专用连接事务外关 FK → 事务内全列复制重建 → `foreign_key_check` 空结果门禁 → 恢复 FK）；virtual_devices 不动（v6 已含 geo 列）。
+- `portSpec` 16 字段：**复合自然键** `device_ip + port_name`（`|` 连接落库，如 `12.1.53.24|bvi2.1008`；单键类型 join 恒等原值，零行为扰动）；`bandwidth_mbps` 无 IntMin（真实表带宽可为 0）；`device_ip` 保持 ipv4 值列而非 device ref（端口工作簿自含导出，设备行可未入库，避免 E003 拒整表）；含 geo_lat/geo_lng/geo 同设备可选坐标列。
+- 导入器**复合自然键**改造（E002/E001/幂等重导/`lookupExisting` 全走拼接键）；**重复表头行**检测跳过（≥3 非空格且逐格等于列头 → skipped 专属消息、零 issue）。
+- 前端：`ResourceType + 'port'`；`TYPE_SPECS` port 镜像 + `naturalKeyFields()` 数组化（keyColumns 双键全量）；device 补 geo 三列前端镜像（v0.3.0 的 UI 缺口——此前界面上无法映射「装机经纬度」列）；i18n 全量标签 + `chip--port` 徽章。
+
+### 测试
+- Go 194 → **200**（+6：port 建议/复合键校验 ×4、port 导入端到端（含表头跳过/复合 E001/E002/幂等/单键回归）、迁移 v7 升级含 port 落库断言）；既有断言零删除零放宽，仅 `TestMigrationV6UpgradesV5Database` 的版本期望 6 → 7（v7 自动级联，契约演进）。
+- `gofmt -l .` 空 · `go vet` 干净 · 14 包全 ok · `tsc -b` 0 错误 · `npm run build` ✓。
+
 ## [0.3.0] — 2026-10-10
 
 **地理视图版**（用户需求驱动：「能把现实地理 2D 地图和 3D 地图也纳入设计吗？可以视角切换」）：设备地理坐标全链路管道（导入列 → 资源属性 → 虚拟设备 → 拓扑 API）+ 画布三视图切换（**拓扑图 | 2D 地图 | 3D 地图**，MapLibre GL 懒加载）——真实深色地理底图上按经纬度落设备、链路状态分色、3D 倾斜视角塔体、视角切换与表格双向联动。**红线：geo 绝不进入规范状态哈希**——坐标是展示元数据，含/不含坐标的同业务状态哈希逐字节一致（回归测试双层证明）。194 个 Go 测试全绿；tsc 0 错误；浏览器控制台零警告零错误。

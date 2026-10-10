@@ -104,6 +104,11 @@ const CAMERA_TRANSITION_MS = 700;
 /** fitBounds 留白与缩放上限（首个数据批次与「适配视图」共用）。 */
 const FIT_PADDING_PX = 80;
 const FIT_MAX_ZOOM = 9;
+/** 3D 斜视的 zoom 上限（单点场景 / 相机解的近端夹紧）。 */
+const FIT3D_MAX_ZOOM = 7.2;
+/** 3D 斜视补偿级数：俯视解 zoom − 1.3 = 斜视等效覆盖（58° 倾角垂直压缩 +
+ *  底部地面余量）；也用于 2D↔3D 切换时的 zoom 补偿。 */
+const ZOOM_3D_STEP_BACK = 1.3;
 
 /** 初始相机（数据到达前）：中国中心，等待 fitBounds。 */
 const DEFAULT_CENTER: [number, number] = [105, 36];
@@ -475,18 +480,70 @@ function applyTowerVisibility(map: MLMap, view: 'geo2d' | 'geo3d'): void {
   }
 }
 
-function fitGeoBounds(map: MLMap, data: GeoData): void {
+/**
+ * fitGeoBounds：按**目标视图**适配相机（v0.3.1）。
+ *
+ * 2D：沿用 v0.3.0 的 fitBounds（平视假设正确，行为已验收）。
+ *
+ * 3D：不用 MapLibre 的 fitBounds/cameraForBounds——它们的「恰好容纳」解在
+ * 大倾角下过于保守（塔群挤成一撮占屏宽 ~3%，实测 zoom 2.84 相当于全球
+ * 视野），而 2D 假设的解在斜视下又怼脸。正解是墨卡托几何直解：给定容器
+ * 像素与 bbox 弧度跨度，让塔群占屏宽 ~55%、等效高 ~30%（斜视垂直压缩），
+ * clamp [3, 7.2]。一次 easeTo 把 pitch/bearing/zoom/center 全部到位。
+ */
+function fitGeoBounds(map: MLMap, data: GeoData, view: 'geo2d' | 'geo3d'): void {
   if (data.bbox === null) return;
   const duration = prefersReducedMotion() ? 0 : 600;
   const center: [number, number] = [
     (data.bbox[0][0] + data.bbox[1][0]) / 2,
     (data.bbox[0][1] + data.bbox[1][1]) / 2,
   ];
+  if (view === 'geo3d') {
+    if (data.deviceCount === 1) {
+      map.easeTo({ center, zoom: FIT3D_MAX_ZOOM, pitch: PITCH_3D, bearing: BEARING_3D, duration });
+      return;
+    }
+    const rect = map.getContainer().getBoundingClientRect();
+    const zoom = zoomForBBox3D(data.bbox, rect.width, rect.height);
+    // center 北移 ~18% 的 bbox 高：pitch 58 的地面投影中心偏屏幕下方，
+    // 北移让塔群落在屏幕中央条带。
+    const latSpan = data.bbox[1][1] - data.bbox[0][1];
+    map.easeTo({
+      center: [center[0], center[1] + latSpan * 0.18],
+      zoom, pitch: PITCH_3D, bearing: BEARING_3D, duration,
+    });
+    return;
+  }
   if (data.deviceCount === 1) {
     map.easeTo({ center, zoom: FIT_MAX_ZOOM, duration });
     return;
   }
   map.fitBounds(data.bbox, { padding: FIT_PADDING_PX, maxZoom: FIT_MAX_ZOOM, duration });
+}
+
+/**
+ * 3D 斜视的 bbox → zoom 直解（纯函数，可用手算复核）：
+ * 世界像素宽 256·2^z 对应 2π 弧度。要求 bbox 弧度宽占容器宽 TOWER_FIT_W3D
+ * （0.55），墨卡托弧度高占容器高 TOWER_FIT_H3D（0.30 —— 斜视把垂直跨度
+ * 压缩到约一半再留地面余量）。zoom 取两个约束的较小者并夹紧。
+ *
+ * 手算复核（黑龙江孪生 bbox ≈ lng 122.5..130.4 / lat 43.5..53，容器
+ * 564×359）：bw = 7.9°·rad = 0.138；mercY(53)−mercY(43.5) ≈ 0.248；
+ * zw = log2(564·2π / (256·0.55·0.138)) ≈ 7.5；zh = log2(359·2π /
+ * (256·0.30·0.248)) ≈ 6.9 → zoom 6.9（塔群占屏宽 ~55%）。
+ */
+const TOWER_FIT_W3D = 0.55;
+const TOWER_FIT_H3D = 0.3;
+function zoomForBBox3D(bbox: [[number, number], [number, number]], wPx: number, hPx: number): number {
+  const rad = Math.PI / 180;
+  const mercY = (lat: number): number => Math.log(Math.tan(Math.PI / 4 + (lat * rad) / 2));
+  const bw = Math.max((bbox[1][0] - bbox[0][0]) * rad, 1e-4);
+  const bh = Math.max(Math.abs(mercY(bbox[1][1]) - mercY(bbox[0][1])), 1e-4);
+  const w = Math.max(wPx, 120);
+  const h = Math.max(hPx, 90);
+  const zw = Math.log2((w * 2 * Math.PI) / (256 * TOWER_FIT_W3D * bw));
+  const zh = Math.log2((h * 2 * Math.PI) / (256 * TOWER_FIT_H3D * bh));
+  return Math.min(FIT3D_MAX_ZOOM, Math.max(3, Math.min(zw, zh)));
 }
 
 /**
@@ -611,8 +668,11 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         style: buildGeoStyle(true),
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
-        pitch: PITCH_2D,
-        bearing: 0,
+        // 初始 pitch/bearing 按目标视图设置（v0.3.1）：否则「挂载即 3D」时
+        // view effect 会发 easeTo 纠正 pitch，打断首批 fitBounds 动画——
+        // 相机停在 DEFAULT_CENTER，正是「3D 视图怼脸/不飞向数据」的竞态根因。
+        pitch: viewRef.current === 'geo3d' ? PITCH_3D : PITCH_2D,
+        bearing: viewRef.current === 'geo3d' ? BEARING_3D : 0,
         attributionControl: { compact: true },
       });
       localMap = map;
@@ -727,9 +787,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     if (tsrc !== undefined) tsrc.setData(buildTowerCollection(topology, map.getZoom()));
     if (!didFitRef.current && geoData.deviceCount > 0) {
       didFitRef.current = true;
-      fitGeoBounds(map, geoData);
+      fitGeoBounds(map, geoData, view);
     }
-  }, [geoData, sourcesReady, topology]);
+  }, [geoData, sourcesReady, topology, view]);
 
   // —— 地标（HTML Marker）：设备增删/状态变化重建；选中与标签走类切换 ——
   const rebuildMarkers = useCallback((): void => {
@@ -812,7 +872,10 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     const pitch = view === 'geo3d' ? PITCH_3D : PITCH_2D;
     const bearing = view === 'geo3d' ? BEARING_3D : 0;
     if (Math.abs(map.getPitch() - pitch) < 0.01 && Math.abs(map.getBearing() - bearing) < 0.01) return;
-    map.easeTo({ pitch, bearing, duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS });
+    // zoom 补偿（v0.3.1）：58° 斜视放大近景、等效覆盖缩小——进 3D 后退
+    // ZOOM_3D_STEP_BACK 级、回 2D 还原，让切换前后「看到的范围」保持一致。
+    const zoom = Math.min(15, Math.max(1, map.getZoom() + (view === 'geo3d' ? -ZOOM_3D_STEP_BACK : ZOOM_3D_STEP_BACK)));
+    map.easeTo({ pitch, bearing, zoom, duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS });
   }, [view, sourcesReady]);
 
   // —— 故障链路虚线动画（marching-ants）：仅存在 down 链路且未偏好减少动效时运行 ——
@@ -851,7 +914,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       fitView: () => {
         const map = mapRef.current;
         if (map === null || geoDataRef.current === null) return;
-        fitGeoBounds(map, geoDataRef.current);
+        fitGeoBounds(map, geoDataRef.current, viewRef.current);
       },
       resetNorth: () => {
         const map = mapRef.current;

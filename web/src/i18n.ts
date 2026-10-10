@@ -26,7 +26,7 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.3.0';
+export const APP_VERSION = 'v0.3.1';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -103,6 +103,7 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
   device: '网元设备',
   ip_pool: 'IP地址池',
   circuit: '传输电路',
+  port: '设备端口',
 };
 
 export const RESOURCE_STATUS_LABELS: Record<string, string> = {
@@ -172,6 +173,18 @@ export const FIELD_LABELS: Record<string, string> = {
   a_end_device: 'A端设备',
   z_end_device: 'Z端设备',
   bandwidth_mbps: '带宽(Mbps)',
+  device_ip: '设备IP',
+  port_name: '端口名称',
+  port_desc: '端口描述',
+  port_type: '端口类型',
+  admin_status: '管理状态',
+  oper_status: '运行状态',
+  device_type: '设备类型',
+  district: '区县',
+  record_date: '日期',
+  geo_lat: '纬度',
+  geo_lng: '经度',
+  geo: '经纬度',
 };
 
 export const FIELD_KIND_LABELS: Record<string, string> = {
@@ -181,6 +194,9 @@ export const FIELD_KIND_LABELS: Record<string, string> = {
   int: '整数',
   enum: '枚举',
   ref: '引用',
+  lat: '纬度',
+  lng: '经度',
+  geo: '经纬度',
 };
 
 export const RESOURCE_STATUS_VALUES: string[] = ['在网', '停用', '在建', '退网'];
