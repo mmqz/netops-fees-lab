@@ -60,6 +60,7 @@ import {
   IMP_NATURAL_KEY_IP_SHORT,
   IMP_NATURAL_KEY_IP_WARNING,
   IMP_NATURAL_KEY_NAME_SCOPE,
+  IMP_NATURAL_KEY_PORT_COMPOSITE,
   IMP_NATURAL_KEY_TAG,
   IMP_NO_ROWS,
   IMP_OPT_UNMAPPED,
@@ -256,17 +257,25 @@ function confidenceChip(confidence: number): ReactElement | null {
   return null;
 }
 
-// R4 短期项 2：自然键稳定性提示（仅展示提示，不改 keyColumns / TYPE_SPECS 数据）
-/** 目标字段是否为 IP 类自然键（如 port 的 device_ip）：IP 属可变属性，作键有分裂风险。 */
+// R4 短期项 2（v0.3.2）+ W1-D（migration v8）：自然键稳定性提示（仅展示提示，不改
+// keyColumns 逻辑；TYPE_SPECS 的 port 键定义已随 migration v8 在 schema.ts 更新）
+/** 目标字段是否为 IP 类自然键：IP 属可变属性，作键有分裂风险
+ *  （migration v8 后四类均无 IP 自然键，防御性保留供未来类型）。 */
 function isIpNaturalKeyField(field: string, type: ResourceType): boolean {
   if (field === '') return false;
   const spec = fieldsForType(type).find((f) => f.field === field);
   return spec !== undefined && spec.naturalKey && spec.field.includes('ip');
 }
 
-/** 该类型的自然键是否含名称类字段（如 pool_name / port_name）：需保证唯一作用域。 */
+/** 该类型的自然键是否含名称类字段（如 pool_name）：需保证唯一作用域。 */
 function hasNameNaturalKey(type: ResourceType): boolean {
   return naturalKeyFields(type).some((field) => field.includes('name'));
+}
+
+/** 该类型是否为 port 复合键（device_name|port_name，migration v8 起）：
+ *  键已锚定设备名称，展示 port 专属正向提示而非通用名称作用域文案。 */
+function isPortCompositeKey(type: ResourceType): boolean {
+  return type === 'port';
 }
 
 function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChange }: SheetCardProps) {
@@ -398,11 +407,18 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
               })}
             </span>
           </div>
-          {hasNameNaturalKey(draft.resourceType) && (
+          {isPortCompositeKey(draft.resourceType) ? (
             <span className="key-note key-note--info">
               <IconInfo size={14} />
-              <span>{IMP_NATURAL_KEY_NAME_SCOPE}</span>
+              <span>{IMP_NATURAL_KEY_PORT_COMPOSITE}</span>
             </span>
+          ) : (
+            hasNameNaturalKey(draft.resourceType) && (
+              <span className="key-note key-note--info">
+                <IconInfo size={14} />
+                <span>{IMP_NATURAL_KEY_NAME_SCOPE}</span>
+              </span>
+            )
           )}
           {errors.length > 0 && (
             <ul className="form-error-list" role="alert">

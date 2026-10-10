@@ -276,6 +276,13 @@ type TypeSpec struct {
 	// SheetHint is a sheet-name substring that suggests this type
 	// (设备→device, 池→ip_pool [matches 地址池 too], 电路→circuit).
 	SheetHint string
+	// NameFieldOverride pins the field whose value becomes the resource
+	// Name when the default NameField heuristic (first *_name field)
+	// picks the wrong one: port carries BOTH device_name and port_name,
+	// and the port's own name (port_name) is the display name —
+	// device_name is the scope component of the natural key, not the
+	// port's name. Empty = the heuristic applies unchanged.
+	NameFieldOverride string
 	// Fields lists the target fields in canonical order.
 	Fields []FieldSpec
 }
@@ -290,8 +297,9 @@ func (t TypeSpec) Field(name string) (FieldSpec, bool) {
 	return FieldSpec{}, false
 }
 
-// NaturalKeyField returns the natural key field of the type. Every §6 type
-// has exactly one.
+// NaturalKeyField returns the first natural key field of the type. §6 types
+// have exactly one, port has two (device_name + port_name) — prefer
+// NaturalKeyFields for composite-aware code.
 func (t TypeSpec) NaturalKeyField() (FieldSpec, bool) {
 	for _, f := range t.Fields {
 		if f.NaturalKey {
@@ -313,9 +321,14 @@ func (t TypeSpec) NaturalKeyNames() []string {
 }
 
 // NameField returns the field whose value becomes the resource Name: the
-// first field whose name ends in "_name", else the natural key field. For
-// the §6 schemas this yields device_name / pool_name / circuit_code.
+// NameFieldOverride when set, else the first field whose name ends in
+// "_name", else the natural key field. For the §6 schemas this yields
+// device_name / pool_name / circuit_code; port overrides to port_name
+// (device_name is the key's scope component, not the port's own name).
 func (t TypeSpec) NameField() string {
+	if t.NameFieldOverride != "" {
+		return t.NameFieldOverride
+	}
 	for _, f := range t.Fields {
 		if strings.HasSuffix(f.Name, "_name") {
 			return f.Name
@@ -393,23 +406,30 @@ var circuitSpec = TypeSpec{
 	},
 }
 
-// portSpec is the device-port schema (v0.3.1): the telecom port workbooks of
-// the real-network samples (端口流量监控表 / 端口资源表). The natural key is
-// COMPOSITE — device_ip + port_name — because a port name repeats across
-// devices; the importer joins the key values with '|' in natural-key order
-// (single-key types are byte-identical to the classic behaviour).
-// device_ip deliberately stays an ipv4 value column (not a device ref): the
-// port workbook is a self-contained export whose device rows may not exist
-// (yet) in the resource base, and E003 on a missing device would reject the
-// whole port sheet.
+// portSpec is the device-port schema (v0.3.1; natural key rebased in v0.4
+// development, migration v8): the telecom port workbooks of the real-network
+// samples (端口流量监控表 / 端口资源表). The natural key is COMPOSITE —
+// device_name + port_name — because a port name repeats across devices; the
+// importer joins the key values with '|' in natural-key (spec field) order
+// (single-key types are byte-identical to the classic behaviour). The device
+// side of the key is the device NAME, not its IP: a re-IPped device must keep
+// its ports one resource (IP is a mutable attribute, R4's P1 finding).
+// device_ip deliberately stays an ipv4 VALUE column (required, not a device
+// ref, not a key): the port workbook is a self-contained export whose device
+// rows may not exist (yet) in the resource base, and E003 on a missing device
+// would reject the whole port sheet. NameFieldOverride pins the display name
+// to port_name — device_name is the key's scope, not the port's own name.
 var portSpec = TypeSpec{
-	Type:      domain.ResourceTypePort,
-	SheetHint: "端口",
+	Type:              domain.ResourceTypePort,
+	SheetHint:         "端口",
+	NameFieldOverride: "port_name",
 	Fields: []FieldSpec{
-		{Name: "device_ip", Label: "设备IP", Required: true, NaturalKey: true, Kind: KindIPv4,
-			Synonyms: []string{"设备IP地址", "设备ip", "设备IP", "网元IP"}},
+		{Name: "device_name", Label: "设备名称", Required: true, NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"设备名称", "网元名称", "设备名"}},
 		{Name: "port_name", Label: "端口名称", Required: true, NaturalKey: true, Kind: KindString,
 			Synonyms: []string{"端口名称", "端口名", "端口"}},
+		{Name: "device_ip", Label: "设备IP", Required: true, Kind: KindIPv4,
+			Synonyms: []string{"设备IP地址", "设备ip", "设备IP", "网元IP"}},
 		{Name: "port_desc", Label: "端口描述", Kind: KindString, Synonyms: []string{"端口描述"}},
 		{Name: "port_type", Label: "端口类型", Kind: KindString, Synonyms: []string{"端口类型"}},
 		{Name: "bandwidth_mbps", Label: "带宽Mbps", Kind: KindInt, // no IntMin: real sheets carry 0

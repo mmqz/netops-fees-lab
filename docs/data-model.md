@@ -1,11 +1,11 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **7**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列与 v7 port 类型为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **8**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型与 v8 port 换键为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
 - **ID**：TEXT。P1 聚合 `前缀_<uuid>`：`res_`（资源）、`rel_`（关系）、`src_`（来源引用）、`bat_`（导入批次）、`iss_`（问题），生成见 `internal/domain` 的 `NewID`；P2 仿真实体 `前缀-<n>`（全局序列，见文末 §6）。工作区为 UUID。
-- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_ip|port_name`（v7，见文末 v7 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
+- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_name|port_name`（v8 换键，见文末 v7/v8 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
 - **时间戳**：一律 **UTC RFC3339 字符串**（如 `2026-10-09T12:04:40Z`）。
 - **JSON 列**：`attributes` / `raw` / `evidence` / `mapping` 均为 TEXT 存 JSON 对象（默认 `'{}'`）。
 
@@ -369,24 +369,25 @@ ALTER TABLE virtual_devices ADD COLUMN geo_lng REAL;  -- nullable，NULL = 无�
 
 # DDL v7 — port 资源类型（真实电信端口表导入）
 
-> Migration `7` name `port_resource_type`（`internal/repo/migrations_v7.go`，经 `init()` 追加 + 按版本排序注册，机制同 v4/v5/v6）。**当前 schema version = 7**（本文之上的 v6 章节描述保持历史原貌）。`resources` 表的 `resource_type` CHECK 扩展 `'port'`；其余表不动（port 无 Phase 1 工作台实体、无派生关系）。
+> Migration `7` name `port_resource_type`（`internal/repo/migrations_v7.go`，经 `init()` 追加 + 按版本排序注册，机制同 v4/v5/v6）。v7 引入 port 类型（`resources` 表的 `resource_type` CHECK 扩展 `'port'`；其余表不动——port 无 Phase 1 工作台实体、无派生关系）。**当前 schema version = 8**（v8 见下节；本文之上的 v6 章节描述保持历史原貌）。
 
 ## 10. 设备端口资源（port schema）
 
-面向真实电信端口工作簿（`samples/telecom-port-multi-header.xlsx`：端口流量监控表 / 端口资源表两种表头形态）。**复合自然键**：`device_ip + port_name`（端口名跨设备重复，必须连同设备 IP 才唯一）；导入器按 spec 字段序以 `|` 连接键值落 `resources.natural_key`（如 `12.1.53.24|bvi2.1008`）。**单键类型零扰动**：单元素 join 恒等原值，device/ip_pool/circuit 的键、E001 证据、幂等重导行为逐字节不变（同库回归测试钉死）。
+面向真实电信端口工作簿（`samples/telecom-port-multi-header.xlsx`：端口流量监控表 / 端口资源表两种表头形态）。**复合自然键（migration v8 后）**：`device_name + port_name`（端口名跨设备重复，必须连同设备名称才唯一；键的设备侧自 v8 起锚定设备**名称**而非 IP——设备重划 IP 不再分裂资源）；导入器按 spec 字段序以 `|` 连接键值落 `resources.natural_key`（如 `B2|bvi2.1008`）。**单键类型零扰动**：单元素 join 恒等原值，device/ip_pool/circuit 的键、E001 证据、幂等重导行为逐字节不变（同库回归测试钉死）。
 
 ### 10.1 目标 schema（全部可选字段除键外）
 
 | 字段 | 标签 | Kind | 约束 | 同义词（节选） |
 | --- | --- | --- | --- | --- |
-| `device_ip` | 设备IP | ipv4 | **必填·自然键** | 设备IP地址, 设备ip, 设备IP, 网元IP |
+| `device_name` | 设备名称 | string | **必填·自然键**（v8 起键的设备侧） | 设备名称, 网元名称, 设备名 |
 | `port_name` | 端口名称 | string | **必填·自然键** | 端口名称, 端口名, 端口 |
+| `device_ip` | 设备IP | ipv4 | **必填·非键值列**（v8 起从键降级，进 attributes） | 设备IP地址, 设备ip, 设备IP, 网元IP |
 | `port_desc` / `port_type` / `admin_status` / `oper_status` / `device_type` / `district` / `record_date` | … | string | — | 端口描述 / 端口类型 / 管理状态 / 运行状态 / 设备类型 / 区县 / 日期 |
 | `bandwidth_mbps` | 带宽Mbps | int | **无 IntMin**（真实表带宽可为 0） | 端口带宽, 端口速率(M), 速率 |
 | `city` / `vendor` / `model` | … | string | — | 地市, 城市通用同义词族 |
 | `geo_lat` / `geo_lng` / `geo` | 纬度/经度/经纬度 | lat/lng/geo | 同设备 §9.1 | 同设备 §9.1（基站端口表可携带坐标） |
 
-设计决策：`device_ip` 保持 ipv4 值列（**非 device ref**）——端口工作簿是自含导出，其设备行可能尚未入库，E003 引用失败会拒绝整表；端口与设备的关联由 IP 值匹配承担，不建派生关系（`relation_type` 枚举不动）。sheet 名含 `端口` 提示 port 类型（`设备端口表` 类含 `设备` 的名字仍按 Specs 顺序提示 device——确定性优先）。
+设计决策：`device_ip` 保持 ipv4 值列（**非 device ref**、v8 起**非自然键**）——端口工作簿是自含导出，其设备行可能尚未入库，E003 引用失败会拒绝整表；端口与设备的关联由 IP 值匹配承担，不建派生关系（`relation_type` 枚举不动）。展示名（`NameField`）显式钉定为 `port_name`——`device_name` 是键的作用域分量，不是端口自身的名字。sheet 名含 `端口` 提示 port 类型（`设备端口表` 类含 `设备` 的名字仍按 Specs 顺序提示 device——确定性优先）。
 
 ### 10.2 重复表头行（多段导出拼接）
 
@@ -413,3 +414,18 @@ ALTER TABLE resources_new RENAME TO resources;
 ```
 
 SQLite 无法 ALTER CHECK，需重建表；`DROP TABLE resources` 在外键约束开启时会触发隐式 DELETE（relations 的 ON DELETE CASCADE、sim 表的 SET NULL——静默丢数据）。v7 为首个 `ForeignKeysOff` 迁移：专用连接**事务外** `PRAGMA foreign_keys=OFF` → 事务内重建 → `PRAGMA foreign_key_check` 空结果门禁（违例即整体回滚）→ commit 后恢复 FK ON 归还连接池。普通迁移路径行为逐字节不变。
+
+# DDL v8 — port 自然键换稳定键（device_ip|port_name → device_name|port_name）
+
+> Migration `8` name `port_natural_key_device_name`（`internal/repo/migrations_v8.go`，经 `init()` 自注册追加 + 按版本排序，机制同 v4–v7；migrations.go 字面量列表不动）。**当前 schema version = 8**。
+
+## 11. 存量 port 行的键重算（就地 UPDATE，非重建）
+
+R4 审查定性 P1：旧键 `device_ip|port_name` 的设备侧是 IP，设备重划 IP 后同一物理端口分裂为两个资源。v8 把键的设备侧换成设备**名称**（真实端口表无设备编码列，设备名称是唯一现成稳定列；新导入由 portSpec 字段序自动产出新键）：
+
+- **重算规则**（逐行，旧键按第一个 `|` 拆分，port_name 含 `|` 时可完整还原）：新键 = `COALESCE(attrs.device_name, 旧键的 device_ip 分量) + '|' + 旧键的 port_name 分量`。存量行（v7 及以前导入）不可能带 device_name 属性——旧 schema 无该字段且键字段不进 attrs——故 fallback 是唯一现实来源，**旧键逐字节保留**（诚实保数据，不发明设备名）；手工携带 device_name 属性的行迁移到新键格式。
+- **就地 UPDATE、无表重建、无 ForeignKeysOff**：`natural_key` 无外部外键引用（relations / virtual_devices / links 全部锚 `resources.id`），它只参与 `UNIQUE (resource_type, natural_key)`——对每一条 REFERENCES 子句核实过。
+- **UNIQUE 冲突策略（保守保留原键）**：迁移先把全部 port 行的目标键快照进 `port_key_targets_v8` 临时表，再对满足「目标键仅本行认领 ∧ 不被任何其它行当前持有」的行执行单条 UPDATE；两行认领同一目标键、或目标键被保留行（fallback 恒等）占用时，涉事行一律保留原键。冲突条件全部对冻结快照求值，单语句确定性、不可能中途违反 UNIQUE。快照表随迁移 DROP，不留痕。
+- **幂等**：对已换键行重算结果恒等（新键的 `|` 前分量即设备侧，回代不变）；账本（schema_migrations）跳过已应用版本。
+- **不动 `updated_at`**：属模式级身份修复而非业务变更，迁移时刻由 `schema_migrations.applied_at` 记录。
+- 语义提示：旧键保留的存量行与新键导入的同端口行互不判重（键不同）——需清理旧行时回滚其批次再重导即可；详见 [natural-keys.md](natural-keys.md) §4。

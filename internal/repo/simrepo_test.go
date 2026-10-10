@@ -209,15 +209,15 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 
 	db2, err := Open(path)
 	if err != nil {
-		t.Fatalf("second Open (v5 → v6 → v7): %v", err)
+		t.Fatalf("second Open (v5 → v6 → v7 → v8): %v", err)
 	}
 	defer db2.Close()
 	var maxV int
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 7 {
-		t.Errorf("max schema version after upgrade = %d, want 7", maxV)
+	if maxV != 8 {
+		t.Errorf("max schema version after upgrade = %d, want 8", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -252,15 +252,15 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 			return err
 		}
 		return tx.Resources.Insert(ctx, domain.Resource{
-			Type: domain.ResourceTypePort, NaturalKey: "12.1.53.24|bvi2.1008",
-			Name: "bvi2.1008", Attributes: map[string]string{"vendor": "中兴"},
+			Type: domain.ResourceTypePort, NaturalKey: "B2|bvi2.1008",
+			Name: "bvi2.1008", Attributes: map[string]string{"device_ip": "12.1.53.24", "vendor": "中兴"},
 			FirstBatchID: batchID, CreatedAt: simTS, UpdatedAt: simTS,
 		})
 	}); err != nil {
-		t.Fatalf("insert port resource after v7 upgrade: %v", err)
+		t.Fatalf("insert port resource after v8 key migration: %v", err)
 	}
-	if _, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "12.1.53.24|bvi2.1008"); err != nil {
-		t.Fatalf("GetByTypeKey(port) after v7 upgrade: %v", err)
+	if _, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "B2|bvi2.1008"); err != nil {
+		t.Fatalf("GetByTypeKey(port) after v8 key migration: %v", err)
 	}
 
 	// Reopening again must be a no-op (idempotent migration).
@@ -272,8 +272,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 7 {
-		t.Errorf("max schema version after reopen = %d, want 7", maxV)
+	if maxV != 8 {
+		t.Errorf("max schema version after reopen = %d, want 8", maxV)
 	}
 }
 

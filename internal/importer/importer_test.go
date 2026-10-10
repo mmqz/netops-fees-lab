@@ -1091,16 +1091,17 @@ func writeWorkbookFile(t *testing.T, sheet string, rows [][]string) string {
 var portHeadersA = []string{"地市", "区县", "设备名称", "设备ip", "端口", "端口ip", "端口带宽", "端口类型", "端口描述", "厂家", "型号", "日期"}
 
 // portMapping builds the confirmed mapping for the port type: composite key
-// (device_ip, port_name) against the header row A columns.
+// (device_name, port_name) against the header row A columns.
 func portMapping(sheet string) mapping.Mapping {
 	return mapping.Mapping{Sheets: []mapping.SheetMapping{{
 		Sheet:        sheet,
 		Action:       mapping.ActionImport,
 		ResourceType: domain.ResourceTypePort,
-		KeyColumns:   []string{"device_ip", "port_name"},
+		KeyColumns:   []string{"device_name", "port_name"},
 		ColumnMapping: map[string]string{
-			"device_ip":      "设备ip",
+			"device_name":    "设备名称",
 			"port_name":      "端口",
+			"device_ip":      "设备ip",
 			"port_desc":      "端口描述",
 			"port_type":      "端口类型",
 			"bandwidth_mbps": "端口带宽",
@@ -1115,9 +1116,11 @@ func portMapping(sheet string) mapping.Mapping {
 // TestImportPortCompositeKeyAndHeaderRepeat drives the real telecom sheet
 // shape through the importer: a verbatim repeated header row (multi-segment
 // export concatenation) is skipped with a dedicated message and no issue,
-// the composite natural key (device_ip, port_name) drives E001 and
+// the composite natural key (device_name, port_name) drives E001 and
 // idempotent re-import, missing key fields fail E002 per field, and
-// bandwidth 0 imports (no IntMin on the port schema). A single-key device
+// bandwidth 0 imports (no IntMin on the port schema). device_ip is a
+// required ipv4 VALUE column (migration v8 removed it from the key): it
+// fails E002/E004 as a field and lands in attributes. A single-key device
 // import in the same database pins the legacy natural-key behavior.
 func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
 	svc, db := newService(t)
@@ -1205,13 +1208,14 @@ func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
 	if e001.ID == "" || len(e002ByRow) != 2 {
 		t.Fatalf("missing E001/E002 issues: %+v", issues)
 	}
-	wantKey := "4.8.2.5|xgei-1/1/0/2.186"
+	wantKey := "道西30米1|xgei-1/1/0/2.186"
 	if e001.Evidence["natural_key"] != wantKey || e001.Evidence["row_number"] != "5" ||
 		e001.Evidence["conflicting_row_number"] != "4" || e001.Evidence["type"] != "port" {
 		t.Errorf("E001 evidence = %v, want key %q conflicting row 4", e001.Evidence, wantKey)
 	}
-	// E002 reports the empty key field BY NAME: port_name at row 6,
-	// device_ip at row 7.
+	// E002 reports the empty required field BY NAME: port_name at row 6,
+	// device_ip at row 7 (a value column since migration v8, still
+	// required — the real sheets always carry the device IP).
 	if e := e002ByRow["6"]; e.Evidence["field"] != "port_name" {
 		t.Errorf("E002(row 6) field = %q, want port_name", e.Evidence["field"])
 	}
@@ -1219,9 +1223,11 @@ func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
 		t.Errorf("E002(row 7) field = %q, want device_ip", e.Evidence["field"])
 	}
 
-	// Port resources: joined natural key, name from port_name, attributes
-	// carry the non-key fields (bandwidth 0 stored, keys never in attrs).
-	res1, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "12.1.53.24|bvi2.1008")
+	// Port resources: joined natural key, name from port_name (the display
+	// override — device_name is the key's scope component), attributes
+	// carry the non-key fields INCLUDING device_ip as a value column
+	// (bandwidth 0 stored; the two key fields never enter attrs).
+	res1, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "B2|bvi2.1008")
 	if err != nil {
 		t.Fatalf("GetByTypeKey(port): %v", err)
 	}
@@ -1229,15 +1235,15 @@ func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
 		t.Errorf("port resource = %s/%q, want port/bvi2.1008", res1.Type, res1.Name)
 	}
 	for field, want := range map[string]string{
-		"port_type": "业务口", "port_desc": "BBU_CT_1333", "bandwidth_mbps": "0",
+		"device_ip": "12.1.53.24", "port_type": "业务口", "port_desc": "BBU_CT_1333", "bandwidth_mbps": "0",
 		"vendor": "中兴", "model": "9000-3E", "record_date": "2026-10-09",
 	} {
 		if res1.Attributes[field] != want {
 			t.Errorf("port attrs[%s] = %q, want %q", field, res1.Attributes[field], want)
 		}
 	}
-	if _, isKey := res1.Attributes["device_ip"]; isKey {
-		t.Errorf("port attrs must not contain the key field device_ip: %v", res1.Attributes)
+	if _, isKey := res1.Attributes["device_name"]; isKey {
+		t.Errorf("port attrs must not contain the key field device_name: %v", res1.Attributes)
 	}
 	if _, isKey := res1.Attributes["port_name"]; isKey {
 		t.Errorf("port attrs must not contain the key field port_name: %v", res1.Attributes)

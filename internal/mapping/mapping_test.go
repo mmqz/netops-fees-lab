@@ -499,7 +499,8 @@ func TestCheckFormatRanges(t *testing.T) {
 	}
 }
 
-// TestNameField checks the name-field derivation of the three schemas.
+// TestNameField checks the name-field derivation of the schemas (port pins
+// its display name to port_name — device_name is the key's scope component).
 func TestNameField(t *testing.T) {
 	for _, tc := range []struct {
 		t    domain.ResourceType
@@ -508,6 +509,7 @@ func TestNameField(t *testing.T) {
 		{domain.ResourceTypeDevice, "device_name"},
 		{domain.ResourceTypeIPPool, "pool_name"},
 		{domain.ResourceTypeCircuit, "circuit_code"},
+		{domain.ResourceTypePort, "port_name"},
 	} {
 		spec, ok := SpecByType(tc.t)
 		if !ok {
@@ -698,16 +700,17 @@ const portSheetName = "端口资源表"
 var portHeadersA = []string{"地市", "区县", "设备名称", "设备ip", "端口", "端口ip", "端口带宽", "端口类型", "端口描述", "厂家", "型号", "日期"}
 
 // portSheetMapping builds a complete, valid port sheet mapping: composite
-// natural key (device_ip, port_name) and the real header row A columns.
+// natural key (device_name, port_name) and the real header row A columns.
 func portSheetMapping() SheetMapping {
 	return SheetMapping{
 		Sheet:        portSheetName,
 		Action:       ActionImport,
 		ResourceType: domain.ResourceTypePort,
-		KeyColumns:   []string{"device_ip", "port_name"},
+		KeyColumns:   []string{"device_name", "port_name"},
 		ColumnMapping: map[string]string{
-			"device_ip":      "设备ip",
+			"device_name":    "设备名称",
 			"port_name":      "端口",
+			"device_ip":      "设备ip",
 			"port_desc":      "端口描述",
 			"port_type":      "端口类型",
 			"bandwidth_mbps": "端口带宽",
@@ -734,6 +737,9 @@ func TestPortSuggest(t *testing.T) {
 		{"exact field name", portSheetName, "device_ip", "device_ip", 1.0},
 		{"normalized case field name", portSheetName, "DEVICE_IP", "device_ip", 0.9},
 		{"normalized spaces field name", portSheetName, " port_name ", "port_name", 0.9},
+		{"header A device name", portSheetName, "设备名称", "device_name", 0.75},
+		{"header B device name", portSheetName, "网元名称", "device_name", 0.75},
+		{"short device name synonym", portSheetName, "设备名", "device_name", 0.75},
 		{"header A device ip", portSheetName, "设备ip", "device_ip", 0.75},
 		{"header B device ip", portSheetName, "设备IP地址", "device_ip", 0.75},
 		{"header A port", portSheetName, "端口", "port_name", 0.75},
@@ -787,7 +793,7 @@ func TestSuggestTypePort(t *testing.T) {
 }
 
 // TestPortCompositeKeyValidate pins the composite natural key of the port
-// type: keyColumns must be EXACTLY [device_ip port_name] — a single key, a
+// type: keyColumns must be EXACTLY [device_name port_name] — a single key, a
 // swapped order or source-header names are all rejected — and the valid
 // mapping passes with the required key fields mapped.
 func TestPortCompositeKeyValidate(t *testing.T) {
@@ -813,7 +819,7 @@ func TestPortCompositeKeyValidate(t *testing.T) {
 			name: "single key column is rejected",
 			mutate: func(m *Mapping) {
 				sm := portSheetMapping()
-				sm.KeyColumns = []string{"device_ip"}
+				sm.KeyColumns = []string{"device_name"}
 				m.Sheets = append(m.Sheets, sm)
 			},
 			wantErr:   true,
@@ -823,7 +829,7 @@ func TestPortCompositeKeyValidate(t *testing.T) {
 			name: "swapped key order is rejected",
 			mutate: func(m *Mapping) {
 				sm := portSheetMapping()
-				sm.KeyColumns = []string{"port_name", "device_ip"}
+				sm.KeyColumns = []string{"port_name", "device_name"}
 				m.Sheets = append(m.Sheets, sm)
 			},
 			wantErr:   true,
@@ -833,14 +839,24 @@ func TestPortCompositeKeyValidate(t *testing.T) {
 			name: "source headers as key columns are rejected",
 			mutate: func(m *Mapping) {
 				sm := portSheetMapping()
-				sm.KeyColumns = []string{"设备ip", "端口"}
+				sm.KeyColumns = []string{"设备名称", "端口"}
 				m.Sheets = append(m.Sheets, sm)
 			},
 			wantErr:   true,
 			wantField: "keyColumns",
 		},
 		{
-			name: "unmapped required key field device_ip",
+			name: "unmapped required key field device_name",
+			mutate: func(m *Mapping) {
+				sm := portSheetMapping()
+				delete(sm.ColumnMapping, "device_name")
+				m.Sheets = append(m.Sheets, sm)
+			},
+			wantErr:   true,
+			wantField: "device_name",
+		},
+		{
+			name: "unmapped required value field device_ip",
 			mutate: func(m *Mapping) {
 				sm := portSheetMapping()
 				delete(sm.ColumnMapping, "device_ip")

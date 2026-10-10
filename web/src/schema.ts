@@ -50,8 +50,9 @@ export const TYPE_SPECS: Record<ResourceType, FieldSpec[]> = {
     { field: 'status', required: false, naturalKey: false, kind: 'enum' },
   ],
   port: [
-    { field: 'device_ip', required: true, naturalKey: true, kind: 'ipv4' },
+    { field: 'device_name', required: true, naturalKey: true, kind: 'string' },
     { field: 'port_name', required: true, naturalKey: true, kind: 'string' },
+    { field: 'device_ip', required: true, naturalKey: false, kind: 'ipv4' },
     { field: 'port_desc', required: false, naturalKey: false, kind: 'string' },
     { field: 'port_type', required: false, naturalKey: false, kind: 'string' },
     { field: 'bandwidth_mbps', required: false, naturalKey: false, kind: 'int' },
@@ -79,8 +80,8 @@ export function fieldsForType(type: ResourceType): FieldSpec[] {
   return TYPE_SPECS[type];
 }
 
-/** 指定类型的自然键字段名列表（port 为双键：device_ip + port_name，
- *  keyColumns 必须全量携带；单键类型列表长度为 1，行为与旧版一致）。 */
+/** 指定类型的自然键字段名列表（port 为双键：device_name + port_name（migration v8 起设备侧锚定
+ *  设备名称，device_ip 降为必填 ipv4 值列）；单键类型列表长度为 1，行为与旧版一致）。 */
 export function naturalKeyFields(type: ResourceType): string[] {
   const keys = TYPE_SPECS[type].filter((f) => f.naturalKey).map((f) => f.field);
   if (keys.length === 0) throw new Error(`schema: type ${type} has no natural key field`);

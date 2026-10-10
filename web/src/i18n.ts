@@ -289,12 +289,16 @@ export const IMP_NATURAL_KEY_HINT = '自然键：{field}，自动作为唯一键
 // R4 短期项 2：映射确认页自然键稳定性提示（仅展示，不改 keyColumns 逻辑）
 /** IP 类自然键的短标签（行内展示）。 */
 export const IMP_NATURAL_KEY_IP_SHORT = 'IP 作键不稳定';
-/** IP 类自然键的完整告警文案（tooltip / 无障碍名称）。 */
+/** IP 类自然键的完整告警文案（tooltip / 无障碍名称；migration v8 后当前四类
+ *  均无 IP 自然键，属防御性提示，供未来类型复用）。 */
 export const IMP_NATURAL_KEY_IP_WARNING =
-  'IP 属可变属性：设备重划 IP 后，同键资源将分裂为两条（计划 v0.4 迁移为设备稳定键）';
-/** 名称类自然键的作用域轻提示（info 级）。 */
+  'IP 属可变属性：设备重划 IP 后，同键资源将分裂为两条（应改用稳定标识作键）';
+/** 名称类自然键的作用域轻提示（info 级；单键名称类型如 ip_pool）。 */
 export const IMP_NATURAL_KEY_NAME_SCOPE =
   '名称键需保证唯一作用域：跨地市同名会冲突，建议（地市 + 名称）复合作键';
+/** port 复合键专属正向提示（migration v8 起）：键已锚定设备名称，IP 重划不再分裂。 */
+export const IMP_NATURAL_KEY_PORT_COMPOSITE =
+  '端口键 = 设备名称|端口名称：设备重划 IP 不再影响资源身份（设备IP 为普通值列）';
 export const IMP_VALIDATION_TITLE = '请先完成以下必填映射：';
 export const IMP_ERR_REQUIRED_UNMAPPED = '工作表「{sheet}」：必填字段「{field}」尚未映射';
 export const IMP_ROWS_INFO = '数据行 {rows} 行，跳过空行 {empty} 行';

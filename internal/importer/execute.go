@@ -289,7 +289,9 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	// Composite natural key (v0.3.1): key values joined by "|" in spec
 	// field order. A single-key type joins one element — the joined key is
 	// exactly the historic single-field key, so device/ip_pool/circuit
-	// behave (and hash) identically. Port's key is "<device_ip>|<port_name>".
+	// behave (and hash) identically. Port's key is
+	// "<device_name>|<port_name>" (migration v8 rebased the device side
+	// from device_ip; the IP lives on as a required ipv4 value column).
 	key := strings.Join(keyVals, "|")
 
 	// E004 / W002: value formats. A bad ipv4/cidr/int fails the row; an
@@ -562,7 +564,8 @@ func (st *sheetState) mappedValues(row workbook.Row) map[string]string {
 }
 
 // resourceName returns the Name of the resource: the name-ish field value
-// (device_name / pool_name / circuit_code), falling back to the natural key.
+// (device_name / pool_name / port_name; circuit falls to the key), falling
+// back to the natural key.
 func (st *sheetState) resourceName(vals map[string]string, key string) string {
 	if v := vals[st.nameField]; v != "" {
 		return v

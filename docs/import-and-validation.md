@@ -136,10 +136,10 @@ completeness = round(100 × imported / rows_total)   （rows_total = 0 时记 10
 
 port（设备端口）是 v0.3.1 引入的第四类资源类型，面向真实电信端口工作簿（样例 `samples/telecom-port-multi-header.xlsx`，真实样例授权说明见其目录内 README）：
 
-- **复合自然键**：`device_ip + port_name` 按 schema 字段序以 `|` 拼接（例：`12.1.53.24|bvi2.1008`）。E002 缺必填键字段、E001 批内同键、幂等 skip、`lookupExisting` 判重全部走拼接后的完整键；单键类型（device/ip_pool/circuit）拼接退化为原值，行为不变。`device_ip` 保持 **ipv4 值列**而非 device 引用：端口工作簿是自含导出，其设备行可能未入库，作 ref 会因 E003 拒掉整表。
+- **复合自然键（migration v8 后）**：`device_name + port_name` 按 schema 字段序以 `|` 拼接（例：`B2|bvi2.1008`，真实样例的设备名称 B2 + 端口名 bvi2.1008）。E002 缺必填字段、E001 批内同键、幂等 skip、`lookupExisting` 判重全部走拼接后的完整键；单键类型（device/ip_pool/circuit）拼接退化为原值，行为不变。`device_ip` 保持 **ipv4 值列**而非 device 引用（v8 起亦非自然键，作为普通属性落入 attributes）：端口工作簿是自含导出，其设备行可能未入库，作 ref 会因 E003 拒掉整表。存量库升级语义与冲突保留策略见 [data-model.md §11](data-model.md)。
 - **带宽 0 合法**：`bandwidth_mbps` 无 IntMin 下界（真实表带宽可为 0），与 circuit 的 `bandwidth ≥ 1` 不同。
-- **表头形态**：端口流量监控表与端口资源表两种表头形态经同义词梯子命中各自的 port 字段；同一样例 sheet 内多段拼接可共存。
-- 键的稳定性评估（IP 属可变属性、v0.4 计划换为设备稳定键）见 [natural-keys.md](natural-keys.md)。
+- **表头形态**：端口流量监控表与端口资源表两种表头形态经同义词梯子命中各自的 port 字段（两种表头均含「设备名称」列）；同一样例 sheet 内多段拼接可共存。
+- 键的稳定性裁决（IP 属可变属性 → 已换为设备名称，migration v8 落地）见 [natural-keys.md](natural-keys.md)。
 
 **重复表头行自动跳过（多段导出拼接）**：真实导出常把表头行重新拼进数据区。导入器对「≥3 个非空格且逐格等于列头」的行判为重复表头行——在任何规则（E002/E004）之前跳过：行状态 `skipped`、消息「跳过重复表头行（多段导出拼接）」、**零 issue**、不计入 E001。样例实测：2 imported（含带宽 0）/ 1 skipped（重复表头）/ 2 failed（表头 B 行走正常 E004 证据链）。
 

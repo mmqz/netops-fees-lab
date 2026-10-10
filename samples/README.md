@@ -31,6 +31,6 @@
 
 ## 相关文档
 
-- `docs/natural-keys.md` —— 基于本样例与同批真实表格得出的各资源类型自然键规范（本样例的 `device_ip|port_name` 复合键已定性为 P1 稳定性隐患，v0.4 迁移计划见该文档）；
+- `docs/natural-keys.md` —— 基于本样例与同批真实表格得出的各资源类型自然键规范（本样例分析推动的 port 键迁移已落地：migration v8 起键为 `device_name|port_name`，稳定性裁决见该文档）；
 - `docs/import-and-validation.md` —— port 导入行为（重复表头跳过、复合键拼接）；
-- `docs/data-model.md` §v7 —— port 类型的 DDL 与迁移。
+- `docs/data-model.md` §v7/§v8 —— port 类型的 DDL 与两次迁移。

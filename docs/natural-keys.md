@@ -13,7 +13,7 @@
 | **业务自然键** | `UNIQUE (resource_type, natural_key)`（`resources` 表约束） | **导入幂等判重键**：同键再导 → 行 skipped，零变更；批内同键 → E001 行 failed | 理论应稳定——键的选型即本文档主题 |
 | **展示名** | `*_name` 属性字段（schema `NameField`） | 人读名称（资源详情 / 画布标签 / 报告） | 可变（改名不影响身份与关系） |
 
-**裁决**：这是「代理键 PK + 自然键 UNIQUE」的正确两层底座，**保持不变**。任何自然键策略调整（如 §4 port 换键）都不需要动主键与关系锚——这正是该架构的价值。
+**裁决**：这是「代理键 PK + 自然键 UNIQUE」的正确两层底座，**保持不变**。任何自然键策略调整都不需要动主键与关系锚——这正是该架构的价值：port 换键（§4，migration v8）已实际验证了这一点，relations/SourceRef/代理键零改动。
 
 ## 2. 稳定性排序与变更语义
 
@@ -39,14 +39,14 @@
 
 ## 4. 每类型自然键策略表
 
-### 已实现类型（封闭集 = device / ip_pool / circuit / port，schema v7）
+### 已实现类型（封闭集 = device / ip_pool / circuit / port，schema v8）
 
 | 资源类型 | 自然键（现状） | 状态与裁决 |
 | --- | --- | --- |
 | device 设备 | `device_code`（设备编码） | ✅ 正确——真实表设备编码是系统签发标识；`mgmt_ip` 只是普通属性列。设备层已做对 |
 | ip_pool 地址池 | `pool_name` | ✅ 可用；地址池为系统自建实体，名称即编号 |
 | circuit 专线/电路 | `circuit_code`（电路编号） | ✅ 正确——对应真实专线表的**专线编号**列（如 `MSTHL1060715`）、集团STN编号等系统编号 |
-| **port 端口** | 复合键 `device_ip + port_name`（`|` 拼接落库，如 `12.1.53.24\|bvi2.1008`） | ⚠️ **P1 隐患（已定性）**：键的设备侧用了 IP——设备重划 IP 后同一物理端口将分裂为两个资源（旧资源永久孤儿、无告警）。**v0.4 迁移为「设备稳定键 \| port_name」**（真实端口表无设备编码列，设备名称是唯一现成稳定列；`device_ip` 保持 ipv4 值列而非 device ref 的既有决策不变——端口工作簿自含导出，避免 E003 拒整表） |
+| **port 端口** | 复合键 `device_name + port_name`（`|` 拼接落库，如 `B2\|bvi2.1008`） | ✅ **已换键落地（migration v8）**：键的设备侧锚定**设备名称**（真实端口表无设备编码列，设备名称是唯一现成稳定列）——设备重划 IP 后同一物理端口不再分裂。`device_ip` 保持 ipv4 **值列**（必填、非 device ref、非自然键）的既有决策不变：端口工作簿自含导出，避免 E003 拒整表；且自 v8 起作为普通属性落入 attributes。存量迁移语义：旧库（v7 及以前）port 行无 device_name 属性可取（旧 schema 无该字段），fallback = 旧键的 device_ip 分量 → **旧键原样保留**（诚实保数据，不发明设备名）；重新导入同一工作簿会以新键入库（若需清理旧行，回滚其批次即可）。冲突策略：目标键被多行认领或被保留行占用时，涉事行一律保留原键（测试钉死） |
 
 ### 规划类型（v0.4+ 引入时的键策略，R4 裁决）
 
@@ -60,7 +60,7 @@
 
 ## 5. 复合键的拼接规则（实现口径）
 
-自然键为多字段复合时，按 `mapping.TypeSpec` 字段序收集键值并以 `|` 连接（`importer/execute.go`）；单键类型 join 恒等原值（device / ip_pool / circuit 行为与哈希不受影响）。示例值：port 的 `12.1.53.24|bvi2.1008`。
+自然键为多字段复合时，按 `mapping.TypeSpec` 字段序收集键值并以 `|` 连接（`importer/execute.go`）；单键类型 join 恒等原值（device / ip_pool / circuit 行为与哈希不受影响）。示例值：port 的 `B2|bvi2.1008`（真实样例：设备名称 B2 + 端口名 bvi2.1008）。
 
 ## 6. 现状差距（诚实声明）与路线图
 
@@ -70,14 +70,15 @@
 2. **无属性变更历史表**——「IP 变 = 属性变更事件」目前没有落点（现状既检测不到「同键但属性不同」，也检测不到「同属性不同键」的疑似改名）；
 3. **SourceRef 无版本化**：同资源再导入被 skip，来源引用停留在首个批次。
 
-以上均为**已识别、已排期**的差距，不是隐性缺陷：变更历史表（`resource_attribute_changes`）与 update-on-diff 导入模式（先记录、人工确认后生效）排入 **v0.4+** 路线图；port 换键迁移（migration v8，可复用 v7 的 `ForeignKeysOff` 整表重建模式）同为 v0.4 项。名称改名的人工确认流在变更历史表之后。
+以上均为**已识别、已排期**的差距，不是隐性缺陷：变更历史表（`resource_attribute_changes`）与 update-on-diff 导入模式（先记录、人工确认后生效）排入 **v0.4+** 路线图。~~port 换键迁移（migration v8）~~ 已落地（v8 就地重算 natural_key，冲突保留原键，详见 §4）。名称改名的人工确认流在变更历史表之后。
 
-## 7. UI 落地（v0.3.2 已生效）
+## 7. UI 落地（v0.3.2 起生效；migration v8 后 port 提示升级）
 
-- **导入向导（ImportWizard）映射确认页**：源列被映射到 **IP 类自然键**（port 的 `device_ip`）时显示告警——「IP 属可变属性，重划后同键资源将分裂」；所选类型自然键含**名称类字段**（`pool_name` / `port_name`）时显示轻提示——名称键需保证唯一作用域，建议 `(地市 + 名称)` 复合作键（R4 §4.5 短期项）。
+- **导入向导（ImportWizard）映射确认页**：源列被映射到 **IP 类自然键**时显示告警——「IP 属可变属性，重划后同键资源将分裂」（migration v8 后四类均无 IP 自然键，该告警为防御性保留）；所选类型自然键含**名称类字段**（如 `pool_name`）时显示轻提示——名称键需保证唯一作用域，建议 `(地市 + 名称)` 复合作键（R4 §4.5 短期项）。
+- **port 专属正向提示（migration v8 起）**：port 类型改为显示「端口键 = 设备名称|端口名称：设备重划 IP 不再影响资源身份（设备IP 为普通值列）」——通用名称作用域文案对 port 复合键不再合适（键已固定，无从追加地市分量），改展示换键后的稳定性语义。
 
 ## 8. 相关文档
 
-- [docs/data-model.md](data-model.md) —— `resources` DDL（`id TEXT PRIMARY KEY` + `UNIQUE (resource_type, natural_key)`）与 v7 迁移；
+- [docs/data-model.md](data-model.md) —— `resources` DDL（`id TEXT PRIMARY KEY` + `UNIQUE (resource_type, natural_key)`）与 v7/v8 迁移；
 - [docs/import-and-validation.md](import-and-validation.md) —— 幂等 / skip-duplicate / E001 的行为细节；
 - [samples/README.md](../samples/README.md) —— 真实样例的授权与披露（本规范的数据依据之一）。
