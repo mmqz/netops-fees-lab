@@ -11,6 +11,7 @@ package mapping
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ const (
 	KindInt    FieldKind = "int"    // base-10 integer
 	KindEnum   FieldKind = "enum"   // one of a fixed value set
 	KindRef    FieldKind = "ref"    // natural key of another resource type
+	KindLat    FieldKind = "lat"    // latitude, float in [-90, 90]
+	KindLng    FieldKind = "lng"    // longitude, float in [-180, 180]
+	KindGeo    FieldKind = "geo"    // combined "num1,num2" (either order)
 )
 
 // CheckFormat reports whether value is well-formed for kind k. When it is
@@ -54,10 +58,138 @@ func (k FieldKind) CheckFormat(value string) (reason string, ok bool) {
 		if _, err := strconv.Atoi(value); err != nil {
 			return "不是十进制整数", false
 		}
+	case KindLat:
+		v, err := parseFloatStrict(value)
+		if err != nil || v < -90 || v > 90 {
+			return "不是合法的纬度（-90 到 90 的数字）", false
+		}
+	case KindLng:
+		v, err := parseFloatStrict(value)
+		if err != nil || v < -180 || v > 180 {
+			return "不是合法的经度（-180 到 180 的数字）", false
+		}
+	case KindGeo:
+		f1, f2, err := parseGeoPair(value)
+		if err != nil {
+			return "经纬度应为两个数字（如 126.63,45.75）", false
+		}
+		// Both components must be plausible coordinates (within
+		// [-180,180]) and at least one must be a valid latitude
+		// (within [-90,90]) — otherwise no ordering of the pair can
+		// form a (lat, lng) assignment. Values failing this check
+		// are E004 invalid_format.
+		if f1 < -180 || f1 > 180 || f2 < -180 || f2 > 180 ||
+			(f1 < -90 || f1 > 90) && (f2 < -90 || f2 > 90) {
+			return "不是合法的经纬度（纬度 -90 到 90，经度 -180 到 180）", false
+		}
 	case KindString, KindEnum, KindRef:
 		// No format constraint beyond trimming.
 	}
 	return "", true
+}
+
+// parseFloatStrict parses a decimal float, rejecting NaN/Inf and the Go
+// syntax ParseFloat would accept but a spreadsheet column should not (hex
+// forms, underscores). strconv.ParseFloat already rejects hex and
+// underscores; NaN/Inf parse successfully, so they are rejected here.
+func parseFloatStrict(value string) (float64, error) {
+	if value == "" {
+		return 0, strconv.ErrSyntax
+	}
+	v, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, strconv.ErrSyntax
+	}
+	return v, nil
+}
+
+// geoPairSeparators are the separators accepted inside a combined 经纬度
+// value: half-width and full-width comma, semicolon and spaces (any run of
+// them, mixed allowed).
+const geoPairSeparators = ",，；; \t"
+
+// parseGeoPair splits a combined coordinate value into exactly two floats.
+// Separators: comma, Chinese comma, semicolon, whitespace (any mix). Values
+// such as "126.63,45.75", "126.63，45.75", "126.63 45.75" all parse.
+func parseGeoPair(value string) (float64, float64, error) {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return strings.ContainsRune(geoPairSeparators, r)
+	})
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("geo: want two components, got %d", len(parts))
+	}
+	f1, err := parseFloatStrict(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	f2, err := parseFloatStrict(parts[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return f1, f2, nil
+}
+
+// China longitude/latitude bounds of the combined 经纬度 split heuristic
+// (continental China plus a margin): longitude [73,136], latitude [3,54].
+// The two windows are disjoint, so at most one ordering of a pair can match
+// both — that is what makes the heuristic deterministic.
+const (
+	geoChinaLngMin = 73.0
+	geoChinaLngMax = 136.0
+	geoChinaLatMin = 3.0
+	geoChinaLatMax = 54.0
+)
+
+// SplitGeoLatLng splits a combined 经纬度 value (either component order)
+// into its latitude and longitude using the China-bounds heuristic:
+//
+//   - f1 in the China longitude window [73,136] AND f2 in the China
+//     latitude window [3,54] → (lng, lat) order — the Gaode/Baidu
+//     convention, e.g. "126.63,45.75" (哈尔滨);
+//   - f1 in [3,54] AND f2 in [73,136] → (lat, lng) order, e.g.
+//     "45.75,126.63";
+//   - otherwise (foreign or ambiguous coordinates — no ordering matches
+//     the China windows): keep whichever interpretation is in-range for
+//     both slots. lng=f1/lat=f2 is the default (Gaode convention); it is
+//     swapped to lat=f1/lng=f2 only when f2 cannot be a latitude while f1
+//     can. Foreign coordinates are accepted — the heuristic never fails
+//     on out-of-China values.
+//
+// ok is false only when the value does not parse as two floats at all; the
+// caller then leaves the value un-split so the E004 format check reports
+// it. Callers that already ran the KindGeo format check get in-range
+// results by construction.
+func SplitGeoLatLng(value string) (lat, lng float64, ok bool) {
+	f1, f2, err := parseGeoPair(value)
+	if err != nil {
+		return 0, 0, false
+	}
+	if f1 >= geoChinaLngMin && f1 <= geoChinaLngMax && f2 >= geoChinaLatMin && f2 <= geoChinaLatMax {
+		return f2, f1, true // (经度, 纬度) order — Gaode/Baidu convention
+	}
+	if f1 >= geoChinaLatMin && f1 <= geoChinaLatMax && f2 >= geoChinaLngMin && f2 <= geoChinaLngMax {
+		return f1, f2, true // (纬度, 经度) order
+	}
+	// Neither ordering matches the China windows. Validity of each
+	// interpretation: lat slot must be within [-90,90], lng slot within
+	// [-180,180].
+	latFirst := (f1 >= -90 && f1 <= 90) && (f2 >= -180 && f2 <= 180) // lat=f1, lng=f2
+	lngFirst := (f1 >= -180 && f1 <= 180) && (f2 >= -90 && f2 <= 90) // lng=f1, lat=f2
+	if latFirst && !lngFirst {
+		return f1, f2, true // f2 cannot be a latitude; f1 must be it
+	}
+	// Default (covers lngFirst-only and both-valid): lng=f1, lat=f2.
+	return f2, f1, true
+}
+
+// FormatGeoFloat renders a split coordinate as the plain decimal attribute
+// string (strconv.FormatFloat 'f', -1 precision — no exponent, no trailing
+// zeros): 45.773 stays "45.773", 126.6 stays "126.6".
+func FormatGeoFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // CheckFormat reports whether value is well-formed for this field: it
@@ -210,6 +342,17 @@ var deviceSpec = TypeSpec{
 		{Name: "mgmt_ip", Label: "管理IP", Kind: KindIPv4, Synonyms: []string{"管理IP", "管理地址", "IP地址", "IP"}},
 		{Name: "status", Label: "状态", Kind: KindEnum, Enum: StatusEnum,
 			Synonyms: []string{"状态", "设备状态", "运行状态"}},
+		// Geographic position (optional, presentation metadata —
+		// deliberately NOT part of the simulation state hash).
+		// geo_lat/geo_lng are the canonical split columns; geo is
+		// the combined "num1,num2" column (either order) the
+		// importer splits via the China-bounds heuristic.
+		{Name: "geo_lat", Label: "纬度", Kind: KindLat,
+			Synonyms: []string{"纬度", "lat", "LAT", "GPS纬度", "北纬"}},
+		{Name: "geo_lng", Label: "经度", Kind: KindLng,
+			Synonyms: []string{"经度", "lng", "lon", "LON", "GPS经度", "东经"}},
+		{Name: "geo", Label: "经纬度", Kind: KindGeo,
+			Synonyms: []string{"经纬度", "装机经纬度", "坐标", "GPS坐标", "A端装机经纬度", "位置"}},
 	},
 }
 

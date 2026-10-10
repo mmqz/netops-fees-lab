@@ -189,6 +189,7 @@ func (s *Service) applyDeleteDevice(ctx context.Context, tx *repo.Tx, workspaceI
 		Op: domain.OpRestoreDevice,
 		Device: DeviceSnap{
 			ID: d.ID, Code: d.Code, Name: d.Name, Status: d.Status.String(), ResourceID: d.ResourceID,
+			GeoLat: d.GeoLat, GeoLng: d.GeoLng, // position survives delete→undo
 		},
 		Interfaces: make([]InterfaceSnap, 0, len(ifaces)),
 		Links:      make([]LinkSnap, 0, len(links)),
@@ -391,6 +392,8 @@ func (s *Service) applyRestoreDevice(ctx context.Context, tx *repo.Tx, workspace
 		ID: r.Device.ID, WorkspaceID: workspaceID,
 		ResourceID: r.Device.ResourceID, Code: r.Device.Code, Name: r.Device.Name,
 		Status:    domain.EntityStatus(r.Device.Status),
+		GeoLat:    r.Device.GeoLat,
+		GeoLng:    r.Device.GeoLng,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return "", fmt.Errorf("restore device %s: %w", r.Device.ID, err)

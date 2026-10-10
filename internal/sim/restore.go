@@ -10,13 +10,18 @@ import (
 // DeviceSnap is the captured pre-state of a virtual device for the
 // restore_device inverse of delete_device: the device row plus ids and all
 // business fields (timestamps are not business state; restored rows get
-// fresh ones).
+// fresh ones). GeoLat/GeoLng keep the optional geographic position (nil =
+// no position); inverse_json rows recorded before geo existed lack the keys
+// entirely and decode as nil, which restores position-less — harmless,
+// geo never enters the state hash.
 type DeviceSnap struct {
-	ID         string `json:"id"`
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	ResourceID string `json:"resourceId"` // "" = no lineage resource
+	ID         string   `json:"id"`
+	Code       string   `json:"code"`
+	Name       string   `json:"name"`
+	Status     string   `json:"status"`
+	ResourceID string   `json:"resourceId"`       // "" = no lineage resource
+	GeoLat     *float64 `json:"geoLat,omitempty"` // nil = no position
+	GeoLng     *float64 `json:"geoLng,omitempty"` // nil = no position
 }
 
 // InterfaceSnap is the captured pre-state of a simulated interface for the

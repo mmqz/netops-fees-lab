@@ -588,7 +588,7 @@ func cmdTestdata(args []string, stdout, stderr io.Writer) error {
 
 // cmdLab implements `netopslab lab …`:
 //
-//	lab workspace create --db <path> --name <n> [--batches id1,id2 | --all-batches]
+//	lab workspace create --db <path> --name <n> [--desc <s>] [--batches id1,id2 | --all-batches]
 //	lab topology      --db <path> --workspace <id>
 //	lab path          --db <path> --workspace <id> --from <code> --to <code>
 //	lab apply         --db <path> --workspace <id> --ops <ops.json> [--desc <s>] [--no-checks]
@@ -640,6 +640,7 @@ func cmdLabWorkspace(args []string, stdout, stderr io.Writer) error {
 	name := fs.String("name", "", "工作台名称，必填")
 	batches := fs.String("batches", "", "逗号分隔的导入批次 id（缺省为全部 completed 批次）")
 	allBatches := fs.Bool("all-batches", false, "显式选择全部 completed 批次（与缺省行为相同）")
+	desc := fs.String("desc", "", "工作台描述（可选，透传到 workspaces.description）")
 	if err := fs.Parse(args[1:]); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -673,7 +674,7 @@ func cmdLabWorkspace(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer func() { _ = a.Close() }()
-	res, err := a.Lab.Materialize(context.Background(), *name, "", batchIDs)
+	res, err := a.Lab.Materialize(context.Background(), *name, *desc, batchIDs)
 	if err != nil {
 		return err
 	}

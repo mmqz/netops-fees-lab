@@ -2,6 +2,57 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.3.0] — 2026-10-10
+
+**地理视图版**（用户需求驱动：「能把现实地理 2D 地图和 3D 地图也纳入设计吗？可以视角切换」）：设备地理坐标全链路管道（导入列 → 资源属性 → 虚拟设备 → 拓扑 API）+ 画布三视图切换（**拓扑图 | 2D 地图 | 3D 地图**，MapLibre GL 懒加载）——真实深色地理底图上按经纬度落设备、链路状态分色、3D 倾斜视角塔体、视角切换与表格双向联动。**红线：geo 绝不进入规范状态哈希**——坐标是展示元数据，含/不含坐标的同业务状态哈希逐字节一致（回归测试双层证明）。194 个 Go 测试全绿；tsc 0 错误；浏览器控制台零警告零错误。
+
+### 新增 — 映射与导入（internal/mapping · internal/importer）
+- 设备 schema 三个**可选**字段（仅设备）：`geo_lat`（纬度，float [-90,90]）、`geo_lng`（经度，float [-180,180]）、`geo`（经纬度组合列，两个数字、顺序不限）；同义词梯子覆盖 经度/纬度/lat/lng/lon/GPS纬度/GPS经度/北纬/东经/经纬度/装机经纬度/坐标/GPS坐标/A端装机经纬度/位置
+- 三个新 FieldKind（`lat`/`lng`/`geo`）的 E004 校验，中文原因：`不是合法的纬度（-90 到 90 的数字）`、`不是合法的经度（-180 到 180 的数字）`、`经纬度应为两个数字（如 126.63,45.75）`；浮点范围检查在 Kind 分支内实现（整数区间机制不受影响）
+- **组合列拆分（中国边界启发式）**：`f1∈[73,136] ∧ f2∈[3,54]` → (经度,纬度) 高德惯例；`f1∈[3,54] ∧ f2∈[73,136]` → (纬度,经度)；境外/歧义坐标不硬失败（取合法解读，默认 `lng=f1, lat=f2`）；分隔符支持半角/全角逗号、分号、空白；拆分值先落属性再走与分列相同的校验；**分列优先**（纬度+经度两列同时提供时组合列不拆分，原始值保留溯源）
+- 拆分结果以十进制原码串（`FormatFloat 'f' -1`）写入资源属性 `geo_lat`/`geo_lng`，同时保留原始 `geo` 属性
+
+### 新增 — 存储与仿真（internal/domain · internal/repo · internal/sim）
+- `domain.VirtualDevice.GeoLat/GeoLng *float64`（nil = 无位置）；迁移 **v6**（`device_geo_columns`）：`ALTER TABLE virtual_devices ADD COLUMN geo_lat REAL / geo_lng REAL`，可空无默认，v5 库打开自动升级、旧行 NULL；仓储层 `sql.NullFloat64 ↔ *float64`、Insert 对 nil 写 NULL
+- 物化解析资源属性 geo_lat/geo_lng（合法且在界内才采纳，非法忽略属防御）；拓扑节点 `GeoLat/GeoLng`（JSON `geoLat`/`geoLng`，`omitempty`——无位置节点不带键）
+- **撤销路径保位置**：`delete_device` 的逆操作快照 `DeviceSnap` 携带 `geoLat`/`geoLng`（camelCase；旧 inverse_json 缺键解码为 nil，兼容）
+- **哈希红线**：`hashDevice` 不含 geo（`internal/sim/state.go` 未改动）；`TestWorkspaceHashIgnoresGeo` 双层证明——两个全新库分别导入含/不含 经纬度 列的同数据工作簿，物化哈希逐字节相同；单元级直接清空已加载状态的 GeoLat/GeoLng，hashValue 不变
+
+### 新增 — 测试数据与演示
+- `cmd/testdatagen -geo`：新增 `testdata/geodevices.xlsx`（设备 sheet + 经度/纬度 分列，10 行）与 `testdata/geocircuits.xlsx`（电路 sheet，10 行）——黑龙江真实网络孪生（设备编码/名称/型号/IP/电路编号取自运营商真实导出，**坐标为演示近似值**）；哈尔滨→漠河北南干线 + 地震局 10M 长专线 + 基站支路；确定性生成（固定文档属性，重跑 sha256 一致）；**既有 4 个合成工件零改动**（sha256 前后一致）
+- `scripts/demo-geo-lab.sh`：导入两本地理工作簿 → 物化「黑龙江-地理孪生演示」（描述注明坐标为演示近似值）→ GD-202366 两端配置 10.61.0.1/30 ↔ 10.61.0.2/30 → 关断 CKT-QQH-JGDC-10G（干线中段红色故障）→ 起 serve 随机端口 curl 拓扑 API 展示 geoLat/geoLng
+- CLI `lab workspace create` 新增可选 `--desc`（透传 workspaces.description，此前仅 HTTP 可设）
+
+### 已知边界（诚实清单）
+- 检查点恢复重建被删设备走 `create_device`（封闭操作面无 geo 字段）→ 重建设备无坐标（状态哈希不受影响；撤销路径不受影响）
+- 3D 塔为示意级数字孪生（塔高 = 设备连接数），非物理仿真渲染（无材质光影/流量驱动高度）；VLM 终评 2D 7.5 / 3D 6.5 / 综合 7.0
+- 地理底图依赖公网瓦片服务（ESRI anonymous），离线时自动降级为无栅格深色网格模式（设备/链路本地 GeoJSON 恒可渲染）
+
+### 新增 — 前端地理画布（web/src/components/lab/GeoCanvas.tsx，GEO-2）
+- **三视图切换**：画布工具带新增分段控件「拓扑图 / 2D 地图（俯视 · 设备按真实经纬度落位）/ 3D 地图（斜视 58° · 塔高示意设备连接数 · 右键拖拽旋转）」，按工作台持久化（画布 v2 存档新增 view 字段，兼容旧档）；全部设备无坐标时显示引导空态 +「返回拓扑图」按钮；部分缺坐标时右下角 chip 提示「N 台设备未显示（无坐标）」
+- **maplibre-gl 6.13.0（精确锁定）懒加载**：`await import('maplibre-gl')` 独立异步 chunk（主包不增重；worker 经 vite `?url` 哈希资源发射）
+- **设备 HTML Marker**：状态色圆点 + 编码牌（`HLB-A4`），键盘可聚焦（tabindex + Enter/Space 触发选择），点击/选中与拓扑图 tap **同一套选中语义**（右侧表格同步定位、选中态强调环）；悬停复用画布左上信息条；L 键标签开关（隐藏编码文字保留圆点）
+- **链路 GeoJSON 图层**：up #5b8fd9 2px 实线 / down #ff5252 3px 红虚线（rAF marching-ants 动画，prefers-reduced-motion 关闭）/ 选中 #2f9dff 4px；端点缺坐标的链路跳过并计数
+- **3D 塔（fill-extrusion）**：仅 3D 视图可见，像素高 18 + 连接数 × 10；2D↔3D easeTo pitch 0|58（3D 同时 bearing -30 斜视角，700ms，reduced-motion 时 0）；拖拽旋转/俯仰为 MapLibre 原生右键/Ctrl 拖拽
+- **地理控制**：NavigationControl（visualizePitch 指北针 + 缩放）+ ScaleControl + 适配视图（fitBounds，F 键）/ 指北复位；首批数据自动 fitBounds（maxZoom 9）
+- **zen 全屏兼容**：ResizeObserver → map.resize()，1920×1080 下地图 1888×999 满幅、pitch/塔体保持；Esc 链与拓扑视图一致；图例（地理变体）含塔高说明
+
+### 修复 — 底图与 3D 塔两处 P0/P1（编排者终验发现并动手）
+- **P0 底图水印砖（取证与替换）**：CARTO `basemaps.cartocdn.com/dark_all` 对匿名 IP 统一返回 2513B 的「API KEY REQUIRED」水印砖（浏览器内 fetch z3/z4/z10 字节级相同的错误砖；截图左区亮像素 18.3% = 文字墙；HTTP 200 故瓦片 error 降级不触发）→ 替换为 **ESRI Canvas/World_Dark_Gray_Base + Reference 双层栅格底图**（免密钥、深色画布风格匹配、Reference 层提供地名/边界注记，注意 z/y/x 路径顺序）；修复后 VLM 确认真实地理内容（满洲里/海拉尔/根河等地名可见）
+- **P1 3D 塔不渲染（两处叠加根因）**：① 塔高表达式对 `['zoom']` 直接做除法运算违反 MapLibre 规范（paint 属性里 zoom 只能作顶层 interpolate 输入）→ 样式校验失败、`getStyle()` 返回 undefined；修复：顶层 `interpolate exponential-2` 双停止点（z0→9e4 × towerPx、z16→9e4/2^16 × towerPx，几何插值恒等于 9e4×2^zoom）② 塔 footprint 固定 0.0016°（≈120 米）在省级缩放下仅 0.04px，亚像素多边形光栅化不出面；修复：footprint 改为恒定 7px 像素宽（`buildTowerCollection(topology, zoom)` 纯函数按当前 zoom 逐设备换算，zoomend 防抖 150ms 重建，`applyDataToMap` 不再触碰塔源防清空）；修复后 `queryRenderedFeatures(towers)`=10/10、VLM 确认「明显 3D 立体柱状物、高度不一、数字孪生感较强」
+- **离线降级匹配**：瓦片错误源判定覆盖 arcgisonline 主机名；降级样式重建时塔数据与可见性一并回填
+
+### 验证 — GEO-2 前端（agent-browser 1920×1080 真浏览器）
+- 2D：ESRI 底图真实渲染（纹理 425 色 + VLM 确认地理内容与地名）；pitch=0；标记点击 → 表格行选中（HLB-MH-BS1 已停机同步）；红虚线故障链路可见
+- 3D：pitch=58.0 / bearing=-30 / zoom=3.2；塔 10/10 渲染；zen 3D 全屏 1888×999 满幅
+- 快捷键：F fitBounds（黑龙江 bbox）/ L 标签往返（10 codes ↔ 10 nolabel ↔ 0 恢复）
+- 空态与持久化：无坐标工作台引导 + 返回拓扑图可用；重载后持久化视图自动恢复
+- 稳定性：15 次快速视图切换后控制台 0 error 0 warning；拓扑视图回归（布局/路径模式横幅/节点渲染/minimap）抽查通过；截图归档 `download/ui-screenshots-v0.3.0-geo2/`（22 张）
+
+### 验证 — GEO-1 后端
+- 门禁：gofmt 空 / `go vet` 干净 / 全部测试通过（**+13 个新测试**，覆盖：三个 geo Kind 的 E004、拆分启发式（双序/中文逗号/空格/分号/境外/非法）、导入器端到端（组合列/分列/分列优先/非法拒绝）、物化→拓扑 geo 流转、哈希红线回归、delete→undo 位置保留、v6 迁移升级（v5 库活数据 + 幂等重开）、geo fixtures 不变量）
+- 冒烟（真实二进制 + curl）：导入 geodevices/geocircuits → 物化 10 设备/10 链路 → 拓扑 API 10/10 节点携带 geoLat/geoLng（哈尔滨枢纽 45.773/126.636、漠河站 down）→ 故障注入后 CKT-QQH-JGDC-10G down；ops/undo/checkpoint 往返不受影响（留档 `/home/z/my-project/tmp/geo1/`）
+
 ## [0.2.3] — 2026-10-10
 
 **画布全屏工作台版**（用户反馈驱动：「画布的组件太简陋了，画布的展示区域太小了，不能全屏工作」）：画布从「被四层壳挤压的 948×760 面板」升级为**可全屏的一等工作区**——zen 全屏模式（1080p 下 1920×1080，约 2.9 倍面积）+ 工业级画布交互（右键菜单 / PNG 导出 / 缩放指示 / 手动排布持久化 / 快捷键）+ 分栏拖拽与右栏折叠。全部改动仅在 web 前端 5 个文件（后端零改动，红线保持）。181 个 Go 测试全绿；tsc 0 错误；控制台零警告零错误。

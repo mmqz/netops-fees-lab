@@ -423,6 +423,40 @@ export function IconPanelExpand({ size = 16, className }: IconProps) {
   );
 }
 
+/** GEO-2：视图分段——2D 地图（平面网格 + 定位点，俯视）。 */
+export function IconMap2d({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18M3 15h18M9 3v18M15 3v18" strokeDasharray="0" />
+      <circle cx="15" cy="9" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="15" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** GEO-2：视图分段——3D 地图（等距立方体，斜视）。 */
+export function IconMap3d({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M12 2.5l8.5 4.8v9.4L12 21.5l-8.5-4.8V7.3z" />
+      <path d="M3.5 7.3 12 12.1l8.5-4.8" />
+      <path d="M12 12.1v9.4" />
+    </svg>
+  );
+}
+
+/** GEO-2：地图视图——指北复位（罗盘针）。 */
+export function IconCompass({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M15.6 8.4l-2 5.2-5.2 2 2-5.2z" />
+      <path d="M12 3v1.5M21 12h-1.5M12 21v-1.5M3 12h1.5" />
+    </svg>
+  );
+}
+
 /** Toast 状态图标：错误（实感更重的警示）。 */
 export function IconAlert({ size = 16, className }: IconProps) {
   return (

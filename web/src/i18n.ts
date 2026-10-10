@@ -26,7 +26,7 @@ import type {
 
 export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
-export const APP_VERSION = 'v0.2.3';
+export const APP_VERSION = 'v0.3.0';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -603,6 +603,51 @@ export const LAB_LEGEND_DEVICE_DOWN = '停机设备';
 export const LAB_LEGEND_IFACE_FAULT = '接口故障';
 export const LAB_LEGEND_LINK_UP = '正常链路';
 export const LAB_LEGEND_LINK_DOWN = '中断链路';
+
+// —— GEO-2：地理 2D/3D 地图视图（视图维度 + 地图专属控件与状态） ——
+
+/** 工具带视图分段（拓扑图 | 2D 地图 | 3D 地图）标签。 */
+export const LAB_VIEW = '视图';
+export const LAB_VIEW_TOPO = '拓扑图';
+export const LAB_VIEW_GEO2D = '2D 地图';
+export const LAB_VIEW_GEO3D = '3D 地图';
+export const LAB_VIEW_TOPO_TITLE = '拓扑图视图（关系拓扑 · 布局 / 路径 / 聚焦 / PNG 导出）';
+export const LAB_VIEW_GEO2D_TITLE = '2D 地图（俯视 · 设备按真实经纬度落位）';
+export const LAB_VIEW_GEO3D_TITLE = '3D 地图（斜视 58° · 塔高示意设备连接数 · 右键拖拽旋转）';
+
+/** 地图视图：适配视图（快捷键 F，与拓扑视图一致）。 */
+export const LAB_GEO_FIT = '适配视图（快捷键 F · 缩放至全部设备可见）';
+/** 地图视图：指北复位（方位角归零）。 */
+export const LAB_GEO_NORTH = '指北复位（方位角归零，保留当前俯仰角）';
+/** 地图视图：设备标签开关（快捷键 L，镜像拓扑视图链路标签语义）。 */
+export const LAB_GEO_LABELS = '设备标签（快捷键 L）';
+/** 拓扑专属工具在地图视图中禁用时的说明 tooltip。 */
+export const LAB_GEO_DISABLED_TITLE = '仅在拓扑图视图可用（切回拓扑图后生效）';
+/** PNG 导出在地图视图中的禁用说明。 */
+export const LAB_GEO_EXPORT_DISABLED = 'PNG 导出仅在拓扑图视图可用';
+/** 地图视图工具带右侧 hint。 */
+export const LAB_GEO_HINT = '点击地标定位右侧设备行 · 左键拖拽平移 · 右键拖拽旋转';
+
+/** 底图瓦片连续加载失败 → 本地数据渲染模式 chip。 */
+export const LAB_GEO_OFFLINE = '离线底图模式';
+export const LAB_GEO_OFFLINE_TITLE = '底图瓦片加载失败，已切换为纯本地数据渲染（设备与链路不受影响）';
+
+/** 全部设备无坐标 → 居中提示 + 返回拓扑图。 */
+export const LAB_GEO_NOGEO = '当前工作区设备没有地理坐标——导入含经度/纬度（或经纬度）列的设备表后自动出现';
+export const LAB_GEO_NOGEO_BACK = '返回拓扑图';
+
+/** 部分设备缺坐标 → 右下角计数 chip。 */
+export const LAB_GEO_PARTIAL = '{n} 台设备未显示（无坐标）';
+export const LAB_GEO_PARTIAL_TITLE = '这些设备未携带地理坐标，仅在拓扑图视图中显示';
+
+/** 地图地标（HTML Marker）的 aria-label：设备 {code} · {name} · {status}。 */
+export const LAB_GEO_MARKER_LABEL = '设备 {code} · {name} · {status}';
+
+/** 地图图例（3D 塔 = 连接数条目，仅 3D 视图显示）。 */
+export const LAB_GEO_LEGEND_TOWER = '塔高 = 连接数';
+
+/** 地图容器 aria-label。 */
+export const LAB_GEO_MAP_LABEL = '地理地图';
 
 // —— 设备标签页 ——
 

@@ -189,8 +189,8 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	if AppVersion != "v0.2.3" {
-		t.Errorf("AppVersion = %q, want v0.2.3 (PROJECT_BRIEF_P2 §7 + v0.2.3 fullscreen canvas workspace)", AppVersion)
+	if AppVersion != "v0.3.0" {
+		t.Errorf("AppVersion = %q, want v0.3.0 (PROJECT_BRIEF_P2 §7 + v0.3.0 geographic 2D/3D map views)", AppVersion)
 	}
 }
 

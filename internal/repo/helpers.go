@@ -43,6 +43,25 @@ func nullablePtr(s *string) any {
 	return *s
 }
 
+// nullFloatPtr maps a *float64 to a driver argument, preserving nil (SQL
+// NULL = "no value" — used by the virtual_devices geo columns).
+func nullFloatPtr(f *float64) any {
+	if f == nil {
+		return nil
+	}
+	return *f
+}
+
+// floatPtrFromNull converts a scanned nullable REAL into *float64 (nil when
+// NULL) — the read side of nullFloatPtr.
+func floatPtrFromNull(nf sql.NullFloat64) *float64 {
+	if !nf.Valid {
+		return nil
+	}
+	v := nf.Float64
+	return &v
+}
+
 // nullableTimePtr maps a *time.Time to a driver argument (UTC RFC3339),
 // preserving nil.
 func nullableTimePtr(t *time.Time) any {

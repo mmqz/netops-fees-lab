@@ -52,7 +52,12 @@ func ParseWorkspaceSource(s string) (WorkspaceSource, error) {
 
 // VirtualDevice is a simulated device inside a workspace. ResourceID keeps
 // the lineage to the imported device resource ("" = NULL = manually created,
-// no lineage). Code is unique within the workspace.
+// no lineage). Code is unique within the workspace. GeoLat/GeoLng are the
+// OPTIONAL geographic position (nil = no position) — presentation metadata
+// only: they flow import → resource attributes → materialization → the
+// topology payload, but are deliberately EXCLUDED from the canonical
+// workspace state hash (moving a device on a map must never change the
+// state hash, checks or diffs).
 type VirtualDevice struct {
 	ID          string
 	WorkspaceID string
@@ -60,6 +65,8 @@ type VirtualDevice struct {
 	Code        string
 	Name        string
 	Status      EntityStatus
+	GeoLat      *float64 // nil = no position (SQL NULL)
+	GeoLng      *float64 // nil = no position (SQL NULL)
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

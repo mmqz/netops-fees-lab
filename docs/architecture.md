@@ -101,3 +101,9 @@ web/                                   ← React 源码（构建产物输出到 
 - **多工作区并发写不支持**（schema 允许多工作区共存；检查点恢复的 id 预测依赖单写者模式）；
 - MCP 部署态（TeleAgent 宿主）调用未在本环境验证——见 `docs/verified-capabilities.md`；
 - `/lab` 的 Cytoscape 视觉效果未经真实浏览器人工确认（结构断言通过，终审待做）。
+
+## 8. 地理坐标元数据路径（geo pipeline，schema v6）
+
+设备坐标走一条**独立于业务规则的展示元数据管道**：导入列（`纬度`/`经度` 分列，或组合列 `经纬度` 经中国边界启发式拆分，`internal/mapping` 的 `SplitGeoLatLng`）→ 资源属性 `geo_lat`/`geo_lng`（纯十进制串）→ 物化时解析进 `domain.VirtualDevice.GeoLat/GeoLng`（v6 两列可空 `REAL`，`internal/repo/migrations_v6.go`）→ 拓扑负载节点携带 `geoLat`/`geoLng`（`omitempty`）。红线：**geo 绝不进入规范状态哈希**（`hashDevice` 不含 geo，回归测试证明含/不含坐标的同业务状态哈希逐字节一致）——坐标是给前端 2D/3D 地图视图消费的呈现数据，挪动地图上的设备不允许改变哈希、校验或 diff。撤销路径的 `DeviceSnap` 携带坐标（delete→undo 位置不丢）；已知边界：检查点恢复重建被删设备走 `create_device`（封闭操作面无 geo 字段），重建设备无坐标（哈希不受影响）。演示数据 `testdata/geodevices.xlsx` + `geocircuits.xlsx`（`testdatagen -geo`，黑龙江真实网络孪生，坐标为演示近似值），演示脚本 `scripts/demo-geo-lab.sh`。
+
+前端消费端为 `web/src/components/lab/GeoCanvas.tsx`（v0.3.0）：画布三视图切换（拓扑图 / 2D 地图 / 3D 地图，MapLibre GL 懒加载）。底图 ESRI `Canvas/World_Dark_Gray_Base + Reference` 双层栅格（免密钥匿名可用；曾评估 CARTO dark_all，2026-10 实测对匿名 IP 统一返回「API KEY REQUIRED」水印砖已弃用）；瓦片连续失败自动重建无栅格样式降级（设备/链路本地 GeoJSON 恒可渲染）。设备为 HTML Marker（键盘可聚焦、与拓扑 tap 同一选中语义联动表格），链路为 GeoJSON line 图层（up 实线 / down 红虚线 marching-ants），3D 塔为 fill-extrusion（像素高 18 + 连接数 × 10，高度经顶层 `interpolate exponential-2` 双停止点按 zoom 几何换算为米——MapLibre 规范要求 paint 属性中 `zoom` 只能作顶层 interpolate 输入；塔 footprint 按当前 zoom 恒定 7px 宽重建，规避亚像素多边形无法光栅化的问题）。

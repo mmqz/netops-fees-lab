@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,6 +147,13 @@ func (s *Service) Materialize(ctx context.Context, name, description string, bat
 				Status:      deviceStatusOfResource(res),
 				CreatedAt:   now, UpdatedAt: now,
 			}
+			// Optional geographic position from the resource
+			// attributes (plain decimal strings written by the
+			// importer's geo split). Invalid values are ignored
+			// — import already validated them; this is defensive
+			// only. Geo is presentation metadata and never
+			// enters the state hash.
+			dev.GeoLat, dev.GeoLng = geoOfResource(res)
 			if dev.Name == "" {
 				dev.Name = res.NaturalKey // defensive: device_name is a required field
 			}
@@ -295,6 +304,31 @@ func deviceStatusOfResource(res domain.Resource) domain.EntityStatus {
 		return domain.EntityStatusUp
 	}
 	return domain.EntityStatusDown
+}
+
+// geoOfResource parses the optional geo_lat/geo_lng device attributes into
+// the virtual device position pointers. Each coordinate is adopted only
+// when it parses AND is in range (lat [-90,90], lng [-180,180]); absent,
+// unparsable or out-of-range values yield nil (import already validated the
+// columns — ignoring here is defensive, never a hard failure). The two
+// coordinates are independent: a partial pair still carries the valid half.
+func geoOfResource(res domain.Resource) (lat, lng *float64) {
+	lat = parseGeoAttr(res.Attributes["geo_lat"], -90, 90)
+	lng = parseGeoAttr(res.Attributes["geo_lng"], -180, 180)
+	return lat, lng
+}
+
+// parseGeoAttr parses one geo attribute as a float within [min, max]; nil
+// when absent, unparsable (NaN/Inf included) or out of range.
+func parseGeoAttr(v string, min, max float64) *float64 {
+	if v == "" {
+		return nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < min || f > max {
+		return nil
+	}
+	return &f
 }
 
 // isNotFound reports whether err wraps domain.ErrNotFound.

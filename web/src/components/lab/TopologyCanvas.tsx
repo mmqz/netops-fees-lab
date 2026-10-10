@@ -51,6 +51,14 @@
  *   · resizeSuspended：分栏拖拽期间挂起 cy.resize（不逐帧重设画布缓冲），
  *     拖完/zen 切换后补一次 resize + minimap（容器尺寸变化 Cytoscape 不自动
  *     感知；平时 ResizeObserver 自动，拖拽期间手动挂起防卡顿）。
+ * - GEO-2 顶层视图维度：拓扑图 | 2D 地图 | 3D 地图（prefs v2 新增 view 字段，
+ *   兼容旧档案默认 topo）。视图分段复用 canvas-seg/canvas-tool 视觉语言；
+ *   地图视图由 <GeoCanvas>（maplibre-gl 懒加载）铺满画布区域，覆盖在 cy 容器
+ *   之上——cy 实例与全部拓扑能力原样保留（回到 topo 视图零重建、位置/选中/
+ *   布局状态不变，且不产生实例泄漏）。布局/模式/PNG 等拓扑专属工具在地图
+ *   视图禁用（带说明 tooltip）；地图专属控件（适配视图 F / 指北复位）接管；
+ *   minimap/缩放 chip/右键菜单/trace 横幅仅拓扑视图渲染。Esc 链在地图视图
+ *   自然收窄为：菜单（不会开）→ trace/focus 痕迹（切视图时清理）→ zen 退出。
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -92,6 +100,12 @@ import {
   LAB_CANVAS_ZOOM_IN,
   LAB_CANVAS_ZOOM_OUT,
   LAB_CANVAS_ZOOM_HINT,
+  LAB_GEO_DISABLED_TITLE,
+  LAB_GEO_EXPORT_DISABLED,
+  LAB_GEO_FIT,
+  LAB_GEO_HINT,
+  LAB_GEO_LABELS,
+  LAB_GEO_NORTH,
   LAB_LAYOUT,
   LAB_LAYOUT_CIRCLE,
   LAB_LAYOUT_CONCENTRIC,
@@ -117,6 +131,13 @@ import {
   LAB_TRACE_PICK_A,
   LAB_TRACE_PICK_B,
   LAB_TRACE_UNREACHABLE,
+  LAB_VIEW,
+  LAB_VIEW_GEO2D,
+  LAB_VIEW_GEO2D_TITLE,
+  LAB_VIEW_GEO3D,
+  LAB_VIEW_GEO3D_TITLE,
+  LAB_VIEW_TOPO,
+  LAB_VIEW_TOPO_TITLE,
   LABWS_ZEN_ENTER,
   LABWS_ZEN_EXIT,
   LABWS_ZEN_EXIT_LABEL,
@@ -133,6 +154,7 @@ import {
 import {
   IconCamera,
   IconClose,
+  IconCompass,
   IconExpand,
   IconFit,
   IconLabels,
@@ -142,23 +164,37 @@ import {
   IconLayoutFreeze,
   IconLayoutGrid,
   IconLayoutHier,
+  IconMap2d,
+  IconMap3d,
   IconMinimize,
   IconModeFocus,
   IconModeSelect,
   IconModeTrace,
   IconResetView,
+  IconTopology,
   IconZoomIn,
   IconZoomOut,
 } from '../icons';
+import { GeoCanvas } from './GeoCanvas';
+import type { GeoCanvasHandle, GeoHoverInfo } from './GeoCanvas';
 
 type LayoutKind = 'force' | 'hier' | 'concentric' | 'grid' | 'circle' | 'freeze';
 type ModeKind = 'select' | 'trace' | 'focus';
 
-/** 按工作台持久化的画布偏好（v2：布局 + 交互模式 + 标签开关）。 */
+/** GEO-2：画布顶层视图维度（拓扑图 / 2D 地图 / 3D 地图）。 */
+type CanvasView = 'topo' | 'geo2d' | 'geo3d';
+
+const VIEW_KINDS: CanvasView[] = ['topo', 'geo2d', 'geo3d'];
+
+const isViewKind = (v: unknown): v is CanvasView =>
+  typeof v === 'string' && (VIEW_KINDS as string[]).includes(v);
+
+/** 按工作台持久化的画布偏好（v2：布局 + 交互模式 + 标签开关 + 顶层视图 GEO-2）。 */
 interface CanvasPrefs {
   layout: LayoutKind;
   mode: ModeKind;
   labels: boolean;
+  view: CanvasView;
 }
 
 /** FX-6：右键菜单项（label=可见文案；title=tooltip；hint=快捷键提示列）。 */
@@ -180,7 +216,7 @@ interface CanvasMenuState {
   items: CanvasMenuItem[];
 }
 
-const DEFAULT_PREFS: CanvasPrefs = { layout: 'force', mode: 'select', labels: true };
+const DEFAULT_PREFS: CanvasPrefs = { layout: 'force', mode: 'select', labels: true, view: 'topo' };
 
 const LAYOUT_KINDS: LayoutKind[] = ['force', 'hier', 'concentric', 'grid', 'circle', 'freeze'];
 const MODE_KINDS: ModeKind[] = ['select', 'trace', 'focus'];
@@ -294,6 +330,8 @@ function readPrefs(persistKey: string | undefined): CanvasPrefs {
           layout: isLayoutKind(rec.layout) ? rec.layout : DEFAULT_PREFS.layout,
           mode: isModeKind(rec.mode) ? rec.mode : DEFAULT_PREFS.mode,
           labels: typeof rec.labels === 'boolean' ? rec.labels : DEFAULT_PREFS.labels,
+          // GEO-2：旧 v2 档案无 view 字段 → 默认 topo（向后兼容）
+          view: isViewKind(rec.view) ? rec.view : DEFAULT_PREFS.view,
         };
       }
     }
@@ -867,6 +905,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   /** FX-4：hover 信息条/容器光标的事件清理（实例卸载时调用）。 */
   const hoverCleanupRef = useRef<(() => void) | null>(null);
   const [prefs, setPrefs] = useState<CanvasPrefs>(() => readPrefs(persistKey));
+  /** GEO-2：GeoCanvas 命令句柄（工具带适配/指北与 F 键经 ref 转发）。 */
+  const geoRef = useRef<GeoCanvasHandle | null>(null);
+  /** GEO-2：当前视图镜像（挂载期闭包 / 快捷键路径读最新值）。 */
+  const viewRef = useRef<CanvasView>(prefs.view);
   /** 悬浮节点信息（FX-4）：左上角信息条「code · 名称 · 状态」。 */
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   /** 路径追踪横幅（v0.2.2）。 */
@@ -931,6 +973,11 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   const layout = prefs.layout;
   const mode = prefs.mode;
   const edgeLabels = prefs.labels;
+  const view = prefs.view;
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -1149,6 +1196,24 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     menuActionsRef.current = { focusTap: contextFocusTap, traceStart: contextTraceStart };
     viewActionsRef.current = { fitView, resetView, toggleLabels, exportPng, closeMenu };
   });
+
+  // —— GEO-2：视图切换 ——
+  // 离开拓扑图时清理模式痕迹与菜单（cy 实例保留在地图层下方，全部拓扑能力
+  // 在回到 topo 视图时原样可用；地图视图自身无菜单/路径/聚焦语义）。
+  useEffect(() => {
+    if (view === 'topo') return;
+    clearModeArtifacts();
+    setMenu(null);
+  }, [view, clearModeArtifacts]);
+
+  function switchView(kind: CanvasView): void {
+    setPrefs((p) => (p.view === kind ? p : { ...p, view: kind }));
+  }
+
+  /** 悬停信息条回调（拓扑 cy 事件与地图地标悬停共用同一状态与样式）。 */
+  const handleGeoHoverInfo = useCallback((info: GeoHoverInfo | null): void => {
+    setHoverInfo(info);
+  }, []);
 
   // 模式切换 → 清掉上一模式的视觉残留（pick-a 引导横幅由渲染层从 mode/trace 派生）
   // （FX-6 例外：右键「路径起点」——先切换到路径模式再注入起点，跳过清除）
@@ -1728,6 +1793,11 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   }
 
   function fitView(): void {
+    // GEO-2：地图视图 → GeoCanvas 的 fitBounds（与拓扑 fitView 同一 F 键与语义）
+    if (viewRef.current !== 'topo') {
+      geoRef.current?.fitView();
+      return;
+    }
     const cy = cyRef.current;
     if (cy === null) return;
     fitToView(cy);
@@ -1889,7 +1959,13 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   }, [zen, selected, topology]);
 
   const hintText =
-    mode === 'trace' ? LAB_MODE_TRACE_HINT : mode === 'focus' ? LAB_MODE_FOCUS_HINT : LAB_CANVAS_HINT;
+    view !== 'topo'
+      ? LAB_GEO_HINT
+      : mode === 'trace'
+        ? LAB_MODE_TRACE_HINT
+        : mode === 'focus'
+          ? LAB_MODE_FOCUS_HINT
+          : LAB_CANVAS_HINT;
 
   /** 路径追踪横幅文案（v0.2.2；v0.2.3 pick-a 改为渲染层派生）。 */
   let traceBanner: { className: string; text: string } | null = null;
@@ -1938,12 +2014,38 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     { kind: 'focus', label: LAB_MODE_FOCUS, title: '聚焦模式（点击设备，仅保留其一跳邻域）', icon: <IconModeFocus /> },
   ];
 
+  /** GEO-2：顶层视图分段（拓扑图 | 2D 地图 | 3D 地图；后两者互为俯视/斜视切换）。 */
+  const VIEW_BUTTONS: Array<{ kind: CanvasView; label: string; title: string; icon: ReactNode }> = [
+    { kind: 'topo', label: LAB_VIEW_TOPO, title: LAB_VIEW_TOPO_TITLE, icon: <IconTopology size={16} /> },
+    { kind: 'geo2d', label: LAB_VIEW_GEO2D, title: LAB_VIEW_GEO2D_TITLE, icon: <IconMap2d /> },
+    { kind: 'geo3d', label: LAB_VIEW_GEO3D, title: LAB_VIEW_GEO3D_TITLE, icon: <IconMap3d /> },
+  ];
+
   const zenCardCls: string = `lab-canvas-card card${zen ? ' lab-canvas-card--zen' : ''}`;
 
   return (
     <div className={zenCardCls} aria-label={LAB_CANVAS_LABEL}>
-      {/* 工具带（v0.2.2 图标化分段控件）：布局 6 态 + 交互模式 3 态 + 链路标签开关 */}
+      {/* 工具带：GEO-2 视图分段（拓扑图/2D/3D）+ 布局 6 态 + 交互模式 3 态 +
+          标签开关（地图视图=设备标签）+ 地图专属控件（适配/指北）+ PNG + zen。
+          拓扑专属工具在地图视图禁用（带说明 tooltip，保持工具带结构稳定）。 */}
       <div className="lab-canvas-toolbar" role="toolbar" aria-label={LAB_CANVAS_LABEL}>
+        <span className="lab-canvas-toolbar-label">{LAB_VIEW}</span>
+        <div className="canvas-seg" role="group" aria-label={LAB_VIEW}>
+          {VIEW_BUTTONS.map((btn) => (
+            <button
+              key={btn.kind}
+              type="button"
+              className={`canvas-tool${view === btn.kind ? ' is-active' : ''}`}
+              aria-pressed={view === btn.kind}
+              title={btn.title}
+              aria-label={btn.title}
+              onClick={() => switchView(btn.kind)}
+            >
+              {btn.icon}
+            </button>
+          ))}
+        </div>
+        <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
         <span className="lab-canvas-toolbar-label">{LAB_LAYOUT}</span>
         <div className="canvas-seg" role="group" aria-label={LAB_LAYOUT}>
           {LAYOUT_BUTTONS.map((btn) => (
@@ -1952,8 +2054,9 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
               type="button"
               className={`canvas-tool${layout === btn.kind ? ' is-active' : ''}`}
               aria-pressed={layout === btn.kind}
-              title={btn.title}
+              title={view === 'topo' ? btn.title : LAB_GEO_DISABLED_TITLE}
               aria-label={btn.title}
+              disabled={view !== 'topo'}
               onClick={() => runLayout(btn.kind)}
             >
               {btn.icon}
@@ -1969,8 +2072,9 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
               type="button"
               className={`canvas-tool${mode === btn.kind ? ' is-active' : ''}`}
               aria-pressed={mode === btn.kind}
-              title={btn.title}
+              title={view === 'topo' ? btn.title : LAB_GEO_DISABLED_TITLE}
               aria-label={btn.title}
+              disabled={view !== 'topo'}
               onClick={() => switchMode(btn.kind)}
             >
               {btn.icon}
@@ -1982,20 +2086,42 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           type="button"
           className={`canvas-tool canvas-tool--toggle${edgeLabels ? ' is-active' : ''}`}
           aria-pressed={edgeLabels}
-          title={LAB_CANVAS_LABELS}
-          aria-label={LAB_CANVAS_LABELS}
+          title={view === 'topo' ? LAB_CANVAS_LABELS : LAB_GEO_LABELS}
+          aria-label={view === 'topo' ? LAB_CANVAS_LABELS : LAB_GEO_LABELS}
           onClick={toggleLabels}
         >
           <IconLabels />
         </button>
+        {view !== 'topo' && (
+          <>
+            <button
+              type="button"
+              className="canvas-tool canvas-tool--action"
+              title={LAB_GEO_FIT}
+              aria-label={LAB_GEO_FIT}
+              onClick={() => geoRef.current?.fitView()}
+            >
+              <IconFit />
+            </button>
+            <button
+              type="button"
+              className="canvas-tool canvas-tool--action"
+              title={LAB_GEO_NORTH}
+              aria-label={LAB_GEO_NORTH}
+              onClick={() => geoRef.current?.resetNorth()}
+            >
+              <IconCompass />
+            </button>
+          </>
+        )}
         <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
-        {/* FX-6：PNG 快照导出（空拓扑禁用） */}
+        {/* FX-6：PNG 快照导出（空拓扑禁用；地图视图禁用——快照仅拓扑视图） */}
         <button
           type="button"
           className="canvas-tool canvas-tool--action"
-          title={LAB_CANVAS_EXPORT}
-          aria-label={LAB_CANVAS_EXPORT}
-          disabled={empty}
+          title={view === 'topo' ? LAB_CANVAS_EXPORT : LAB_GEO_EXPORT_DISABLED}
+          aria-label={view === 'topo' ? LAB_CANVAS_EXPORT : LAB_GEO_EXPORT_DISABLED}
+          disabled={empty || view !== 'topo'}
           onClick={exportPng}
         >
           <IconCamera />
@@ -2026,48 +2152,67 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
         )}
       </div>
       <div ref={wrapRef} className="lab-canvas-wrap lab-canvas-wrap--dark">
+        {/* cy 容器常驻（地图视图不卸载：GeoCanvas 以不透明层覆盖其上，交互被
+            地图层接管；切回拓扑视图零重建，位置/选中/布局状态原样保留） */}
         <div ref={containerRef} className="lab-canvas" />
-        {/* 视图控制（右上角）与图例（左下角）：容器不拦截指针，仅控件可点 */}
-        <div className="lab-canvas-overlay lab-canvas-controls" role="toolbar" aria-label={LAB_CANVAS_LABEL} title={LAB_CANVAS_ZOOM_HINT}>
-          <button
-            type="button"
-            className="canvas-ctrl"
-            title={LAB_CANVAS_ZOOM_IN}
-            aria-label={LAB_CANVAS_ZOOM_IN}
-            onClick={() => zoomBy(ZOOM_STEP)}
-          >
-            <IconZoomIn />
-          </button>
-          <button
-            type="button"
-            className="canvas-ctrl"
-            title={LAB_CANVAS_ZOOM_OUT}
-            aria-label={LAB_CANVAS_ZOOM_OUT}
-            onClick={() => zoomBy(1 / ZOOM_STEP)}
-          >
-            <IconZoomOut />
-          </button>
-          <button
-            type="button"
-            className="canvas-ctrl"
-            title={LAB_CANVAS_FIT}
-            aria-label={LAB_CANVAS_FIT}
-            onClick={fitView}
-          >
-            <IconFit />
-          </button>
-          <button
-            type="button"
-            className="canvas-ctrl"
-            title={LAB_CANVAS_RESET}
-            aria-label={LAB_CANVAS_RESET}
-            onClick={resetView}
-          >
-            <IconResetView />
-          </button>
-        </div>
-        {/* FX-6：缩放百分比 chip（缩放控制组旁，仅显示不接指针；1:1 → 100%） */}
-        {!empty && (
+        {/* GEO-2：地图视图（2D/3D 同一组件，view 驱动相机与塔可见性） */}
+        {view !== 'topo' && (
+          <GeoCanvas
+            ref={geoRef}
+            topology={topology}
+            selected={selected}
+            onSelect={onSelect}
+            view={view}
+            labels={edgeLabels}
+            zen={zen}
+            resizeSuspended={resizeSuspended}
+            onHoverInfo={handleGeoHoverInfo}
+            onBackToTopo={() => switchView('topo')}
+          />
+        )}
+        {/* 视图控制（右上角，仅拓扑视图；地图缩放/旋转用 maplibre 右侧控件） */}
+        {view === 'topo' && (
+          <div className="lab-canvas-overlay lab-canvas-controls" role="toolbar" aria-label={LAB_CANVAS_LABEL} title={LAB_CANVAS_ZOOM_HINT}>
+            <button
+              type="button"
+              className="canvas-ctrl"
+              title={LAB_CANVAS_ZOOM_IN}
+              aria-label={LAB_CANVAS_ZOOM_IN}
+              onClick={() => zoomBy(ZOOM_STEP)}
+            >
+              <IconZoomIn />
+            </button>
+            <button
+              type="button"
+              className="canvas-ctrl"
+              title={LAB_CANVAS_ZOOM_OUT}
+              aria-label={LAB_CANVAS_ZOOM_OUT}
+              onClick={() => zoomBy(1 / ZOOM_STEP)}
+            >
+              <IconZoomOut />
+            </button>
+            <button
+              type="button"
+              className="canvas-ctrl"
+              title={LAB_CANVAS_FIT}
+              aria-label={LAB_CANVAS_FIT}
+              onClick={fitView}
+            >
+              <IconFit />
+            </button>
+            <button
+              type="button"
+              className="canvas-ctrl"
+              title={LAB_CANVAS_RESET}
+              aria-label={LAB_CANVAS_RESET}
+              onClick={resetView}
+            >
+              <IconResetView />
+            </button>
+          </div>
+        )}
+        {/* FX-6：缩放百分比 chip（cy 缩放语义，仅拓扑视图；1:1 → 100%） */}
+        {view === 'topo' && !empty && (
           <div
             className="lab-canvas-overlay canvas-zoom-chip"
             role="status"
@@ -2150,8 +2295,8 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
             )}
           </div>
         )}
-        {/* 路径追踪横幅（v0.2.2，顶部居中）：待选 → 结果（跳数/途经/不可达） */}
-        {traceBanner !== null && (
+        {/* 路径追踪横幅（v0.2.2，顶部居中）：仅拓扑视图（地图视图无路径语义） */}
+        {view === 'topo' && traceBanner !== null && (
           <div className={`lab-canvas-overlay lab-canvas-trace ${traceBanner.className}`} role="status" aria-live="polite">
             <span className="trace-text">{traceBanner.text}</span>
             <button
@@ -2173,8 +2318,9 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
             </button>
           </div>
         )}
-        {/* 迷你导航图（v0.2.2，右下角）：点击/拖动定位主视图 */}
-        {!empty && (
+        {/* 迷你导航图（v0.2.2，右下角；仅拓扑视图——地图视图右下角由 maplibre
+            NavigationControl 占位）：点击/拖动定位主视图 */}
+        {view === 'topo' && !empty && (
           <div className="lab-canvas-minimap" aria-label={LAB_MINIMAP_LABEL} title={LAB_MINIMAP_LABEL}>
             <canvas
               ref={minimapRef}
@@ -2218,29 +2364,31 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
             ))}
           </div>
         )}
-        <div className="lab-canvas-overlay lab-canvas-legend" aria-label={LAB_CANVAS_LEGEND_LABEL}>
-          <span className="legend-item">
-            <span className="legend-dot legend-dot--up" aria-hidden="true" />
-            {LAB_LEGEND_DEVICE_UP}
-          </span>
-          <span className="legend-item">
-            <span className="legend-dot legend-dot--down" aria-hidden="true" />
-            {LAB_LEGEND_DEVICE_DOWN}
-          </span>
-          <span className="legend-item">
-            <span className="legend-dot legend-dot--fault" aria-hidden="true" />
-            {LAB_LEGEND_IFACE_FAULT}
-          </span>
-          <span className="legend-item">
-            <span className="legend-line legend-line--up" aria-hidden="true" />
-            {LAB_LEGEND_LINK_UP}
-          </span>
-          <span className="legend-item">
-            <span className="legend-line legend-line--down" aria-hidden="true" />
-            {LAB_LEGEND_LINK_DOWN}
-          </span>
-        </div>
-        {empty && (
+        {view === 'topo' && (
+          <div className="lab-canvas-overlay lab-canvas-legend" aria-label={LAB_CANVAS_LEGEND_LABEL}>
+            <span className="legend-item">
+              <span className="legend-dot legend-dot--up" aria-hidden="true" />
+              {LAB_LEGEND_DEVICE_UP}
+            </span>
+            <span className="legend-item">
+              <span className="legend-dot legend-dot--down" aria-hidden="true" />
+              {LAB_LEGEND_DEVICE_DOWN}
+            </span>
+            <span className="legend-item">
+              <span className="legend-dot legend-dot--fault" aria-hidden="true" />
+              {LAB_LEGEND_IFACE_FAULT}
+            </span>
+            <span className="legend-item">
+              <span className="legend-line legend-line--up" aria-hidden="true" />
+              {LAB_LEGEND_LINK_UP}
+            </span>
+            <span className="legend-item">
+              <span className="legend-line legend-line--down" aria-hidden="true" />
+              {LAB_LEGEND_LINK_DOWN}
+            </span>
+          </div>
+        )}
+        {view === 'topo' && empty && (
           <div className="lab-canvas-empty">{topology === null ? LOADING_TEXT : LAB_CANVAS_EMPTY}</div>
         )}
       </div>

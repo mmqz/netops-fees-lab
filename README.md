@@ -35,7 +35,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ## 2. 当前阶段能力清单（Stage 0 + Phase 1 + Phase 2 已交付）
 
-### 仿真工作台（Phase 2，v0.2.3 画布全屏工作版）
+### 仿真工作台（Phase 2，v0.3.0 地理视图版）
 
 - **一键物化**：从导入批次生成虚拟拓扑（设备 → 虚拟设备、电路 → 链路、确定性 `eth0/eth1…` 端口分配）；演示规模 27 设备 / 40 接口 / 20 链路，物化 3–4 ms。
 - **类型化操作集（含故障注入）**：10 个前向操作（增删设备/接口/链路、启停、配地址）经同一引擎路径（API/MCP/CLI 无旁路）；单事务变更集，失败零污染且留档（422 `op_failed`）。
@@ -46,6 +46,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **画布全屏工作模式（v0.2.3 zen）**：一键让画布接管整个视口（优先浏览器原生全屏，拒绝时降级应用内全屏；Esc 逐级退出：右键菜单 → 路径/聚焦 → 全屏）；全屏中左上浮动**选中详情卡**（设备：状态/接口 up-down/IPv4；链路：两端与端口），工具带深色化；Toast 浮层不被遮盖。
 - **画布工业级交互（v0.2.3）**：**右键上下文菜单**（设备：邻域聚焦/设为路径起点/表格定位/复制 ID；链路：表格定位/复制 ID；空白：适配/重置；a11y role=menu + 焦点管理 + 越界翻转）；**PNG 快照导出**（整图 2 倍分辨率不透明深色底）；**缩放百分比实时指示**；**手动排布位置持久化**（localStorage，重载不丢，切布局自动重排）；键盘快捷键（F 适配 / L 标签开关 / Esc 链级）。
 - **画布工作区布局（v0.2.3）**：页头紧凑化（画布高度 1080p 达 760px）；**分栏拖拽**（30–85% 自适应 + 键盘 ±2% + a11y separator + 持久化）；**右栏折叠**（画布占满工作区宽度）；画布非全屏 948×760 → 全屏 1920×1080（约 2.9 倍面积）。
+- **地理视图（v0.3.0 三视图切换）**：画布新增「拓扑图 / 2D 地图 / 3D 地图」分段切换（按工作台持久化）；导入设备表时自动识别**经度/纬度/经纬度列**（组合列按中国坐标边界启发式拆分），物化后设备携带 geoLat/geoLng；2D 俯视——真实深色地理底图（ESRI World_Dark_Gray，免密钥）上按真实经纬度落设备（状态色圆点 + 编码牌）、链路 up 蓝实线 / down 红虚线 marching-ants；3D 斜视 58°——设备渲染为按连接数分高的塔体（数字孪生示意）、右键拖拽旋转环视；设备点击/选中与右侧表格双向联动；瓦片失败自动降级离线网格底图；maplibre-gl 懒加载独立 chunk。演示数据：`testdata/geodevices.xlsx`（黑龙江哈尔滨→漠河北南干线 + 地震局 10M 长专线，坐标为演示近似值），一键脚本 `scripts/demo-geo-lab.sh`。
 - **MCP 五工具**：`resource_search`（只读）+ `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`——AI 改仿真态的唯一通道；`restore_*` 内部操作码三边界拒绝；**无建删工作区工具**。
 - **CLI `lab` 子命令树**：workspace/topology/path/apply/checks/diff/undo/checkpoint，全部单一 JSON 输出。
 - **仿真报告**：`GET /api/lab/report`（HTML/JSON）：引擎版本、评分、发现、变更集史、检查点、固定免责声明。
@@ -222,7 +223,7 @@ netopslab mcp      [--db ./data/netops.db]                  # 或环境变量 NE
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.2.3`），注册**恰好 5 个工具**：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.3.0`），注册**恰好 5 个工具**：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |

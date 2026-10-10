@@ -249,6 +249,14 @@ type resolvedRef struct {
 // failed rows and return nil.
 func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results *[]domain.RowResult) error {
 	vals := st.mappedValues(row)
+	// Combined 经纬度 split (device sheets only — the geo field exists in
+	// no other schema): when the combined column is mapped and the split
+	// 纬度/经度 columns are not both provided from their own columns, derive
+	// geo_lat/geo_lng now, BEFORE the E004 loop, so the derived values pass
+	// through the same KindLat/KindLng format checks as directly-mapped
+	// columns. An unparseable combined value is left un-split and fails
+	// E004 on the geo field below.
+	splitGeoCombined(vals)
 	key := vals[st.keyField]
 	rt := st.spec.Type.String()
 	var warns []pendingWarning
@@ -278,9 +286,10 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 			continue
 		}
 		switch f.Kind {
-		case mapping.KindIPv4, mapping.KindCIDR, mapping.KindInt:
-			// Field-level check = kind parse check + int range constraint
-			// (vlan_id 1..4094, bandwidth_mbps > 0) of PROJECT_BRIEF §6.
+		case mapping.KindIPv4, mapping.KindCIDR, mapping.KindInt, mapping.KindLat, mapping.KindLng, mapping.KindGeo:
+			// Field-level check = kind parse check + int/float range
+			// constraint (vlan_id 1..4094, bandwidth_mbps > 0, lat
+			// -90..90, lng -180..180) of PROJECT_BRIEF §6.
 			if reason, ok := f.CheckFormat(v); !ok {
 				return st.failRow(ctx, row, results, domain.RuleInvalidFormat,
 					fmt.Sprintf("字段格式无效：%s.%s=%q（%s）", rt, f.Name, v, reason),
@@ -478,6 +487,28 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	}
 	st.local[st.spec.Type][key] = resource.ID
 	return nil
+}
+
+// splitGeoCombined fills vals["geo_lat"]/vals["geo_lng"] from the combined
+// 经纬度 value of vals["geo"] using mapping.SplitGeoLatLng's China-bounds
+// heuristic. It is a no-op unless the geo column is mapped with a
+// non-empty value — which can only happen on a device sheet, the one
+// schema carrying the geo fields — and the split 纬度/经度 columns are not
+// BOTH already provided from their own mapped columns (explicit split
+// columns win; a partially-provided pair is completed from the combined
+// value so lat/lng always come from one consistent source). The raw geo
+// attribute is kept alongside the split values — harmless, and it keeps
+// the original import value traceable in the resource attributes.
+func splitGeoCombined(vals map[string]string) {
+	if vals["geo"] == "" || (vals["geo_lat"] != "" && vals["geo_lng"] != "") {
+		return
+	}
+	lat, lng, ok := mapping.SplitGeoLatLng(vals["geo"])
+	if !ok {
+		return // unparseable: leave it for the E004 format check on the geo field
+	}
+	vals["geo_lat"] = mapping.FormatGeoFloat(lat)
+	vals["geo_lng"] = mapping.FormatGeoFloat(lng)
 }
 
 // mappedValues extracts the trimmed raw value of every mapped target field

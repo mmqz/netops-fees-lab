@@ -482,6 +482,12 @@ export interface TopologyNode {
   code: string;
   name: string;
   status: SimEntityStatus;
+  /**
+   * 地理坐标（GEO v6）：可选展示元数据，无位置节点 omitempty 不带键。
+   * 前端读取时需判 undefined；绝不允许进入状态语义。
+   */
+  geoLat?: number;
+  geoLng?: number;
   interfaces: Array<{
     id: string;
     name: string;

@@ -321,3 +321,48 @@ check_runs.changeset_id → changesets（SET NULL：自动校验运行绑定其�
 - 仿真表删除语义：对工作区 `ON DELETE CASCADE`（`repo.DeleteWorkspace` 按表级联删除并返回计数；检查点目录尽力 `os.RemoveAll`）。
 - 索引 `idx_changesets_ws(workspace_id, id)` 等按**字典序**排 id——仓库层的"最新/倒序"查询用 `ORDER BY LENGTH(id) DESC, id DESC` 兜数值序（`cs-9 < cs-10`）。
 - 工作区支持多工作区共存（schema 全面携带 workspace_id + 全局 id）；**单工作区活跃**是受支持的使用模式（多工作区并发写显式 out-of-scope）。
+
+---
+
+# DDL v6 — 设备地理坐标（geo pipeline）
+
+> Migration `6` name `device_geo_columns`（`internal/repo/migrations_v6.go`，经 `init()` 追加 + 按版本排序注册，机制同 v4/v5）。**当前 schema version = 6**（本文之上的 v5 章节描述保持历史原貌）。改动仅为两列可空 `REAL`，无默认值、无回填；v6 之前的库打开后自动升级，旧行坐标为 NULL（无位置）。
+
+## 9. 设备地理字段（可选，展示元数据）
+
+设备资源与虚拟设备获得**可选**地理坐标，全链路为：导入列 → 资源属性 → 物化 → 拓扑 API（`geoLat`/`geoLng`）。**红线：geo 绝不进入状态哈希**（坐标是展示元数据——在地图上挪动一台设备不允许改变哈希/校验/diff；回归测试 `TestWorkspaceHashIgnoresGeo` 双层证明：含坐标与不含坐标的同业务数据物化出逐字节相同的哈希）。
+
+### 9.1 目标 schema 三个新字段（设备 schema 专属，全部可选）
+
+| 字段 | 标签 | Kind | 约束 | 同义词（建议引擎） |
+| --- | --- | --- | --- | --- |
+| `geo_lat` | 纬度 | `lat`（新） | float，[-90, 90] | 纬度, lat, LAT, GPS纬度, 北纬 |
+| `geo_lng` | 经度 | `lng`（新） | float，[-180, 180] | 经度, lng, lon, LON, GPS经度, 东经 |
+| `geo` | 经纬度 | `geo`（新） | 两个数字（顺序不限，见下） | 经纬度, 装机经纬度, 坐标, GPS坐标, A端装机经纬度, 位置 |
+
+- E004 拒绝原因（中文）：纬度超界 → `不是合法的纬度（-90 到 90 的数字）`；经度超界 → `不是合法的经度（-180 到 180 的数字）`；组合列不是两个数字 → `经纬度应为两个数字（如 126.63,45.75）`。
+- 浮点范围检查在 Kind 分支内实现（`FieldKind.CheckFormat`）；FieldSpec 的 `IntMin/IntMax` 整数区间机制不受影响。
+
+### 9.2 组合列「经纬度」拆分（中国边界启发式）
+
+设备表映射了 `geo` 列且 `geo_lat`/`geo_lng` **未同时**由各自分列提供时，导入器在行内校验**之前**拆分（拆分出的值随后过与分列完全相同的 KindLat/KindLng 校验）：
+
+1. `f1 ∈ [73,136]` 且 `f2 ∈ [3,54]` → **(经度, 纬度) 序**——高德/百度惯例（如 `126.63,45.75`）；
+2. 否则 `f1 ∈ [3,54]` 且 `f2 ∈ [73,136]` → **(纬度, 经度) 序**（如 `45.75,126.63`）；
+3. 否则（境外/歧义坐标，不硬失败）：取**两种解读中合法的那一种**（纬度槽须 ∈[-90,90]、经度槽须 ∈[-180,180]）；两序皆合法时默认 `lng=f1, lat=f2`（高德惯例），仅当 f2 不可能是纬度而 f1 可以时交换。境外坐标照常接受。
+4. 分隔符：半角逗号 / 全角逗号 / 分号 / 全角分号 / 空白（任意混用）。
+
+两个窗口 [73,136] 与 [3,54] 不相交 → 启发式确定性。拆分结果以十进制原码串（`strconv.FormatFloat 'f' -1`）写入资源属性 `geo_lat`/`geo_lng`；原始 `geo` 属性同时保留（溯源无害）。**分列优先**：`纬度`/`经度` 两列同时提供时忽略组合列的拆分（原始值仍保留在属性里）。
+
+### 9.3 DDL v6 全文
+
+```sql
+ALTER TABLE virtual_devices ADD COLUMN geo_lat REAL;  -- nullable，NULL = 无位置
+ALTER TABLE virtual_devices ADD COLUMN geo_lng REAL;  -- nullable，NULL = 无位置
+```
+
+- 域层表示：`domain.VirtualDevice.GeoLat/GeoLng *float64`（nil = 无位置）；仓储层 `sql.NullFloat64 ↔ *float64`（`nullFloatPtr`/`floatPtrFromNull`），`Insert` 对 nil 写 NULL。`virtualDeviceColumns`/`scanVirtualDevice` 同步扩展，其余查询形状不变。
+- 物化（`sim/materialize.go`）：解析资源属性 `geo_lat`/`geo_lng`（ParseFloat，仅在**合法且在界内**时采纳；导入已校验，此处忽略非法值属防御，永不硬失败）。两坐标相互独立，半对坐标保留合法的一半。
+- 拓扑 API（`sim/reads.go`）：`TopologyNode.GeoLat/GeoLng *float64`，JSON `geoLat`/`geoLng`（`omitempty` —— 无位置节点不带键）。
+- 撤销路径：`delete_device` 的逆操作快照 `DeviceSnap` 携带 `geoLat`/`geoLng`（camelCase；v6 之前的 inverse_json 行缺键解码为 nil，恢复成无位置——无害，geo 不入哈希）。
+- **已知边界（诚实清单）**：检查点恢复重建被删设备走 `create_device`（封闭操作面无 geo 字段）→ 该设备坐标不随快照重建（哈希不受影响，撤销路径不受影响）；前端 2D/3D 地图视图随下一任务交付。

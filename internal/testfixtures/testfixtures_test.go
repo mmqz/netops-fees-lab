@@ -516,3 +516,58 @@ func TestSeedRowLocatorsInRange(t *testing.T) {
 	check("CircuitUnknownRefRow", CircuitUnknownRefRow, len(CircuitRows))
 	check("CircuitBadBandwidthRow", CircuitBadBandwidthRow, len(CircuitRows))
 }
+
+// TestGeoFixtureInvariants guards the geographic demo fixtures: row counts,
+// clean-import invariants (unique codes, distinct IPs, valid enum statuses,
+// parseable in-range coordinates) and circuit endpoint resolution — the geo
+// workbook must import 10/10 rows with zero issues.
+func TestGeoFixtureInvariants(t *testing.T) {
+	if len(GeoDeviceRows) != GeoDeviceTotal || len(GeoCircuitRows) != GeoCircuitTotal {
+		t.Fatalf("geo fixture counts = %d/%d, want %d/%d", len(GeoDeviceRows), len(GeoCircuitRows), GeoDeviceTotal, GeoCircuitTotal)
+	}
+	if len(GeoDeviceHeaders) != 9 || len(GeoCircuitHeaders) != 5 {
+		t.Errorf("geo header counts = %d/%d, want 9/5", len(GeoDeviceHeaders), len(GeoCircuitHeaders))
+	}
+	codes := map[string]bool{}
+	ips := map[string]bool{}
+	for i, r := range GeoDeviceRows {
+		if codes[r.DeviceCode] {
+			t.Errorf("row %d: duplicated geo device code %q", i+2, r.DeviceCode)
+		}
+		codes[r.DeviceCode] = true
+		if ips[r.MgmtIP] {
+			t.Errorf("row %d: duplicated 管理IP %q (E006)", i+2, r.MgmtIP)
+		}
+		ips[r.MgmtIP] = true
+		if !deviceStatusEnum[r.Status] {
+			t.Errorf("row %d (%s): unexpected status %q", i+2, r.DeviceCode, r.Status)
+		}
+		if _, err := netip.ParseAddr(r.MgmtIP); err != nil {
+			t.Errorf("row %d (%s): 管理IP %q does not parse: %v", i+2, r.DeviceCode, r.MgmtIP, err)
+		}
+		lat, errLat := strconv.ParseFloat(r.Lat, 64)
+		lng, errLng := strconv.ParseFloat(r.Lng, 64)
+		if errLat != nil || errLng != nil || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+			t.Errorf("row %d (%s): coordinates %q/%q out of range or unparsable", i+2, r.DeviceCode, r.Lat, r.Lng)
+		}
+	}
+	// Circuit endpoints resolve against the geo device sheet; codes unique.
+	seen := map[string]bool{}
+	for i, c := range GeoCircuitRows {
+		if seen[c.CircuitCode] {
+			t.Errorf("row %d: duplicated geo circuit code %q", i+2, c.CircuitCode)
+		}
+		seen[c.CircuitCode] = true
+		for _, ref := range []string{c.AEndDevice, c.ZEndDevice} {
+			if !codes[ref] {
+				t.Errorf("row %d (%s): referenced geo device %q missing", i+2, c.CircuitCode, ref)
+			}
+		}
+		if c.AEndDevice == c.ZEndDevice {
+			t.Errorf("row %d (%s): self loop", i+2, c.CircuitCode)
+		}
+		if bw, err := strconv.Atoi(c.BandwidthMbps); err != nil || bw <= 0 {
+			t.Errorf("row %d (%s): bandwidth %q invalid", i+2, c.CircuitCode, c.BandwidthMbps)
+		}
+	}
+}

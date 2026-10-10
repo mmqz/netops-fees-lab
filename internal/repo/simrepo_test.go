@@ -97,7 +97,9 @@ func simTableCount(t *testing.T, db *DB, table string) int {
 // ---------- migrations ----------
 
 // TestMigrationV5UpgradesV4Database verifies that a database left at schema
-// v4 is migrated to v5 by Open, and that the result is idempotent.
+// v4 is migrated to the CURRENT head (v5 simulation tables + the v6 geo
+// columns, since Open always applies every pending version) by Open, and
+// that the result is idempotent.
 func TestMigrationV5UpgradesV4Database(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "netops.db")
@@ -132,15 +134,15 @@ func TestMigrationV5UpgradesV4Database(t *testing.T) {
 
 	db2, err := Open(path)
 	if err != nil {
-		t.Fatalf("second Open (v4 → v5): %v", err)
+		t.Fatalf("second Open (v4 → current): %v", err)
 	}
 	defer db2.Close()
 	var maxV, count int
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 5 {
-		t.Errorf("max schema version after upgrade = %d, want 5", maxV)
+	if maxV != migrations[len(migrations)-1].Version {
+		t.Errorf("max schema version after upgrade = %d, want %d", maxV, migrations[len(migrations)-1].Version)
 	}
 	if err := db2.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("count migrations: %v", err)
@@ -163,8 +165,94 @@ func TestMigrationV5UpgradesV4Database(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 5 {
-		t.Errorf("max schema version after reopen = %d, want 5", maxV)
+	if maxV != migrations[len(migrations)-1].Version {
+		t.Errorf("max schema version after reopen = %d, want %d", maxV, migrations[len(migrations)-1].Version)
+	}
+}
+
+// TestMigrationV6UpgradesV5Database verifies the geo column migration: a
+// database left at schema v5 (virtual_devices WITHOUT geo_lat/geo_lng, with
+// live rows) is migrated to v6 by Open — the two REAL columns are added,
+// existing rows read back unchanged with NULL positions, and reopening is
+// idempotent (a second ADD COLUMN would fail on the duplicate column, so a
+// clean reopen proves the bookkeeping works).
+func TestMigrationV6UpgradesV5Database(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netops.db")
+	ctx := context.Background()
+
+	db1, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	// Seed one workspace + device so the upgrade runs against live data.
+	seedWorkspace(t, db1, "ws_v6", "geo-upgrade", "")
+	if err := db1.Do(ctx, func(tx *Tx) error {
+		return tx.VirtualDevices.Insert(ctx, newDevice("vd-1", "ws_v6", "DEV-V6", domain.EntityStatusUp))
+	}); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	// Rewind to the pre-v6 state: strip the geo columns and the v6
+	// bookkeeping row, emulating a database created by DDL v1–v5.
+	for _, stmt := range []string{
+		`ALTER TABLE virtual_devices DROP COLUMN geo_lat`,
+		`ALTER TABLE virtual_devices DROP COLUMN geo_lng`,
+		`DELETE FROM schema_migrations WHERE version = 6`,
+	} {
+		if _, err := db1.sql.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("rewind %q: %v", stmt, err)
+		}
+	}
+	if err := db1.Close(); err != nil {
+		t.Fatalf("close after rewind: %v", err)
+	}
+
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open (v5 → v6): %v", err)
+	}
+	defer db2.Close()
+	var maxV int
+	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
+		t.Fatalf("max version: %v", err)
+	}
+	if maxV != 6 {
+		t.Errorf("max schema version after upgrade = %d, want 6", maxV)
+	}
+	// Old data is readable and position-less (NULL → nil pointers).
+	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
+	if err != nil {
+		t.Fatalf("GetByCode after upgrade: %v", err)
+	}
+	if d.GeoLat != nil || d.GeoLng != nil {
+		t.Errorf("device after upgrade = lat %v / lng %v, want nil/nil (old rows stay position-less)", d.GeoLat, d.GeoLng)
+	}
+	// The new columns are usable: writing a position round-trips.
+	d2 := newDevice("vd-2", "ws_v6", "DEV-GEO", domain.EntityStatusUp)
+	lat, lng := 46.59, 125.103
+	d2.GeoLat, d2.GeoLng = &lat, &lng
+	if err := db2.Do(ctx, func(tx *Tx) error { return tx.VirtualDevices.Insert(ctx, d2) }); err != nil {
+		t.Fatalf("insert geo device after upgrade: %v", err)
+	}
+	got, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-GEO")
+	if err != nil {
+		t.Fatalf("GetByCode(DEV-GEO): %v", err)
+	}
+	if got.GeoLat == nil || *got.GeoLat != lat || got.GeoLng == nil || *got.GeoLng != lng {
+		t.Errorf("geo round-trip after upgrade = %v/%v, want %v/%v", got.GeoLat, got.GeoLng, lat, lng)
+	}
+
+	// Reopening again must be a no-op (idempotent migration).
+	db3, err := Open(path)
+	if err != nil {
+		t.Fatalf("third Open (idempotency): %v", err)
+	}
+	defer db3.Close()
+	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
+		t.Fatalf("max version: %v", err)
+	}
+	if maxV != 6 {
+		t.Errorf("max schema version after reopen = %d, want 6", maxV)
 	}
 }
 

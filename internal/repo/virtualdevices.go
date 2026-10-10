@@ -12,12 +12,12 @@ import (
 // VirtualDeviceRepo persists the virtual devices of the simulation
 // workspaces. ResourceID "" is stored as SQL NULL (no lineage resource);
 // the DDL turns a deleted resource into NULL via ON DELETE SET NULL, which
-// reads back as "".
+// reads back as "". GeoLat/GeoLng nil are stored as SQL NULL (no position).
 type VirtualDeviceRepo struct{ q DBTX }
 
 // virtualDeviceColumns is the canonical SELECT column list of
 // virtual_devices.
-const virtualDeviceColumns = `id, workspace_id, resource_id, code, name, status, created_at, updated_at`
+const virtualDeviceColumns = `id, workspace_id, resource_id, code, name, status, geo_lat, geo_lng, created_at, updated_at`
 
 // scanVirtualDevice scans one virtual_devices row into a
 // domain.VirtualDevice.
@@ -25,15 +25,20 @@ func scanVirtualDevice(s scanner) (domain.VirtualDevice, error) {
 	var (
 		d          domain.VirtualDevice
 		resourceID sql.NullString
+		geoLat     sql.NullFloat64
+		geoLng     sql.NullFloat64
 		status     string
 		createdAt  string
 		updatedAt  string
 	)
-	if err := s.Scan(&d.ID, &d.WorkspaceID, &resourceID, &d.Code, &d.Name, &status, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&d.ID, &d.WorkspaceID, &resourceID, &d.Code, &d.Name, &status,
+		&geoLat, &geoLng, &createdAt, &updatedAt); err != nil {
 		return domain.VirtualDevice{}, err
 	}
 	d.ResourceID = stringFromNull(resourceID)
 	d.Status = domain.EntityStatus(status)
+	d.GeoLat = floatPtrFromNull(geoLat)
+	d.GeoLng = floatPtrFromNull(geoLng)
 	var err error
 	if d.CreatedAt, err = parseTime(createdAt); err != nil {
 		return domain.VirtualDevice{}, err
@@ -44,18 +49,19 @@ func scanVirtualDevice(s scanner) (domain.VirtualDevice, error) {
 	return d, nil
 }
 
-// Insert adds a virtual device. ResourceID "" is stored as NULL. A
-// duplicate (workspace_id, code) returns an error wrapping
-// domain.ErrConflict; an unknown workspace or resource fails on the foreign
-// keys.
+// Insert adds a virtual device. ResourceID "" and nil GeoLat/GeoLng are
+// stored as NULL. A duplicate (workspace_id, code) returns an error
+// wrapping domain.ErrConflict; an unknown workspace or resource fails on
+// the foreign keys.
 func (r *VirtualDeviceRepo) Insert(ctx context.Context, d domain.VirtualDevice) error {
 	if !d.Status.IsValid() {
 		return fmt.Errorf("repo: insert virtual device %s: invalid status %q", d.ID, d.Status)
 	}
 	_, err := r.q.ExecContext(ctx, `INSERT INTO virtual_devices
-(id, workspace_id, resource_id, code, name, status, created_at, updated_at)
-VALUES (?,?,?,?,?,?,?,?)`,
+(id, workspace_id, resource_id, code, name, status, geo_lat, geo_lng, created_at, updated_at)
+VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		d.ID, d.WorkspaceID, nullString(d.ResourceID), d.Code, d.Name, d.Status.String(),
+		nullFloatPtr(d.GeoLat), nullFloatPtr(d.GeoLng),
 		formatTime(d.CreatedAt), formatTime(d.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {

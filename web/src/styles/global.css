@@ -2426,6 +2426,258 @@ body.lab-split-dragging {
   outline-offset: 1px;
 }
 
+/* =========================================================================
+ * GEO-2：地理 2D/3D 地图视图（GeoCanvas · maplibre-gl）
+ * 深色工业风与画布一致：扁平 1px 边框、无渐变、无装饰光晕。
+ * ========================================================================= */
+
+/* 地图层：铺满画布 wrap（覆盖在 cy 容器之上，z-2；hover 信息条等 z-5 悬浮层
+   仍在其上）。底色与画布一致——瓦片/样式加载期间不闪白。 */
+.geo-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  background: #0e1626;
+}
+
+.geo-map {
+  position: absolute;
+  inset: 0;
+}
+
+/* 悬浮层公共（同 .lab-canvas-overlay 语义：容器不接指针，控件自身可点） */
+.geo-overlay {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  pointer-events: none;
+}
+
+/* 状态 chip：右上角（离线底图模式）/ 右下 NavigationControl 上方（部分缺坐标） */
+.geo-chip {
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid rgba(125, 162, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(14, 22, 38, 0.88);
+  color: #c9d6ec;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.geo-chip--offline {
+  top: 10px;
+  right: 10px;
+}
+
+/* 右下角 NavigationControl（28×2 按钮高 + 10px 边距）之上 */
+.geo-chip--partial {
+  right: 10px;
+  bottom: 76px;
+}
+
+/* 加载 / 空态 */
+.geo-state {
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  color: #8da0bf;
+  font-size: 13px;
+}
+
+/* 全部设备无坐标：居中引导 + 返回拓扑图 */
+.geo-empty {
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  background: rgba(14, 22, 38, 0.6);
+  text-align: center;
+}
+
+.geo-empty-text {
+  max-width: 460px;
+  color: #c3cdd9;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.geo-empty-back {
+  pointer-events: auto;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 6px;
+  border: 1px solid #7da2ff;
+  background: #2f5fe0;
+  color: #ffffff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.geo-empty-back:hover {
+  background: #3a6ff0;
+}
+
+.geo-empty-back:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 1px;
+}
+
+/* 地图图例：复用 .lab-canvas-legend 结构，左下角抬升避开 ScaleControl；
+   链路配色与地图图层同步（up #5b8fd9 / down #ff5252 虚线）。 */
+.geo-legend {
+  bottom: 48px;
+}
+
+.geo-legend .legend-line--up {
+  border-top: 2.5px solid #5b8fd9;
+}
+
+.geo-legend .legend-line--down {
+  border-top: 3px dashed #ff5252;
+}
+
+/* 3D 塔图例（仅 3D 视图）：小方块示意 */
+.legend-tower {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #7da2ff;
+  border-top: 2px solid #5b8fd9;
+  flex-shrink: 0;
+}
+
+/*
+ * 设备地标（maplibregl.Marker 自定义元素）：
+ * 外层 div 由 maplibre 定位（anchor center，transform 由其管理）；内层 button
+ * = [状态色圆点][编码牌]。left 偏移 calc(50% - 7px) 把 14px 圆点的圆心精确
+ * 落在坐标点上（编码牌在点右侧；关标签后仅剩圆点，偏移归零）。
+ * 编码牌 #e8eefb 对深底 ≈ 13:1，描边同系 1px 扁平。
+ */
+.geo-marker {
+  position: relative;
+  left: calc(50% - 7px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.geo-marker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #dce6f7;
+  border: 2px solid #8fa6ce;
+  box-sizing: border-box;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.geo-marker--down .geo-marker-dot {
+  background: #d13c33;
+  border-color: #ff9d95;
+}
+
+.geo-marker-code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e8eefb;
+  background: rgba(13, 20, 36, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* 标签开关（L）：隐藏编码牌，圆点保持 */
+.geo-marker--nolabel .geo-marker-code {
+  display: none;
+}
+
+.geo-marker:hover .geo-marker-dot {
+  transform: scale(1.18);
+}
+
+/* 选中：强调蓝外圈 + 轻微放大（与拓扑节点选中语义一致） */
+.geo-marker--selected .geo-marker-dot {
+  box-shadow: 0 0 0 3px #2f9dff;
+  transform: scale(1.22);
+}
+
+.geo-marker--selected .geo-marker-code {
+  border-color: #7da2ff;
+  color: #ffffff;
+}
+
+.geo-marker:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* maplibre 原生控件深色化（NavigationControl / ScaleControl / Attribution） */
+.geo-canvas .maplibregl-ctrl-group {
+  background: rgba(14, 22, 38, 0.88);
+  border: 1px solid rgba(125, 162, 255, 0.35);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.geo-canvas .maplibregl-ctrl-group button {
+  width: 28px;
+  height: 28px;
+  border-bottom: 1px solid rgba(125, 162, 255, 0.25);
+  background: transparent;
+  cursor: pointer;
+}
+
+.geo-canvas .maplibregl-ctrl-group button:last-child {
+  border-bottom: none;
+}
+
+.geo-canvas .maplibregl-ctrl-group button:hover {
+  background: rgba(47, 95, 224, 0.4);
+}
+
+.geo-canvas .maplibregl-ctrl-group button:focus {
+  box-shadow: none;
+}
+
+.geo-canvas .maplibregl-ctrl-group button:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: -2px;
+}
+
+/* 控件图标为深色 SVG（面向浅底设计）→ 反相提亮适配深底 */
+.geo-canvas .maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: invert(0.85);
+}
+
+.geo-canvas .maplibregl-ctrl-attrib {
+  background: rgba(13, 20, 36, 0.85);
+  color: #8da0bf;
+  font-size: 11px;
+}
+
+.geo-canvas .maplibregl-ctrl-attrib a {
+  color: #c9d6ec;
+}
+
+.geo-canvas .maplibregl-ctrl-scale {
+  background: rgba(13, 20, 36, 0.85);
+  border-color: #8da0bf;
+  color: #c9d6ec;
+  font-size: 11px;
+}
+
 .hoverinfo-dot {
   width: 8px;
   height: 8px;

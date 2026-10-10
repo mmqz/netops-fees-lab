@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -515,5 +516,174 @@ func TestNameField(t *testing.T) {
 		if got := spec.NameField(); got != tc.want {
 			t.Errorf("NameField(%s) = %q, want %q", tc.t, got, tc.want)
 		}
+	}
+}
+
+// ---- geographic coordinate fields (geo pipeline) ----
+
+// TestGeoFieldSpecs pins the three optional device geo fields: presence,
+// kinds, labels, synonym ladders (so the suggestion engine picks up 经度/
+// 纬度/经纬度 columns), and that NO other schema carries them (geo is a
+// device-only concern).
+func TestGeoFieldSpecs(t *testing.T) {
+	spec, ok := SpecByType(domain.ResourceTypeDevice)
+	if !ok {
+		t.Fatal("device spec missing")
+	}
+	cases := []struct {
+		name     string
+		label    string
+		kind     FieldKind
+		synonyms []string
+	}{
+		{"geo_lat", "纬度", KindLat, []string{"纬度", "lat", "LAT", "GPS纬度", "北纬"}},
+		{"geo_lng", "经度", KindLng, []string{"经度", "lng", "lon", "LON", "GPS经度", "东经"}},
+		{"geo", "经纬度", KindGeo, []string{"经纬度", "装机经纬度", "坐标", "GPS坐标", "A端装机经纬度", "位置"}},
+	}
+	for _, tc := range cases {
+		f, found := spec.Field(tc.name)
+		if !found {
+			t.Fatalf("device spec misses optional field %s", tc.name)
+		}
+		if f.Label != tc.label || f.Kind != tc.kind {
+			t.Errorf("%s = label %q kind %q, want %q/%q", tc.name, f.Label, f.Kind, tc.label, tc.kind)
+		}
+		if f.Required || f.NaturalKey {
+			t.Errorf("%s must be optional and non-key (Required=%v NaturalKey=%v)", tc.name, f.Required, f.NaturalKey)
+		}
+		if !reflect.DeepEqual(f.Synonyms, tc.synonyms) {
+			t.Errorf("%s synonyms = %v, want %v", tc.name, f.Synonyms, tc.synonyms)
+		}
+	}
+	// The geo fields sit AFTER status, keep every required field in front and
+	// do not disturb the natural key.
+	if f, _ := spec.Field("status"); f.Kind != KindEnum {
+		t.Errorf("status field must stay the enum before the geo block, got %q", f.Kind)
+	}
+	for _, other := range []domain.ResourceType{domain.ResourceTypeIPPool, domain.ResourceTypeCircuit} {
+		s, _ := SpecByType(other)
+		for _, name := range []string{"geo_lat", "geo_lng", "geo"} {
+			if _, found := s.Field(name); found {
+				t.Errorf("%s spec must not carry the device-only field %s", other, name)
+			}
+		}
+	}
+	// The synonym ladder reaches the suggestion engine: 经度/纬度/经纬度
+	// headers of a 设备 sheet suggest the geo fields at synonym confidence.
+	sug := Suggest("设备", []string{"经度", "纬度", "经纬度", "位置"})
+	want := []string{"geo_lng", "geo_lat", "geo", "geo"}
+	for i, s := range sug {
+		if s.Field != want[i] || s.Confidence != ConfidenceSynonym {
+			t.Errorf("Suggest(设备, %q) = %s@%v, want %s@%v", sug[i].Header, s.Field, s.Confidence, want[i], ConfidenceSynonym)
+		}
+	}
+}
+
+// TestGeoFieldKindCheckFormat covers the E004 parse/range checks of the
+// three geo kinds, including the Chinese failure reasons.
+func TestGeoFieldKindCheckFormat(t *testing.T) {
+	cases := []struct {
+		kind   FieldKind
+		value  string
+		ok     bool
+		reason string // expected reason prefix when !ok
+	}{
+		{KindLat, "45.773", true, ""},
+		{KindLat, "-90", true, ""},
+		{KindLat, "90", true, ""},
+		{KindLat, "90.0001", false, "不是合法的纬度（-90 到 90 的数字）"},
+		{KindLat, "-90.5", false, "不是合法的纬度（-90 到 90 的数字）"},
+		{KindLat, "abc", false, "不是合法的纬度（-90 到 90 的数字）"},
+		{KindLng, "126.636", true, ""},
+		{KindLng, "-180", true, ""},
+		{KindLng, "180", true, ""},
+		{KindLng, "180.1", false, "不是合法的经度（-180 到 180 的数字）"},
+		{KindLng, "N/A", false, "不是合法的经度（-180 到 180 的数字）"},
+		{KindGeo, "126.63,45.75", true, ""},
+		{KindGeo, "45.75,126.63", true, ""},
+		{KindGeo, "126.63，45.75", true, ""}, // Chinese comma
+		{KindGeo, "126.63 45.75", true, ""}, // space separator
+		{KindGeo, "126.63；45.75", true, ""}, // Chinese semicolon
+		{KindGeo, "-74.0,40.7", true, ""},   // foreign coordinates pass
+		{KindGeo, "126.63,45.75,0", false, "经纬度应为两个数字（如 126.63,45.75）"},
+		{KindGeo, "126.63", false, "经纬度应为两个数字（如 126.63,45.75）"},
+		{KindGeo, "abc,45.75", false, "经纬度应为两个数字（如 126.63,45.75）"},
+		{KindGeo, "100,100", false, "不是合法的经纬度"}, // both outside [-90,90]
+		{KindGeo, "200,45", false, "不是合法的经纬度"},  // 200 can be neither lat nor lng
+		{KindGeo, "", false, "经纬度应为两个数字（如 126.63,45.75）"},
+	}
+	for _, tc := range cases {
+		reason, ok := tc.kind.CheckFormat(tc.value)
+		if ok != tc.ok {
+			t.Errorf("CheckFormat(%q, %q) ok = %v, want %v (reason %q)", tc.kind, tc.value, ok, tc.ok, reason)
+			continue
+		}
+		if !ok && !strings.HasPrefix(reason, tc.reason) {
+			t.Errorf("CheckFormat(%q, %q) reason = %q, want prefix %q", tc.kind, tc.value, reason, tc.reason)
+		}
+	}
+	// Field-level CheckFormat (range machinery wrapper) delegates to the kind
+	// check for the float fields — IntMin/IntMax stay untouched.
+	spec, _ := SpecByType(domain.ResourceTypeDevice)
+	lat, _ := spec.Field("geo_lat")
+	if _, ok := lat.CheckFormat("45.773"); !ok {
+		t.Errorf("geo_lat.CheckFormat(45.773) must pass")
+	}
+	if reason, ok := lat.CheckFormat("91"); ok || reason == "" {
+		t.Errorf("geo_lat.CheckFormat(91) = ok %v reason %q, want a failed check with reason", ok, reason)
+	}
+}
+
+// TestSplitGeoLatLng covers the China-bounds heuristic of the combined
+// 经纬度 split: both component orders, all separators, foreign coordinates
+// and the swap rule for pairs whose second component cannot be a latitude.
+func TestSplitGeoLatLng(t *testing.T) {
+	cases := []struct {
+		value   string
+		lat     float64
+		lng     float64
+		ok      bool
+		comment string
+	}{
+		{"126.63,45.75", 45.75, 126.63, true, "Gaode/Baidu (经度,纬度) order — 哈尔滨"},
+		{"45.75,126.63", 45.75, 126.63, true, "(纬度,经度) order — same site"},
+		{"126.636，45.773", 45.773, 126.636, true, "Chinese comma"},
+		{"126.61 45.721", 45.721, 126.61, true, "space separator"},
+		{"124.114;50.424", 50.424, 124.114, true, "semicolon separator"},
+		{"124.114；50.424", 50.424, 124.114, true, "Chinese semicolon"},
+		{"122.536,52.972", 52.972, 122.536, true, "漠河 — lat beyond 54: China-lng window still first"},
+		{"-74.0,40.7", 40.7, -74.0, true, "New York as (lng,lat) — foreign, default interpretation"},
+		{"40.7,-74.0", -74.0, 40.7, true, "ambiguous pair (both in both windows): default lng=f1"},
+		{"45,150", 45, 150, true, "lat<90/lng>90: swapped interpretation (Alaska-ish)"},
+		{"-50,100", -50, 100, true, "southern latitude + lng>90: swapped interpretation"},
+		{"126.63,abc", 0, 0, false, "unparseable second component"},
+		{"abc", 0, 0, false, "not a pair"},
+		{"", 0, 0, false, "empty"},
+	}
+	for _, tc := range cases {
+		lat, lng, ok := SplitGeoLatLng(tc.value)
+		if ok != tc.ok {
+			t.Errorf("SplitGeoLatLng(%q) ok = %v, want %v (%s)", tc.value, ok, tc.ok, tc.comment)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if lat != tc.lat || lng != tc.lng {
+			t.Errorf("SplitGeoLatLng(%q) = (%v, %v), want (%v, %v) — %s", tc.value, lat, lng, tc.lat, tc.lng, tc.comment)
+		}
+		if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+			t.Errorf("SplitGeoLatLng(%q) produced out-of-range lat/lng (%v, %v)", tc.value, lat, lng)
+		}
+	}
+	// The formatting half: plain decimal strings, no exponent, no padding.
+	if got := FormatGeoFloat(45.773); got != "45.773" {
+		t.Errorf("FormatGeoFloat(45.773) = %q, want 45.773", got)
+	}
+	if got := FormatGeoFloat(126.6); got != "126.6" {
+		t.Errorf("FormatGeoFloat(126.6) = %q, want 126.6", got)
+	}
+	if got := FormatGeoFloat(-50); got != "-50" {
+		t.Errorf("FormatGeoFloat(-50) = %q, want -50", got)
 	}
 }

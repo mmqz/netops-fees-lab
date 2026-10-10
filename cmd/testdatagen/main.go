@@ -30,16 +30,25 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 )
 
 func main() {
 	out := flag.String("out", "testdata", "output directory (created if missing)")
+	geo := flag.Bool("geo", false, "additionally write the geographic demo workbooks (geodevices.xlsx + geocircuits.xlsx, 黑龙江 real-network twin); the four canonical artifacts are never touched")
 	flag.Parse()
 	if err := testfixtures.WriteAll(*out); err != nil {
 		fmt.Fprintln(os.Stderr, "testdatagen:", err)
 		os.Exit(1)
 	}
 	fmt.Printf("testdatagen: wrote %s to %s\n", "devices.xlsx, ippools.xlsx, circuits.xlsx, expected-summary.json", *out)
+	if *geo {
+		if err := testfixtures.WriteGeo(*out); err != nil {
+			fmt.Fprintln(os.Stderr, "testdatagen:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("testdatagen: wrote %s to %s\n", strings.Join(testfixtures.GeoGeneratedFiles, ", "), *out)
+	}
 }

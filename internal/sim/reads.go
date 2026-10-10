@@ -8,12 +8,17 @@ import (
 )
 
 // TopologyNode is one node of the workspace topology payload: a virtual
-// device with its interfaces (sorted by name).
+// device with its interfaces (sorted by name). GeoLat/GeoLng carry the
+// OPTIONAL geographic position (nil ⇒ omitted from the JSON) — pure
+// presentation metadata for map views; the canonical workspace state hash
+// deliberately excludes them.
 type TopologyNode struct {
 	ID         string              `json:"id"`
 	Code       string              `json:"code"`
 	Name       string              `json:"name"`
 	Status     string              `json:"status"`
+	GeoLat     *float64            `json:"geoLat,omitempty"`
+	GeoLng     *float64            `json:"geoLng,omitempty"`
 	Interfaces []TopologyInterface `json:"interfaces"`
 }
 
@@ -90,6 +95,8 @@ func (s *simState) topology(workspaceID, hash string) Topology {
 			Code:       d.Dev.Code,
 			Name:       d.Dev.Name,
 			Status:     d.Dev.Status.String(),
+			GeoLat:     d.Dev.GeoLat,
+			GeoLng:     d.Dev.GeoLng,
 			Interfaces: make([]TopologyInterface, 0, len(d.Interfaces)),
 		}
 		for _, i := range d.Interfaces {
