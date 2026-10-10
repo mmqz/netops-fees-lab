@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/app"
+	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 )
 
@@ -1112,9 +1113,9 @@ func TestAPILabFullFlow(t *testing.T) {
 	}
 	var report labReportResp
 	decodeJSON(t, "lab report json", body, &report)
-	if report.GeneratedAt == "" || report.EngineVersion != "v0.2.1" {
-		t.Fatalf("lab report meta = %s/%s, want a timestamp and engineVersion v0.2.1",
-			report.GeneratedAt, report.EngineVersion)
+	if report.GeneratedAt == "" || report.EngineVersion != domain.AppVersion {
+		t.Fatalf("lab report meta = %s/%s, want a timestamp and engineVersion %s",
+			report.GeneratedAt, report.EngineVersion, domain.AppVersion)
 	}
 	if report.Workspace.ID != ws || report.Workspace.Name != "lab-e2e" ||
 		report.Workspace.WorkspaceHash != created.WorkspaceHash {
