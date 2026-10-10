@@ -1,11 +1,11 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **5**（v5 = 仿真工作台表，见文末 DDL v5 一节）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **7**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列与 v7 port 类型为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
 - **ID**：TEXT。P1 聚合 `前缀_<uuid>`：`res_`（资源）、`rel_`（关系）、`src_`（来源引用）、`bat_`（导入批次）、`iss_`（问题），生成见 `internal/domain` 的 `NewID`；P2 仿真实体 `前缀-<n>`（全局序列，见文末 §6）。工作区为 UUID。
-- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
+- **自然键**（natural key）：资源唯一业务键——device 用 `device_code`、ip_pool 用 `pool_name`、circuit 用 `circuit_code`、port 用复合键 `device_ip|port_name`（v7，见文末 v7 节；复合键拼接规则与稳定性评估见 [natural-keys.md](natural-keys.md)）。表级唯一约束 `UNIQUE (resource_type, natural_key)`，幂等重导依赖它。
 - **时间戳**：一律 **UTC RFC3339 字符串**（如 `2026-10-09T12:04:40Z`）。
 - **JSON 列**：`attributes` / `raw` / `evidence` / `mapping` 均为 TEXT 存 JSON 对象（默认 `'{}'`）。
 

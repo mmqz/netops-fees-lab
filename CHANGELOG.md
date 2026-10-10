@@ -12,26 +12,26 @@
 
 ### 修复 — 后端健壮性（R2-P2×2 + R1-D6 + R2-P3×3）
 - `importer.Rollback` 的 in-use 检查与状态前置校验**移入 `db.Do` 事务内**（BEGIN IMMEDIATE 先取写锁，与其他写事务严格串行，TOCTOU 窗口归零）。
-- workbook 层新增**解压上限**（单 sheet 行数 / 全簿单元格总量封顶，超限走既有 422 错误通道）——zip 炸弹暴露面收敛。
-- serve 启动**自愈**：进程崩溃遗留的非终态 `importing` 批次复位为 `failed(interrupted)`（R1-D6 崩溃窗口关闭；自愈仅在会执行导入的进程启动时运行，MCP 进程不做以免误伤并发导入）。
+- workbook 层新增**解压上限**（单 sheet 物化行数 / 全簿单元格总量封顶，超限返回新增 422 错误码 `workbook_too_large`）——zip 炸弹暴露面收敛；解析改为逐 sheet 流式。
+- serve 启动**自愈**：进程崩溃遗留的 `analyzing`/`importing` 瞬态批次复位为 `failed(interrupted)`（R1-D6 崩溃窗口关闭）。调用点在 cmd 层——`serve` 启动与 CLI `import` 入口（确定本进程无在途导入的入口，非 api.New）；MCP 进程不做以免误伤并发导入。
 - `handleBatchDelete` 删除响应计数改 **COUNT 聚合**（不再全量加载行结果与 issue 仅为取 len）。
 - MCP `resource_search` 的 type 描述与错误文案**补 port**（文案与封闭集对齐）。
 - dataDir 为空时上传请求直接 500（消除半初始化相对路径拼接）。
 
 ### 修复 — 前端（R2-P2-3 / R1-D4 / R4 短期）
 - **Overview 类型统计动态化**：此前硬编码 `device|ip_pool|circuit` 三类型，v0.3.1 新增的 port 在总览统计完全缺席——改为按后端 stats.byType 动态渲染全部类型。
-- **Report 页批次切换加 useSeq 陈旧响应守卫**（快速切换下拉时慢响应后到覆盖新批次预览的串台修复——全站最后一个未守卫的异步加载点）。
+- **Report 页批次切换加 useSeq 陈旧响应守卫**（快速切换下拉时慢响应后到覆盖新批次预览的串台修复；顺带为 Overview 挂载/重试加载加同款守卫——全站异步加载点全部收口）。
 - **导入映射确认页主键稳定性告警**（R4 短期落地）：IP 类列被选入自然键时告警「IP 属可变属性，重划后同键资源将分裂」；名称类自然键提示 (地市, 名称) 作用域。
 
 ### 文档 — 诚实对齐（R3-P0×2 + P1×2 + P3）
 - README 合规横幅**加 samples/ 真实样例例外条款**；新增 `samples/README.md`（来源/授权/范围说明——红线 8「no real network data」的已文档化偏差）。
 - 新增 `docs/natural-keys.md`：**各资源类型自然键规范**（R4 裁决落地——UUID 代理键 PK 不变；编号类自然键优先；名称键须 (地市,名称) 作用域；IP 一律降级可变属性；port 键含 IP 定性为 P1 隐患并排入 v0.4 迁移计划）。
-- `docs/api.md` 补 v0.3.x 契约（拓扑节点 geoLat/geoLng、`type=port`、port 复合键导入示例）；`docs/import-and-validation.md` 补 port / 重复表头 / 解压上限行为。
+- `docs/api.md` 补 v0.3.x 契约（拓扑节点 geoLat/geoLng、`type=port`、port 复合键导入示例、422 `workbook_too_large`，版本戳 v0.3.2）；`docs/import-and-validation.md` 补 port / 重复表头 / 解压上限 / 崩溃自愈行为。
 - `docs/verified-capabilities.md` 新增 v0.3.2 段（测试计数口径注明）；ADR-0002 / ADR-0009 补遗（DSN `_txlock=immediate`；maplibre-gl 懒加载独立 chunk）；`architecture.md` §4 undo 标记原子化更正。
-- backup-local-impl 本地分支归档决策记入 worklog（tag 归档、永不直推）。
+- backup-local-impl 本地分支处置决策已执行：本地 tag `archive/backup-local-impl` 归档（价值已迁移主线的旧基线实验；该分支与 tag 均永不推送远程），决策记入 worklog。
 
 ### 测试
-- Go 198 个顶层测试基线 + 本轮新增回归（版本一致性 / 事务内回滚检查 / 解压上限 / importing 自愈 / 动态统计）；门禁全绿：gofmt 空 · vet 干净 · 全包 ok · `-race` 0 · tsc 0 错误 · build ✓（最终实测计数与 CI 运行记于 verified-capabilities.md v0.3.2 段）。
+- Go **207 个顶层测试**全绿（+8 修复回归：rollback 事务化 / 解压上限 / 崩溃自愈 / 动态统计等修复项各自的新增测试，+1 版本一致性 `TestAppVersionMatchesChangelogHead`；基线为 v0.3.1 实测 198——彼时宣称 200 属口径未对齐，本版已校正为 `go test -list '.*'` 顶层函数实测计数）。门禁六项全绿：gofmt 空 · vet 0 告警 · 14 包全 ok · `-race` 0（importer/workbook/api/repo）· tsc 0 错误 · build ✓（最终实测计数与 CI 运行态——待推送后记录——见 verified-capabilities.md v0.3.2 段）。
 
 ## [0.3.1] — 2026-10-10
 

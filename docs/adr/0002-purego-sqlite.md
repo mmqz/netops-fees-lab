@@ -20,3 +20,18 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign
   - 正面：交叉编译友好；无需系统 sqlite3；DSN pragma 保持 SQL 层行为一致；
   - 负面：纯 Go 驱动首次编译较慢（~数十秒，2 核；之后走构建缓存）；大规模写入吞吐低于 C 驱动——Phase 1 数据量（几十行/批）远未触界。
 - 验证：repo 层 22 个测试（迁移幂等、各聚合 CRUD、并发语义靠 WAL/busy_timeout 保障）；导入原子性/回滚测试全部经真实 SQLite 事务路径。
+
+## Addendum（2026-10-10 追记，v0.2.1/v0.3.2 期间实码演进——不改写上文决策）
+
+ADR 原文记录的 DSN 为 3 个 pragma。实码（`internal/repo/repo.go`）经 AUD1-4 加固后已演进为：
+
+```
+file:<percent-encoded-path>?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)
+```
+
+与原文相比新增两项、均**优于**原描述：
+
+1. **`_txlock=immediate`**：每个事务 BEGIN 即取写锁——deferred 读→写升级的 BUSY 竞争（曾丢失并发 check-run）在 DSN 级根治；另配套 `beginBusyAttempts = 3` 有界重试：BEGIN 返回 SQLITE_BUSY 时重试至多 3 次，间隔 50/100 ms 退避。
+2. **路径 percent-encode**（`dsnOf`）：路径含 `?`/`#`/空格/中文时不再截断 DSN 丢 pragma（SQLite 按 URI 解码打开）。纯 ASCII 路径下 DSN 与原文逐字节一致。
+
+上述演进均已在实码与测试（DSN 特殊字符、并发压力×2）中验证；本 ADR 其余决策（驱动选型、模块路径坑、否决理由）不变。

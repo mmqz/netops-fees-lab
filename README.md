@@ -25,9 +25,9 @@
                     └──────────────────────────────────────────────┘
 ```
 
-> ⚠️ **合规声明**：本平台**不具备生产设备写能力**。AI 仅可操作本地实验室工作区（仿真工作台）；生产操作必须由人员通过公司批准的外部工具执行。仓库内所有数据均为**合成测试数据**，仅用于工程方法验证，不代表真实网络运行情况。
+> ⚠️ **合规声明**：本平台**不具备生产设备写能力**。AI 仅可操作本地实验室工作区（仿真工作台）；生产操作必须由人员通过公司批准的外部工具执行。仓库内所有数据均为**合成测试数据**，仅用于工程方法验证，不代表真实网络运行情况——**唯一例外**：`samples/` 目录含项目所有者在需求会话中提供的真实电信运营导出样例（含真实设备 IP 与运营商标头，未脱敏），仅限本私有仓库内做导入工程验证、不得外发或再分发（授权与范围详见 [samples/README.md](samples/README.md)）。此为红线「no real network data」的**已文档化偏差**（经项目所有者授权入库并记录于案）。
 >
-> ⚠️ **Compliance**: This platform has **NO production-device write capability**. AI may only operate the local lab workspace (simulation workbench); production operations must be performed by humans through company-approved external tooling. All data in this repository is **synthetic** and used solely for engineering-method validation.
+> ⚠️ **Compliance**: This platform has **NO production-device write capability**. AI may only operate the local lab workspace (simulation workbench); production operations must be performed by humans through company-approved external tooling. All data in this repository is **synthetic** and used solely for engineering-method validation — with **one documented exception**: the `samples/` directory holds real telecom-operator export samples provided by the project owner (containing real device IPs and operator headers, not anonymized). They are licensed for import-engineering validation **inside this private repository only** and must not be redistributed; see [samples/README.md](samples/README.md). This is a **documented, owner-authorized deviation** from the "no real network data" red line.
 
 ## 1. 项目定位
 
@@ -47,7 +47,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **画布工业级交互（v0.2.3）**：**右键上下文菜单**（设备：邻域聚焦/设为路径起点/表格定位/复制 ID；链路：表格定位/复制 ID；空白：适配/重置；a11y role=menu + 焦点管理 + 越界翻转）；**PNG 快照导出**（整图 2 倍分辨率不透明深色底）；**缩放百分比实时指示**；**手动排布位置持久化**（localStorage，重载不丢，切布局自动重排）；键盘快捷键（F 适配 / L 标签开关 / Esc 链级）。
 - **画布工作区布局（v0.2.3）**：页头紧凑化（画布高度 1080p 达 760px）；**分栏拖拽**（30–85% 自适应 + 键盘 ±2% + a11y separator + 持久化）；**右栏折叠**（画布占满工作区宽度）；画布非全屏 948×760 → 全屏 1920×1080（约 2.9 倍面积）。
 - **地理视图（v0.3.0 三视图切换）**：画布新增「拓扑图 / 2D 地图 / 3D 地图」分段切换（按工作台持久化）；导入设备表时自动识别**经度/纬度/经纬度列**（组合列按中国坐标边界启发式拆分），物化后设备携带 geoLat/geoLng；2D 俯视——真实深色地理底图（ESRI World_Dark_Gray，免密钥）上按真实经纬度落设备（状态色圆点 + 编码牌）、链路 up 蓝实线 / down 红虚线 marching-ants；3D 斜视 58°——设备渲染为按连接数分高的塔体（数字孪生示意）、右键拖拽旋转环视；设备点击/选中与右侧表格双向联动；瓦片失败自动降级离线网格底图；maplibre-gl 懒加载独立 chunk。演示数据：`testdata/geodevices.xlsx`（黑龙江哈尔滨→漠河北南干线 + 地震局 10M 长专线，坐标为演示近似值），一键脚本 `scripts/demo-geo-lab.sh`。
-- **port 资源类型（v0.3.1 真实表格导入）**：真实电信端口工作簿（端口流量监控表 / 端口资源表两种表头形态）可直接导入——`device_ip + port_name` 复合自然键、逐字重复表头行自动跳过多段导出拼接、带宽 0 合法入库；样例 `samples/telecom-port-multi-header.xlsx`；3D 地图默认视野按全部数据点的包围盒几何直解自适应（修「3D 地图过大」）。
+- **port 资源类型（v0.3.1 真实表格导入）**：真实电信端口工作簿（端口流量监控表 / 端口资源表两种表头形态）可直接导入——`device_ip + port_name` 复合自然键（`|` 拼接落库）、逐字重复表头行自动跳过多段导出拼接、带宽 0 合法入库；样例 `samples/telecom-port-multi-header.xlsx`（项目所有者在需求会话中提供的真实电信运营导出，已授权入库、仅限本私有仓库使用——来源与授权见 [samples/README.md](samples/README.md)；自然键稳定性分析见 [docs/natural-keys.md](docs/natural-keys.md)）；3D 地图默认视野按全部数据点的包围盒几何直解自适应（修「3D 地图过大」）。
 - **MCP 五工具**：`resource_search`（只读）+ `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`——AI 改仿真态的唯一通道；`restore_*` 内部操作码三边界拒绝；**无建删工作区工具**。
 - **CLI `lab` 子命令树**：workspace/topology/path/apply/checks/diff/undo/checkpoint，全部单一 JSON 输出。
 - **仿真报告**：`GET /api/lab/report`（HTML/JSON）：引擎版本、评分、发现、变更集史、检查点、固定免责声明。
@@ -65,7 +65,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **HTTP API**：`/api/...` 全套 REST 风格接口（错误统一 `{"error":{"code","message"}}` 信封）+ 17 条 §7 仿真路由。
 - **嵌入式 React 前端**：概览 / 数据导入（三步向导）/ 资源浏览（抽屉 + 二跳）/ 问题清单 / 质量报告 / 工作台列表 / 拓扑工作台 中文界面，`go:embed` 打进单二进制。
 - **结构化 CLI**：`analyze / import / validate / report / query / serve / mcp / testdata / lab`，成功输出单一 JSON 对象，退出码 0/1/2（TeleAgent 的 CLI 回退路径）。
-- **工程化**：**169 个 Go 测试**（14 个含测试的包）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）。
+- **工程化**：**207 个 Go 顶层测试**（14 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）。
 
 ## 3. 快速开始
 
@@ -73,7 +73,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ```bash
 # 1) 测试
-make test            # go test -count=1 -timeout 15m ./...（169 个测试 / 14 包 ok）
+make test            # go test -count=1 -timeout 15m ./...（207 个顶层测试 / 14 包 ok）
 
 # 2) 构建前端（产物嵌入 internal/webui/dist，供 go:embed 使用）
 make web             # cd web && npm ci && npm run build
@@ -145,7 +145,7 @@ netopslab lab checkpoint --db $DB --workspace <wsId> --restore --id cp-1
 | 前端 | React 18 + TypeScript 5.6（strict）+ Vite 6 | 手写设计系统 CSS，无 UI 框架 |
 | 拓扑图 | cytoscape 3.32.0（精确版本，无插件） | /lab 画布；单 chunk 嵌入（ADR-0009） |
 | 嵌入 | go:embed all:dist | 前端产物打进二进制，单文件分发 |
-| 测试 | go test（table-driven） | 169 个测试 / 14 包；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
+| 测试 | go test（table-driven） | 207 个顶层测试 / 14 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
 
 ## 6. 仓库结构
 
@@ -171,7 +171,8 @@ netops-lab/
 │   └── webui/            # go:embed 前端产物（dist/.gitkeep 占位）
 ├── web/                  # React 源码（npm；含 components/lab 拓扑画布与实验室组件；
 │                         #   构建产物出 internal/webui/dist）
-├── testdata/             # 3 本合成工作簿 + expected-summary.json
+├── testdata/             # 合成工作簿（devices/ippools/circuits + geodevices/geocircuits）+ expected-summary.json
+├── samples/              # 真实电信运营导出样例（唯一合规例外，见 samples/README.md）
 ├── scripts/demo.sh       # 一键演示（资源治理）
 ├── scripts/demo-lab.sh   # 一键演示（仿真工作台/故障注入）
 ├── docs/                 # 文档（见下方索引）
@@ -241,13 +242,13 @@ TeleAgent 集成：MCP 注册方式与 CLI 回退路径（以结构化 JSON 供 
 ## 9. 免责声明（再次强调）
 
 - 本项目**没有任何生产网络写能力**，MCP/HTTP API 均不暴露 SQL、Shell、SSH 或通用文件访问；
-- 仓库内全部资源数据为**合成测试数据**（`testdata/`，可由 `netopslab testdata` 确定性再生成），**不代表真实网络运行情况**；
+- 仓库内资源数据除 `samples/` 真实样例（见顶部合规声明的例外条款）外均为**合成测试数据**（`testdata/`，可由 `netopslab testdata` 确定性再生成），**不代表真实网络运行情况**；
 - 质量报告页脚固定携带免责声明：“本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。”
 - 能力边界与已验证/未验证事项的诚实清单见 [docs/verified-capabilities.md](docs/verified-capabilities.md)。
 
 ## 10. English Summary
 
-NetOps Lab is a local-first cloud-network resource governance and AI simulation workbench delivering Stage 0 + Phase 1 + Phase 2. Phase 1 imports three synthetic Excel workbook types (devices, IP pools, circuits) through a user-confirmed column mapping into SQLite (pure Go, no CGO), with single-transaction atomicity, row-level accounting, idempotent re-import, batch rollback, and a deterministic, versioned validation engine (10 rules, E001–E006/W001–W003/I001) with source evidence. Phase 2 adds the simulation workbench: one-click materialization of a virtual topology (27 devices / 40 interfaces / 20 links in the demo), a closed set of 10 typed operations (including fault injection) that humans AND the AI (via MCP) apply through the same engine path as atomic changesets, five deterministic checks (CHK-001..005, score 100−5E−1W), up-only BFS connectivity, before/after run diff (business-key matching, connectivity lost/gained pairs, score delta), and three-tier undo: transaction rollback for failed changesets, LIFO changeset-inverse undo (undo-of-undo works), and checkpoints via the SQLite Online Backup API with workspace-scoped restore-as-forward-ops (hash-equal verification, no-op detection). Exits: stdlib HTTP API (17 new §7 routes), embedded React 18 UI with a Cytoscape topology canvas (/lab), structured-JSON CLI (lab subcommand tree), and an MCP stdio server exposing exactly five tools (one read-only search + four typed lab tools; no workspace create/delete for the AI). Verified: 169 Go tests green, live-server API journey, CLI e2e, in-process MCP round-trip + real-process stdio smoke, determinism (two fresh DBs), atomicity, checkpoint round-trip, repeatable demo-lab.sh double-run. Unverified: deployed-TeleAgent MCP invocation, real-browser /lab smoke (pending final review), Windows/macOS builds. No production write capability anywhere; all data is synthetic.
+NetOps Lab is a local-first cloud-network resource governance and AI simulation workbench delivering Stage 0 + Phase 1 + Phase 2. Phase 1 imports three synthetic Excel workbook types (devices, IP pools, circuits) through a user-confirmed column mapping into SQLite (pure Go, no CGO), with single-transaction atomicity, row-level accounting, idempotent re-import, batch rollback, and a deterministic, versioned validation engine (10 rules, E001–E006/W001–W003/I001) with source evidence. Phase 2 adds the simulation workbench: one-click materialization of a virtual topology (27 devices / 40 interfaces / 20 links in the demo), a closed set of 10 typed operations (including fault injection) that humans AND the AI (via MCP) apply through the same engine path as atomic changesets, five deterministic checks (CHK-001..005, score 100−5E−1W), up-only BFS connectivity, before/after run diff (business-key matching, connectivity lost/gained pairs, score delta), and three-tier undo: transaction rollback for failed changesets, LIFO changeset-inverse undo (undo-of-undo works), and checkpoints via the SQLite Online Backup API with workspace-scoped restore-as-forward-ops (hash-equal verification, no-op detection). Exits: stdlib HTTP API (17 new §7 routes), embedded React 18 UI with a Cytoscape topology canvas (/lab), structured-JSON CLI (lab subcommand tree), and an MCP stdio server exposing exactly five tools (one read-only search + four typed lab tools; no workspace create/delete for the AI). Verified: 207 top-level Go tests green (v0.3.2 fresh count, counting convention in docs/verified-capabilities.md), live-server API journey, CLI e2e, in-process MCP round-trip + real-process stdio smoke, determinism (two fresh DBs), atomicity, checkpoint round-trip, repeatable demo-lab.sh double-run. Unverified: deployed-TeleAgent MCP invocation, real-browser /lab smoke (pending final review), Windows/macOS builds. No production write capability anywhere; all data is synthetic, with the single documented `samples/` exception (real telecom export samples, owner-authorized, private-repository-only — see samples/README.md).
 
 ## 文档索引
 
@@ -257,6 +258,7 @@ NetOps Lab is a local-first cloud-network resource governance and AI simulation 
 | [docs/data-model.md](docs/data-model.md) | DDL v1–v5、实体说明、ID/时间戳约定、迁移机制 |
 | [docs/api.md](docs/api.md) | HTTP API 参考（含真实请求/响应示例；§7 仿真路由） |
 | [docs/import-and-validation.md](docs/import-and-validation.md) | 导入管线、行级记账、规则目录、评分、幂等与回滚 |
+| [docs/natural-keys.md](docs/natural-keys.md) | 各资源类型自然键规范（分层身份模型、稳定性排序、现状差距） |
 | [docs/simulation.md](docs/simulation.md) | 仿真工作台：物化、操作目录、校验目录、三层撤销、diff、确定性、性能 |
 | [docs/teleagent-integration.md](docs/teleagent-integration.md) | TeleAgent 的 MCP 注册（5 工具）与 CLI 回退 |
 | [docs/verified-capabilities.md](docs/verified-capabilities.md) | 已验证 / 未验证能力清单（诚实性文档） |

@@ -1,6 +1,6 @@
 # NetOps Lab — 架构说明（Architecture）
 
-> 本文描述 Stage 0 + Phase 1 + Phase 2（v0.2.0）的实际实现。源码是唯一事实来源：分层、包边界、事务与确定性策略均可在 `internal/` 中逐一对应。中文为主，关键术语保留英文。
+> 本文描述 Stage 0 + Phase 1 + Phase 2（截至 v0.3.x，含 v0.3.0 geo 管道 §8）的实际实现。源码是唯一事实来源：分层、包边界、事务与确定性策略均可在 `internal/` 中逐一对应。中文为主，关键术语保留英文。
 
 ## 1. 总体分层
 
@@ -74,7 +74,7 @@ web/                                   ← React 源码（构建产物输出到 
 - **导入执行**（`importer.Execute`）：所有 import sheet 的**全部写入在同一个 `db.Do` 事务**里——资源、关系、source_refs、row_results、issues、批次计数与状态。任何行级失败**不**中止（行记 `failed`）；任何内部错误（含测试注入的 afterSheet 钩子错误）→ 整体回滚 + 批次置 `failed`（在事务外写状态）。零半写由 `TestImportAtomicRollback` 验证。
 - **集合级校验**（`validation.Engine.Run`）：单个 `db.Do`：`DeleteSetLevel`（删 batch_id IS NULL 的集合级问题）→ 计算 → 按 `(rule_code, entityKey)` 排序插入。失败则整体回滚，保留旧问题集。
 - **批次回滚**（`importer.Rollback`）：单个 `db.Do` 删除关系 → 资源（FK 级联）→ source_refs → row_results → issues → 批次置 `rolled_back`。
-- **仿真操作/撤销/恢复**（`sim.applyInternal`，Phase 2）：变更集行 + 逐操作迁移 + 逐操作逆操作记录**同一事务**；语义失败 → 整体回滚 → 第二个事务记录失败变更集（ADR-0007）。undo 的目标标记 `reverted` 在撤销变更集提交后的独立小事务中（崩溃窗口分析见 `sim/undo.go` 注释）。
+- **仿真操作/撤销/恢复**（`sim.applyInternal`，Phase 2）：变更集行 + 逐操作迁移 + 逐操作逆操作记录**同一事务**；语义失败 → 整体回滚 → 第二个事务记录失败变更集（ADR-0007）。undo 的目标标记 `reverted` 同样在**同一事务**内完成（AUD1-8 原子化：`applyInternal` 的 afterInsert 钩子在变更集行落库后、提交前把目标标 `reverted`，标记失败则撤销变更集随之回滚——要么同时落地要么都不落地；旧版「撤销提交后的独立小事务」设计已废弃，崩溃窗口分析见 `sim/undo.go` 注释）。
 - **校验运行**（`sim.RunChecks`）：单事务（状态读取 + 发现计算 + run/results/topology 快照写入）。
 - **物化**：单事务（workspace + 序列 + 设备 + 接口 + 链路 + 哈希）。
 - **检查点**：三步非事务化（id 分配 → Online Backup 文件写 → 标记行插入，崩溃安全分析见 ADR-0008）；恢复 = 前向操作变更集（引擎路径）。

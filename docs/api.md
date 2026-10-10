@@ -4,26 +4,28 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `internal`；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`。
 - 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；§7 示例取自一次完整的服务器旅程（2026-10-09，v0.2.0）。
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.3.2（2026-10-10）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.2.0",
+  "version": "v0.3.2",
   "ruleVersion": "1.0.0"
 }
 ```
 
+（`version` = `domain.AppVersion` 单一事实源，v0.3.2 起由 `TestAppVersionMatchesChangelogHead` 锚定与 CHANGELOG 头版本一致，不再手抄漂移。）
+
 ## POST /api/imports — 上传并分析工作簿
 
-multipart/form-data，字段名 `file`，仅 `.xlsx`，≤10MB（超出 → 413 `too_large`）。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
+multipart/form-data，字段名 `file`，仅 `.xlsx`，≤10MB（压缩尺寸超出 → 413 `too_large`）。**解压后尺寸另有上限（v0.3.2，zip 炸弹防护）**：单 sheet 物化行数 > 100,000（含表头）或全簿物化单元格总数 > 5,000,000 → **422 `workbook_too_large`**（"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"）。解析为逐 sheet 流式读取，超限即中止，不会整表先物化。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
 
 ```json
 {
@@ -255,7 +257,7 @@ HTTP/1.1 409 Conflict
 
 ## GET /api/resources?type=&q=&status=&page=&pageSize= — 资源检索
 
-`q` 对 natural_key / name / attributes 值做不区分大小写包含匹配；默认按类型分组、每组自然键排序（首页 circuit-first 为排序副作用）。示例 `?pageSize=2`：
+`type` 可取 `device` / `ip_pool` / `circuit` / `port`（v0.3.1 起 port 入封闭集；非法值 → 400 `bad_request`）。`q` 对 natural_key / name / attributes 值做不区分大小写包含匹配；默认按类型分组、每组自然键排序（首页 circuit-first 为排序副作用）。示例 `?pageSize=2`：
 
 ```json
 {
@@ -318,6 +320,8 @@ HTTP/1.1 409 Conflict
 ```
 
 `raw` 即原始 Excel 行（表头→值）。
+
+**port 类型的复合自然键（v0.3.1）**：port 资源的 `naturalKey` 是复合键 `device_ip|port_name` 按此顺序以 `|` 拼接落库（例如 `12.1.53.24|bvi2.1008`，取自真实样例 `samples/telecom-port-multi-header.xlsx`）；检索/幂等判重（E001/skip）均以拼接后的完整键匹配。单键类型（device/ip_pool/circuit）拼接退化为原值，行为不变。键的稳定性评估与 v0.4 迁移计划见 [natural-keys.md](natural-keys.md)。
 
 ## GET /api/resources/{id}/relations?depth=1|2 — 关系子图（BFS）
 
@@ -611,6 +615,8 @@ GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
       "code": "DEV-002",
       "name": "宁波-接入路由器-002",
       "status": "up",
+      "geoLat": 45.773,
+      "geoLng": 126.636,
       "interfaces": [
         { "id": "if-2", "name": "eth0", "status": "up", "ipv4Addr": "", "ipv4Prefix": -1 },
         { "id": "if-3", "name": "eth1", "status": "up", "ipv4Addr": "", "ipv4Prefix": -1 }
@@ -634,6 +640,8 @@ GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
 ```
 
 （27 节点 / 20 边，此处截断到前 2 节点与第 1 边；`ipv4Addr:""`、`ipv4Prefix:-1` 表示未配置——与状态哈希的 `null` 表示法故意不同，§7 vs §3。）
+
+**节点可选字段 `geoLat` / `geoLng`（v0.3.0 geo 管道）**：导入设备表映射了经度/纬度/经纬度列并物化后，节点携带十进制坐标（上例 vd-2 的坐标为演示库 `testdata/geodevices.xlsx` 哈尔滨枢纽真实捕获值，此处并入示意；两个键均为 `omitempty`——**无位置节点不带键**，而非 `null`）。坐标不参与状态哈希与任何校验规则（红线，见 [simulation.md](simulation.md) §6 与 [architecture.md](architecture.md) §8）。
 
 ## POST /api/workspaces/{id}/topology/path — 连通性查询
 

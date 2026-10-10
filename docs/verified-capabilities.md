@@ -1,7 +1,7 @@
 # NetOps Lab — 已验证 / 未验证能力清单
 
 > 诚实为本：每一条"已验证"都可追溯到具体的验证方式与日期；未验证事项显式列出，不粉饰。
-> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版）。
+> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版）。
 
 ## ✅ 已验证（2026-10-09，linux/amd64）
 
@@ -72,6 +72,25 @@
 | **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
+
+## v0.3.2（2026-10-10）工程审查整改版
+
+四维只读审查（R1 架构 A- / R2 代码质量 / R3 计划偏移 / R4 主键身份模型）结论为「代码能力层无降级，偏差集中在文档/承诺层」，本版为整改落地（三个提交：404161b 版本事实源 / 96b8c74 后端健壮性 / 9a9e2d0 前端修复）。
+
+### ✅ 已验证（2026-10-10，linux/amd64 · 2 核沙箱）
+
+| 能力 | 验证方式 | 备注 |
+| --- | --- | --- |
+| **207 个顶层测试全绿** | `gofmt -l .` 输出为空；`go vet ./...` 0 告警；`go test -count=1 ./...` 14 个含测试的包全部 ok；`-race` 0 失败（importer/workbook/api/repo 四包）；`tsc -b` 0 错误；`npm run build` ✓（chunk >500KB 警告为既有 P3-5 遗留，非本轮引入） | 计数口径：`go test -list '.*' ./... | grep -c '^Test'` **顶层函数计数 = 207**。v0.3.1 曾宣称 200、实跑 198（口径未对齐），本版已校正为实测值：198 基线 + **8 项修复回归**（rollback 事务化 / 解压上限 / 崩溃自愈 / 动态统计等）+ **1 版本一致性**（`TestAppVersionMatchesChangelogHead`，钉死 domain 常量 = CHANGELOG 头版本） |
+| 版本单一事实源（R1-D1 / R3-C1） | `domain.AppVersion = v0.3.2`；`/api/health` 与 MCP 握手实报 v0.3.2；前端侧栏改读 `/api/health`（不再手抄）；TestAppVersionMatchesChangelogHead 红/绿锚定 | v0.3.1 的版本虚报链（domain 停 v0.3.0 / 文档 v0.3.1）已闭环 |
+| 后端健壮性六项（96b8c74） | 各自新增回归测试：rollback in-use 检查入事务（TOCTOU 归零）、workbook 解压上限（100k 行/sheet、5M 单元格 → 422 workbook_too_large）、importing/analyzing 崩溃自愈（serve/CLI import 入口复位 failed(interrupted)）、批次删除 COUNT 聚合、MCP 文案补 port、dataDir 空 fail-fast | 详见 CHANGELOG 0.3.2 与 import-and-validation.md §11 |
+| 前端四项（9a9e2d0） | tsc/build 门禁 + 运行时冒烟（Overview 动态渲染 4 类型含 port；Report 竞态注入验证；侧栏 mock health 版本回落；ImportWizard IP 键告警显示） | 留档 F2 子代理工作记录 |
+| 真实样例合规文档化（R3-C5） | README 合规横幅加 samples/ 例外条款（中英双语）；新增 samples/README.md（来源/授权/披露）与 docs/natural-keys.md（R4 裁决落地） | 红线「no real network data」的已文档化偏差（项目所有者授权） |
+
+### ⚠️ 未验证（v0.3.2 诚实声明）
+
+- **CI 运行态**：本轮三个提交（404161b / 96b8c74 / 9a9e2d0）**尚未推送**——GitHub Actions 暂无对应运行记录，**待推送后补记**（不预填 run 编号）。本地已实测上述六项门禁。
+- 其余未验证事项（部署态 TeleAgent MCP 调用 / Windows/macOS 构建 / 长时并发负载）与 v0.3.0 段一致，无变化。
 
 ## ✅ 已验证（2026-10-10，v0.3.0 地理视图版 · linux/amd64 · 2 核沙箱）
 
