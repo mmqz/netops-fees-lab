@@ -457,6 +457,21 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	if existing, found, err := st.lookupExisting(ctx, st.spec.Type, key); err != nil {
 		return err
 	} else if found {
+		// Attribute diff detection (W005, v0.4 W4-D): the row hits
+		// the SAME natural key but may carry changed attribute
+		// values (e.g. a device re-homed to a new mgmt_ip). The
+		// values used to be silently dropped; they are now recorded
+		// as PENDING change proposals (one row per differing field
+		// in resource_attribute_changes) plus a W005 warning issue.
+		// The row itself is STILL skipped — nothing is written to
+		// the resource until a human applies the change (HTTP API /
+		// CLI; MCP never). Empty new values record nothing (the
+		// existing "empty never overwrites" import semantics); the
+		// enum/status field never participates (attributes() already
+		// excludes key and enum fields).
+		if err := st.recordAttributeDiff(ctx, existing, vals, row); err != nil {
+			return err
+		}
 		*results = append(*results, domain.RowResult{
 			BatchID:   st.batch.ID,
 			Sheet:     st.sheet.Name,
@@ -660,6 +675,102 @@ func (st *sheetState) lookupExisting(ctx context.Context, rt domain.ResourceType
 		return domain.Resource{}, false, err
 	}
 	return res, true, nil
+}
+
+// recordAttributeDiff compares the mapped attribute fields (non-key,
+// non-enum, non-empty — exactly the attributes() gathering) of a
+// duplicate-key row against the stored resource and records one PENDING
+// domain.AttributeChange per field whose new value differs (W005, W4-D).
+// The skipped row itself gets no entity and no source ref, so the W005
+// issue locates its origin via the evidence (sheet/row_number) exactly like
+// the failed-row issues.
+//
+// Deduplication (idempotency): a re-import that repeats a diff which is
+// ALREADY pending — same resource, same field, same new value — records
+// nothing. A diff whose new value changed again records a second proposal;
+// multiple pendings on one field coexist in created_at order, and apply
+// resolves them in that order (an earlier apply makes later ones conflict
+// on the old-value check). When every differing field of the row is
+// deduplicated away, no issue is recorded either — the re-import is then
+// byte-for-byte the classic silent skip.
+func (st *sheetState) recordAttributeDiff(ctx context.Context, existing domain.Resource,
+	vals map[string]string, row workbook.Row) error {
+
+	rt := st.spec.Type.String()
+	// Pending proposals of this resource, keyed by field → new values.
+	pending, err := st.tx.AttributeChanges.ListPendingByResource(ctx, existing.ID)
+	if err != nil {
+		return err
+	}
+	pendingNew := make(map[string]map[string]struct{}, len(pending))
+	for _, ch := range pending {
+		if pendingNew[ch.Field] == nil {
+			pendingNew[ch.Field] = map[string]struct{}{}
+		}
+		pendingNew[ch.Field][ch.NewValue] = struct{}{}
+	}
+
+	// Field order follows the spec (deterministic evidence and insertion).
+	var changes []domain.AttributeChange
+	var fields []string
+	for _, f := range st.spec.Fields {
+		if f.NaturalKey || f.Kind == mapping.KindEnum {
+			continue // attributes() excludes key and enum fields
+		}
+		nv := vals[f.Name]
+		if nv == "" {
+			continue // empty new value never records (nor overwrites)
+		}
+		ov := existing.Attributes[f.Name] // absent attribute == ""
+		if nv == ov {
+			continue
+		}
+		if news, dup := pendingNew[f.Name]; dup {
+			if _, same := news[nv]; same {
+				continue // same diff already pending → no duplicate record
+			}
+		}
+		changes = append(changes, domain.AttributeChange{
+			ID:         domain.NewID("chg"),
+			ResourceID: existing.ID,
+			BatchID:    st.batch.ID,
+			Field:      f.Name,
+			OldValue:   ov,
+			NewValue:   nv,
+			Status:     domain.ChangeStatusPending,
+			Sheet:      st.sheet.Name,
+			RowNumber:  row.Number,
+			CreatedAt:  st.now,
+		})
+		fields = append(fields, f.Name)
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	if err := st.tx.AttributeChanges.InsertBatch(ctx, changes); err != nil {
+		return err
+	}
+	return st.tx.Issues.Insert(ctx, domain.Issue{
+		ID:          domain.NewID("iss"),
+		BatchID:     &st.batch.ID,
+		RuleCode:    domain.RuleAttributeChange,
+		RuleVersion: domain.RuleVersion,
+		Severity:    domain.SeverityWarning,
+		EntityKind:  domain.EntityKindResource,
+		EntityID:    existing.ID,
+		Message: fmt.Sprintf("属性变更待确认：%s/%s 的 %d 个字段与库内值不同（%s）",
+			rt, existing.NaturalKey, len(changes), strings.Join(fields, ",")),
+		Evidence: map[string]string{
+			"type":         rt,
+			"natural_key":  existing.NaturalKey,
+			"resource_id":  existing.ID,
+			"fields":       strings.Join(fields, ","),
+			"change_count": strconv.Itoa(len(changes)),
+			"sheet":        st.sheet.Name,
+			"row_number":   strconv.Itoa(row.Number),
+		},
+		CreatedAt: st.now,
+	})
 }
 
 // resolveRef resolves a ref value against the batch-local imported map ∪

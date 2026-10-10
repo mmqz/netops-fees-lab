@@ -54,6 +54,10 @@ type DB struct {
 	RowResults *RowResultRepo
 	Issues     *IssueRepo
 
+	// AttributeChanges stores the attribute change proposals recorded on
+	// the importer's duplicate-key skip path (migration v11, W4-D).
+	AttributeChanges *AttributeChangeRepo
+
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
 	Sequences      *SequenceRepo
@@ -105,6 +109,7 @@ func wire(db *DB, q DBTX) {
 	db.SourceRefs = &SourceRefRepo{q: q}
 	db.RowResults = &RowResultRepo{q: q}
 	db.Issues = &IssueRepo{q: q}
+	db.AttributeChanges = &AttributeChangeRepo{q: q}
 	db.Workspaces = &WorkspaceRepo{q: q}
 	db.Sequences = &SequenceRepo{q: q}
 	db.VirtualDevices = &VirtualDeviceRepo{q: q}
@@ -130,6 +135,10 @@ type Tx struct {
 	SourceRefs *SourceRefRepo
 	RowResults *RowResultRepo
 	Issues     *IssueRepo
+
+	// AttributeChanges stores the attribute change proposals recorded on
+	// the importer's duplicate-key skip path (migration v11, W4-D).
+	AttributeChanges *AttributeChangeRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -202,20 +211,21 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		return err
 	}
 	tx := &Tx{
-		Batches:        &BatchRepo{q: sqlTx},
-		Resources:      &ResourceRepo{q: sqlTx},
-		Relations:      &RelationRepo{q: sqlTx},
-		SourceRefs:     &SourceRefRepo{q: sqlTx},
-		RowResults:     &RowResultRepo{q: sqlTx},
-		Issues:         &IssueRepo{q: sqlTx},
-		Workspaces:     &WorkspaceRepo{q: sqlTx},
-		Sequences:      &SequenceRepo{q: sqlTx},
-		VirtualDevices: &VirtualDeviceRepo{q: sqlTx},
-		SimInterfaces:  &SimInterfaceRepo{q: sqlTx},
-		SimLinks:       &SimLinkRepo{q: sqlTx},
-		ChangeSets:     &ChangeSetRepo{q: sqlTx},
-		CheckRuns:      &CheckRunRepo{q: sqlTx},
-		Checkpoints:    &CheckpointRepo{q: sqlTx},
+		Batches:          &BatchRepo{q: sqlTx},
+		Resources:        &ResourceRepo{q: sqlTx},
+		Relations:        &RelationRepo{q: sqlTx},
+		SourceRefs:       &SourceRefRepo{q: sqlTx},
+		RowResults:       &RowResultRepo{q: sqlTx},
+		Issues:           &IssueRepo{q: sqlTx},
+		AttributeChanges: &AttributeChangeRepo{q: sqlTx},
+		Workspaces:       &WorkspaceRepo{q: sqlTx},
+		Sequences:        &SequenceRepo{q: sqlTx},
+		VirtualDevices:   &VirtualDeviceRepo{q: sqlTx},
+		SimInterfaces:    &SimInterfaceRepo{q: sqlTx},
+		SimLinks:         &SimLinkRepo{q: sqlTx},
+		ChangeSets:       &ChangeSetRepo{q: sqlTx},
+		CheckRuns:        &CheckRunRepo{q: sqlTx},
+		Checkpoints:      &CheckpointRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
@@ -46,8 +47,8 @@ import (
 const maxUploadBytes = 10 << 20
 
 // Server is the HTTP API server. It owns its service instances (importer,
-// validation engine, query service, report generator), all bound to the
-// shared *repo.DB.
+// validation engine, query service, report generator, attribute change
+// confirmation service), all bound to the shared *repo.DB.
 type Server struct {
 	log        *slog.Logger
 	db         *repo.DB
@@ -58,6 +59,7 @@ type Server struct {
 	report     *report.Generator
 	sim        *sim.Service
 	lab        *report.LabGenerator
+	changes    *changes.Service
 }
 
 // New returns a Server bound to db; uploads are stored under
@@ -79,6 +81,7 @@ func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
 		report:     report.New(db),
 		sim:        simSvc,
 		lab:        report.NewLab(db, simSvc),
+		changes:    changes.New(db),
 	}
 }
 
@@ -108,6 +111,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/validate", s.handleValidate)
 	mux.HandleFunc("GET /api/report", s.handleReport)
 	mux.HandleFunc("GET /api/topology/check", s.handleTopologyCheck)
+
+	// Attribute change confirmation (W4-D, migration v11): the HUMAN
+	// channel of the update-on-diff import mode. The MCP tool surface
+	// stays frozen at the five read-only tools — an AI must never apply
+	// attribute changes (resource-domain writes are HTTP/CLI only).
+	mux.HandleFunc("GET /api/attribute-changes", s.handleAttributeChangesList)
+	mux.HandleFunc("POST /api/attribute-changes/{id}/apply", s.handleAttributeChangeApply)
+	mux.HandleFunc("POST /api/attribute-changes/{id}/dismiss", s.handleAttributeChangeDismiss)
 
 	// Simulation workbench (PROJECT_BRIEF_P2 §7). The sim engine owns ALL
 	// writes to the sim tables; the handlers only decode, call and project.

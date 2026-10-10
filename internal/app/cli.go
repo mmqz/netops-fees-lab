@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
@@ -43,7 +44,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, lab, mcp, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, changes, lab, mcp, testdata")
 		return exitUsage
 	}
 
@@ -61,6 +62,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdReport(args[1:], stdout, stderr)
 	case "query":
 		err = cmdQuery(args[1:], stdout, stderr)
+	case "changes":
+		err = cmdChanges(args[1:], stdout, stderr)
 	case "lab":
 		err = cmdLab(args[1:], stdout, stderr)
 	case "mcp":
@@ -68,7 +71,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, lab, mcp, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, changes, lab, mcp, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -437,7 +440,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) error {
 // The sub-subcommand may appear before or after the query-level flags; only
 // --db is accepted at the query level.
 func cmdQuery(args []string, stdout, stderr io.Writer) error {
-	dbPath, sub, subArgs, err := splitQueryArgs(args)
+	dbPath, sub, subArgs, err := splitSubArgs("query", "resources / stats / relations", args)
 	if err != nil {
 		return err
 	}
@@ -460,9 +463,11 @@ func cmdQuery(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-// splitQueryArgs separates leading query-level flags (--db[=path]) from the
-// sub-subcommand (resources|stats|relations) and its own flags.
-func splitQueryArgs(args []string) (dbPath, sub string, subArgs []string, err error) {
+// splitSubArgs separates the leading command-level flags (--db[=path])
+// from the sub-subcommand and its own flags. cmdName names the parent
+// command for the error messages; subUsage lists the accepted
+// sub-subcommands (e.g. "resources / stats / relations").
+func splitSubArgs(cmdName, subUsage string, args []string) (dbPath, sub string, subArgs []string, err error) {
 	dbPath = "./data/netops.db"
 	i := 0
 	for i < len(args) {
@@ -478,12 +483,116 @@ func splitQueryArgs(args []string) (dbPath, sub string, subArgs []string, err er
 			dbPath = strings.TrimPrefix(arg, "--db=")
 			i++
 		case strings.HasPrefix(arg, "-"):
-			return "", "", nil, &usageError{msg: fmt.Sprintf("query 不支持参数 %q（仅 --db）", arg)}
+			return "", "", nil, &usageError{msg: fmt.Sprintf("%s 不支持参数 %q（仅 --db）", cmdName, arg)}
 		default:
 			return dbPath, arg, args[i+1:], nil
 		}
 	}
-	return "", "", nil, &usageError{msg: "缺少 query 子命令（resources / stats / relations）"}
+	return "", "", nil, &usageError{msg: fmt.Sprintf("缺少 %s 子命令（%s）", cmdName, subUsage)}
+}
+
+// cmdChanges implements `netopslab changes --db <path> list|apply|dismiss …`
+// — the CLI side of the attribute change confirmation flow (W4-D; the
+// query subcommand pattern: leading --db, then the sub-subcommand). All
+// outputs are the single-JSON-object stdout contract: list → {items,total};
+// apply/dismiss → the change object after the transition.
+func cmdChanges(args []string, stdout, stderr io.Writer) error {
+	dbPath, sub, subArgs, err := splitSubArgs("changes", "list / apply / dismiss", args)
+	if err != nil {
+		return err
+	}
+	a, err := openApp(dbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	switch sub {
+	case "list":
+		return cmdChangesList(ctx, a, subArgs, stdout, stderr)
+	case "apply":
+		return cmdChangesApply(ctx, a, subArgs, stdout, stderr)
+	case "dismiss":
+		return cmdChangesDismiss(ctx, a, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("changes 子命令必须是 list、apply 或 dismiss，收到 %q", sub)}
+	}
+}
+
+// cmdChangesList implements `changes list [--status] [--resource-id]
+// [--batch-id] [--limit] [--offset]`.
+func cmdChangesList(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("changes list")
+	status := fs.String("status", "", "状态过滤：pending / applied / dismissed / all（缺省 all）")
+	resourceID := fs.String("resource-id", "", "按资源 id 过滤")
+	batchID := fs.String("batch-id", "", "按导入批次 id 过滤")
+	limit := fs.Int("limit", changes.DefaultPageSize, "每页条数（最大 100）")
+	offset := fs.Int("offset", 0, "偏移量（非负）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "changes list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	filter := changes.Filter{
+		ResourceID: *resourceID,
+		BatchID:    *batchID,
+		Limit:      *limit,
+		Offset:     *offset,
+	}
+	if *status != "" && *status != "all" {
+		st, err := domain.ParseChangeStatus(*status)
+		if err != nil {
+			return &usageError{msg: fmt.Sprintf("--status 必须是 pending/applied/dismissed/all，收到 %q", *status), usage: usage.String()}
+		}
+		filter.Status = st
+	}
+	result, err := a.Changes.List(ctx, filter)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cmdChangesApply implements `changes apply --id <changeId>`.
+func cmdChangesApply(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("changes apply")
+	id := fs.String("id", "", "待确认变更 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "changes apply 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	item, err := a.Changes.Apply(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, item)
+}
+
+// cmdChangesDismiss implements `changes dismiss --id <changeId>`.
+func cmdChangesDismiss(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("changes dismiss")
+	id := fs.String("id", "", "待确认变更 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "changes dismiss 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	item, err := a.Changes.Dismiss(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, item)
 }
 
 // cmdQueryResources implements `query resources --q --type --status --page

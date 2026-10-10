@@ -9,6 +9,8 @@
 
 import type {
   ApplyResult,
+  AttributeChangeItem,
+  AttributeChangeList,
   BatchDetail,
   BatchListItem,
   BatchRow,
@@ -417,6 +419,47 @@ export function checkTopology(
 ): Promise<TopologyCheckResponse> {
   return requestJson<TopologyCheckResponse>(
     `/topology/check${buildQuery({ fromDevice, toDevice, maxHops })}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 属性变更确认（W4-D，migration v11）
+// ---------------------------------------------------------------------------
+
+export interface AttributeChangesQuery {
+  status?: 'pending' | 'applied' | 'dismissed' | 'all';
+  resourceId?: string;
+  batchId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** GET /api/attribute-changes?status=&resource_id=&batch_id=&limit=&offset= */
+export function listAttributeChanges(query: AttributeChangesQuery): Promise<AttributeChangeList> {
+  return requestJson<AttributeChangeList>(
+    `/attribute-changes${buildQuery({
+      status: query.status,
+      resource_id: query.resourceId,
+      batch_id: query.batchId,
+      limit: query.limit,
+      offset: query.offset,
+    })}`,
+  );
+}
+
+/** POST /api/attribute-changes/{id}/apply（非 pending 409；旧值漂移 409 attribute_conflict） */
+export function applyAttributeChange(id: string): Promise<AttributeChangeItem> {
+  return requestJson<AttributeChangeItem>(
+    `/attribute-changes/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  );
+}
+
+/** POST /api/attribute-changes/{id}/dismiss（非 pending 409） */
+export function dismissAttributeChange(id: string): Promise<AttributeChangeItem> {
+  return requestJson<AttributeChangeItem>(
+    `/attribute-changes/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
   );
 }
 

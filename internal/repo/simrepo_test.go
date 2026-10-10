@@ -216,8 +216,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 10 {
-		t.Errorf("max schema version after upgrade = %d, want 10", maxV)
+	if maxV != 11 {
+		t.Errorf("max schema version after upgrade = %d, want 11", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -272,8 +272,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 10 {
-		t.Errorf("max schema version after reopen = %d, want 10", maxV)
+	if maxV != 11 {
+		t.Errorf("max schema version after reopen = %d, want 11", maxV)
 	}
 }
 

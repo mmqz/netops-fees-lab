@@ -1,6 +1,6 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **10**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型与 v10 site/machine_room 类型 + belongs_to 关系为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **11**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系与 v11 属性变更历史表 `resource_attribute_changes` 为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
@@ -506,3 +506,44 @@ ALTER TABLE relations_new RENAME TO relations;
 ```
 
 与 v7/v9 完全同构的 `ForeignKeysOff` 重建（专用连接事务外 `PRAGMA foreign_keys=OFF` → 事务内重建 → `PRAGMA foreign_key_check` 门禁 → 恢复 FK ON），但**同一迁移内串行两次重建**。**重建顺序 = 先 resources 后 relations**：relations 以**表名**引用 resources(id)，v9 已验证的 drop+rename 循环使名字 "resources" 始终指向重建后的表（id/行/约束逐字节保留），relations 重建因此对着一个按名一致的父表进行；FK 关闭时两种顺序都能通过 foreign_key_check 门禁，但 resources-first 保证即使迁移在两次重建之间中断，每个中间态的按名引用都是自洽的。v10 之前 site/machine_room INSERT 与 belongs_to 关系 INSERT 均被 CHECK 拒绝（`TestMigrationV10AddsSiteMachineRoom` 钉死两处回归）；迁移后既有行（device/circuit/a_end 等两表数据）逐字节保留、`first_batch_id` 与 relations→resources 两向 FK 仍强制、`UNIQUE (from, to, relation_type)` 防重、`Open` 幂等。site/machine_room 无工作台侧实体（物化仅消费 device，同 port/base_station）。
+
+# DDL v11 — 资源属性变更历史表 resource_attribute_changes
+
+> Migration `11` name `resource_attribute_changes`（`internal/repo/migrations_v11.go`，经 `init()` 自注册追加 + 按版本排序，机制同 v4–v10；migrations.go 字面量列表不动）。**当前 schema version = 11**。纯 `CREATE TABLE` + 三个索引，**无表重建**、无数据搬迁，FK 始终强制（非 ForeignKeysOff 形）。
+
+## 14. 属性变更历史与人工确认生命周期（W4-D）
+
+闭环 R4 裁决的「IP 变 = 属性变更事件」（[natural-keys.md](natural-keys.md) §2/§6 差距 #1/#2）：同键再导入命中库内资源且属性字段值不同时，importer（skip 分支）逐字段记录一条 **pending** 提案 + 一条 W005 warning issue，行仍 skip 不改库；人工经 HTTP API / CLI（`changes` 子命令）apply 后属性才真正生效（同一事务内：新值写入 `resources.attributes` + `updated_at` 刷新 + 提案置 `applied` + `applied_at` 打点），dismiss 可忽略。同值再导仍纯 skip（零记录零 issue，幂等不变）。
+
+### 14.1 DDL v11 全文
+
+```sql
+CREATE TABLE resource_attribute_changes (
+  id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+  batch_id TEXT NOT NULL REFERENCES import_batches(id),
+  field TEXT NOT NULL,
+  old_value TEXT NOT NULL DEFAULT '',     -- 记录时的库内值（'' = 资源原本无该属性）
+  new_value TEXT NOT NULL,                -- 恒非空（空新值不记录，空值不写属性语义）
+  status TEXT NOT NULL CHECK (status IN ('pending','applied','dismissed')),
+  sheet TEXT NOT NULL,
+  row_number INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  applied_at TEXT
+);
+CREATE INDEX idx_attr_changes_resource ON resource_attribute_changes(resource_id);
+CREATE INDEX idx_attr_changes_batch ON resource_attribute_changes(batch_id);
+CREATE INDEX idx_attr_changes_status ON resource_attribute_changes(status);
+```
+
+### 14.2 设计决策与不变式
+
+- **生命周期**：`pending`（导入记录，唯一可操作态）→ `applied`（人工确认，属性已生效，`applied_at` 打点）或 `dismissed`（人工拒绝，资源永不触碰）；后两者为终态，重复 apply/dismiss 均拒绝。
+- **id 前缀**：`chg_`（`domain.NewID`，UUID）。
+- **幂等去重**：同一资源同一字段已有 pending 且 new 值相同 → 不重复记录（也不重记 W005）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409 `attribute_conflict`（变更服务校验资源当前值 == `old_value`，不等即拒绝——防丢失中间变更）。
+- **apply 的 updated_at 语义**：`resources.updated_at` 仅在两处刷新——导入首次插入与属性变更 apply（`ResourceRepo.UpdateAttributes`）；skip 路径永不触碰。
+- **回滚不对称（声明性语义）**：批次回滚删除链含「删本批 pending 提案」（`DeletePendingByBatch`）；**applied/dismissed 保留**——人工决策是与导入批次生命周期解耦的审计线。不对称例外：若提案的资源本身被该批回滚删除，`resource_id ON DELETE CASCADE` 会连带删除其全部变更记录（含终态）——被审计的资源已不存在，记录随之消失是正确行为。`batch_id` 刻意**不**设 CASCADE：回滚只删 pending（显式），终态不随批次死。
+- **old_value 可为空串**：资源原本无该属性（attributes 只存非空值）而新导入带来值时，old_value = ''（约束 `NOT NULL DEFAULT ''`，空串非 NULL）；apply 校验同口径（当前值缺失 == ""）。
+- **diff 归集口径**：参与比较的字段 = 导入行映射后的**非键、非枚举、非空**属性值（与首次导入的 attributes 归集完全一致；ref 字段（如机房的 site_id 属性快照）也在其中——apply 只改属性快照，**不重建派生关系**，ref 变更的正确路径是回滚批次重导，E003 顺序约束重新生效）。
+- **与撤销红线的零交集**：本表属于**资源域**；lab 三层撤销/检查点属于**仿真域**（仅操作 `virtual_devices`/`sim_links`/变更集等 P2 表），两域无共享表、无代码路径交叉（`internal/sim` 零引用 `resource_attribute_changes`/`resources.attributes`）。
+- **API/CLI 面**：`GET /api/attribute-changes`（status/resource_id/batch_id/limit/offset 过滤）与 `POST …/{id}/apply`、`POST …/{id}/dismiss`（契约见 [api.md](api.md)）；CLI `netopslab changes --db … list|apply|dismiss`。**MCP 工具面 5 个冻结不变**——AI 不得经 MCP 改资源属性（引擎仅仿真态操作）。

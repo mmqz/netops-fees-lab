@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
+  AttributeChangeItem,
   GraphEdge,
   GraphNode,
   Paged,
@@ -17,7 +18,17 @@ import type {
   ResourceItem,
   ResourceType,
 } from '../api/types';
-import { debounce, formatApiError, getResource, getResourceRelations, listResources } from '../api/client';
+import {
+  applyAttributeChange,
+  debounce,
+  dismissAttributeChange,
+  formatApiError,
+  formatApiErrorText,
+  getResource,
+  getResourceRelations,
+  listAttributeChanges,
+  listResources,
+} from '../api/client';
 import {
   BTN_EXPAND_2HOP,
   BTN_COLLAPSE_2HOP,
@@ -29,6 +40,15 @@ import {
   RELATION_LABELS,
   RES_ATTR_FIRST_BATCH,
   RES_ATTR_UPDATED_AT,
+  RES_CHANGE_APPLY,
+  RES_CHANGE_APPLYING,
+  RES_CHANGE_DISMISS,
+  RES_CHANGES_ACTION_FAILED,
+  RES_CHANGES_APPLIED_TOAST,
+  RES_CHANGES_BATCH_ROW,
+  RES_CHANGES_DISMISSED_TOAST,
+  RES_CHANGES_HINT,
+  RES_CHANGES_TITLE,
   RES_COL_KEY,
   RES_COL_NAME,
   RES_COL_STATUS,
@@ -171,15 +191,28 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   /** 二跳展开失败的内联错误（AUD2-13：不再静默吞掉）。 */
   const [depth2Error, setDepth2Error] = useState<string | null>(null);
   const [depth2ErrorDetail, setDepth2ErrorDetail] = useState<string | null>(null);
+  /** 待确认属性变更（W4-D）：抽屉加载时并行拉取，无 pending 时面板不渲染。 */
+  const [pendingChanges, setPendingChanges] = useState<AttributeChangeItem[]>([]);
+  /** 行内操作错误（应用/忽略失败时按 change id 定位）。 */
+  const [changeErrors, setChangeErrors] = useState<Record<string, string>>({});
+  /** 正在处理中的 change id（按钮禁用）。 */
+  const [changeBusy, setChangeBusy] = useState<string | null>(null);
+  const toast = useToast();
 
   const load = useCallback((): void => {
     setLoading(true);
     setError(null);
     setErrorDetail(null);
-    Promise.all([getResource(resourceId), getResourceRelations(resourceId, 1)])
+    Promise.all([
+      getResource(resourceId),
+      getResourceRelations(resourceId, 1),
+      listAttributeChanges({ resourceId, status: 'pending', limit: 100 }),
+    ])
       .then((results) => {
         setDetail(results[0]);
         setGraph(results[1]);
+        setPendingChanges(results[2].items);
+        setChangeErrors({});
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -189,6 +222,39 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         setLoading(false);
       });
   }, [resourceId]);
+
+  /** 应用一条待确认变更：成功后行内刷新（重拉详情/关联/剩余 pending）。 */
+  function applyChange(change: AttributeChangeItem): void {
+    setChangeBusy(change.id);
+    setChangeErrors((prev) => ({ ...prev, [change.id]: '' }));
+    applyAttributeChange(change.id)
+      .then(() => {
+        toast.show(format(RES_CHANGES_APPLIED_TOAST, { field: fieldLabel(change.field) }), 'success');
+        load();
+      })
+      .catch((err: unknown) => {
+        // 409 冲突（字段已被其它变更修改/非 pending）等 → 行内错误展示
+        const display = formatApiErrorText(err);
+        setChangeErrors((prev) => ({ ...prev, [change.id]: display }));
+      })
+      .finally(() => setChangeBusy(null));
+  }
+
+  /** 忽略一条待确认变更：成功后行内刷新。 */
+  function dismissChange(change: AttributeChangeItem): void {
+    setChangeBusy(change.id);
+    setChangeErrors((prev) => ({ ...prev, [change.id]: '' }));
+    dismissAttributeChange(change.id)
+      .then(() => {
+        toast.show(format(RES_CHANGES_DISMISSED_TOAST, { field: fieldLabel(change.field) }), 'info');
+        load();
+      })
+      .catch((err: unknown) => {
+        const display = formatApiErrorText(err);
+        setChangeErrors((prev) => ({ ...prev, [change.id]: display }));
+      })
+      .finally(() => setChangeBusy(null));
+  }
 
   useEffect(() => {
     load();
@@ -264,6 +330,57 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
             <StatusChip status={detail.status} />
             <span className="cell-strong">{detail.naturalKey}</span>
           </div>
+          {pendingChanges.length > 0 && (
+            <div className="change-panel" data-testid="pending-changes">
+              <div className="change-panel-title">{RES_CHANGES_TITLE}</div>
+              <div className="muted-note">{RES_CHANGES_HINT}</div>
+              {pendingChanges.map((change) => {
+                const busy = changeBusy === change.id;
+                const changeError = changeErrors[change.id] ?? '';
+                return (
+                  <div className="change-row" key={change.id}>
+                    <div className="change-main">
+                      <span className="cell-strong">{fieldLabel(change.field)}</span>
+                      <span className="change-values" title={`${change.oldValue} → ${change.newValue}`}>
+                        <span className="change-old">{change.oldValue === '' ? NO_VALUE : change.oldValue}</span>
+                        <span className="change-arrow" aria-hidden="true">→</span>
+                        <span className="change-new">{change.newValue}</span>
+                      </span>
+                      <span className="muted-note">
+                        {format(RES_CHANGES_BATCH_ROW, {
+                          batch: change.batchId.length > 12 ? `${change.batchId.slice(0, 12)}…` : change.batchId,
+                          row: change.rowNumber,
+                        })}
+                      </span>
+                    </div>
+                    <div className="change-actions">
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        disabled={busy}
+                        onClick={() => applyChange(change)}
+                      >
+                        {busy ? RES_CHANGE_APPLYING : RES_CHANGE_APPLY}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        disabled={busy}
+                        onClick={() => dismissChange(change)}
+                      >
+                        {RES_CHANGE_DISMISS}
+                      </button>
+                    </div>
+                    {changeError !== '' && (
+                      <div className="form-error change-error" role="alert">
+                        {format(RES_CHANGES_ACTION_FAILED, { message: changeError })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="tabs">
             <button
               type="button"

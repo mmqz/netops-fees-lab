@@ -44,6 +44,7 @@ const (
 	RuleUnknownStatusValue   = "W002" // status not in the known enum (row)
 	RuleCircuitSelfLoop      = "W003" // circuit a_end == z_end (row)
 	RuleKeyFallback          = "W004" // natural key degraded to fallback fields (row)
+	RuleAttributeChange      = "W005" // attribute diff on a duplicate-key row awaits confirmation (row)
 	RuleUnlinkedDevice       = "I001" // device with zero relations (set)
 )
 

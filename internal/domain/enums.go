@@ -217,3 +217,43 @@ func ParseEntityKind(s string) (EntityKind, error) {
 	}
 	return v, nil
 }
+
+// ChangeStatus enumerates the lifecycle states of a resource attribute
+// change proposal (resource_attribute_changes.status, migration v11).
+// pending is the only operable state (apply/dismiss both refuse anything
+// else); applied and dismissed are terminal — an applied change has written
+// its new value into the resource attributes, a dismissed one was
+// deliberately ignored. Both survive a batch rollback as the human-decision
+// audit trail (pending proposals of the rolled-back batch are deleted).
+type ChangeStatus string
+
+// Change statuses.
+const (
+	ChangeStatusPending   ChangeStatus = "pending"
+	ChangeStatusApplied   ChangeStatus = "applied"
+	ChangeStatusDismissed ChangeStatus = "dismissed"
+)
+
+// String implements fmt.Stringer.
+func (c ChangeStatus) String() string { return string(c) }
+
+// IsValid reports whether c is a known change status. The values must stay
+// in sync with the resource_attribute_changes CHECK constraint
+// (migrations v11).
+func (c ChangeStatus) IsValid() bool {
+	switch c {
+	case ChangeStatusPending, ChangeStatusApplied, ChangeStatusDismissed:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseChangeStatus converts s into a ChangeStatus.
+func ParseChangeStatus(s string) (ChangeStatus, error) {
+	v := ChangeStatus(s)
+	if !v.IsValid() {
+		return "", fmt.Errorf("domain: invalid change status %q", s)
+	}
+	return v, nil
+}

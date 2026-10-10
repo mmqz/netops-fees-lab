@@ -305,6 +305,37 @@ export interface IssueItem {
 }
 
 // ---------------------------------------------------------------------------
+// 12b. 属性变更确认（W4-D，migration v11）
+// ---------------------------------------------------------------------------
+
+/** 属性变更提案状态（与 resource_attribute_changes CHECK 一致）。 */
+export type AttributeChangeStatus = 'pending' | 'applied' | 'dismissed';
+
+/** GET /api/attribute-changes 的单个变更提案（含资源侧 join 字段）。 */
+export interface AttributeChangeItem {
+  id: string;
+  resourceId: string;
+  /** 资源被回滚级联删除后为空串（join 不到资源）。 */
+  resourceType: string;
+  naturalKey: string;
+  batchId: string;
+  field: string;
+  oldValue: string;
+  newValue: string;
+  status: AttributeChangeStatus;
+  sheet: string;
+  rowNumber: number;
+  createdAt: string;
+  appliedAt?: string | null;
+}
+
+/** 列表信封：{items, total}（limit/offset 分页）。 */
+export interface AttributeChangeList {
+  items: AttributeChangeItem[];
+  total: number;
+}
+
+// ---------------------------------------------------------------------------
 // 13. POST /api/validate
 // ---------------------------------------------------------------------------
 

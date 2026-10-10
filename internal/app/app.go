@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/api"
+	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/repo"
@@ -66,6 +67,8 @@ type App struct {
 	Validation *validation.Engine
 	// Query is the read-side query service.
 	Query *query.Service
+	// Changes is the attribute change confirmation service (W4-D).
+	Changes *changes.Service
 	// Lab is the simulation workbench engine (Phase 2: materialize, ops,
 	// checks, undo, checkpoints).
 	Lab *sim.Service
@@ -107,6 +110,7 @@ func New(cfg Config) (*App, error) {
 		Importer:   importer.New(db),
 		Validation: validation.New(db),
 		Query:      query.New(db),
+		Changes:    changes.New(db),
 		Lab:        sim.New(db),
 		Report:     report.New(db),
 	}

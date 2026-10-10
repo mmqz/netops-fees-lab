@@ -97,3 +97,30 @@ type Issue struct {
 	Evidence    map[string]string
 	CreatedAt   time.Time
 }
+
+// AttributeChange is one pending attribute change proposal recorded by the
+// importer when a row whose natural key matches an existing resource carries
+// attribute values that differ from the stored ones (W005, v0.4 W4-D). The
+// row itself is still skipped — the change only takes effect when a human
+// applies it via the HTTP API / CLI (never via MCP); dismissed proposals are
+// kept as an audit trail. OldValue is the stored attribute value at record
+// time (empty when the resource had no value for Field — attributes only
+// store non-empty values); NewValue is always non-empty (empty new values
+// record nothing, the existing "empty never overwrites" import semantics).
+// Pending proposals of a batch are deleted by that batch's rollback;
+// applied/dismissed ones survive it (the human decision is decoupled from
+// the import-batch lifecycle) — unless their resource itself is deleted by
+// the rollback, in which case the ON DELETE CASCADE removes them with it.
+type AttributeChange struct {
+	ID         string
+	ResourceID string
+	BatchID    string
+	Field      string
+	OldValue   string
+	NewValue   string
+	Status     ChangeStatus
+	Sheet      string
+	RowNumber  int // 1-based Excel row; row 1 is the header row
+	CreatedAt  time.Time
+	AppliedAt  *time.Time // set when Status == ChangeStatusApplied
+}

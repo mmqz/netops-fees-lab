@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 )
@@ -240,6 +241,29 @@ func (r *ResourceRepo) CountByBatch(ctx context.Context, batchID string) (int, e
 		return 0, fmt.Errorf("repo: count resources of batch %s: %w", batchID, err)
 	}
 	return n, nil
+}
+
+// UpdateAttributes overwrites the attributes JSON of the resource with the
+// given id and refreshes updated_at. It is the write side of the attribute
+// change apply flow (changes service): the caller has verified the
+// current-value precondition inside the SAME DB.Do transaction, so the
+// read-modify-write cannot race. An unknown id answers domain.ErrNotFound.
+func (r *ResourceRepo) UpdateAttributes(ctx context.Context, id string, attrs map[string]string, updatedAt time.Time) error {
+	attrsJSON, err := mapJSON(attrs)
+	if err != nil {
+		return err
+	}
+	res, err := r.q.ExecContext(ctx, `UPDATE resources SET attributes = ?, updated_at = ? WHERE id = ?`,
+		attrsJSON, formatTime(updatedAt), id)
+	if err != nil {
+		return fmt.Errorf("repo: update attributes of resource %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("repo: update attributes of resource %s: rows affected: %w", id, err)
+	} else if n == 0 {
+		return fmt.Errorf("repo: update attributes of resource %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
 }
 
 // DeleteByBatch deletes all resources created by batchID and returns the

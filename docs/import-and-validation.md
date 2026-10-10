@@ -60,6 +60,7 @@
 | W002 | 状态值未知 | 警告 | status 非空不在枚举内（行导入，状态丢弃） | type, field, raw_value, allowed |
 | W003 | 电路自环 | 警告 | a_end == z_end（两端都解析成功） | circuit_code, device |
 | W004 | 身份键退化 | 警告 | 条件自然键类型的主键字段值任一为空，键退化为兜底字段拼接（行照常导入；base_station：基站编码缺失 → 地市\|无线基站名称 兜底，缺地市列则为纯名称） | type, natural_key, missing_fields, fallback_fields |
+| W005 | 属性变更待确认 | 警告 | 同键再导命中库内资源且属性值不同（行=skipped 不改库；diff 逐字段记 pending 提案，人工 apply 后生效，v0.4 W4-D） | type, natural_key, resource_id, fields, change_count, sheet, row_number |
 
 **集合级（全局）**（对全库状态计算，可重算，`batch_id IS NULL`，报告中 `applicationGenerated: true`）：
 
@@ -88,13 +89,14 @@ completeness = round(100 × imported / rows_total)   （rows_total = 0 时记 10
 
 - 重导同一工作簿（同映射）→ 0 新资源、全部数据行 `skipped`（消息"重复导入：资源已存在于批次 \<id\>"）、集合级问题经重算后不变；
 - 集合级校验本身幂等：Run = 单事务"删全部集合级问题 → 重算 → 按序插入"，重复运行结果集相同（`TestSetLevelRecomputeIdempotent`）；
-- `netopslab testdata` 与 `cmd/testdatagen` 输出字节级确定（重生成 sha256 一致）。
+- `netopslab testdata` 与 `cmd/testdatagen` 输出字节级确定（重生成 sha256 一致）；
+- **同值再导零记录零 issue（W4-D diff-skip 语义）**：同键行属性与库内一致 → 纯 skip，不产生变更提案也不记 W005；**重复的 pending diff 去重**：同资源同字段已有 pending 提案且 new 值相同 → 不重复记录（也不重记 W005）；new 值又变 → 新提案（多 pending 并存，按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段旧值不匹配 → 409 `attribute_conflict`，详见 §14）。
 
 **回滚（S0-6 / DELETE /api/batches/{id}）**：
 
 - 前置：批次必须 `completed`，否则 409 `conflict`；
 - 引用保护：若本批次创建的资源被**其他批次**的关系引用 → 409 `batch_in_use`（如 devices 批次的设备被地址池 assigned_to / 电路 a_end 引用）；
-- 执行：单事务删除 关系 → 资源（FK 级联）→ source_refs → row_results → 批次 issues → 状态置 `rolled_back`；响应携带各类删除计数；
+- 执行：单事务删除 关系 → **本批 pending 属性变更提案（W4-D，不对称：applied/dismissed 保留为人工决策审计线；若提案的资源被本批删除则 FK 级联连带删除全部记录——被审计资源已不存在是正确行为）** → 资源（FK 级联）→ source_refs → row_results → 批次 issues → 状态置 `rolled_back`；响应携带各类删除计数（`deleted.attributeChanges` = 本批 pending 数）；
 - 回滚后重导同工作簿 = 干净重放（幂等语义同样适用）。
 
 ## 6. 确定性保证（ACC-4）
@@ -178,3 +180,13 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **名称与 IP 的处置**：机房名称/局站名称为展示名（machine_room 用 NameFieldOverride 钉定，site 走 first *_name 启发式）；设备名称为机房/局站内设备昵称——普通属性，**非 device ref**（设备键是 device_code，本表自由文本无法解析，同 port 的 device_ip 决策）；IP地址为 KindIPv4 可变属性（坏值 → E004）。
 - 样例实测（CLI，6 行双读法）：局站读法 2 imported / 4 failed（2×E001 局站ID 批内重复 + E004 + E002）；机房读法 4 imported / 2 failed + 1×W001；**3×belongs_to**；前导零键 `000123`、`00045600000000013/14` 逐字节保留；重导幂等（0 新增、关系不重复）。
 - 键策略裁决见 [natural-keys.md](natural-keys.md) §4；schema v10（resources + relations 双表重建）见 [data-model.md](data-model.md) §13；API 形态见 [api.md](api.md) 的 site / machine_room 段落。
+
+## 14. 属性变更历史与人工确认（v0.4，W4-D）
+
+**update-on-diff 导入模式**（闭环 R4 裁决「IP 变 = 属性变更事件」，natural-keys.md §2/§6 差距 #1/#2；表结构 `resource_attribute_changes` 见 [data-model.md](data-model.md) §14）：
+
+- **diff-skip 语义**：同键再导入命中库内资源时，取该行映射后的属性字段值（**非键、非枚举、非空**——与首次导入的 attributes 归集同口径），与库内资源逐字段比较。**仅 new 值非空且 ≠ old 的字段**产生一条 pending 变更提案（field/old_value/new_value + sheet/row_number）；行本身**仍走 skip**（row_result 语义不变、rule_code 保持 E001），发一条 **W005** warning issue（evidence：type/natural_key/resource_id/fields/change_count/sheet/row_number），diff 非空才记。diff 为空 → 纯 skip，零记录零 issue（TestReimportIdempotent 语义不破坏）。**空新值永不记录**（空值不写属性的既有语义：首轮导入该列为空的字段，再导也带不来空值覆盖）；枚举（status）字段不参与（attrs 本就不含）。
+- **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染）。**MCP 工具面 5 个冻结**——AI 不得经 MCP 改资源属性。
+- **幂等去重口径**：同一资源同一字段已有 **pending** 且 new 值相同 → 再导不重复记录（也不重记 W005，零痕迹）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409。
+- **回滚不对称**：批次回滚删除链删**本批 pending 提案**；applied/dismissed 保留（人工决策与导入批次生命周期解耦的审计线）；提案的资源被本批删除时 FK 级联连带删除其全部记录（含终态）——被审计资源已不存在，正确行为。见 §5 回滚节。
+- **边界声明**：apply 只写 attributes 快照，**不重建派生关系**——ref 类字段（如 machine_room.site_id 属性快照）的变更走属性通道时，belongs_to 关系不随之变化；ref 变更的正确路径是回滚批次后重新导入（E003 顺序约束重新生效）。

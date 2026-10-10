@@ -42,6 +42,14 @@ func TestRuleCodes(t *testing.T) {
 	if sev, ok := SeverityForCode(RuleKeyFallback); !ok || sev != SeverityWarning {
 		t.Errorf("SeverityForCode(W004) = (%v, %v), want (warning, true)", sev, ok)
 	}
+	// W005 (attribute diff on a duplicate-key row) is a row-phase WARNING:
+	// the row is skipped, the diff awaits human confirmation.
+	if sev, ok := SeverityForCode(RuleAttributeChange); !ok || sev != SeverityWarning {
+		t.Errorf("SeverityForCode(W005) = (%v, %v), want (warning, true)", sev, ok)
+	}
+	if RuleAttributeChange != "W005" {
+		t.Errorf("RuleAttributeChange = %q, want W005", RuleAttributeChange)
+	}
 }
 
 func TestNewID(t *testing.T) {

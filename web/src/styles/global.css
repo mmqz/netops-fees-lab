@@ -1017,6 +1017,74 @@ a.btn:hover {
   margin-bottom: 12px;
 }
 
+/* 待确认属性变更面板（W4-D）：资源抽屉顶部，无 pending 时组件不渲染 */
+.change-panel {
+  border: 1px solid #c77d0a33;
+  border-radius: var(--radius);
+  background: #fdf6ec;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.change-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a5a06; /* 深于 #c77d0a，浅底上 ≥ 4.5:1 */
+}
+
+.change-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.change-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.change-values {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.change-old {
+  color: var(--muted);
+  text-decoration: line-through;
+  word-break: break-all;
+}
+
+.change-arrow {
+  color: var(--muted);
+}
+
+.change-new {
+  color: #1f6f43; /* 深于 success #1f9d55，白底上 ≥ 4.5:1 */
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.change-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.change-error {
+  margin: 0;
+}
+
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);

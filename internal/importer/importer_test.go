@@ -97,6 +97,7 @@ var rowPhaseCodes = []string{
 	domain.RuleInvalidReference, domain.RuleInvalidFormat,
 	domain.RuleOrphanRecord, domain.RuleUnknownStatusValue,
 	domain.RuleCircuitSelfLoop, domain.RuleKeyFallback,
+	domain.RuleAttributeChange,
 }
 
 // batchIssues lists all issues attributed to a batch.
