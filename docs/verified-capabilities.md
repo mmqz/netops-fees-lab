@@ -88,9 +88,11 @@
 | 冒烟与演示脚本（全部复跑） | w6/w7/w8/w12/w13/w14 六冒烟全 SMOKE-OK（发布二进制驱动）；demo.sh 64 资源/57 关系/E13/W3/I1/评分 32；demo-lab.sh 九步全过，物化/撤销/恢复哈希 aea27501fa59… 与历史基线一致 | 均为本轮 make build 产物 |
 | MCP 真进程 stdio | 握手 serverInfo netops-lab/**v0.6.0**；tools/list 恰 5（resource_search + 4 lab 工具）；tools/call resource_search DEV-001 → total 1 + source{devices.xlsx/设备清单/row 2}；未知工具 → JSON-RPC -32602 | MCP 工具面冻结红线未破（v0.4.0 起恒 5） |
 
-### ⏳ CI 运行态（推送后补记）
+### ⚠️ CI 运行态（已补记——三绿两受阻，账号 Actions 分钟配额耗尽）
 
-- 本轮发布提交（release/tag v0.6.0）与四轮里程碑提交（14bf12e / d34a68b / 6fa5de9 / 967b5d4）的 GitHub Actions 运行态**待推送后补记**（v0.4.0/v0.5.0 先例：发布轮不预填 CI 结果，推送后按既有格式补 run 号）。历史基线：v0.5.0 release 0e0ebe8 → run 38126225593 全绿；v0.4.0 release d71874d → run 38072980042 全绿。
+- **W11-W13 三提交 CI 全绿**：14bf12e → run **38151970576** ✅（go+web 双 job）；d34a68b → run **38154941722** ✅；6fa5de9 → run **38158064643** ✅——与 v0.5.0 同一工作流同一 runner 镜像，证明管线本身健康。
+- **W14/W15 两提交的 run 在 runner 启动层即失败**：967b5d4 → run 38160958085、9b989ee（release/tag v0.6.0）→ run 38163481738——两 job 均 **0 steps、无日志（BlobNotFound）**、4-5 秒内 conclusion=failure，rerun（attempt 2）同样失败。**非代码原因**：账号为 free 计划（私有仓库 2,000 分钟/月），账号级 Actions 用量 10 月已达 **5,876 分钟**（`/users/mmqz/settings/billing/usage` 实查），配额耗尽后私有仓库工作流无法启动 runner——GitHub 状态页 Actions 服务 operational、工作流文件与绿提交逐字节无差异、本地六门禁全绿（每轮 worklog）共同佐证。
+- **恢复路径**：配额重置或升级计划后对两 run 重跑（`actions/runs/{id}/rerun`）即可；W11-W13 同管线全绿 + 本地全门禁绿是代码侧的先行证据。历史基线：v0.5.0 release 0e0ebe8 → run 38126225593 全绿；v0.4.0 release d71874d → run 38072980042 全绿。
 
 ## ⚠️ 未验证（v0.6.0 诚实声明，沿 v0.5.0 清单）
 
