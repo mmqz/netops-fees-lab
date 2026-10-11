@@ -2,6 +2,39 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.5.0] — 2026-10-11
+
+**身份治理闭环与来源谱系版**（四轮迭代：W6-W8 三轮功能开发 + W9 重构收敛轮 + W10 发布轮收口；需求驱动为 R0-W5 发布时留下的下轮候选清单：名称改名的人工身份变更流、SourceRef 版本化、PTP 配置脚本导入通道、D2/D3 组合根收敛与四个语义尾巴）。核心：身份确认流补上最后一块拼图（改名合并人工流），来源证据从「首源」进化为「全史版本」，真实材料从三类工作簿扩展到第四类（配置脚本），服务装配收敛到唯一组合根。
+
+### 新增 — 疑似改名检测与身份合并人工流（W6-D，migration v12，W006）
+- 名称类键类型（ip_pool / base_station / port）的新键导入行，在「旧键已从源消失」且属性全等时**照常按新资源导入**并发 **W006** + pending 改名提案（`rename_proposals` 表，纯 CREATE TABLE）。检测五条件保守判定（类型开启 RenameDetection / 旧键消失 / 属性全等 / 新旧行双射 / 匹配集非空洞），**绝不自动合并**。
+- **人工确认通道**（资源域写仅限人类）：HTTP `GET /api/renames` + `POST …/{id}/apply|reject` 与 CLI `netopslab renames list|apply|reject`。apply 单事务合并身份——关系改挂旧资源、**键分量属性同步**（新侧空值保留库内值）、删除新资源、旧资源换自然键；代理键 `res_x` 与 SourceRef 不动（审计痕迹保留）；apply 时新资源已消失 → 409 `target_missing`（驳回建议文案）。reject 零改动。回滚不对称：删本批 pending、留终态审计线。
+- 增量导入（部分快照）会误报假提案——保守方向，人工 reject 即可，四处文档诚实声明。
+- 端到端：基站改名副本 1/1/2 + W006 → 提案 pending（matchedFields 11 字段）→ apply（旧 res id 保留持新键、终态 2 资源）→ 再导 0/2/2 零 warning（键分量同步后无假 W005，幂等闭环）→ 重复 apply 409 conflict。
+
+### 新增 — 来源引用版本化（W7-D，零迁移）
+- **skip 即谱系版本**：同键再导入（纯 skip 与 W005 diff-skip）对每批每实体追加一条 `source_refs`（行语义/计数/issues 零变化；E001 批内重复不追加）——`UNIQUE(entity,entity_id,batch_id)` 每批一行的 v1 既有约束即版本化，**零迁移**（无 v13 涉入，source_refs DDL 逐字节未动）。
+- 读侧版本序：`ListByEntity` 改 `ORDER BY rowid,row_number`（rowid 单调分配=时间版本序，删除不重编号、新版本恒殿后）；资源详情 `sourceRefs[]` 展示全史（创建批次在前，`raw` 记录该批工作簿原话）；回滚随批消失（`batch_id ON DELETE CASCADE`，DELETE 批次响应的 `deleted.sourceRefs` 诚实计数）；MCP `resource_search` 仍匹配首源（创建批次引用）。
+- 三轮导入 → `sourceRefs=3` 版本序（创建 / diff-skip / 纯 skip 各留 raw）；回滚后版本行随批消失、幸存序稳定。
+
+### 新增 — PTP 配置脚本导入通道（W8-D，migration v13，ptp_port 第 8 类资源）
+- 第 4 类真实电信材料：中兴 VRP 风格 PTP 配置脚本（`.txt`/`.cfg`）经确定性解析器（`internal/ptpconfig`：节上下文栈、行号错误、`IsScriptText` 嗅探）产出「PTP配置」虚拟 sheet，**完整复用既有 analyze → 映射确认 → 导入执行管线**（全规则 / 幂等 / 回滚 / 来源版本化 / 改名检测天然适用，无旁路）；解析失败 422 `script_parse_error` 带行号，非 PTP 文本 422 `unsupported_script`（xlsx 永远走 excelize）。
+- 新资源类型 `ptp_port`（复合自然键 `设备型号|接口名称`，23 字段，RenameDetection=true 与 W6 协同）；migration v13：resources CHECK 八类型重建（v9 ForeignKeysOff 模板复刻，存量行逐字节保持、relations 零触碰）。**模型级模板身份**诚实声明（脚本只携带型号不携带设备实例身份 → 无 ref 无关系）。
+- 样例 `samples/ptp-config-script.txt`（真实材料逐字节提取，无凭据）；端到端 4/0/0 零 issue、再导 0/4/0 纯 skip、改名协同 apply 键迁移。
+
+### 重构 — 组合根收敛与读路径（W9-D，零行为变化）
+- 新包 `internal/services` 成为服务装配唯一事实源：`Services{db, Importer, Validation, Query, Changes, Renames, Lab, Report, LabReport}` + `New(db, opts…Option)`（`WithClock` 统一注入确认服务时钟）；app / HTTP API / MCP 三消费方共享同一实例（指针级测试 `TestAppSharesOneServiceComposition` 钉死 7 组恒等 + API/MCP 贯穿）——「App 死装配 + MCP 自建引擎」两处 R1-P2 病灶消除。
+- MCP `resource_search` 收敛 `query.Service.SearchResourcesWithSource` + repo `ListByEntityIDs` 单查批量化：**N+1（1+N 查）→ 恒 2 查**（与 N 无关），repo 层 query-count 回归卫兵防倒退；MCP 契约（5 工具 / 输出形状 / 校验文案）零漂移，工具描述补 PTP端口（W8 漏的触点）；batches/issues 读路径裁量留原地（薄 handler 已锚定组合根库）。
+- 四个语义尾巴收口：`intMax` 投影进 GET /api/schema（vlan 1..4094）；HTTP 409 `target_missing` 直删新资源补测（W6-Q P3-5 盲区闭）；apply 后展示名随键迁移（renames + changes 双修，键类名称字段经 `newRes.Name` 回落——W8-Q P3-5 闭）；`sheetHint` 断言钉真实值 PTP（同步修正 W8 文档漂移）。
+
+### 发布轮（W10-D）
+- 版本四处事实源统一 **v0.5.0**（`domain.AppVersion` + CHANGELOG 头 + api.md 契约基线 + web i18n；`TestAppVersionP2` 断言随发布适配并在注释声明）；CHANGELOG 0.5.0 段、docs/verified-capabilities.md v0.5.0 段（CI 运行态按 v0.4.0 先例推送后补记）、README 版本行 / 英文摘要 / 中文定位句对齐；全仓 `v0.4.0` 残留逐处判定（版本事实点改 12 处、7 文件：domain 常量+注释 2 / sim_test 断言 2 / i18n 1 / api.md 2 / README 3 / teleagent 2；其余历史段 / 时点事实 / 里程碑引用保留）。
+- 发布验收全量实测：六门禁全绿 + `make build` + live serve（`/api/health` 实报 v0.5.0、`GET /api/schema` 8 类 / 89 字段 / 13 规则、`/` 与 SPA 路由及全部 chunk 200）+ `testdata/devices.xlsx` 完整导入基线（30 行 27/0/3 + issues 4E/1W/27I）+ `samples/ptp-config-script.txt` 脚本通道（4/0/0）+ 五个冒烟脚本（w3-w8）全 SMOKE-OK + demo.sh + demo-lab.sh 全过 + MCP 真进程 stdio 握手（serverInfo v0.5.0、恰 5 工具）+ 全仓凭据扫描零命中。
+
+### 测试
+- Go **296 个顶层测试**全绿（v0.4.0 基线 244 + 本里程碑四轮新增：W6 +17 / W7 +6 / W8 +21 / W9 +8 = +52，`go test -list '.*'` 顶层函数实测口径——W6 分项 importer 5 / repo 3 / renames 5 / api 2 / app 2，W7 分项 importer 4 / repo 1 / api 1，W8 分项 ptpconfig 9 / workbook 4 / mapping 4 / importer 3 / repo 1，W9 分项 **services 2 / repo 2 / query 1 / renames 1 / changes 1 / api 1**；检测五条件 / 单事务合并 / 谱系版本序 / 解析器 golden / v13 迁移 / 指针级装配 / query-count 卫兵等；既有断言零放宽，唯一例外为 `TestAppVersionP2` 版本断言随发布适配【注释声明】）。门禁六项全绿：gofmt 空 · vet 0 告警 · 18 含测试包全 ok · `-race` 0（importer/repo/api/services 等重点包）· tsc 0 错误 · build ✓（最终实测计数与 CI 运行态——**待推送后补记**——见 docs/verified-capabilities.md v0.5.0 段）。
+- 真实材料端到端冒烟：W6-W8 各轮独立冒烟脚本（w6/w7/w8）+ 既有 w3/w4 + demo.sh / demo-lab.sh 全脚本可重复。
+
 ## [0.4.0] — 2026-10-10
 
 **真实电信资源类型与身份治理版**（五轮迭代：W1-W4 四轮功能开发 + W5 发布轮收口；需求驱动为 v0.3.2 后提供的真实电信样例工作簿与 R4 身份模型审查裁决）。核心：从「三类合成台账」走到「七类资源、真实表格直导、身份键受治理、属性变更有审计」。

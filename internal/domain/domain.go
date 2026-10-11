@@ -22,15 +22,16 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.4.0
-// adds the three real telecom resource types (port stable key, conditional
-// base_station key, machine_room/site with belongs_to), identity-key
-// governance (W004, migration v8-v10) and the attribute change history with
-// human confirmation (W005, migration v11). TestAppVersionP2 pins this
+// the health endpoint, the MCP server implementation and the CLI. v0.5.0
+// closes the identity-governance loop (W006 suspected-rename merge flow,
+// migration v12), versions the source lineage (skip-path SourceRef provenance
+// rows, zero migration), adds the fourth real-telecom material (PTP config
+// scripts, ptp_port type, migration v13) and converges the wiring on a
+// single composition root (internal/services). TestAppVersionP2 pins this
 // constant and TestAppVersionMatchesChangelogHead enforces the CHANGELOG
 // single fact source, so the three-way hand-copied versions cannot drift
 // again.
-const AppVersion = "v0.4.0"
+const AppVersion = "v0.5.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

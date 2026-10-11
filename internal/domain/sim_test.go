@@ -192,8 +192,10 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	if AppVersion != "v0.4.0" {
-		t.Errorf("AppVersion = %q, want v0.4.0 (v0.4.0 real-telecom-types release)", AppVersion)
+	// Release-bump adaptation (W10-D, v0.5.0): this assertion intentionally
+	// tracks AppVersion — it is the version pin, not a relaxed behavior test.
+	if AppVersion != "v0.5.0" {
+		t.Errorf("AppVersion = %q, want v0.5.0 (v0.5.0 identity-governance-loop and provenance release)", AppVersion)
 	}
 }
 

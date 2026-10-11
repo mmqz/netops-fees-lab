@@ -1,7 +1,7 @@
 # NetOps Lab — 已验证 / 未验证能力清单
 
 > 诚实为本：每一条"已验证"都可追溯到具体的验证方式与日期；未验证事项显式列出，不粉饰。
-> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）。
+> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版）。
 
 ## ✅ 已验证（2026-10-09，linux/amd64）
 
@@ -72,6 +72,34 @@
 | **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
+
+## v0.5.0（2026-10-11）身份治理闭环与来源谱系版
+
+四轮迭代（W6-W8 三轮功能开发 + W9 重构收敛轮）+ W10-D 发布轮，主代理逐轮派发开发子代理并派 W6-Q/W7-Q/W8-Q/W9-Q 只读质检（W6/W7 PASS-with-notes 零 P0/P1/P2 唯 P3；W8 PASS-with-notes 含 P2×1【样例披露失实，已在该轮提交 95727da 内修正】+ P3×6；W9 PASS 零 P2 唯 P3×2）；里程碑提交 d5e940f（W6）/ 10b140b（W7）/ 95727da（W8）/ 15800f9（W9）+ 本轮发布提交。以下为本轮（W10-D）实测；W6-W9 各轮的独立实测记录见 worklog 各 Task ID 小节。
+
+### ✅ 已验证（2026-10-11，linux/amd64 · 2 核沙箱）
+
+| 能力 | 验证方式 | 备注 |
+| --- | --- | --- |
+| **296 个顶层测试全绿** | `gofmt -l .` 空；`go vet ./...` 0 告警；`go test -count=1 -timeout 15m ./...` 18 个含测试的包全部 ok；`-race -count=1` importer/repo/api/services/mcpserver 五包 0 race（24.9s/26.5s/11.5s/1.8s/7.5s）；`npx tsc -b` 0 错误；`npm run build` ✓ 4.61s | 计数口径：`go test -list '.*' ./... \| grep -c '^Test'` = **296** = v0.4.0 基线 244 + W6 +17 / W7 +6 / W8 +21 / W9 +8 = +52（W9 分项 services 2 / repo 2 / query 1 / renames 1 / changes 1 / api 1；既有断言零放宽，唯一例外 = TestAppVersionP2 版本断言随发布适配，测试内注释声明） |
+| 版本事实源 | `domain.AppVersion = v0.5.0`；`TestAppVersionP2` + `TestAppVersionMatchesChangelogHead` 双锚定实跑 PASS；live serve `/api/health` 实报 v0.5.0；api.md 契约基线、README、i18n.ts APP_VERSION、teleagent-integration 两处同步；MCP 真进程 stdio 握手 serverInfo v0.5.0 | 全仓 `git grep v0.4.0` 残留逐处判定：版本事实点已改 12 处、7 文件（domain 常量+注释 2 / sim_test 断言 2 / i18n 1 / api.md 2 / README 3 / teleagent 2），其余 29 行（15 文件）逐处判定为合法历史段 / 时点事实 / 里程碑引用：CHANGELOG 3（0.4.0 历史段 + 0.5.0 段内「基线/先例」引用）、README 英文摘要 1（v0.4 real-telecom 类型时点 + browser-smoke 历史时点）、api.md 2 + import-and-validation 1（「v0.4.0/起」引入时点）、verified 历史 5 + v0.5.0 段内引用 6、W5-D 代码注释 7（schema/server/cli/gc/gc_test/projection/batches）、samples 样例开发期 2、web schema.ts「起」1、vite.config 1 |
+| GET /api/schema | live serve 真实输出：8 类型（Specs 注册序，ptp_port 第 8）/ 89 字段 / 13 规则；ip_pool.vlan_id intMin=1/intMax=4094（W9 intMax 投影）；ptp_port sheetHint="PTP"、23 字段、复合键 device_model+port_name、Label「PTP端口」 | 投影由 BuildSchemaDocument() 机械生成；MCP 工具数 grep 实测仍恰 5 |
+| W6-W9 旅程（汇总自各轮独立验证） | W6：改名副本 1/1/2 + W006 → 提案 pending（matchedFields 11）→ apply（旧 res id 保留持新键；name 同步为 W9 增量语义）→ 再导 0/2/2 零 warning 幂等闭环；W7：devices 三轮导入 sourceRefs 27→54→81（E001 不追加、DEV-012 恰 2）、回滚 deleted.sourceRefs=27、回滚后幸存序稳定；W8：PTP 脚本 4/0/0、W006 ptp 提案 apply 键迁移 4 资源终态、refs 2→4→6、回滚 CASCADE 归零；W9：组合根 7 组指针恒等、N+1 1+N→恒 2 查（countingDBTX 卫兵）、intMax 1/4094、Name 随 apply 双修 e2e（含 PTP 键类回落探针） | 详见 worklog W6-D…W9-Q 小节与 CHANGELOG 0.5.0；本轮发布验收复验了其中的 W6 路由 / W7 版本化 / W8 脚本通道 / intMax 四项（下两行） |
+| 发布验收（W10-D live serve，HTTP 层） | 23 项断言脚本全 PASS：`/` 200 + index.html 引用 4 chunk 逐个 200 + SPA 路由（含深链 /lab/:id）全 200；devices.xlsx 完整导入 30 行 27/0/3 + issues 4E/1W/27I（评分 79）与 v0.4.0 基线一致；再导 0/27/3 纯 skip + 资源详情 sourceRefs=2 版本序；PTP 脚本通道 4/0/0（键 6150\|gei-1/1/0/7 等）+ 非 PTP 文本 422 unsupported_script；GET /api/renames 200；stats 27 device + 4 ptp_port | make build ✓（bin 31,926,223 B）；脚本全程单进程持库，验收脚本落 /tmp（仓库零污染） |
+| 冒烟与演示脚本（全部复跑） | w3/w4/w6/w7/w8 五冒烟全 SMOKE-OK；demo.sh 64 资源/57 关系/E13/W3/I1/评分 32；demo-lab.sh 九步全过，物化/撤销/恢复哈希 aea27501fa59… 与历史基线一致 | 均为发布二进制（bin/netopslab）驱动 |
+| MCP 真进程 stdio | 握手 serverInfo netops-lab/**v0.5.0**；tools/list 恰 5（resource_search + 4 lab 工具）；resource_search 描述含「PTP端口」（W9 补触点）；tools/call DEV-001 → total 1 + source{devices.xlsx/设备清单/row 2} + appGen=false；未知工具 → JSON-RPC -32602 | 与 W9-Q live 探针同口径；MCP 工具面冻结红线未破 |
+
+### ⏳ CI 运行态（推送后补记）
+
+- 本轮发布提交的 GitHub Actions 运行态：**待推送后补记**（v0.4.0 先例：发布提交推送后由编排者补 run 号，不预填）。
+
+## ⚠️ 未验证（v0.5.0 诚实声明，沿 v0.4.0 清单）
+
+- 部署态 TeleAgent 的 MCP 调用（环境无 TeleAgent 实例；进程内回环 + 真子进程 stdio 冒烟已验证，含 5 工具握手）。
+- Windows / macOS 构建（仅 linux/amd64 实际产出）。
+- 长时运行 / 并发负载（无 7×24 或压测数据；GC 语义按单进程 serve 设计）。
+- 浏览器级对 /api/schema 的消费 UI（前端镜像未切换——按发布决策「稳定性优先」，schema.ts 注释已注明可经端点校验）。
+- **本轮（W10-D）发布验收为 HTTP 层**（SPA 路由/资产 200 + API 契约）：未重做 v0.4.0 轮的浏览器级交互回归（agent-browser）；v0.5.0 前端增量（W6 改名面板 / W8 ptp 类型枚举六件）经 tsc/build 门禁与 W6-Q/W8-Q 逻辑审查，交互层未在本轮重验。
 
 ## v0.4.0（2026-10-10）真实电信资源类型与身份治理版
 
