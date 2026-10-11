@@ -2,11 +2,17 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
+
+	"github.com/mmqz/netops-lab/internal/app"
+	"github.com/mmqz/netops-lab/internal/repo"
 )
 
 // renameListItem mirrors one item of GET /api/renames (the exact W6-D field
@@ -202,6 +208,10 @@ func TestAPIRenamesFlow(t *testing.T) {
 	if resources.Items[0].ID != rp.ResourceID || resources.Items[0].NaturalKey != "动力机房2新" {
 		t.Fatalf("merged resource = %+v, want the OLD id %s with key 动力机房2新", resources.Items[0], rp.ResourceID)
 	}
+	// W9-D: the display name follows the merge on the HTTP read path too.
+	if resources.Items[0].Name != "动力机房2新" {
+		t.Fatalf("merged resource name = %q, want 动力机房2新 (name follows the merged identity)", resources.Items[0].Name)
+	}
 
 	// Re-apply of the applied proposal → 409 conflict.
 	resp, body = doRequest(t, srv, http.MethodPost, "/api/renames/"+rp.ID+"/apply", nil, "")
@@ -305,5 +315,103 @@ func TestAPIRenamesRejectAndTargetMissing(t *testing.T) {
 	resp, body = doRequest(t, srv, http.MethodPost, "/api/renames/"+target.ID+"/apply", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("apply after batch rollback: status = %d, want 404\nbody: %s", resp.StatusCode, body)
+	}
+}
+
+// TestAPIRenameApplyTargetMissingDirectDelete closes the W6-Q P3-5 HTTP
+// blind spot: the target_missing 409 branch of POST /api/renames/{id}/apply
+// was only ever proven at the service level — the existing HTTP test walks
+// the ROLLBACK route to remove the new resource, which deletes the pending
+// proposal with it and therefore answers 404, never reaching the 409. Here
+// the new resource is deleted DIRECTLY (repo access on the test side, no
+// rollback), so the proposal survives: the apply must answer 409 with code
+// target_missing and a message recommending the rejection, the proposal
+// stays pending and the old resource untouched, and reject remains the
+// working way out.
+func TestAPIRenameApplyTargetMissingDirectDelete(t *testing.T) {
+	dir := t.TempDir()
+	a, err := app.New(app.Config{
+		DBPath:  filepath.Join(dir, "netops.db"),
+		DataDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	srv := httptest.NewServer(a.Routes())
+	t.Cleanup(func() {
+		srv.Close()
+		if err := a.Close(); err != nil {
+			t.Errorf("app.Close: %v", err)
+		}
+	})
+
+	// The pending-proposal pair: 站A imported, then the renamed 站A新.
+	importBaseStationWorkbook(t, srv, "站A", "172.7.40.1/30")
+	importBaseStationWorkbook(t, srv, "站A新", "172.7.40.1/30")
+	resp, body := doRequest(t, srv, http.MethodGet, "/api/renames?status=pending", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list pending: status = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+	var page renamesPage
+	decodeJSON(t, "list pending", body, &page)
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("pending list = %d items (total %d), want 1/1", len(page.Items), page.Total)
+	}
+	rp := page.Items[0]
+	if rp.NewResourceID == "" || rp.ResourceID == "" {
+		t.Fatalf("pending item lacks the resource ids: %+v", rp)
+	}
+
+	// Delete the NEW resource directly through the repository — NOT the
+	// rollback route (rollback would take the pending proposal with it and
+	// the apply would answer 404; see TestAPIRenamesRejectAndTargetMissing).
+	if err := a.DB.Do(context.Background(), func(tx *repo.Tx) error {
+		_, err := tx.Resources.DeleteByID(context.Background(), rp.NewResourceID)
+		return err
+	}); err != nil {
+		t.Fatalf("direct delete of the new resource: %v", err)
+	}
+
+	// The apply refuses: 409 target_missing with the reject recommendation.
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/renames/"+rp.ID+"/apply", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("apply after direct delete: status = %d, want 409\nbody: %s", resp.StatusCode, body)
+	}
+	var er errorResp
+	decodeJSON(t, "apply target missing", body, &er)
+	if er.Error.Code != "target_missing" {
+		t.Errorf("apply target missing: error.code = %q, want target_missing", er.Error.Code)
+	}
+	if !strings.Contains(er.Error.Message, "驳回") {
+		t.Errorf("apply target missing: message %q must recommend rejecting (驳回)", er.Error.Message)
+	}
+
+	// The proposal is still pending and the old resource untouched.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/renames?status=pending", nil, "")
+	decodeJSON(t, "pending after refusal", body, &page)
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != rp.ID {
+		t.Fatalf("pending after refusal = %+v (total %d), want the proposal %s still pending", page.Items, page.Total, rp.ID)
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+rp.ResourceID, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("old resource detail: status = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+	var detail struct {
+		NaturalKey string `json:"naturalKey"`
+	}
+	decodeJSON(t, "old resource detail", body, &detail)
+	if detail.NaturalKey != "站A" {
+		t.Errorf("old resource naturalKey after refused apply = %q, want 站A (untouched)", detail.NaturalKey)
+	}
+
+	// Reject is the way out (200; both proposals' resources stay as-is).
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/renames/"+rp.ID+"/reject", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reject after refused apply: status = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+	var rejected renameListItem
+	decodeJSON(t, "reject", body, &rejected)
+	if rejected.Status != "rejected" || rejected.DecidedAt == nil {
+		t.Fatalf("rejected item = %+v, want rejected with decidedAt", rejected)
 	}
 }

@@ -28,7 +28,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 返回**全部可导入资源类型的字段规格 + 数据质量规则目录**。响应体由后端 `mapping.BuildSchemaDocument()` 从 `mapping.Specs`（Go 类型规格的唯一事实源）与 domain 规则目录机械投影生成——非手抄快照，后端规格演进时该端点自动同步（mapping 包投影测试逐字段对照 Specs 钉死）。**只读、无参数、不进 MCP 工具面**（MCP 工具恒为 5 个；schema 发现是 HTTP 专属能力）。前端 `web/src/schema.ts` 编译期镜像保留，可用本端点对照校验。
 
 - `types[]`（按 Specs 注册序）：`type`（资源类型）、`label`（类型中文名）、`sheetHint`（sheet 名建议锚点）、`nameField`（展示名字段——`NameFieldOverride` 优先、否则「first *_name」启发式）、`nameFieldOverride`（显式展示名钉定，仅 port/base_station/machine_room 有）、`naturalKeyFields[]`（主自然键字段，序 = `|` 拼接序）、`keyFallbackFields[]`（条件键兜底字段，v0.4 仅 base_station）、`fields[]`。
-- `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界；intMax 未投影）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
+- `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界）、`intMax`（int 字段上界，缺省=无界；v0.5 W9-D 起投影——此前 vlan 上界 4094 对端点消费者不可见）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
 - `rules[]`（规则目录，按码序 E001→E006 / W001→W006 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
 
 以下为真实输出截断（完整响应含 8 类共 89 字段与 13 条规则）：
@@ -88,6 +88,31 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
       ]
     },
     {
+      "type": "ip_pool",
+      "label": "IP地址池",
+      "sheetHint": "池",
+      "nameField": "pool_name",
+      "naturalKeyFields": [
+        "pool_name"
+      ],
+      "fields": [
+        {
+          "name": "vlan_id",
+          "label": "VLAN",
+          "required": false,
+          "naturalKey": false,
+          "kind": "int",
+          "intMin": 1,
+          "intMax": 4094,
+          "synonyms": [
+            "VLAN",
+            "VLAN_ID",
+            "VLAN编号"
+          ]
+        }
+      ]
+    },
+    {
       "type": "base_station",
       "label": "基站",
       "sheetHint": "基站",
@@ -129,7 +154,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
     {
       "type": "ptp_port",
       "label": "PTP端口",
-      "sheetHint": "PTP配置",
+      "sheetHint": "PTP",
       "nameField": "port_name",
       "nameFieldOverride": "port_name",
       "naturalKeyFields": ["device_model", "port_name"],
@@ -657,7 +682,7 @@ HTTP/1.1 409 Conflict
 
 ## POST /api/attribute-changes/{id}/apply — 应用待确认变更（人工确认通道）
 
-仅 pending 可应用。校验**资源当前属性值 == 提案旧值**：相等 → 新值写入 `resources.attributes`、`updated_at` 刷新、提案置 `applied`（`appliedAt` 打点），同一事务内原子完成 → 200 返回变更后对象（形态同上，`status: "applied"`）。该字段已被其它变更修改（当前值 ≠ 旧值）→ **409 `attribute_conflict`**，message 含字段名与两个值，资源不动：
+仅 pending 可应用。校验**资源当前属性值 == 提案旧值**：相等 → 新值写入 `resources.attributes`、`updated_at` 刷新、提案置 `applied`（`appliedAt` 打点），同一事务内原子完成 → 200 返回变更后对象（形态同上，`status: "applied"`）。**变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时 `resources.name` 一并同步**（v0.5 W9-D——name 是该字段值的投影，否则资源列表将一直显示旧名）；非 NameField 字段的 apply 不触碰 name。该字段已被其它变更修改（当前值 ≠ 旧值）→ **409 `attribute_conflict`**，message 含字段名与两个值，资源不动：
 
 ```json
 { "error": { "code": "attribute_conflict",
@@ -704,7 +729,7 @@ HTTP/1.1 409 Conflict
 
 ## POST /api/renames/{id}/apply — 确认改名（身份合并，人工确认通道）
 
-确认 pending 提案：单事务完成身份合并——新资源的关系改挂旧资源（UNIQUE 撞车删新侧边）、**键分量属性同步**（新侧非空者覆写旧资源——键换了 base_station_name 也得换，防假 W005）、删新资源（其 pending 属性变更随 v11 CASCADE）、旧资源 `natural_key` 换为新键 + `updated_at` 刷新、提案置 `applied` + `decidedAt` 打点。**旧资源代理键 `res_x`、关系身份、SourceRef 不动**——合并是键改挂，不是行替换。→ 200 返回提案对象（apply 后形状）。
+确认 pending 提案：单事务完成身份合并——新资源的关系改挂旧资源（UNIQUE 撞车删新侧边）、**键分量属性同步**（新侧非空者覆写旧资源——键换了 base_station_name 也得换，防假 W005）、**展示名 Name 同步**（v0.5 W9-D：`resources.name` 是 NameField 值的投影，合并后跟随新名——键类名称字段如 port_name 不进 attributes 时取新资源自身的 name）、删新资源（其 pending 属性变更随 v11 CASCADE）、旧资源 `natural_key` 换为新键 + `updated_at` 刷新、提案置 `applied` + `decidedAt` 打点。**旧资源代理键 `res_x`、关系身份、SourceRef 不动**——合并是键改挂，不是行替换。→ 200 返回提案对象（apply 后形状）。
 
 非 pending（已 applied/rejected）→ 409 `conflict`（HTTP 为通用文案「操作与当前状态冲突」；CLI 错误信封 message 含具体当前状态，如 applied）；**新资源已不存在**（典型：其导入批次被回滚，改名证据随之消失）→ 409 `target_missing`（消息建议 reject 后按现状重新导入）；未知 id → 404。CLI 等价：`netopslab renames --db … apply --id <id>`（结构化 JSON stdout；冲突 exit 1 + 错误信封）。
 

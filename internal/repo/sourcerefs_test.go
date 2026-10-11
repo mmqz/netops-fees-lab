@@ -2,7 +2,9 @@ package repo
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -179,5 +181,122 @@ func TestSourceRefListByEntityVersionOrder(t *testing.T) {
 	wantOrder = []string{"src_z", "src_m", "src_n"}
 	if !slices.Equal(gotOrder, wantOrder) {
 		t.Errorf("ref order after delete+insert = %v, want %v (stable survivor order, new version last)", gotOrder, wantOrder)
+	}
+}
+
+// countingDBTX wraps a DBTX and counts QueryContext calls — the query-count
+// probe of the W9-D N+1 guard: resolving a page of N entities must cost ONE
+// ListByEntityIDs query, not one per entity (the pre-W9-D shape of the MCP
+// resource_search provenance resolution).
+type countingDBTX struct {
+	DBTX
+	queries int
+}
+
+func (c *countingDBTX) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	c.queries++
+	return c.DBTX.QueryContext(ctx, query, args...)
+}
+
+// TestSourceRefListByEntityIDs pins the batched read behind the W9-D N+1 fix:
+// one call resolves the refs of every listed entity, grouped by entity id,
+// each group in rowid (version) order — the same per-entity order
+// ListByEntity guarantees; entities without refs stay absent from the map;
+// an empty id list never touches the database. The counting wrapper asserts
+// the whole resolution is ONE query (N+1 regression guard).
+func TestSourceRefListByEntityIDs(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	_, _, _ = seedGraph(t, db)
+
+	// res_a: two versions (bat_1, then bat_3); res_c: one ref; res_b: none.
+	if err := db.Batches.Create(ctx, newBatch("bat_3", time.Now())); err != nil {
+		t.Fatalf("Create bat_3: %v", err)
+	}
+	seed := []domain.SourceRef{
+		{ID: "src_a1", EntityKind: domain.EntityKindResource, EntityID: "res_a", BatchID: "bat_1",
+			Workbook: "devices.xlsx", Sheet: "设备清单", RowNumber: 2, Raw: map[string]string{"设备编码": "DEV-001"}},
+		{ID: "src_a2", EntityKind: domain.EntityKindResource, EntityID: "res_a", BatchID: "bat_3",
+			Workbook: "devices-v2.xlsx", Sheet: "设备清单", RowNumber: 2, Raw: map[string]string{"设备编码": "DEV-001"}},
+		{ID: "src_c1", EntityKind: domain.EntityKindResource, EntityID: "res_c", BatchID: "bat_2",
+			Workbook: "circuits.xlsx", Sheet: "电路", RowNumber: 7, Raw: map[string]string{"电路编号": "CKT-001"}},
+	}
+	for _, ref := range seed {
+		if err := db.SourceRefs.Insert(ctx, ref); err != nil {
+			t.Fatalf("Insert %s: %v", ref.ID, err)
+		}
+	}
+
+	counter := &countingDBTX{DBTX: db.sql}
+	batched := &SourceRefRepo{q: counter}
+
+	got, err := batched.ListByEntityIDs(ctx, domain.EntityKindResource, []string{"res_a", "res_b", "res_c"})
+	if err != nil {
+		t.Fatalf("ListByEntityIDs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("result map has %d entities, want 2 (res_b has no refs and must be absent)", len(got))
+	}
+	if refs := got["res_a"]; len(refs) != 2 || refs[0].ID != "src_a1" || refs[1].ID != "src_a2" {
+		t.Errorf("res_a refs = %+v, want [src_a1 src_a2] in rowid (version) order", refs)
+	}
+	if refs := got["res_c"]; len(refs) != 1 || refs[0].ID != "src_c1" || refs[0].Workbook != "circuits.xlsx" {
+		t.Errorf("res_c refs = %+v, want the single circuits.xlsx ref", refs)
+	}
+	if _, present := got["res_b"]; present {
+		t.Errorf("res_b must be absent from the map (no refs), got %+v", got["res_b"])
+	}
+	// The N+1 guard itself: three entities resolved in ONE query.
+	if counter.queries != 1 {
+		t.Errorf("ListByEntityIDs issued %d queries for 3 entities, want exactly 1 (the N+1 regression guard)", counter.queries)
+	}
+
+	// Empty ids: empty non-nil map, zero queries.
+	counter.queries = 0
+	got, err = batched.ListByEntityIDs(ctx, domain.EntityKindResource, nil)
+	if err != nil || got == nil || len(got) != 0 {
+		t.Errorf("ListByEntityIDs(nil) = %v (err %v), want an empty non-nil map", got, err)
+	}
+	if counter.queries != 0 {
+		t.Errorf("ListByEntityIDs(nil) issued %d queries, want 0 (early return)", counter.queries)
+	}
+}
+
+// TestSourceRefListByEntityIDsChunksLargeIDSets pins the transparent
+// chunking of id sets larger than maxINListVars: the result is the union of
+// the per-chunk queries (correctness under the split), and the query count
+// is ceil(N / maxINListVars) — still independent of the number of entities
+// that actually carry refs.
+func TestSourceRefListByEntityIDsChunksLargeIDSets(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.Batches.Create(ctx, newBatch("bat_bulk", time.Now())); err != nil {
+		t.Fatalf("Create bat_bulk: %v", err)
+	}
+	n := maxINListVars + 2 // two full chunks + one remainder chunk
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("res_bulk_%04d", i)
+		ref := domain.SourceRef{
+			ID: fmt.Sprintf("src_bulk_%04d", i), EntityKind: domain.EntityKindResource, EntityID: ids[i],
+			BatchID: "bat_bulk", Workbook: "bulk.xlsx", Sheet: "s", RowNumber: 2, Raw: map[string]string{"k": "v"},
+		}
+		if err := db.SourceRefs.Insert(ctx, ref); err != nil {
+			t.Fatalf("Insert %s: %v", ref.ID, err)
+		}
+	}
+
+	counter := &countingDBTX{DBTX: db.sql}
+	batched := &SourceRefRepo{q: counter}
+	got, err := batched.ListByEntityIDs(ctx, domain.EntityKindResource, ids)
+	if err != nil {
+		t.Fatalf("ListByEntityIDs (chunked): %v", err)
+	}
+	if len(got) != n {
+		t.Fatalf("chunked result has %d entities, want %d (the union of all chunks)", len(got), n)
+	}
+	wantChunks := (n + maxINListVars - 1) / maxINListVars
+	if counter.queries != wantChunks {
+		t.Errorf("chunked ListByEntityIDs issued %d queries for %d ids, want %d (chunked, still not per-entity)", counter.queries, n, wantChunks)
 	}
 }

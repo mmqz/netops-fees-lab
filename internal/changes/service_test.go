@@ -134,6 +134,11 @@ func TestApplyWritesAttributeAndFlipsStatus(t *testing.T) {
 	if !after.UpdatedAt.After(res.UpdatedAt) {
 		t.Errorf("updated_at %v must be refreshed (was %v)", after.UpdatedAt, res.UpdatedAt)
 	}
+	// A non-name field must NOT touch resources.name (mgmt_ip is not the
+	// device NameField — the W9-D sync is scoped to the name field).
+	if after.Name != "核心路由1" {
+		t.Errorf("resource name after non-name-field apply = %q, want 核心路由1 (untouched)", after.Name)
+	}
 
 	// A second apply of the same (now applied) proposal → 409 conflict.
 	if _, err := svc.Apply(ctx, target.ID); err == nil || !errors.Is(err, domain.ErrConflict) {
@@ -330,4 +335,108 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestApplyNameFieldSyncsResourceName pins the W9-D name sync of the SAME
+// semantic family the rename apply got: a confirmed change on the type's
+// display-name field (device_name here) rewrites resources.name too — the
+// name is the projection of that attribute, and before W9-D an applied
+// rename of the name attribute left the resource list showing the old
+// display name forever.
+func TestApplyNameFieldSyncsResourceName(t *testing.T) {
+	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	if err != nil {
+		t.Fatalf("repo.Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("db.Close: %v", err)
+		}
+	})
+	imp := importer.New(db)
+	imp.Now = func() time.Time { return time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC) }
+	ctx := context.Background()
+
+	deviceMapping := mapping.Mapping{Sheets: []mapping.SheetMapping{{
+		Sheet: "设备清单", Action: mapping.ActionImport, ResourceType: domain.ResourceTypeDevice,
+		KeyColumns: []string{"device_code"},
+		ColumnMapping: map[string]string{
+			"device_code": "设备编码", "device_name": "设备名称", "city": "城市",
+			"vendor": "厂商", "model": "型号", "mgmt_ip": "管理IP", "status": "状态",
+		},
+	}}}
+	importNamed := func(name string) {
+		t.Helper()
+		f := excelize.NewFile()
+		if err := f.SetSheetName("Sheet1", "设备清单"); err != nil {
+			t.Fatalf("rename default sheet: %v", err)
+		}
+		rows := [][]string{
+			{"设备编码", "设备名称", "城市", "厂商", "型号", "管理IP", "状态"},
+			{"DEV-001", name, "杭州", "华为", "NE40E", "10.0.0.1", "在网"},
+		}
+		for r, row := range rows {
+			for c, v := range row {
+				cell, err := excelize.CoordinatesToCellName(c+1, r+1)
+				if err != nil {
+					t.Fatalf("cell name: %v", err)
+				}
+				if err := f.SetCellStr("设备清单", cell, v); err != nil {
+					t.Fatalf("set cell: %v", err)
+				}
+			}
+		}
+		path := filepath.Join(t.TempDir(), "devices.xlsx")
+		if err := f.SaveAs(path); err != nil {
+			t.Fatalf("save workbook: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close workbook: %v", err)
+		}
+		a, err := imp.Analyze(ctx, path)
+		if err != nil {
+			t.Fatalf("Analyze: %v", err)
+		}
+		if _, err := imp.Execute(ctx, a.BatchID, deviceMapping); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	}
+	importNamed("核心路由1")
+	importNamed("核心路由1改") // same key, new device_name → skip + pending W005
+
+	res, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, "DEV-001")
+	if err != nil {
+		t.Fatalf("GetByTypeKey: %v", err)
+	}
+	if res.Name != "核心路由1" {
+		t.Fatalf("seeded resource name = %q, want 核心路由1 (the name is the device_name projection)", res.Name)
+	}
+	chs, total, err := db.AttributeChanges.List(ctx, repo.ChangeFilter{Status: domain.ChangeStatusPending})
+	if err != nil || total != 1 || len(chs) != 1 {
+		t.Fatalf("pending changes = %d (total %d, err %v), want exactly the device_name proposal", len(chs), total, err)
+	}
+	if chs[0].Field != "device_name" || chs[0].OldValue != "核心路由1" || chs[0].NewValue != "核心路由1改" {
+		t.Fatalf("pending proposal = %+v, want device_name 核心路由1→核心路由1改", chs[0])
+	}
+
+	svc := New(db)
+	svc.Now = func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC) }
+	item, err := svc.Apply(ctx, chs[0].ID)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if item.Field != "device_name" || item.Status != "applied" {
+		t.Fatalf("applied item = %+v, want the applied device_name proposal", item)
+	}
+
+	after, err := db.Resources.GetByID(ctx, res.ID)
+	if err != nil {
+		t.Fatalf("GetByID after apply: %v", err)
+	}
+	if after.Attributes["device_name"] != "核心路由1改" {
+		t.Errorf("attributes after apply = %v, want device_name 核心路由1改", after.Attributes)
+	}
+	if after.Name != "核心路由1改" {
+		t.Errorf("resource NAME after a name-field apply = %q, want 核心路由1改 (the W9-D sync)", after.Name)
+	}
 }

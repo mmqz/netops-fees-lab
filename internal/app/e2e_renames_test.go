@@ -127,6 +127,11 @@ func TestCLIRenamesFlow(t *testing.T) {
 	if res["id"] != oldID || res["naturalKey"] != "动力机房2新" {
 		t.Fatalf("merged resource = %v, want the OLD id %s with key 动力机房2新", res, oldID)
 	}
+	// W9-D: the display NAME follows the merge — the query endpoint shows the
+	// new name, not the pre-merge one.
+	if res["name"] != "动力机房2新" {
+		t.Fatalf("merged resource name = %v, want 动力机房2新 (the name follows the merged identity)", res["name"])
+	}
 
 	// Re-apply of the applied proposal → exit 1 with the conflict code.
 	stdout, code := runCLI(t, "renames", "--db", db, "apply", "--id", proposalID)

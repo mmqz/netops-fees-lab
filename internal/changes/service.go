@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/repo"
 )
 
@@ -149,6 +150,19 @@ func newChangeItem(ch domain.AttributeChange, res domain.Resource) ChangeItem {
 	}
 }
 
+// isDisplayNameField reports whether field is the resource type's
+// display-name field (mapping.TypeSpec.NameField — the override-aware
+// heuristic the importer itself used to set resources.name at insert time).
+// A confirmed change on that field must also rewrite the stored name: the
+// name is the projection of the attribute's value.
+func isDisplayNameField(t domain.ResourceType, field string) bool {
+	spec, ok := mapping.SpecByType(t)
+	if !ok {
+		return false // defensive: the closed set always resolves
+	}
+	return spec.NameField() == field
+}
+
 // StaleError reports the apply refusal of the W005 confirmation flow: the
 // stored attribute value no longer equals the proposal's old value, i.e.
 // another change (an earlier apply on a coexisting proposal, or a manual
@@ -170,9 +184,14 @@ func (e *StaleError) Error() string {
 // 409), writes NewValue into the attributes, refreshes the resource's
 // updated_at and flips the proposal to applied — all inside ONE DB.Do
 // transaction, so a mid-flight failure leaves both the resource and the
-// proposal untouched. Non-pending proposals (already applied/dismissed)
-// answer domain.ErrConflict (409); an unknown id or a vanished resource
-// answers domain.ErrNotFound (404). Returns the change-after-apply object.
+// proposal untouched. W9-D: when the changed field IS the type's display-name
+// field (mapping.TypeSpec.NameField — base_station_name, device_name, …),
+// resources.name follows the new value; the name is the projection of that
+// attribute and a stale name would contradict the applied change.
+//
+// Non-pending proposals (already applied/dismissed) answer
+// domain.ErrConflict (409); an unknown id or a vanished resource answers
+// domain.ErrNotFound (404). Returns the change-after-apply object.
 func (s *Service) Apply(ctx context.Context, id string) (ChangeItem, error) {
 	var item ChangeItem
 	err := s.db.Do(ctx, func(tx *repo.Tx) error {
@@ -199,6 +218,12 @@ func (s *Service) Apply(ctx context.Context, id string) (ChangeItem, error) {
 		attrs[ch.Field] = ch.NewValue
 		if err := tx.Resources.UpdateAttributes(ctx, res.ID, attrs, now); err != nil {
 			return fmt.Errorf("changes: apply %s: %w", id, err)
+		}
+		if isDisplayNameField(res.Type, ch.Field) {
+			if err := tx.Resources.UpdateName(ctx, res.ID, ch.NewValue, now); err != nil {
+				return fmt.Errorf("changes: apply %s: sync display name: %w", id, err)
+			}
+			res.Name = ch.NewValue
 		}
 		if err := tx.AttributeChanges.MarkApplied(ctx, id, now); err != nil {
 			return fmt.Errorf("changes: apply %s: %w", id, err)

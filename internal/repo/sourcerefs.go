@@ -5,6 +5,7 @@ package repo
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 )
@@ -88,6 +89,69 @@ ORDER BY rowid, row_number`,
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("repo: list source refs of %s %s: %w", kind, entityID, err)
+	}
+	return out, nil
+}
+
+// maxINListVars bounds the number of placeholders of one ListByEntityIDs
+// WHERE IN query. SQLite's compiled variable limit is far higher on every
+// supported build (modernc.org/sqlite: 32766), but the chunk keeps the method
+// correct regardless of the driver build and keeps the query plan shape
+// stable. Callers page resources well below the chunk size (the MCP search
+// caps at 100), so the common case is exactly ONE query.
+const maxINListVars = 500
+
+// ListByEntityIDs returns the source refs of EVERY listed entity, grouped by
+// entity id, each group in rowid (version) order — the same per-entity order
+// ListByEntity guarantees. It is the batched read of the W9-D N+1 fix: the
+// MCP resource_search provenance resolution used to issue one ListByEntity
+// per result row; the query service now resolves a whole result page with
+// this single call.
+//
+// ids larger than maxINListVars are transparently split into several queries
+// (merged into one map); empty ids returns an empty map without touching the
+// database. Entities without refs are simply absent from the result map —
+// callers distinguish "no provenance" from "empty list" by the key lookup.
+func (r *SourceRefRepo) ListByEntityIDs(ctx context.Context, kind domain.EntityKind, ids []string) (map[string][]domain.SourceRef, error) {
+	out := make(map[string][]domain.SourceRef, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	for start := 0; start < len(ids); start += maxINListVars {
+		end := start + maxINListVars
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, kind.String())
+		for i, id := range chunk {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		query := `SELECT ` + sourceRefColumns + ` FROM source_refs
+WHERE entity_kind = ? AND entity_id IN (` + strings.Join(placeholders, ",") + `)
+ORDER BY rowid, row_number`
+		rows, err := r.q.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("repo: list source refs of %d %s entities: %w", len(chunk), kind, err)
+		}
+		for rows.Next() {
+			ref, err := scanSourceRef(rows)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("repo: scan source ref: %w", err)
+			}
+			out[ref.EntityID] = append(out[ref.EntityID], ref)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("repo: list source refs of %d %s entities: %w", len(chunk), kind, err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("repo: list source refs of %d %s entities: %w", len(chunk), kind, err)
+		}
 	}
 	return out, nil
 }

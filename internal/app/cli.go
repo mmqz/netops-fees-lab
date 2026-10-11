@@ -714,8 +714,10 @@ func cmdMCP(args []string, stdout, stderr io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	// The MCP server speaks JSON-RPC over the process's real stdio.
-	return mcpserver.Run(ctx, a.DB, os.Stdin, os.Stdout)
+	// The MCP server speaks JSON-RPC over the process's real stdio; it
+	// consumes the app's single service composition (W9-D) — the same
+	// instances the HTTP API and the CLI use.
+	return mcpserver.Run(ctx, a.Services, os.Stdin, os.Stdout)
 }
 
 // cmdTestdata implements `netopslab testdata --out <dir>`: regenerate the

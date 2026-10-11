@@ -26,8 +26,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/sim"
+	"github.com/mmqz/netops-lab/internal/query"
+	"github.com/mmqz/netops-lab/internal/services"
 )
 
 // Server identity constants (§8): name netops-lab, version domain.AppVersion
@@ -89,11 +89,14 @@ type searchOutput struct {
 }
 
 // NewServer builds the MCP server with the five registered tools
-// (PROJECT_BRIEF_P2 §8): the Phase 1 resource_search plus the four lab tools
-// bound to a sim.Service built from the same db — every lab mutation flows
-// through the engine path, exactly like the HTTP API (no SQL here).
+// (PROJECT_BRIEF_P2 §8): the Phase 1 resource_search plus the four lab tools.
+// W9-D: the server consumes the shared *services.Services composition root —
+// resource_search reads through the SAME query service the HTTP API uses
+// (query.Service.SearchResourcesWithSource, batched provenance resolution),
+// and the lab tools bind to the SAME sim.Service engine (svc.Lab) — no more
+// locally-built second engine, exactly like the HTTP API (no SQL here).
 // Exported for tests and future embedding.
-func NewServer(db *repo.DB) *mcp.Server {
+func NewServer(svc *services.Services) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: ServerName, Version: ServerVersion},
 		&mcp.ServerOptions{
@@ -103,9 +106,9 @@ func NewServer(db *repo.DB) *mcp.Server {
 	)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        toolName,
-		Description: "只读检索 NetOps Lab 中已导入的网络资源（设备 / 地址池 / 电路 / 端口 / 基站 / 局站 / 机房）。返回 total 与 items，每个条目含 id、type、naturalKey、name、status、attributes 及其来源（workbook/sheet/rowNumber）或 applicationGenerated 标记。",
+		Description: "只读检索 NetOps Lab 中已导入的网络资源（设备 / 地址池 / 电路 / 端口 / 基站 / 局站 / 机房 / PTP端口）。返回 total 与 items，每个条目含 id、type、naturalKey、name、status、attributes 及其来源（workbook/sheet/rowNumber）或 applicationGenerated 标记。",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
-		out, err := resourceSearch(ctx, db, in)
+		out, err := resourceSearch(ctx, svc.Query, in)
 		if err != nil {
 			// A ToolHandlerFor error is packed into the tool result with
 			// IsError = true (MCP tool error semantics) — exactly what the
@@ -114,16 +117,17 @@ func NewServer(db *repo.DB) *mcp.Server {
 		}
 		return nil, out, nil
 	})
-	addLabTools(server, sim.New(db))
+	addLabTools(server, svc.Lab)
 	return server
 }
 
 // Run starts the MCP server over the given stdin/stdout pair and blocks
 // until the client closes the connection or ctx is cancelled. Use it with
 // the process's real os.Stdin/os.Stdout for the CLI, and with os.Pipe ends
-// in tests.
-func Run(ctx context.Context, db *repo.DB, stdin io.Reader, stdout io.Writer) error {
-	server := NewServer(db)
+// in tests. W9-D: takes the shared *services.Services (app.New's single
+// composition root) instead of a bare db.
+func Run(ctx context.Context, svc *services.Services, stdin io.Reader, stdout io.Writer) error {
+	server := NewServer(svc)
 	transport := &mcp.IOTransport{
 		Reader: io.NopCloser(stdin),
 		Writer: nopWriteCloser{stdout},
@@ -137,11 +141,15 @@ type nopWriteCloser struct{ io.Writer }
 
 func (w nopWriteCloser) Close() error { return nil }
 
-// resourceSearch executes the search: repo.Resources.Search with the same
-// filter semantics as the HTTP API, plus per-item source resolution through
-// the source_refs of the resource's creating batch.
-func resourceSearch(ctx context.Context, db *repo.DB, in searchInput) (searchOutput, error) {
-	filter := repo.ResourceSearchFilter{Q: in.Q}
+// resourceSearch executes the search: the shared query service's
+// SearchResourcesWithSource (W9-D) with the same filter semantics as before
+// (repo.ResourceSearchFilter under the hood), with per-item source resolution
+// batched into ONE source_refs query (the pre-W9-D implementation issued one
+// ListByEntity per result row — an N+1). The input validation and the
+// user-facing error texts below are the tool's wire contract and stay
+// byte-identical; the output JSON shape is searchOutput, unchanged.
+func resourceSearch(ctx context.Context, svc *query.Service, in searchInput) (searchOutput, error) {
+	filter := query.SourceSearchFilter{Q: in.Q}
 	if in.Type != "" {
 		t, err := domain.ParseResourceType(in.Type)
 		if err != nil {
@@ -170,45 +178,27 @@ func resourceSearch(ctx context.Context, db *repo.DB, in searchInput) (searchOut
 	filter.Limit = limit
 	filter.Offset = offset
 
-	resources, total, err := db.Resources.Search(ctx, filter)
+	results, total, err := svc.SearchResourcesWithSource(ctx, filter)
 	if err != nil {
 		return searchOutput{}, fmt.Errorf("检索失败：%w", err)
 	}
 
-	items := make([]searchItem, 0, len(resources))
-	for _, r := range resources {
+	items := make([]searchItem, 0, len(results))
+	for _, r := range results {
 		attrs := r.Attributes
 		if attrs == nil {
 			attrs = map[string]string{}
 		}
 		item := searchItem{
 			ID:         r.ID,
-			Type:       r.Type.String(),
+			Type:       r.Type,
 			NaturalKey: r.NaturalKey,
 			Name:       r.Name,
 			Status:     r.Status,
 			Attributes: attrs,
 		}
-		// Resolve the creating source ref (the ref whose batch created
-		// the resource). Re-imports append version refs since v0.5
-		// W7-D (skip rows record provenance), so an imported resource
-		// may carry several refs — the FirstBatchID match below still
-		// selects the CREATING batch's ref (MCP provenance shows the
-		// first source by design; the full version history is the
-		// resource detail API's job).
-		refs, refErr := db.SourceRefs.ListByEntity(ctx, domain.EntityKindResource, r.ID)
-		if refErr != nil {
-			return searchOutput{}, fmt.Errorf("解析来源失败：%w", refErr)
-		}
-		for _, ref := range refs {
-			if ref.BatchID == r.FirstBatchID {
-				item.Source = &source{Workbook: ref.Workbook, Sheet: ref.Sheet, RowNumber: ref.RowNumber}
-				break
-			}
-		}
-		if item.Source == nil && len(refs) > 0 {
-			ref := refs[0]
-			item.Source = &source{Workbook: ref.Workbook, Sheet: ref.Sheet, RowNumber: ref.RowNumber}
+		if r.Source != nil {
+			item.Source = &source{Workbook: r.Source.Workbook, Sheet: r.Source.Sheet, RowNumber: r.Source.RowNumber}
 		}
 		if item.Source == nil {
 			item.ApplicationGenerated = true

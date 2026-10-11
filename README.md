@@ -73,7 +73,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **HTTP API**：`/api/...` 全套 REST 风格接口（错误统一 `{"error":{"code","message"}}` 信封）+ 17 条 §7 仿真路由。
 - **嵌入式 React 前端**：概览 / 数据导入（三步向导）/ 资源浏览（抽屉 + 二跳）/ 问题清单 / 质量报告 / 工作台列表 / 拓扑工作台 中文界面，`go:embed` 打进单二进制。
 - **结构化 CLI**：`analyze / import / validate / report / query / changes / renames / serve / mcp / gc / testdata / lab`，成功输出单一 JSON 对象，退出码 0/1/2（TeleAgent 的 CLI 回退路径）。
-- **工程化**：**288 个 Go 顶层测试**（17 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）。
+- **工程化**：**296 个 Go 顶层测试**（18 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）；**组合根单一装配**（v0.5 W9-D：`internal/services` 是服务装配唯一事实源，app/HTTP API/MCP 共享同一实例，指针级测试钉死）。
 
 ## 3. 快速开始
 
@@ -81,7 +81,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ```bash
 # 1) 测试
-make test            # go test -count=1 -timeout 15m ./...（288 个顶层测试 / 17 包 ok）
+make test            # go test -count=1 -timeout 15m ./...（296 个顶层测试 / 18 包 ok）
 
 # 2) 构建前端（产物嵌入 internal/webui/dist，供 go:embed 使用）
 make web             # cd web && npm ci && npm run build
@@ -153,7 +153,7 @@ netopslab lab checkpoint --db $DB --workspace <wsId> --restore --id cp-1
 | 前端 | React 18 + TypeScript 5.6（strict）+ Vite 6 | 手写设计系统 CSS，无 UI 框架 |
 | 拓扑图 | cytoscape 3.32.0（精确版本，无插件） | /lab 画布；单 chunk 嵌入（ADR-0009） |
 | 嵌入 | go:embed all:dist | 前端产物打进二进制，单文件分发 |
-| 测试 | go test（table-driven） | 288 个顶层测试 / 17 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
+| 测试 | go test（table-driven） | 296 个顶层测试 / 18 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
 
 ## 6. 仓库结构
 

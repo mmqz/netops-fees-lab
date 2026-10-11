@@ -38,6 +38,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/report"
+	"github.com/mmqz/netops-lab/internal/services"
 	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/validation"
 	"github.com/mmqz/netops-lab/internal/webui"
@@ -48,13 +49,17 @@ import (
 // (PROJECT_BRIEF §9: ≤10MB).
 const maxUploadBytes = 10 << 20
 
-// Server is the HTTP API server. It owns its service instances (importer,
-// validation engine, query service, report generator, attribute change and
-// rename confirmation services), all bound to the shared *repo.DB.
+// Server is the HTTP API server. It is wired from ONE *services.Services
+// composition root (W9-D): the importer, validation engine, query service,
+// report generator, attribute change and rename confirmation services and
+// the simulation engine are the SAME instances the App (and the MCP server)
+// use — New no longer assembles a second set from the bare db. Handlers with
+// thin repo-passthrough read paths keep direct db access via svc.DB().
 type Server struct {
 	log        *slog.Logger
 	db         *repo.DB
 	dataDir    string
+	svc        *services.Services
 	importer   *importer.Service
 	validation *validation.Engine
 	query      *query.Service
@@ -65,29 +70,39 @@ type Server struct {
 	renames    *renames.Service
 }
 
-// New returns a Server bound to db; uploads are stored under
-// <dataDir>/uploads (created lazily on the first upload). An empty dataDir
-// leaves POST /api/imports failing FAST with a 500 "dataDir 未配置" error
-// at the handler entry: the analyze step reads the workbook back from the
-// stored path, so without a data root the upload route can never succeed
-// (AUD1-10). All call sites (app.New with its "./data" default, the tests
-// with t.TempDir()) pass a real directory.
-func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
-	simSvc := sim.New(db)
+// New returns a Server wired from svc — the single composition root the
+// application assembled once (app.New builds it and passes the same instance
+// here, so the App's service fields and the HTTP handlers share every
+// service instance; the wiring test asserts the pointer identity). Uploads
+// are stored under <dataDir>/uploads (created lazily on the first upload). An
+// empty dataDir leaves POST /api/imports failing FAST with a 500 "dataDir
+// 未配置" error at the handler entry: the analyze step reads the workbook
+// back from the stored path, so without a data root the upload route can
+// never succeed (AUD1-10). All call sites (app.New with its "./data"
+// default, the tests with t.TempDir()) pass a real directory.
+func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 	return &Server{
 		log:        log,
-		db:         db,
+		db:         svc.DB(),
 		dataDir:    dataDir,
-		importer:   importer.New(db),
-		validation: validation.New(db),
-		query:      query.New(db),
-		report:     report.New(db),
-		sim:        simSvc,
-		lab:        report.NewLab(db, simSvc),
-		changes:    changes.New(db),
-		renames:    renames.New(db),
+		svc:        svc,
+		importer:   svc.Importer,
+		validation: svc.Validation,
+		query:      svc.Query,
+		report:     svc.Report,
+		sim:        svc.Lab,
+		lab:        svc.LabReport,
+		changes:    svc.Changes,
+		renames:    svc.Renames,
 	}
 }
+
+// Services returns the composition root the server was wired from — the
+// W9-D single-assembly handle. app.New passes its one instance through New;
+// the wiring test (internal/services) asserts a.API.Services() and the App's
+// own handle are the SAME pointer, which is what "no dead second assembly"
+// means in code.
+func (s *Server) Services() *services.Services { return s.svc }
 
 // Routes builds the full HTTP handler: the §9 API routes with logging and
 // recovery middleware, the JSON 404 envelope for unknown /api/ paths, and

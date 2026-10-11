@@ -23,6 +23,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-lab/internal/services"
 	"github.com/mmqz/netops-lab/internal/sim"
 )
 
@@ -77,8 +78,10 @@ func startSession(t *testing.T, db *repo.DB) *mcp.ClientSession {
 	done := make(chan error, 1)
 	go func() {
 		// The real entry point the CLI uses — mcpserver.Run over the pipe
-		// ends as its stdin/stdout.
-		done <- Run(ctx, db, srvRead, srvWrite)
+		// ends as its stdin/stdout. W9-D: the session consumes the single
+		// service composition built from this test's db (the same shape
+		// app.New hands to Run).
+		done <- Run(ctx, services.New(db), srvRead, srvWrite)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -252,6 +255,12 @@ func TestMCPToolRegistry(t *testing.T) {
 		names = append(names, tool.Name)
 		if tool.Description == "" {
 			t.Errorf("tool %q has an empty description", tool.Name)
+		}
+		// W9-D: the resource_search description must enumerate every resource
+		// type of the closed set — ptp_port joined the set in W8-D and the
+		// enumeration lagged one round; this pin keeps the two in lockstep.
+		if tool.Name == "resource_search" && !strings.Contains(tool.Description, "PTP端口") {
+			t.Errorf("resource_search description = %q, want the type enumeration to include PTP端口", tool.Description)
 		}
 	}
 	sort.Strings(names)

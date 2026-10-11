@@ -34,6 +34,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-lab/internal/services"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 )
 
@@ -1085,6 +1086,7 @@ func TestAPISchemaEndpoint(t *testing.T) {
 		Kind       string   `json:"kind"`
 		Enum       []string `json:"enum"`
 		IntMin     int      `json:"intMin"`
+		IntMax     int      `json:"intMax"`
 		RefType    string   `json:"refType"`
 		Synonyms   []string `json:"synonyms"`
 	}
@@ -1168,6 +1170,39 @@ func TestAPISchemaEndpoint(t *testing.T) {
 	}
 	if len(bs.KeyFallbackFields) != 2 || bs.KeyFallbackFields[0] != "city" || bs.KeyFallbackFields[1] != "base_station_name" {
 		t.Errorf("schema base_station keyFallbackFields = %v, want [city base_station_name]", bs.KeyFallbackFields)
+	}
+
+	// W9-D: the int bounds of ip_pool.vlan_id survive the JSON round trip
+	// (intMax joined the projection this round; intMin was already there).
+	pool := byType["ip_pool"]
+	if pool == nil {
+		t.Fatal("schema: ip_pool type missing")
+	}
+	var vlanMin, vlanMax int
+	for _, f := range pool.Fields {
+		if f.Name == "vlan_id" {
+			vlanMin, vlanMax = f.IntMin, f.IntMax
+		}
+	}
+	if vlanMin != 1 || vlanMax != 4094 {
+		t.Errorf("schema ip_pool.vlan_id intMin/intMax = %d/%d, want 1/4094", vlanMin, vlanMax)
+	}
+
+	// W9-D (W5-Q P3-5): the ptp_port sheetHint must decode non-empty — a
+	// misspelled JSON tag on the projection would silently emit "". The real
+	// spec value is "PTP" (the substring anchor that matches the synthesized
+	// virtual sheet "PTP配置" — the sheet NAME is PTP配置, the HINT is PTP);
+	// the W8-D api.md example quoted the sheet name here and is corrected to
+	// the projected value this round.
+	ptp := byType["ptp_port"]
+	if ptp == nil {
+		t.Fatal("schema: ptp_port type missing")
+	}
+	if ptp.SheetHint != "PTP" {
+		t.Errorf("schema ptp_port sheetHint = %q, want PTP (the substring hint; JSON tag decode)", ptp.SheetHint)
+	}
+	if ptp.NameField != "port_name" || ptp.NameFieldOverride != "port_name" {
+		t.Errorf("schema ptp_port nameField/override = %q/%q, want port_name twice", ptp.NameField, ptp.NameFieldOverride)
 	}
 
 	mr := byType["machine_room"]
@@ -1338,7 +1373,7 @@ func TestAPIUploadWithoutDataDirFailsFast(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(api.New(log, db, "").Routes())
+	srv := httptest.NewServer(api.New(log, services.New(db), "").Routes())
 	t.Cleanup(srv.Close)
 
 	resp, body := uploadFile(t, srv, "devices.xlsx", readTestdata(t, "devices.xlsx"))

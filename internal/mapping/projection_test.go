@@ -51,6 +51,9 @@ func TestSchemaProjectionMirrorsSpecs(t *testing.T) {
 			if gf.IntMin != f.IntMin {
 				t.Errorf("%s.%s: intMin = %d, want %d", spec.Type, f.Name, gf.IntMin, f.IntMin)
 			}
+			if gf.IntMax != f.IntMax {
+				t.Errorf("%s.%s: intMax = %d, want %d", spec.Type, f.Name, gf.IntMax, f.IntMax)
+			}
 			if !reflect.DeepEqual(gf.Enum, f.Enum) {
 				t.Errorf("%s.%s: enum = %v, want %v", spec.Type, f.Name, gf.Enum, f.Enum)
 			}
@@ -142,6 +145,11 @@ func TestSchemaProjectionSpotPins(t *testing.T) {
 	}
 	if fields["vlan_id"].IntMin != 1 {
 		t.Errorf("ip_pool.vlan_id intMin = %d, want 1", fields["vlan_id"].IntMin)
+	}
+	// W9-D: the upper bound is projected too (the 4094 ceiling of VLAN ids —
+	// it was the one IntMax the endpoint used to hide).
+	if fields["vlan_id"].IntMax != 4094 {
+		t.Errorf("ip_pool.vlan_id intMax = %d, want 4094", fields["vlan_id"].IntMax)
 	}
 	if fields["assigned_device"].RefType != domain.ResourceTypeDevice {
 		t.Errorf("ip_pool.assigned_device refType = %q, want device", fields["assigned_device"].RefType)

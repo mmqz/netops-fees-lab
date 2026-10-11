@@ -197,7 +197,11 @@ func (e *TargetMissingError) Error() string {
 //     key-bearing attributes (base_station_name of a fallback-key row,
 //     device_name of a port) must follow; leaving the old value would make
 //     the key contradict its own source attribute and every re-import of
-//     the renamed source would fire a W005 diff on that field;
+//     the renamed source would fire a W005 diff on that field. The display
+//     NAME follows the same doctrine (W9-D, W8-Q P3-5): resources.name is
+//     the projection of the type's NameField value, so the merged resource
+//     keeps showing the NEW name — before W9-D a port/ptp_port rename left
+//     the old display name on the merged resource forever;
 //  3. the new resource is deleted (its pending attribute change proposals
 //     vanish via the v11 resource_id CASCADE — documented behavior; its
 //     SourceRef rows are deliberately left in place, see the honest-gap
@@ -242,6 +246,12 @@ func (s *Service) Apply(ctx context.Context, id string) (RenameItem, error) {
 		if err := tx.Resources.UpdateAttributes(ctx, old.ID, old.Attributes, now); err != nil {
 			return fmt.Errorf("renames: apply %s: sync key attributes: %w", id, err)
 		}
+		if name := displayNameOf(old.Type, newRes); name != "" {
+			old.Name = name
+			if err := tx.Resources.UpdateName(ctx, old.ID, old.Name, now); err != nil {
+				return fmt.Errorf("renames: apply %s: sync display name: %w", id, err)
+			}
+		}
 		if _, err := tx.Resources.DeleteByID(ctx, rp.NewResourceID); err != nil {
 			return fmt.Errorf("renames: apply %s: delete new resource: %w", id, err)
 		}
@@ -282,6 +292,28 @@ func syncKeyComponentAttributes(old, newRes domain.Resource) {
 			old.Attributes[name] = v
 		}
 	}
+}
+
+// displayNameOf resolves the merged display name from the NEW resource: the
+// value is looked up in the new resource's ATTRIBUTES first (the NameField
+// semantics — base_station_name is an ordinary attribute), with the new
+// resource's own Name as the fallback: key-class name fields (port_name of
+// port/ptp_port, pool_name of ip_pool) never enter the attributes (the
+// importer excludes natural-key fields), but the importer computed the new
+// resource's Name from exactly that field at insert time — so newRes.Name
+// carries the renamed value there. An empty result means "no new-side name
+// evidence" and the caller keeps the stored name (the same non-empty-wins
+// doctrine as the key-component sync).
+func displayNameOf(t domain.ResourceType, newRes domain.Resource) string {
+	spec, ok := mapping.SpecByType(t)
+	if !ok {
+		return newRes.Name // defensive: the closed set always resolves
+	}
+	name := newRes.Attributes[spec.NameField()]
+	if name == "" {
+		name = newRes.Name
+	}
+	return name
 }
 
 // Reject refuses a pending rename proposal (pending → rejected): the two

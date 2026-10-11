@@ -45,8 +45,9 @@ type SchemaType struct {
 }
 
 // SchemaField is the projection of one FieldSpec. Kind is the field's value
-// type; Enum/IntMin/RefType/Synonyms appear only when the spec sets them
-// (IntMin 0 means "no lower bound" and is omitted — IntMax is not projected).
+// type; Enum/IntMin/IntMax/RefType/Synonyms appear only when the spec sets
+// them (IntMin/IntMax 0 means "no bound" and is omitted — W9-D added IntMax:
+// the vlan_id upper bound 4094 used to be invisible to schema consumers).
 type SchemaField struct {
 	Name       string              `json:"name"`
 	Label      string              `json:"label"`
@@ -55,6 +56,7 @@ type SchemaField struct {
 	Kind       FieldKind           `json:"kind"`
 	Enum       []string            `json:"enum,omitempty"`
 	IntMin     int                 `json:"intMin,omitempty"`
+	IntMax     int                 `json:"intMax,omitempty"`
 	RefType    domain.ResourceType `json:"refType,omitempty"`
 	Synonyms   []string            `json:"synonyms,omitempty"`
 }
@@ -103,6 +105,7 @@ func projectType(spec TypeSpec) SchemaType {
 			Kind:       f.Kind,
 			Enum:       f.Enum,
 			IntMin:     f.IntMin,
+			IntMax:     f.IntMax,
 			RefType:    f.RefType,
 			Synonyms:   f.Synonyms,
 		})

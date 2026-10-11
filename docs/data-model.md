@@ -587,7 +587,7 @@ CREATE INDEX idx_rename_proposals_batch ON rename_proposals(batch_id);
 - **生命周期**：`pending`（导入记录）→ `applied`（人工确认合并，`decided_at` 打点）或 `rejected`（人工拒绝，两资源独立）；后两者为终态，重复 apply/reject 均拒绝（409）。
 - **id 前缀**：`rp_`（`domain.NewID`，UUID）。
 - **resource_id = 旧资源（身份保留方）**：ON DELETE CASCADE——旧资源被删（含回滚删除链）则其改名史随之消失；`new_resource_id` 刻意**无 FK**（apply 删除它指向的行，id 必须以纯文本活下来作审计）。`batch_id` 刻意**无 cascade**（同 v11 裁决）：回滚只显式删本批 pending 提案，applied/rejected 是与批次生命周期解耦的人工决策审计线。
-- **apply 的合并事务**（单 DB.Do）：关系 retarget（UNIQUE 撞车删新侧边）→ 键分量属性同步（`TypeSpec.KeyComponentNames`，新侧非空者覆写旧资源——防「键换了而 base_station_name 还留旧值」引发的假 W005）→ 删新资源（其 pending 属性变更随 v11 CASCADE）→ 旧资源换键 + updated_at 刷新 → 提案置 applied。**旧资源代理键 res_x 与 SourceRef 不动**。
+- **apply 的合并事务**（单 DB.Do）：关系 retarget（UNIQUE 撞车删新侧边）→ 键分量属性同步（`TypeSpec.KeyComponentNames`，新侧非空者覆写旧资源——防「键换了而 base_station_name 还留旧值」引发的假 W005）→ **展示名 Name 同步**（v0.5 W9-D：`resources.name` 跟随新名——NameField 属性值优先，键类名称字段取新资源自身 name；非空才覆写，与键分量同步同口径）→ 删新资源（其 pending 属性变更随 v11 CASCADE）→ 旧资源换键 + updated_at 刷新 → 提案置 applied。**旧资源代理键 res_x 与 SourceRef 不动**。
 - **与 W005 的对偶**：W005 记「键不变数据变」，本表记「键变数据不变」；两通道都只产生待确认提案，人工确认才生效——「自动合并」在整个身份治理体系里不存在。
 - **API/CLI 面**：`GET /api/renames` + `POST …/{id}/apply|reject`；CLI `netopslab renames … list|apply|reject`。**MCP 工具面 5 个冻结不变**。
 - **与撤销红线的零交集**：本表属**资源域**；`internal/sim` 零引用（同 v11 立场）。

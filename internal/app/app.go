@@ -1,8 +1,9 @@
-// Package app wires the NetOps Lab services together: configuration, the
-// slog JSON logger, the SQLite repository, the import/validation/query/report
-// services and the HTTP API server. Both `netopslab serve` and the tests
-// (httptest.NewServer(app.Routes())) mount the same wiring; the CLI
-// subcommands (internal/app/cli.go) reuse App for their service access.
+// Package app wires the NetOps Lab application: configuration, the slog JSON
+// logger, the SQLite repository, the service composition root (internal/
+// services — the single assembly point, W9-D) and the HTTP API server. Both
+// `netopslab serve` and the tests (httptest.NewServer(app.Routes())) mount
+// the same wiring; the CLI subcommands (internal/app/cli.go) reuse App for
+// their service access.
 package app
 
 import (
@@ -24,6 +25,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/report"
+	"github.com/mmqz/netops-lab/internal/services"
 	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/validation"
 )
@@ -62,6 +64,11 @@ type App struct {
 	Log *slog.Logger
 	// DB is the SQLite repository.
 	DB *repo.DB
+	// Services is the single service composition root (W9-D): every field
+	// below aliases an instance of it, and the same instance flows into the
+	// HTTP API (a.API) and the MCP server (cli's cmdMCP) — one assembly,
+	// shared everywhere, no dead second wiring.
+	Services *services.Services
 	// Importer is the import pipeline service.
 	Importer *importer.Service
 	// Validation is the set-level validation engine.
@@ -106,19 +113,26 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("app: open db %s: %w", cfg.DBPath, err)
 	}
 
+	// W9-D: ONE composition root (internal/services) — the App fields alias
+	// its instances and the SAME instance is handed to the HTTP API, so the
+	// pre-W9-D dead assembly (the API building its own second service set
+	// from the bare db) is gone. The MCP server consumes it too (cmdMCP
+	// passes a.Services to mcpserver.Run).
+	svc := services.New(db)
 	a := &App{
 		Config:     cfg,
 		Log:        log,
 		DB:         db,
-		Importer:   importer.New(db),
-		Validation: validation.New(db),
-		Query:      query.New(db),
-		Changes:    changes.New(db),
-		Renames:    renames.New(db),
-		Lab:        sim.New(db),
-		Report:     report.New(db),
+		Services:   svc,
+		Importer:   svc.Importer,
+		Validation: svc.Validation,
+		Query:      svc.Query,
+		Changes:    svc.Changes,
+		Renames:    svc.Renames,
+		Lab:        svc.Lab,
+		Report:     svc.Report,
 	}
-	a.API = api.New(log, db, cfg.DataDir)
+	a.API = api.New(log, svc, cfg.DataDir)
 	return a, nil
 }
 

@@ -117,6 +117,86 @@ func (s *Service) SearchResources(ctx context.Context, f SearchFilter) (PageResu
 	return PageResult[ResourceItem]{Items: items, Total: total, Page: f.Page, PageSize: f.PageSize}, nil
 }
 
+// SourceSearchFilter selects resources the way the MCP resource_search tool
+// pages: raw Limit/Offset (0-based offset, limit 0..N — the caller validates
+// and caps; the repo treats Limit <= 0 as unlimited) instead of the 1-based
+// Page/PageSize envelope of SearchFilter. Q/Type semantics are identical to
+// SearchFilter.
+type SourceSearchFilter struct {
+	Type   domain.ResourceType
+	Q      string
+	Limit  int
+	Offset int
+}
+
+// ResourceSource is the resolved provenance of one resource: the workbook,
+// sheet and 1-based row of its CREATING import.
+type ResourceSource struct {
+	Workbook  string `json:"workbook"`
+	Sheet     string `json:"sheet"`
+	RowNumber int    `json:"rowNumber"`
+}
+
+// ResourceWithSource pairs one resource item with its resolved creating
+// source. Source is nil — and ApplicationGenerated true — exactly when the
+// resource has no source refs at all (e.g. simulation materialization).
+type ResourceWithSource struct {
+	ResourceItem
+	Source               *ResourceSource `json:"source,omitempty"`
+	ApplicationGenerated bool            `json:"applicationGenerated"`
+}
+
+// SearchResourcesWithSource runs the resource search and resolves, in ONE
+// batched source_refs query (repo SourceRefs.ListByEntityIDs), the CREATING
+// source of every hit: the ref whose batch matches the resource's
+// FirstBatchID, falling back to the earliest recorded ref (rowid order) when
+// no ref matches (W7-D version refs make the fallback the earliest version).
+// The per-item semantics are byte-identical to the pre-W9-D MCP
+// implementation, which resolved them one ListByEntity query per row (N+1);
+// this method is the single-query replacement the MCP tool now calls. Total
+// counts the matches ignoring limit/offset.
+func (s *Service) SearchResourcesWithSource(ctx context.Context, f SourceSearchFilter) ([]ResourceWithSource, int, error) {
+	if f.Type != "" && !f.Type.IsValid() {
+		return nil, 0, fmt.Errorf("query: search resources with source: invalid type %q: %w", f.Type, domain.ErrNotFound)
+	}
+	resources, total, err := s.db.Resources.Search(ctx, repo.ResourceSearchFilter{
+		Type:   f.Type,
+		Q:      f.Q,
+		Limit:  f.Limit,
+		Offset: f.Offset,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("query: search resources with source: %w", err)
+	}
+	ids := make([]string, len(resources))
+	for i, r := range resources {
+		ids[i] = r.ID
+	}
+	refsByID, err := s.db.SourceRefs.ListByEntityIDs(ctx, domain.EntityKindResource, ids)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query: resolve creating sources: %w", err)
+	}
+	items := make([]ResourceWithSource, 0, len(resources))
+	for _, r := range resources {
+		item := ResourceWithSource{ResourceItem: newResourceItem(r)}
+		for _, ref := range refsByID[r.ID] {
+			if ref.BatchID == r.FirstBatchID {
+				item.Source = &ResourceSource{Workbook: ref.Workbook, Sheet: ref.Sheet, RowNumber: ref.RowNumber}
+				break
+			}
+		}
+		if item.Source == nil && len(refsByID[r.ID]) > 0 {
+			ref := refsByID[r.ID][0]
+			item.Source = &ResourceSource{Workbook: ref.Workbook, Sheet: ref.Sheet, RowNumber: ref.RowNumber}
+		}
+		if item.Source == nil {
+			item.ApplicationGenerated = true
+		}
+		items = append(items, item)
+	}
+	return items, total, nil
+}
+
 // SourceRefItem is the source provenance of one imported row: the workbook,
 // sheet and 1-based Excel row that produced an entity, plus the raw row as
 // {header: value} pairs.

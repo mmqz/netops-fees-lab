@@ -187,7 +187,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 **update-on-diff 导入模式**（闭环 R4 裁决「IP 变 = 属性变更事件」，natural-keys.md §2/§6 差距 #1/#2；表结构 `resource_attribute_changes` 见 [data-model.md](data-model.md) §14）：
 
 - **diff-skip 语义**：同键再导入命中库内资源时，取该行映射后的属性字段值（**非键、非枚举、非空**——与首次导入的 attributes 归集同口径），与库内资源逐字段比较。**仅 new 值非空且 ≠ old 的字段**产生一条 pending 变更提案（field/old_value/new_value + sheet/row_number）；行本身**仍走 skip**（row_result 语义不变、rule_code 保持 E001），发一条 **W005** warning issue（evidence：type/natural_key/resource_id/fields/change_count/sheet/row_number），diff 非空才记。diff 为空 → 纯 skip，零 issue 零新提案（TestReimportIdempotent 语义不破坏；W7-D 起 skip 追加一行 source_refs 版本记录，行语义不变，见 §17）。**空新值永不记录**（空值不写属性的既有语义：首轮导入该列为空的字段，再导也带不来空值覆盖）；枚举（status）字段不参与（attrs 本就不含）。
-- **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染）。**MCP 工具面 5 个冻结**——AI 不得经 MCP 改资源属性。
+- **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。**Name 同步**（v0.5 W9-D）：apply 的变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时，`resources.name` 一并写成新值——name 是该字段值的投影，不同步则资源列表永远显示旧名；非 NameField 字段的 apply 不触碰 name。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染）。**MCP 工具面 5 个冻结**——AI 不得经 MCP 改资源属性。
 - **幂等去重口径**：同一资源同一字段已有 **pending** 且 new 值相同 → 再导不重复记录（也不重记 W005，零痕迹）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409。
 - **回滚不对称**：批次回滚删除链删**本批 pending 提案**；applied/dismissed 保留（人工决策与导入批次生命周期解耦的审计线）；提案的资源被本批删除时 FK 级联连带删除其全部记录（含终态）——被审计资源已不存在，正确行为。见 §5 回滚节。
 - **边界声明**：apply 只写 attributes 快照，**不重建派生关系**——ref 类字段（如 machine_room.site_id 属性快照）的变更走属性通道时，belongs_to 关系不随之变化；ref 变更的正确路径是回滚批次后重新导入（E003 顺序约束重新生效）。
@@ -231,7 +231,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 1. 校验：提案必须 pending（否则 409 `conflict`）；旧资源存在（被删则提案已 CASCADE 消失 → 404）；新资源必须仍存在——被批次回滚了则 409 `target_missing`（改名证据随批次消失，把旧资源改向从未落地的键是错的，建议 reject）。
 2. 新资源的关系 retarget 到旧资源 id（from/to 两端；撞 UNIQUE(from,to,type) 的删新侧边——重复边是双重记账的产物）。
-3. **键分量属性同步**：新资源的键分量字段（自然键字段 + 兜底字段，`TypeSpec.KeyComponentNames`）里非空者覆写旧资源同名属性——改名后键与其来源属性（如 base_station_name）必须一致，否则每次再导都触发假 W005；新侧为空/缺省则保留库内值（未映射列不是空值证据）。其余属性**证明相等**（匹配前置条件），无需同步。
+3. **键分量属性同步 + Name 同步**：新资源的键分量字段（自然键字段 + 兜底字段，`TypeSpec.KeyComponentNames`）里非空者覆写旧资源同名属性——改名后键与其来源属性（如 base_station_name）必须一致，否则每次再导都触发假 W005；新侧为空/缺省则保留库内值（未映射列不是空值证据）。其余属性**证明相等**（匹配前置条件），无需同步。**展示名 Name 一并同步**（v0.5 W9-D）：`resources.name` 是该类型 NameField 值的投影，合并后取新名——取值先看新资源 attributes 里的 NameField 值，键类名称字段（port/ptp_port 的 port_name、ip_pool 的 pool_name）不进 attributes 时取新资源自身的 name（导入时正是按该字段算出的），非空才覆写、同「非空者胜」口径。
 4. 删新资源（其 pending 属性变更随 v11 CASCADE 消失——文档化行为）。
 5. 旧资源 natural_key = 新键（新资源已删故 UNIQUE 无碰撞）+ updated_at 刷新；提案置 applied + decided_at。**旧资源代理键 res_x、关系、SourceRef 不动**（新资源的 SourceRef 行刻意保留为审计痕迹；旧资源的来源谱系版本化自 v0.5 W7-D 起落地——skip 即版本，见 §17 与 natural-keys §6 #4）。
 

@@ -288,6 +288,28 @@ func (r *ResourceRepo) UpdateNaturalKey(ctx context.Context, id, naturalKey stri
 	return nil
 }
 
+// UpdateName rewrites the display name of the resource with the given id
+// and refreshes updated_at. It is the W9-D name-sync write of the two apply
+// flows: resources.name is the projection of the type's NameField value, so
+// a confirmed rename (renames service — the name follows the merged key
+// components) and a confirmed change ON the name field itself (changes
+// service — base_station_name, device_name, …) must both keep it aligned; a
+// stale name would contradict the attribute it was derived from. An unknown
+// id answers domain.ErrNotFound.
+func (r *ResourceRepo) UpdateName(ctx context.Context, id, name string, updatedAt time.Time) error {
+	res, err := r.q.ExecContext(ctx, `UPDATE resources SET name = ?, updated_at = ? WHERE id = ?`,
+		name, formatTime(updatedAt), id)
+	if err != nil {
+		return fmt.Errorf("repo: update name of resource %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("repo: update name of resource %s: rows affected: %w", id, err)
+	} else if n == 0 {
+		return fmt.Errorf("repo: update name of resource %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
+}
+
 // DeleteByID deletes one resource by id and returns whether a row was
 // deleted. The rename apply flow (renames service) uses it to remove the
 // short-lived new resource after its relations were retargeted — its

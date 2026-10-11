@@ -97,6 +97,11 @@ func TestApplyMergeIsAtomicAndAudited(t *testing.T) {
 	if old.Attributes["base_station_name"] != "动力机房2新" || old.Attributes["base_station_ip"] != "172.7.10.125/30" {
 		t.Errorf("old attributes after apply = %v, want the key-bearing name synced to 动力机房2新 and the matched field kept", old.Attributes)
 	}
+	// W9-D: the display NAME follows the merge (base_station_name is the
+	// NameField and an ordinary attribute — the attributes lookup wins).
+	if old.Name != "动力机房2新" {
+		t.Errorf("old resource name after apply = %q, want 动力机房2新 (the display name follows the merged identity)", old.Name)
+	}
 	if _, err := db.Resources.GetByID(ctx, "res_new"); err == nil {
 		t.Errorf("new resource must be deleted by the merge")
 	}
@@ -302,4 +307,80 @@ func contains(sub, s string) bool {
 		}
 	}
 	return false
+}
+
+// TestApplySyncsResourceNameForKeyClassNameField pins the W9-D name sync on
+// the KEY-CLASS name field shape (W8-Q P3-5, the original complaint): for
+// port/ptp_port the NameField (port_name) is a natural-key component, so it
+// never enters the attributes — the new resource's own Name (computed from
+// exactly that field at import time) carries the renamed value. A port
+// fixture mirrors the shape: the merged resource must end up with the new
+// key AND the new display name.
+func TestApplySyncsResourceNameForKeyClassNameField(t *testing.T) {
+	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	if err != nil {
+		t.Fatalf("repo.Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("db.Close: %v", err)
+		}
+	})
+	ctx := context.Background()
+	err = db.Do(ctx, func(tx *repo.Tx) error {
+		if err := tx.Batches.Create(ctx, domain.ImportBatch{
+			ID: "bat_port", WorkbookName: "ports.xlsx", WorkbookSHA256: "abc123",
+			Status: domain.BatchStatusCompleted, Mapping: "{}", RuleVersion: domain.RuleVersion,
+			StartedAt: simTS,
+		}); err != nil {
+			return err
+		}
+		// port natural key = device_name|port_name; port_name (the NameField)
+		// is a KEY field, so it is absent from the attributes — exactly the
+		// shape that used to leave the stale display name behind.
+		if err := tx.Resources.Insert(ctx, domain.Resource{
+			ID: "res_port_old", Type: domain.ResourceTypePort, NaturalKey: "B2|gei_1/7", Name: "gei_1/7",
+			Attributes:   map[string]string{"device_ip": "10.0.0.2"},
+			FirstBatchID: "bat_port", CreatedAt: simTS, UpdatedAt: simTS,
+		}); err != nil {
+			return err
+		}
+		return tx.Resources.Insert(ctx, domain.Resource{
+			ID: "res_port_new", Type: domain.ResourceTypePort, NaturalKey: "B2|gei_1/8", Name: "gei_1/8",
+			Attributes:   map[string]string{"device_ip": "10.0.0.2"},
+			FirstBatchID: "bat_port", CreatedAt: simTS, UpdatedAt: simTS,
+		})
+	})
+	if err != nil {
+		t.Fatalf("seed port resources: %v", err)
+	}
+	if err := db.RenameProposals.Insert(ctx, domain.RenameProposal{
+		ID: "rp_port", ResourceID: "res_port_old", NewResourceID: "res_port_new", BatchID: "bat_port",
+		ResourceType: domain.ResourceTypePort, OldKey: "B2|gei_1/7", NewKey: "B2|gei_1/8",
+		MatchedFields: []string{"device_ip"},
+		Status:        domain.RenameStatusPending, Sheet: "端口资源表", RowNumber: 2, CreatedAt: simTS,
+	}); err != nil {
+		t.Fatalf("seed proposal: %v", err)
+	}
+	svc := New(db)
+	svc.Now = func() time.Time { return simTS.Add(time.Hour) }
+
+	if _, err := svc.Apply(ctx, "rp_port"); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	merged, err := db.Resources.GetByID(ctx, "res_port_old")
+	if err != nil {
+		t.Fatalf("GetByID after apply: %v", err)
+	}
+	if merged.NaturalKey != "B2|gei_1/8" {
+		t.Errorf("merged natural key = %q, want B2|gei_1/8", merged.NaturalKey)
+	}
+	// The name-sync pin itself: the display name carries the renamed value
+	// even though port_name never lives in the attributes.
+	if merged.Name != "gei_1/8" {
+		t.Errorf("merged display name = %q, want gei_1/8 (the new-side name follows the merge; the W8-Q P3-5 stale-name gap)", merged.Name)
+	}
+	if merged.Attributes["device_ip"] != "10.0.0.2" {
+		t.Errorf("merged attributes = %v, want the matched field kept", merged.Attributes)
+	}
 }
