@@ -4,7 +4,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已随批次回滚消失，见 §POST /api/renames/{id}/apply）。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已随批次回滚消失，见 §POST /api/renames/{id}/apply）。
 - 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
@@ -31,7 +31,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 - `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界；intMax 未投影）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
 - `rules[]`（规则目录，按码序 E001→E006 / W001→W006 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
 
-以下为真实输出截断（完整响应含 7 类共 66 字段与 13 条规则）：
+以下为真实输出截断（完整响应含 8 类共 89 字段与 13 条规则）：
 
 ```json
 {
@@ -127,6 +127,25 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
       "description": "name-keyed resource likely renamed (same attrs, new key) awaits confirmation (row)"
     },
     {
+      "type": "ptp_port",
+      "label": "PTP端口",
+      "sheetHint": "PTP配置",
+      "nameField": "port_name",
+      "nameFieldOverride": "port_name",
+      "naturalKeyFields": ["device_model", "port_name"],
+      "fields": [
+        {
+          "name": "device_model",
+          "label": "设备型号",
+          "kind": "string",
+          "required": true,
+          "naturalKey": true,
+          "synonyms": ["设备型号"]
+        }
+        /* … 其余 22 字段（接口名称/注释/端口号/端口状态/时钟参数…）同形状，完整输出见 live 端点 … */
+      ]
+    },
+    {
       "code": "I001",
       "severity": "info",
       "description": "device with zero relations (set)"
@@ -138,7 +157,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 ## POST /api/imports — 上传并分析工作簿
 
-multipart/form-data，字段名 `file`，仅 `.xlsx`，≤10MB（压缩尺寸超出 → 413 `too_large`）。**解压后尺寸另有上限（v0.3.2，zip 炸弹防护）**：单 sheet 物化行数 > 100,000（含表头）或全簿物化单元格总数 > 5,000,000 → **422 `workbook_too_large`**（"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"）。解析为逐 sheet 流式读取，超限即中止，不会整表先物化。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
+multipart/form-data，字段名 `file`，扩展名 `.xlsx` / `.txt` / `.cfg`（W8-D 起文本脚本放行），≤10MB（压缩尺寸超出 → 413 `too_large`）。**PTP 配置脚本通道（W8-D）**：`.txt`/`.cfg` 内容须含脚本特征（同时出现 `config ter` 与 `ptp`）→ 解析为「PTP配置」虚拟 sheet 走同一映射/导入管线（解析规则与语义见 [import-and-validation.md](import-and-validation.md) §18）；无特征 → 422 `unsupported_script`；解析失败 → 422 `script_parse_error`（消息含行号）。其它扩展名维持 422 `not_xlsx`。**解压后尺寸另有上限（v0.3.2，zip 炸弹防护）**：单 sheet 物化行数 > 100,000（含表头）或全簿物化单元格总数 > 5,000,000 → **422 `workbook_too_large`**（"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"）。解析为逐 sheet 流式读取，超限即中止，不会整表先物化。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
 
 上传落盘为内容寻址存储 `dataDir/uploads/<sha256>_<原名>.xlsx`；**孤儿上传清理（v0.4.0）**：`serve` 启动时（HTTP 监听启动前、串行执行）与 CLI `netopslab gc --db <db> --data <dir>` 会删除 uploads 下未被任何批次 `workbook_path` 引用的文件（任何状态的批次都算引用——含 failed/rolled_back）；MCP 进程不触发清理。见 [docs/import-and-validation.md](import-and-validation.md) §15。
 

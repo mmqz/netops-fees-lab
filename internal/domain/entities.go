@@ -20,7 +20,9 @@ type Resource struct {
 
 // Relation is a typed edge between two resources. Current closed set:
 // assigned_to (ip_pool → device), a_end and z_end (circuit → device),
-// belongs_to (machine_room → site, v0.4 W3-D).
+// belongs_to (machine_room → site, v0.4 W3-D); ptp_port (v0.5 W8-D)
+// derives no relations — the config scripts carry model-level template
+// identity, no device-instance identity.
 type Relation struct {
 	ID             string
 	Type           RelationType

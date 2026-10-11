@@ -1,0 +1,129 @@
+6150配置脚本	
+config ter	
+interface gei-1/1/0/7	
+  ptp enable	
+  ptp pdelay-req-interval 0	
+  ptp unsymmetrical-offset 0 negative	
+$	
+ptp	
+free-mode	
+    port interface gei-1/1/0/7 portnum 6	
+      enable	
+      manual-port-state master	
+    $	
+end	
+write	
+	
+show ptp port-state all	查看接口状态，接BBU口master为正常。
+	
+6130XG-S配置脚本	
+config ter	
+ptp clock-mode boundary	
+ptp state-algorithm alternate-bmc	
+ptp priority1 128	
+ptp priority2 128	
+ptp local-priority 128	
+ptp clock-class 187	
+ptp clock-accuracy 254	
+ptp domain-delay-mechanism e2e	
+ptp announce-interval -3	
+ptp announce-timeout 6	
+ptp domain-num 24	
+ptp utc-trace auto holdover 24	
+ssmclock usessm	
+ssmclock ssm-mode exp-ssm	
+ssmclock sec-quality 11	
+ssmclock wtr-time 5	
+ssmclock config	
+  synchronization-clock line gei_1/1 2 unframe auto-ssm 11	
+!	
+!	
+interface gei_1/7	互联口
+ptp enable	
+ptp pdelay-req-interval 0	
+ptp packet-rcv-mode forward	
+exit	
+interface gei_1/7.31	
+ptp enable	
+  ptp sync-interval -1	
+  ptp delay-req-interval -1	
+  ptp network-protocol ipv4	
+  ptp transfer-mode multicast	
+  ptp vlan-priority 7	
+exit	
+interface gei_1/1	BBU
+  switchport access vlan 4003	
+  ptp enable	
+  ptp pdelay-req-interval 0	
+  ptp packet-rcv-mode forward	
+!	
+ptp add vlan4003	
+!	
+vlan 4003	
+  l2_switch enable	
+  ptp enable	
+  ptp port-state master	
+  ptp sync-interval -4	
+  ptp delay-req-interval -4	
+  ptp network-protocol ieee802	
+  ptp transfer-mode multicast	
+!	
+end	
+write	
+	
+show ptp port-state	
+	
+一、6120H/6180H配置脚本	
+config ter	
+ssm	
+  usessm	
+  ssm-mode exp-ssm	
+  synchronization-clock line xgei-1/1/0/1	互联端口
+  priority line xgei-1/1/0/1 2               	互联端口
+  receive-quality line xgei-1/1/0/1 11      	互联端口
+exit	
+ptp	
+  announce-timeout 6	
+  domain 24	
+  state-algorithm bmc	
+  free-mode	
+    port interface xgei-1/1/0/1.31 portnum 2	互联端口,编号2开始使用，累计顺延使用，不能重复
+      enable	
+      network-protocol ipv4	
+    $	
+  $	
+$	
+	
+2、开通基站脚本	
+ptp	
+  free-mode	
+    port interface xgei-1/1/0/2 portnum 5  	接BBU口,编号2开始使用，累计顺延使用，不能重复
+      enable	
+       manual-port-state master	
+    $	
+  $	
+$	
+	
+3、闭环脚本：	
+config ter	
+ssm	
+  usessm	
+  ssm-mode exp-ssm	
+  synchronization-clock line xgei-1/1/0/1    	互联端口
+  priority line xgei-1/1/0/1 2              	互联端口，2是优先级，顺序使用
+  receive-quality line xgei-1/1/0/1 11	互联端口
+exit	
+ptp	
+  announce-timeout 6	
+  domain 24	
+  state-algorithm bmc	
+  free-mode	
+    port interface xgei-1/1/0/1.31 portnum 2	互联端口,编号2开始使用，累计顺延使用，不能重复
+      enable	
+      network-protocol ipv4	
+    $	
+  $	
+$	
+地市	区县	设备名称	IP地址	机房ID	机房名称	局站ID	局站名称	
+大兴	呼区	源1	4.8.14.8	23100120000018049	呼	231001824048	源	
+

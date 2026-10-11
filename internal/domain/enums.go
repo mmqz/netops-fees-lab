@@ -15,6 +15,7 @@ const (
 	ResourceTypeBaseStation ResourceType = "base_station"
 	ResourceTypeSite        ResourceType = "site"
 	ResourceTypeMachineRoom ResourceType = "machine_room"
+	ResourceTypePTPPort     ResourceType = "ptp_port"
 )
 
 // String implements fmt.Stringer.
@@ -22,14 +23,16 @@ func (t ResourceType) String() string { return string(t) }
 
 // IsValid reports whether t is a known resource type. The values must stay
 // in sync with the resources table CHECK constraint (migrations v1 + v6 +
-// v9 + v10: 'device', 'ip_pool', 'circuit', 'port', 'base_station', 'site',
-// 'machine_room'). port and base_station resources carry no derived
-// relations; site is a plain container; machine_room derives belongs_to
-// relations to site (RelationTypeBelongsTo).
+// v9 + v10 + v13: 'device', 'ip_pool', 'circuit', 'port', 'base_station',
+// 'site', 'machine_room', 'ptp_port'). port, base_station and ptp_port
+// resources carry no derived relations; site is a plain container;
+// machine_room derives belongs_to relations to site
+// (RelationTypeBelongsTo). ptp_port (v0.5 W8-D) is the per-model PTP port
+// template row synthesized from ZTE VRP configuration scripts.
 func (t ResourceType) IsValid() bool {
 	switch t {
 	case ResourceTypeDevice, ResourceTypeIPPool, ResourceTypeCircuit, ResourceTypePort,
-		ResourceTypeBaseStation, ResourceTypeSite, ResourceTypeMachineRoom:
+		ResourceTypeBaseStation, ResourceTypeSite, ResourceTypeMachineRoom, ResourceTypePTPPort:
 		return true
 	}
 	return false

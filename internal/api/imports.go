@@ -32,10 +32,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleImportUpload implements POST /api/imports: multipart field "file",
-// .xlsx only, ≤10MB. The upload is stored at
-// dataDir/uploads/<sha256>_<name>.xlsx (content-addressed, overwriting an
+// .xlsx workbook or PTP configuration script (.txt/.cfg), ≤10MB. The
+// upload is stored at
+// dataDir/uploads/<sha256>_<name> (content-addressed, overwriting an
 // identical prior upload), then analyzed via the importer with the user's
 // original file name as the batch's display name (202 + Analysis JSON).
+// Script uploads enter the same analyze → confirm → import pipeline: the
+// workbook layer parses the script and synthesizes the virtual sheet (W8-D).
+// Content errors surface as 422 script_parse_error (malformed script, the
+// message carries the script line number) or 422 unsupported_script (a
+// .txt/.cfg without the PTP fingerprint) from the analyze step; an
+// extension outside .xlsx/.txt/.cfg is rejected up front with 422 not_xlsx.
 // An unconfigured (empty) dataDir fails fast with 500: the analyze step
 // reads the workbook back from the stored path, so a relative "uploads/…"
 // path could never work (AUD1-10 residue, now guarded at the entry).
@@ -70,9 +77,9 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "bad_request", "上传文件名无效")
 		return
 	}
-	if ext := strings.ToLower(filepath.Ext(name)); ext != ".xlsx" {
+	if ext := strings.ToLower(filepath.Ext(name)); ext != ".xlsx" && ext != ".txt" && ext != ".cfg" {
 		respondError(w, http.StatusUnprocessableEntity, "not_xlsx",
-			fmt.Sprintf("仅支持 .xlsx 工作簿，收到 %q", filepath.Ext(name)))
+			fmt.Sprintf("仅支持 .xlsx 工作簿或 PTP 配置脚本（.txt/.cfg），收到 %q", filepath.Ext(name)))
 		return
 	}
 
@@ -91,7 +98,8 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Content-addressed storage: <sha256>_<original name>.xlsx.
+	// Content-addressed storage: <sha256>_<original name> (the extension of
+	// the user's file is preserved — the script channel sniffs on it).
 	sum := sha256.Sum256(data)
 	stored := filepath.Join(s.dataDir, "uploads", hex.EncodeToString(sum[:])+"_"+name)
 	if err := os.MkdirAll(filepath.Join(s.dataDir, "uploads"), 0o755); err != nil {

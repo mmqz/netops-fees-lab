@@ -46,7 +46,8 @@ func newBaseStationResource(id, batchID string) domain.Resource {
 //     round-trips (matched_fields JSON array included), the status CHECK
 //     rejects bogus values, both foreign keys are enforced, the resource_id
 //     ON DELETE CASCADE removes the proposal with its resource, and
-//     MAX(version) == 12;
+//     MAX(version) == 12 (withoutV12 removed v12 AND every later migration,
+//     so the upgrade under test stops at v12 — v13 stays unapplied here);
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV12AddsRenameProposals(t *testing.T) {
 	dir := t.TempDir()

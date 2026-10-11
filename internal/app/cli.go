@@ -222,7 +222,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 // import itself (analyze + execute + auto-validation) is `netopslab import`.
 func cmdAnalyze(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("analyze")
-	file := fs.String("file", "", "工作簿路径 (.xlsx)，必填")
+	file := fs.String("file", "", "工作簿路径（.xlsx）或 PTP 配置脚本（.txt/.cfg），必填")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -259,7 +259,7 @@ type importResponse struct {
 // import summary with issue counts.
 func cmdImport(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("import")
-	file := fs.String("file", "", "工作簿路径 (.xlsx)，必填")
+	file := fs.String("file", "", "工作簿路径（.xlsx）或 PTP 配置脚本（.txt/.cfg），必填")
 	mapFile := fs.String("map", "", "映射 JSON 文件路径（§8 结构），必填")
 	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
 	if err := fs.Parse(args); err != nil {
@@ -619,7 +619,7 @@ func cmdChangesDismiss(ctx context.Context, a *App, args []string, stdout, stder
 func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("query resources")
 	q := fs.String("q", "", "搜索关键词（natural_key/name/attributes 模糊匹配）")
-	typ := fs.String("type", "", "资源类型：device / ip_pool / circuit / port / base_station / site / machine_room")
+	typ := fs.String("type", "", "资源类型：device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port")
 	status := fs.String("status", "", "状态过滤")
 	page := fs.Int("page", 1, "页码（1 起）")
 	pageSize := fs.Int("pageSize", query.DefaultPageSize, "每页条数（最大 100）")
@@ -633,7 +633,7 @@ func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stder
 	if *typ != "" {
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
-			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station/site/machine_room，收到 %q", *typ), usage: usage.String()}
+			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station/site/machine_room/ptp_port，收到 %q", *typ), usage: usage.String()}
 		}
 		filter.Type = t
 	}
@@ -1286,7 +1286,7 @@ func cmdRenames(args []string, stdout, stderr io.Writer) error {
 func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("renames list")
 	status := fs.String("status", "", "状态过滤：pending / applied / rejected / all（缺省 all）")
-	typ := fs.String("type", "", "资源类型过滤：device / ip_pool / circuit / port / base_station / site / machine_room")
+	typ := fs.String("type", "", "资源类型过滤：device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port")
 	resourceID := fs.String("resource-id", "", "按资源 id 过滤")
 	batchID := fs.String("batch-id", "", "按导入批次 id 过滤")
 	limit := fs.Int("limit", renames.DefaultPageSize, "每页条数（最大 100）")
@@ -1313,7 +1313,7 @@ func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr i
 	if *typ != "" {
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
-			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station/site/machine_room，收到 %q", *typ), usage: usage.String()}
+			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station/site/machine_room/ptp_port，收到 %q", *typ), usage: usage.String()}
 		}
 		filter.ResourceType = t
 	}

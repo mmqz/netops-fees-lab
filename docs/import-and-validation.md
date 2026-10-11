@@ -261,3 +261,33 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **E001 批内重复不记**：失败行到不了 skip 检查点（见上），同批重复键不会产生第二条版本行。
 - **读侧触点**：资源详情 API/前端「来源」标签展示完整版本列表（列表渲染已有，零改动）；**MCP 溯源仍展示首源**（FirstBatchID 匹配逻辑不受排序与多版本影响，展示语义不变）；rename apply 后新资源的 SourceRef 行保留为审计痕迹（W6-D 语义不变），旧资源的版本链完整。
 - 测试钉死（internal/importer/sourcerefversion_test.go + repo/api 同名测试）：纯 skip 2 版本 / diff-skip 2 版本且 pending 提案并存 / E001 批内重复不追加 / 回滚版本随批消失 / ListByEntity 版本序（插入序非 batch_id 字典序）/ 详情 API 三轮导入三版本。
+
+
+## 18. PTP 配置脚本导入通道（v0.5，W8-D）
+
+第 4 类真实电信材料形态：中兴 VRP 风格 PTP 配置脚本（文本，非 xlsx）。**架构 = 解析器产出「虚拟 sheet」→ 完整复用既有 analyze → 映射确认 → 导入执行管线**——脚本通道没有旁路，E001-E006/W001-W006/I001 全规则、幂等、回滚、SourceRef 版本化（§17）、改名检测（§16）全部天然适用。
+
+### 18.1 通道入口与嗅探
+
+- `workbook.Read`：扩展名 `.txt`/`.cfg` 且内容同时出现 `config ter` 与 `ptp` 脚本特征 → 走 `internal/ptpconfig` 解析器；否则 xlsx 路径（语义零变化）。`.xlsx` 扩展名永远走 excelize。
+- HTTP `POST /api/imports`：扩展名白名单 `.xlsx`/`.txt`/`.cfg`；`.txt`/`.cfg` 内容无脚本特征 → 422 `unsupported_script`；解析失败（语法）→ 422 `script_parse_error`（消息含行号）；其它扩展名维持 422 `not_xlsx`。
+- CLI：`netopslab analyze --file <script.txt>` / `import --file <script.txt> --map <map.json>` 与 xlsx 完全同流程。
+
+### 18.2 解析规则（internal/ptpconfig，确定性、带行号错误）
+
+- 脚本块以「<型号>配置脚本」标题行分界（如 `6150配置脚本` → device_model=6150）；`config ter`/`end`/`write`/`$`/`!`/`exit` 为结构关键字；CRLF/空行容错。
+- 接口块 `interface <name>[\t<注释>]`——tab 后缀为该端口的注释属性（如「互联口」「BBU」）；块内 `ptp enable` 及各 `ptp <param>` 行归该端口；`port interface <name> portnum <n>` 归 PTP 块端口参数。
+- 全局 PTP 时钟参数（`ptp clock-mode`/`priority1`/`domain-num`/`ssmclock *` 等）记录在该型号的所有端口行上（扁平重复落列——表格式资源的诚实形态）。
+- 块外说明行（`show ptp port-state all\t查看接口状态…`）不是配置，解析忽略（样例保留该行作为真实形态证据）。
+- **枚举字段落点（通用机制声明）**：`delay_mechanism` 是 ptp_port 唯一枚举字段——按既有枚举机制落入 `resources.status` 列（不进 attributes JSON）：坏值触发 W002（文案为通用的「状态值未知」）、值丢弃行照常导入；枚举不参与 W005 属性 diff（再导改枚举值=纯 skip 零 warning）。
+- vlan 块（`vlan 4003`）不是接口，不产生行；`synchronization-clock line` 行的接口归属解析器按测试钉死的规则处理（见 ptpconfig golden 测试）。
+
+### 18.3 虚拟 sheet 与映射
+
+- 解析结果合成单 sheet「PTP配置」，列头用 ptp_port spec 的中文同义词（设备型号/接口名称/注释/端口号/…）——**既有 SuggestType 同义词匹配自动建议 ptp_port 类型**（实测 confidence 0.75、23 列全映射），映射确认页与 xlsx 完全同交互（可改选类型/改映射）。
+- 执行时按 batch.workbook_path 重新读取脚本并重新解析（解析确定性 ⇒ 同文件同结果），行级记账/issue/幂等与 xlsx 通道一致：**再导同一脚本 → 纯 skip 零 issue + SourceRef 版本行追加（§17）**；改接口名再导 → W006 疑似改名提案（§16，键名称类分量）。
+
+### 18.4 诚实声明
+
+- **模型级模板身份**：脚本只携带设备型号（标题行），不携带设备实例身份——ptp_port 行表达「该型号模板下此接口的 PTP 配置」；与 device 资源的实例级关联需要脚本未提供的数据（编号/名称），故无 ref 字段、无派生关系。
+- 脚本通道当前仅支持 PTP 配置形态（第 1 个解析器）；其它脚本家族沿用此框架扩展（解析器接口不变，新 spec + 列头同义词即可）。

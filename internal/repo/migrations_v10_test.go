@@ -10,24 +10,32 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 )
 
-// withoutV10 temporarily removes migration v10 from the registry so the next
-// Open builds a GENUINE v9 database (migrations v1–v9 applied, resources
-// CHECK without site/machine_room, relations CHECK without belongs_to). The
-// registry is restored via t.Cleanup so later tests in this package are
-// unaffected even on failure. The package never runs these migrations
-// concurrently (no t.Parallel in the repo package), so mutating the
-// package-level list between Opens is safe — the withoutV9 precedent.
-func withoutV10(t *testing.T) {
+// withoutV10 temporarily removes migration v10 AND every later migration
+// (v11, v12, v13, …) from the registry so the next Open builds a GENUINE
+// v9 database (migrations v1–v9 applied, resources CHECK without
+// site/machine_room, relations CHECK without belongs_to). Necessary
+// adaptation for v13 (W8-D): v13's cumulative resources CHECK also carries
+// site/machine_room, so leaving later migrations registered would mask the
+// v10 regression the test pins — the same adaptation withoutV9 received
+// when v10 landed. The registry is restored via t.Cleanup; the removed
+// tail (v10+) is returned for Phase 2's full-registry reopen. The package
+// never runs these migrations concurrently (no t.Parallel in the repo
+// package), so mutating the package-level list between Opens is safe.
+func withoutV10(t *testing.T) []Migration {
 	t.Helper()
 	restored := append([]Migration(nil), migrations...)
 	filtered := make([]Migration, 0, len(migrations))
+	var removed []Migration
 	for _, m := range migrations {
-		if m.Version != 10 {
+		if m.Version <= 9 {
 			filtered = append(filtered, m)
+		} else {
+			removed = append(removed, m)
 		}
 	}
 	migrations = filtered
 	t.Cleanup(func() { migrations = restored })
+	return removed
 }
 
 // seedRelation inserts one relation (bypassing the importer) between two
@@ -72,8 +80,9 @@ func TestMigrationV10AddsSiteMachineRoom(t *testing.T) {
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
-	// Phase 1: genuine v9 database (no v10 in the registry).
-	withoutV10(t)
+	// Phase 1: genuine v9 database (no v10 — and nothing later — in the
+	// registry); tail keeps the removed v10+ migrations for Phase 2.
+	tail := withoutV10(t)
 	db1, err := Open(path)
 	if err != nil {
 		t.Fatalf("open at v9: %v", err)
@@ -122,8 +131,9 @@ func TestMigrationV10AddsSiteMachineRoom(t *testing.T) {
 		t.Fatalf("close v9 db: %v", err)
 	}
 
-	// Phase 2: restore the full registry and reopen — v10 applies.
-	migrations = append(append([]Migration(nil), migrations...), migrationV10)
+	// Phase 2: restore the full registry (the tail Phase 1 removed) and
+	// reopen — v10 (and v11+) apply, so the upgrade path matches production.
+	migrations = append(append([]Migration(nil), migrations...), tail...)
 	sort.Slice(migrations, func(i, j int) bool { return migrations[i].Version < migrations[j].Version })
 	db2, err := Open(path)
 	if err != nil {
@@ -206,11 +216,11 @@ func TestMigrationV10AddsSiteMachineRoom(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	// v11 now also applies on this Open (the registry holds it), so the max
-	// version advances with the schema; the v10 assertions of THIS test were
-	// 10 before v11 existed.
-	if maxV != 12 {
-		t.Errorf("max schema version after upgrade = %d, want 12", maxV)
+	// v11 (and now v13) also applies on this Open (the registry holds it),
+	// so the max version advances with the schema; the v10 assertions of
+	// THIS test were 10 before v11 existed and 12 before v13 (W8-D).
+	if maxV != 13 {
+		t.Errorf("max schema version after upgrade = %d, want 13", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.
@@ -222,8 +232,8 @@ func TestMigrationV10AddsSiteMachineRoom(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 12 {
-		t.Errorf("max schema version after reopen = %d, want 12", maxV)
+	if maxV != 13 {
+		t.Errorf("max schema version after reopen = %d, want 13", maxV)
 	}
 	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeMachineRoom, "23100120000018049"); err != nil {
 		t.Errorf("GetByTypeKey(machine_room) after reopen: %v", err)

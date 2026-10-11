@@ -39,7 +39,7 @@
 
 ## 4. 每类型自然键策略表
 
-### 已实现类型（封闭集 = device / ip_pool / circuit / port / base_station / site / machine_room，schema v10）
+### 已实现类型（封闭集 = device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port，schema v10/v13）
 
 | 资源类型 | 自然键（现状） | 状态与裁决 |
 | --- | --- | --- |
@@ -50,6 +50,7 @@
 | **base_station 基站** | **条件键**：主键 `base_station_code`（基站编码，全局唯一）；**任一主键值空 → 兜底 `(city, base_station_name)` 按序拼接、跳过空值**（无地市列则退化为纯名称） | ✅ **已落地（v0.4 W2-D，schema v9）**：真实无线基站表（样例 `samples/telecom-base-station.xlsx`）的基站编码列存在但值为空——编码是非必填主键，缺失时键退化为地市+名称兜底，**行照常导入并发 W004 治理 issue**（evidence 含所用键与缺失字段）。编码行与名称兜底行天然异键（E001/幂等判重都在解析后的最终键上）。基站IP/网关IP/归属A IP 全部为可变属性（基站IP 真实值带 /30 掩码，故为 string 值列，非身份）。机制通用：`TypeSpec.KeyFallbackFields` 按 spec 声明驱动，base_station 是首个使用者 |
 | **site 局站** | `site_id`（局站ID，12 位数字编码，全局唯一） | ✅ **已落地（v0.4 W3-D，schema v10）**：真实机房局站表（样例 `samples/telecom-site-machine-room.xlsx`）同一张 sheet 的局站读法。**键为 KindString 而非数字类型**：数字编码是系统签发的数字串，前导零是身份的一部分（数字解析会丢失前导零导致身份分裂），且编码无任何算术语义。局站名称/设备名称为昵称（展示名/属性），IP地址为可变属性。局站是纯容器：无 ref 字段、不派生关系 |
 | **machine_room 机房** | `machine_room_id`（机房ID，17 位数字编码，全局唯一）；同表可选 ref 字段 `site_id`（局站ID，非键） | ✅ **已落地（v0.4 W3-D，schema v10）**：同一张 sheet 的机房读法（双类型导入故事：先局站后机房）。键同为 KindString（前导零同理）。`site_id` 为**可选 ref**：映射后按 E003 既有语义解析（局站须先入库，否则行失败），解析成功自动建 `machine_room --belongs_to--> site` 关系；不映射则导入成功零关系（每行 W001 孤儿警告，同 ip_pool.assigned_device 语义）。机房名称为展示名，设备名称为机房内设备昵称（属性非 ref——设备键是 device_code，本表自由文本无法解析），IP地址为可变属性 |
+| **ptp_port PTP 端口** | 复合键 `device_model + port_name`（`|` 拼接，如 `6150\|gei-1/1/0/7`、`6130XG-S\|gei_1/7`） | ✅ **已落地（v0.5 W8-D，schema v13）**：真实中兴 VRP 配置脚本（样例 `samples/ptp-config-script.txt`）经脚本导入通道解析为虚拟 sheet 后走既有映射/导入管线。设备型号取自脚本标题行（「6150配置脚本」→ 6150）——**模型级模板身份**（脚本不携带设备实例身份，实例级关联需脚本未提供的数据，诚实声明）；接口名两种真实形态（`gei-1/1/0/7` 连字符 / `gei_1/7` 下划线）均按原文入库。名称类复合键 → 开启 `RenameDetection`（W006 改名检测适用）。无 ref 字段、不派生关系。`device_model`/`port_name` 同为名称类键分量，教义同 port：IP 一律不出现（脚本无 IP），改名走人工确认 |
 
 ### 规划类型
 

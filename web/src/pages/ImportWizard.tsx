@@ -1,6 +1,6 @@
 /**
  * 数据导入页 /import：三步向导。
- * ① 上传工作簿（拖拽 + 选择，.xlsx ≤ 10MB 客户端校验）
+ * ① 上传工作簿/PTP 脚本（拖拽 + 选择，.xlsx/.txt/.cfg ≤ 10MB 客户端校验）
  * ② 映射确认（每工作表：导入/跳过、资源类型、逐列目标字段，必填校验）
  * ③ 执行结果（汇总卡片 + 按状态筛选的行明细 + 后续动作）
  */
@@ -50,7 +50,7 @@ import {
   IMP_DROPZONE_DESC,
   IMP_DROPZONE_RETRY,
   IMP_DROPZONE_TITLE,
-  IMP_ERR_NOT_XLSX,
+  IMP_ERR_FILE_TYPE,
   IMP_ERR_REQUIRED_UNMAPPED,
   IMP_ERR_TOO_LARGE,
   IMP_ERR_RETRY_HINT,
@@ -62,6 +62,7 @@ import {
   IMP_NATURAL_KEY_FALLBACK,
   IMP_NATURAL_KEY_NAME_SCOPE,
   IMP_NATURAL_KEY_PORT_COMPOSITE,
+  IMP_NATURAL_KEY_PTP_COMPOSITE,
   IMP_NATURAL_KEY_TAG,
   IMP_REF_FIELD_NOTE,
   IMP_REF_FIELD_SHORT,
@@ -132,8 +133,9 @@ function severityForRule(code: string): Severity {
 }
 
 function validateFile(file: File): string | null {
-  if (!file.name.toLowerCase().endsWith('.xlsx')) {
-    return IMP_ERR_NOT_XLSX;
+  const lower = file.name.toLowerCase();
+  if (!lower.endsWith('.xlsx') && !lower.endsWith('.txt') && !lower.endsWith('.cfg')) {
+    return IMP_ERR_FILE_TYPE;
   }
   if (file.size > MAX_FILE_SIZE) {
     return IMP_ERR_TOO_LARGE;
@@ -290,6 +292,13 @@ function isPortCompositeKey(type: ResourceType): boolean {
   return type === 'port';
 }
 
+/** 该类型是否为 ptp_port 复合键（device_model|port_name，v0.5 W8-D）：
+ *  模型级模板键，展示 ptp_port 专属提示（而非通用名称作用域文案——
+ *  键已固定为 型号|接口，无从追加地市分量；改名走 W006 确认流）。 */
+function isPTPPortCompositeKey(type: ResourceType): boolean {
+  return type === 'ptp_port';
+}
+
 /** 该类型是否声明了条件自然键兜底且兜底含名称字段（base_station：
  *  主键 base_station_code 不会命中 hasNameNaturalKey，需独立判定）：展示
  *  键退化语义提示（编码缺失 → 地市|名称 兜底 + W004 治理问题）。 */
@@ -443,6 +452,11 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
             <span className="key-note key-note--info">
               <IconInfo size={14} />
               <span>{IMP_NATURAL_KEY_PORT_COMPOSITE}</span>
+            </span>
+          ) : isPTPPortCompositeKey(draft.resourceType) ? (
+            <span className="key-note key-note--info">
+              <IconInfo size={14} />
+              <span>{IMP_NATURAL_KEY_PTP_COMPOSITE}</span>
             </span>
           ) : hasConditionalKeyFallback(draft.resourceType) ? (
             <span className="key-note key-note--info">
@@ -702,7 +716,7 @@ export function ImportWizardPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx"
+            accept=".xlsx,.txt,.cfg"
             className="visually-hidden"
             onChange={handlePick}
           />

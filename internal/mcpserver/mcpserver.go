@@ -54,7 +54,7 @@ const (
 // reserved and rejected).
 type searchInput struct {
 	Q      string `json:"q,omitempty" jsonschema:"搜索关键词：natural_key/name/attributes 不区分大小写的包含匹配"`
-	Type   string `json:"type,omitempty" jsonschema:"资源类型过滤：device、ip_pool、circuit、port、base_station、site 或 machine_room"`
+	Type   string `json:"type,omitempty" jsonschema:"资源类型过滤：device、ip_pool、circuit、port、base_station、site、machine_room 或 ptp_port"`
 	Limit  *int   `json:"limit,omitempty" jsonschema:"返回条数上限，缺省 20，最大 100"`
 	Offset *int   `json:"offset,omitempty" jsonschema:"返回起始偏移，缺省 0"`
 }
@@ -145,7 +145,7 @@ func resourceSearch(ctx context.Context, db *repo.DB, in searchInput) (searchOut
 	if in.Type != "" {
 		t, err := domain.ParseResourceType(in.Type)
 		if err != nil {
-			return searchOutput{}, fmt.Errorf("type 必须是 device、ip_pool、circuit、port、base_station、site 或 machine_room，收到 %q", in.Type)
+			return searchOutput{}, fmt.Errorf("type 必须是 device、ip_pool、circuit、port、base_station、site、machine_room 或 ptp_port，收到 %q", in.Type)
 		}
 		filter.Type = t
 	}

@@ -109,6 +109,7 @@ export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
   base_station: '基站',
   site: '局站',
   machine_room: '机房',
+  ptp_port: 'PTP端口',
 };
 
 /**
@@ -222,6 +223,29 @@ export const FIELD_LABELS: Record<string, string> = {
   machine_room_id: '机房ID',
   machine_room_name: '机房名称',
   ip_address: 'IP地址',
+  // ptp_port（v0.5 W8-D）：PTP 配置脚本导入的模型级端口模板字段
+  device_model: '设备型号',
+  annotation: '注释',
+  portnum: '端口号',
+  port_state: '端口状态',
+  free_mode: '自由模式',
+  pdelay_req_interval: '延迟请求间隔',
+  unsymmetrical_offset: '非对称偏移',
+  delay_mechanism: '延迟机制',
+  domain_num: '域号',
+  clock_mode: '时钟模式',
+  state_algorithm: '状态算法',
+  priority1: '优先级1',
+  priority2: '优先级2',
+  local_priority: '本地优先级',
+  clock_class: '时钟等级',
+  clock_accuracy: '时钟精度',
+  announce_interval: '通告间隔',
+  announce_timeout: '通告超时',
+  utc_trace: 'UTC追踪',
+  ssm_mode: 'SSM模式',
+  ssm_sec_quality: 'SSM质量等级',
+  ssm_wtr_time: 'SSM等待恢复时间',
 };
 
 export const FIELD_KIND_LABELS: Record<string, string> = {
@@ -286,12 +310,12 @@ export const IMP_STEP3 = '执行结果';
 export const STEPPER_LABEL = '导入流程步骤';
 
 export const IMP_DROPZONE_TITLE = '拖拽工作簿到此处，或点击选择文件';
-export const IMP_DROPZONE_DESC = '支持 .xlsx 格式，单个文件不超过 10MB';
+export const IMP_DROPZONE_DESC = '支持 .xlsx 工作簿与 PTP 配置脚本（.txt/.cfg），单个文件不超过 10MB';
 export const IMP_DROPZONE_RETRY = '重试上传';
 export const IMP_SELECTED_FILE = '已选择文件：{name}（{size}）';
 export const IMP_ROW_SOURCE = '{sheet} · 行 {row}';
 export const IMP_UPLOADING = '正在上传并解析…';
-export const IMP_ERR_NOT_XLSX = '请选择 .xlsx 格式的工作簿文件';
+export const IMP_ERR_FILE_TYPE = '请选择 .xlsx 工作簿或 .txt/.cfg PTP 配置脚本文件';
 export const IMP_ERR_TOO_LARGE = '文件大小超过 10MB 上限';
 export const IMP_FILE_SIZE = '文件大小';
 export const IMP_UPLOADED_INFO = '已上传：{workbook} · {sheets} 个工作表 · 批次 {batchId}';
@@ -325,6 +349,9 @@ export const IMP_NATURAL_KEY_NAME_SCOPE =
 /** port 复合键专属正向提示（migration v8 起）：键已锚定设备名称，IP 重划不再分裂。 */
 export const IMP_NATURAL_KEY_PORT_COMPOSITE =
   '端口键 = 设备名称|端口名称：设备重划 IP 不再影响资源身份（设备IP 为普通值列）';
+/** ptp_port 复合键专属提示（v0.5 W8-D，PTP 配置脚本通道）：模型级模板键。 */
+export const IMP_NATURAL_KEY_PTP_COMPOSITE =
+  'PTP端口键 = 设备型号|接口名称：配置脚本为模型级模板（无设备实例身份，不派生关系）；接口在脚本修订中改名时走 W006 疑似改名确认流';
 /** 条件自然键提示（base_station，v0.4）：编码缺失时键退化为兜底字段并记 W004。 */
 export const IMP_NATURAL_KEY_FALLBACK =
   '基站键 = 基站编码（全局唯一）；编码为空时退化为 地市|无线基站名称 兜底键（缺地市列则为纯名称），并记录 W004 治理问题（行照常导入）';

@@ -1,5 +1,5 @@
 /**
- * 资源类型徽章：网元设备 / IP地址池 / 传输电路 / 设备端口 / 基站 / 局站 / 机房。
+ * 资源类型徽章：网元设备 / IP地址池 / 传输电路 / 设备端口 / 基站 / 局站 / 机房 / PTP端口。
  */
 
 import type { ResourceType } from '../api/types';
@@ -13,6 +13,7 @@ const TYPE_VARIANTS: Record<ResourceType, string> = {
   base_station: 'chip--base-station',
   site: 'chip--site',
   machine_room: 'chip--machine-room',
+  ptp_port: 'chip--ptp-port',
 };
 
 export function TypeChip({ type }: { type: ResourceType }) {

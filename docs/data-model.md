@@ -1,6 +1,6 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **12**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表 `resource_attribute_changes` 与 v12 改名提案表 `rename_proposals` 为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **13**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表 `resource_attribute_changes`、v12 改名提案表 `rename_proposals` 与 v13 ptp_port 类型（resources CHECK 扩容）为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
@@ -591,3 +591,34 @@ CREATE INDEX idx_rename_proposals_batch ON rename_proposals(batch_id);
 - **与 W005 的对偶**：W005 记「键不变数据变」，本表记「键变数据不变」；两通道都只产生待确认提案，人工确认才生效——「自动合并」在整个身份治理体系里不存在。
 - **API/CLI 面**：`GET /api/renames` + `POST …/{id}/apply|reject`；CLI `netopslab renames … list|apply|reject`。**MCP 工具面 5 个冻结不变**。
 - **与撤销红线的零交集**：本表属**资源域**；`internal/sim` 零引用（同 v11 立场）。
+
+
+# DDL v13 — ptp_port 资源类型（resources CHECK 扩容重建）
+
+> Migration `13` name `ptp_port_type`（`internal/repo/migrations_v13.go`，`init()` 自注册模式同 v4–v12）。**当前 schema version = 13**。SQLite 无法就地改 CHECK，resources 表在单个 ForeignKeysOff 迁移内重建（v9 模板：专用连接、pragma 在事务外、`PRAGMA foreign_key_check` 提交前门、恢复 pragma）——relations 表零触碰（ptp_port 无 ref 字段、不派生关系）。新 CHECK 八类型封闭集 `('device','ip_pool','circuit','port','base_station','site','machine_room','ptp_port')`。
+
+## 16. ptp_port 类型（W8-D）
+
+`ptp_port` = PTP 配置脚本解析行（第 4 类真实电信材料，脚本导入通道见 [import-and-validation.md](import-and-validation.md) §18）：复合自然键 `device_model|port_name`（`|` 拼接，如 `6150|gei-1/1/0/7`），23 字段（接口级 PTP 参数 + 型号级时钟参数扁平重复落列 + 接口行 tab 注释；唯一枚举字段 `delay_mechanism` 按通用枚举机制落 `resources.status` 列而非 attributes——W002/幂等语义同既有类型，见 import-and-validation.md §18.2）。存储复用 resources 表本体（attributes JSON），代理键 `res_x` 与 UNIQUE(resource_type, natural_key) 语义同既有七类；模型级模板身份的诚实声明见 §18.4。v13 全文：
+
+```sql
+CREATE TABLE resources_new (
+  id TEXT PRIMARY KEY,
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('device','ip_pool','circuit','port','base_station','site','machine_room','ptp_port')),
+  natural_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  attributes TEXT NOT NULL DEFAULT '{}',
+  status TEXT,
+  first_batch_id TEXT NOT NULL REFERENCES import_batches(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (resource_type, natural_key)
+);
+
+INSERT INTO resources_new (id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at)
+SELECT id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at
+FROM resources;
+
+DROP TABLE resources;
+ALTER TABLE resources_new RENAME TO resources;
+```

@@ -7,7 +7,7 @@ package importer
 // incremental-import false-positive face (declared, not fixed), the
 // idempotent re-import, the relation retarget through the renames service
 // apply (an ip_pool rename carries a real assigned_to edge — the one e2e
-// relation scenario the seven types have for a rename candidate), and the
+// relation scenario the pre-ptp_port types have for a rename candidate), and the
 // rollback asymmetry.
 
 import (
@@ -378,7 +378,7 @@ func TestImportRenameIncrementalFalsePositive(t *testing.T) {
 }
 
 // TestImportRenameApplyRetargetsRelations walks the one E2E relation
-// scenario the seven types offer for a rename candidate: an ip_pool rename
+// scenario the pre-ptp_port types offer for a rename candidate: an ip_pool rename
 // carries the pool's assigned_to edge. Import POOL-1 (assigned to DEV-001),
 // re-import the sheet with the pool renamed (same cidr/gateway/vlan) → new
 // resource + edge + W006 + proposal; apply through the renames service →

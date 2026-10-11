@@ -6,8 +6,8 @@
 //   - reports failures through the uniform error envelope
 //     {"error":{"code","message"}} with proper status codes
 //     (400 bad_request/validation, 404 not_found, 409 batch_in_use/conflict,
-//     413 too_large, 422 not_xlsx/empty_workbook/workbook_too_large, 500
-//     internal).
+//     413 too_large, 422 not_xlsx/empty_workbook/workbook_too_large/
+//     unsupported_script/script_parse_error, 500 internal).
 //
 // Cross-cutting concerns live in the middleware stack installed by Routes:
 // panic recovery (500 + logged stack, no leak to the client) and request
@@ -33,6 +33,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-lab/internal/ptpconfig"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
@@ -279,7 +280,9 @@ func respondErrorf(w http.ResponseWriter, status int, code, format string, args 
 // message): *mapping.FieldError → 400 validation (the message carries the
 // sheet/field detail the UI points at); workbook sentinels → 422
 // (not_xlsx / empty_workbook / workbook_too_large — the decompressed-size
-// guard of the workbook parser);
+// guard of the workbook parser); PTP script errors → 422
+// (script_parse_error, the message carries the script line number;
+// unsupported_script — a .txt/.cfg without the script fingerprint);
 // domain.ErrNotFound → 404; domain.ErrConflict → 409. Anything else is a
 // 500 (the caller logs it).
 func mapServiceError(err error) (status int, code string, message string) {
@@ -290,6 +293,11 @@ func mapServiceError(err error) (status int, code string, message string) {
 	switch {
 	case errors.Is(err, workbook.ErrNotXLSX):
 		return http.StatusUnprocessableEntity, "not_xlsx", "文件不是有效的 xlsx 工作簿"
+	case errors.Is(err, workbook.ErrUnsupportedScript):
+		return http.StatusUnprocessableEntity, "unsupported_script",
+			"文件不是可识别的 PTP 配置脚本（.txt/.cfg 仅支持中兴 VRP 风格 PTP 配置脚本）"
+	case errors.Is(err, ptpconfig.ErrSyntax):
+		return http.StatusUnprocessableEntity, "script_parse_error", err.Error()
 	case errors.Is(err, workbook.ErrEmptyWorkbook):
 		return http.StatusUnprocessableEntity, "empty_workbook", "工作簿不包含任何数据行"
 	case errors.Is(err, workbook.ErrWorkbookTooLarge):

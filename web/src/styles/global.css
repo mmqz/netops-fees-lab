@@ -675,6 +675,14 @@ th[aria-sort="descending"] .th-sort-indicator {
   color: #9f1239;
 }
 
+/* PTP端口：靛蓝深紫（v0.5 W8-D PTP 配置脚本通道；与 device 亮蓝 / circuit
+   亮紫错开为深靛；#4338ca 对 12% 白底实测对比度 6.48:1、对 slate-50 底
+   6.23:1，满足 AA 文本标准） */
+.chip--ptp-port {
+  background: rgba(67, 56, 202, 0.12);
+  color: #4338ca;
+}
+
 /* 表格内的实体 id 代码芯片（W3：vd-22 / if-9 / ln-4 / cs-3 …） */
 .code-chip {
   display: inline-block;

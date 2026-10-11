@@ -17,7 +17,8 @@ export type ResourceType =
   | 'port'
   | 'base_station'
   | 'site'
-  | 'machine_room';
+  | 'machine_room'
+  | 'ptp_port';
 
 export type Severity = 'error' | 'warning' | 'info';
 

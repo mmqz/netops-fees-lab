@@ -641,16 +641,83 @@ var machineRoomSpec = TypeSpec{
 	},
 }
 
+// ptpPortSpec is the PTP 端口 schema (v0.5, W8-D): one row per PTP-configured
+// interface of a device-model configuration script (the ptpconfig parser
+// synthesizes the virtual sheet; samples/ptp-config-script.txt is the real
+// ZTE VRP material). The natural key is COMPOSITE — device_model +
+// port_name — mirroring the port precedent: a port/interface name repeats
+// across models, and the model scopes it. Both components are NAME-class
+// values (the model title of the script block and the interface name), so
+// the key is name-class and RenameDetection is ON (W006: an interface
+// renamed in a later revision of the script splits identity — the proposal
+// flow lets a human confirm the merge; see docs/natural-keys.md §4).
+// device_model is the MODEL-level template identity, not a device
+// instance: the scripts carry no device codes/IPs, so no ref field and no
+// derived relation exist — an instance-level association would need
+// identity data the scripts do not carry (honest declaration, §18 of
+// import-and-validation.md). Global PTP clock parameters (clock mode,
+// priorities, domain, SSM …) of the model's block are flattened onto every
+// row of that model — the flat table is the honest materialization of "one
+// script block, N interface rows, one global section".
+// NameFieldOverride pins the display name to port_name (device_model is
+// the key's scope component, not the port's own name).
+var ptpPortSpec = TypeSpec{
+	Type:              domain.ResourceTypePTPPort,
+	Label:             "PTP端口",
+	SheetHint:         "PTP", // matches the synthesized virtual sheet "PTP配置"
+	NameFieldOverride: "port_name",
+	RenameDetection:   true, // device_model|port_name composite key: renames split identity (W006)
+	Fields: []FieldSpec{
+		{Name: "device_model", Label: "设备型号", Required: true, NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"设备型号"}},
+		{Name: "port_name", Label: "接口名称", Required: true, NaturalKey: true, Kind: KindString,
+			Synonyms: []string{"接口名称", "接口", "端口名称"}},
+		{Name: "annotation", Label: "注释", Kind: KindString, Synonyms: []string{"注释"}},
+		{Name: "portnum", Label: "端口号", Kind: KindInt, Synonyms: []string{"端口号"}},
+		{Name: "port_state", Label: "端口状态", Kind: KindString,
+			Synonyms: []string{"端口状态"}},
+		{Name: "free_mode", Label: "自由模式", Kind: KindString,
+			Synonyms: []string{"自由模式"}},
+		{Name: "pdelay_req_interval", Label: "延迟请求间隔", Kind: KindInt,
+			Synonyms: []string{"延迟请求间隔"}},
+		{Name: "unsymmetrical_offset", Label: "非对称偏移", Kind: KindString,
+			// string on purpose: the real value carries a textual suffix
+			// ("0 negative"), so a numeric kind would E004 it.
+			Synonyms: []string{"非对称偏移"}},
+		{Name: "delay_mechanism", Label: "延迟机制", Kind: KindEnum,
+			Enum: []string{"e2e", "p2p"}, Synonyms: []string{"延迟机制"}},
+		{Name: "domain_num", Label: "域号", Kind: KindInt, Synonyms: []string{"域号"}},
+		{Name: "clock_mode", Label: "时钟模式", Kind: KindString, Synonyms: []string{"时钟模式"}},
+		{Name: "state_algorithm", Label: "状态算法", Kind: KindString, Synonyms: []string{"状态算法"}},
+		{Name: "priority1", Label: "优先级1", Kind: KindInt, Synonyms: []string{"优先级1"}},
+		{Name: "priority2", Label: "优先级2", Kind: KindInt, Synonyms: []string{"优先级2"}},
+		{Name: "local_priority", Label: "本地优先级", Kind: KindInt, Synonyms: []string{"本地优先级"}},
+		{Name: "clock_class", Label: "时钟等级", Kind: KindInt, Synonyms: []string{"时钟等级"}},
+		{Name: "clock_accuracy", Label: "时钟精度", Kind: KindInt, Synonyms: []string{"时钟精度"}},
+		{Name: "announce_interval", Label: "通告间隔", Kind: KindInt, Synonyms: []string{"通告间隔"}},
+		{Name: "announce_timeout", Label: "通告超时", Kind: KindInt, Synonyms: []string{"通告超时"}},
+		{Name: "utc_trace", Label: "UTC追踪", Kind: KindString,
+			// string on purpose: the real value is a compound ("auto holdover 24").
+			Synonyms: []string{"UTC追踪"}},
+		{Name: "ssm_mode", Label: "SSM模式", Kind: KindString, Synonyms: []string{"SSM模式"}},
+		{Name: "ssm_sec_quality", Label: "SSM质量等级", Kind: KindInt, Synonyms: []string{"SSM质量等级"}},
+		{Name: "ssm_wtr_time", Label: "SSM等待恢复时间", Kind: KindInt, Synonyms: []string{"SSM等待恢复时间"}},
+	},
+}
+
 // Specs lists the resource type schemas in canonical order (device,
-// ip_pool, circuit, port, base_station, site, machine_room). The order is
-// the deterministic tie-breaker of SuggestType and of the suggestion fallback
-// for untyped sheets. site is registered BEFORE machine_room (container
-// first, mirroring the import story 先局站后机房): a sheet named 机房局站表
-// matches BOTH SheetHints (机房 and 局站) and SuggestType therefore suggests
-// site — the suggestion is only a prefill, the mapping confirmation page lets
-// the user switch to machine_room for the second pass. Treat the list as
+// ip_pool, circuit, port, base_station, site, machine_room, ptp_port). The
+// order is the deterministic tie-breaker of SuggestType and of the
+// suggestion fallback for untyped sheets. site is registered BEFORE
+// machine_room (container first, mirroring the import story 先局站后机房): a
+// sheet named 机房局站表 matches BOTH SheetHints (机房 and 局站) and
+// SuggestType therefore suggests site — the suggestion is only a prefill,
+// the mapping confirmation page lets the user switch to machine_room for
+// the second pass. ptp_port's SheetHint "PTP" only matters for the
+// synthesized virtual sheet ("PTP配置"); an xlsx sheet whose name carries
+// 端口/机房/… suggests those types first by order. Treat the list as
 // read-only.
-var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec, siteSpec, machineRoomSpec}
+var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec, siteSpec, machineRoomSpec, ptpPortSpec}
 
 // SpecByType returns the schema of t; ok is false for unknown types.
 func SpecByType(t domain.ResourceType) (TypeSpec, bool) {

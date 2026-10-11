@@ -112,6 +112,36 @@ export const TYPE_SPECS: Record<ResourceType, FieldSpec[]> = {
     { field: 'device_name', required: false, naturalKey: false, kind: 'string' },
     { field: 'ip_address', required: false, naturalKey: false, kind: 'ipv4' },
   ],
+  // PTP端口（v0.5 W8-D，PTP 配置脚本导入通道）：键 = device_model|port_name（模型级模板
+  // 复合键，两分量均为名称类 → W006 改名检测开启）；全局时钟参数按行扁平重复；无 ref
+  // 字段不派生关系（脚本不含设备实例身份）；unsymmetrical_offset/utc_trace 为 string
+  // （真实值含文字后缀 "0 negative" / "auto holdover 24"）；delay_mechanism 为枚举
+  // e2e/p2p。列头 = 各字段中文 Label（同义词首项），虚拟 sheet 经同义词匹配自动建议。
+  ptp_port: [
+    { field: 'device_model', required: true, naturalKey: true, kind: 'string' },
+    { field: 'port_name', required: true, naturalKey: true, kind: 'string' },
+    { field: 'annotation', required: false, naturalKey: false, kind: 'string' },
+    { field: 'portnum', required: false, naturalKey: false, kind: 'int' },
+    { field: 'port_state', required: false, naturalKey: false, kind: 'string' },
+    { field: 'free_mode', required: false, naturalKey: false, kind: 'string' },
+    { field: 'pdelay_req_interval', required: false, naturalKey: false, kind: 'int' },
+    { field: 'unsymmetrical_offset', required: false, naturalKey: false, kind: 'string' },
+    { field: 'delay_mechanism', required: false, naturalKey: false, kind: 'enum' },
+    { field: 'domain_num', required: false, naturalKey: false, kind: 'int' },
+    { field: 'clock_mode', required: false, naturalKey: false, kind: 'string' },
+    { field: 'state_algorithm', required: false, naturalKey: false, kind: 'string' },
+    { field: 'priority1', required: false, naturalKey: false, kind: 'int' },
+    { field: 'priority2', required: false, naturalKey: false, kind: 'int' },
+    { field: 'local_priority', required: false, naturalKey: false, kind: 'int' },
+    { field: 'clock_class', required: false, naturalKey: false, kind: 'int' },
+    { field: 'clock_accuracy', required: false, naturalKey: false, kind: 'int' },
+    { field: 'announce_interval', required: false, naturalKey: false, kind: 'int' },
+    { field: 'announce_timeout', required: false, naturalKey: false, kind: 'int' },
+    { field: 'utc_trace', required: false, naturalKey: false, kind: 'string' },
+    { field: 'ssm_mode', required: false, naturalKey: false, kind: 'string' },
+    { field: 'ssm_sec_quality', required: false, naturalKey: false, kind: 'int' },
+    { field: 'ssm_wtr_time', required: false, naturalKey: false, kind: 'int' },
+  ],
 };
 
 /** 字段中文名（未知字段回退为字段名本身）。 */
