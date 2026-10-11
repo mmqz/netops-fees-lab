@@ -4,7 +4,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已随批次回滚消失，见 §POST /api/renames/{id}/apply）。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已不存在而提案仍在——标准批次回滚会先删本批提案、apply 将得 404，此 409 多为新资源被其它路径直接删除，见 §POST /api/renames/{id}/apply）。
 - 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
@@ -699,7 +699,7 @@ HTTP/1.1 409 Conflict
 
 ## GET /api/renames?status=&resource_id=&resource_type=&batch_id=&limit=&offset= — 疑似改名提案列表
 
-（v0.5 W6-D，migration v12）名称类键类型的新键导入行与旧键消失资源属性全等时记录的**待确认改名提案**（W006）。参数：`status=pending|applied|rejected|all`（缺省 all）；`resource_id`（旧资源=身份保留方）/ `resource_type` / `batch_id` 精确过滤（`resource_type` 非法 → 400）；分页 `limit`（默认 20，>100 截断）/ `offset`（非负，默认 0）——边界遵循 §9 列表端点惯例，同 `GET /api/attribute-changes`。信封 `{"items":[…],"total":n}`，按 `created_at, rowid`（提案入队序）排序。项字段：`id`、`resourceId`（旧资源）、`resourceType` / `naturalKey`（资源侧 join 字段；旧资源被删除时提案随 resource_id CASCADE 先行消失，故列表里 join 恒命中——空串回落分支为防御性实现）、`batchId`、`newResourceId`、`oldKey`、`newKey`、`matchedFields[]`（参与匹配且相等的非键字段名）、`status`、`sheet`、`rowNumber`、`createdAt`、`decidedAt`。
+（v0.5 W6-D，migration v12）名称类键类型的新键导入行与旧键消失资源属性全等时记录的**待确认改名提案**（W006）。参数：`status=pending|applied|rejected|all`（缺省 all）；`resource_id`（**提案任一侧**：`resource_id` 或 `new_resource_id` 命中即返回——v0.5 W11-D 起双侧匹配，W006 issue 深链落在新资源抽屉时面板同样可见）/ `resource_type` / `batch_id` 精确过滤（`resource_type` 非法 → 400）；分页 `limit`（默认 20，>100 截断）/ `offset`（非负，默认 0）——边界遵循 §9 列表端点惯例，同 `GET /api/attribute-changes`。信封 `{"items":[…],"total":n}`，按 `created_at, rowid`（提案入队序）排序。项字段：`id`、`resourceId`（旧资源）、`resourceType` / `naturalKey`（资源侧 join 字段；旧资源被删除时提案随 resource_id CASCADE 先行消失，故列表里 join 恒命中——空串回落分支为防御性实现）、`batchId`、`newResourceId`、`oldKey`、`newKey`、`matchedFields[]`（参与匹配且相等的非键字段名）、`status`、`sheet`、`rowNumber`、`createdAt`、`decidedAt`。
 
 示例（导入基站样例后，把「动力机房2」改名为「动力机房2新」的副本再导一次）：
 
@@ -731,7 +731,7 @@ HTTP/1.1 409 Conflict
 
 确认 pending 提案：单事务完成身份合并——新资源的关系改挂旧资源（UNIQUE 撞车删新侧边）、**键分量属性同步**（新侧非空者覆写旧资源——键换了 base_station_name 也得换，防假 W005）、**展示名 Name 同步**（v0.5 W9-D：`resources.name` 是 NameField 值的投影，合并后跟随新名——键类名称字段如 port_name 不进 attributes 时取新资源自身的 name）、删新资源（其 pending 属性变更随 v11 CASCADE）、旧资源 `natural_key` 换为新键 + `updated_at` 刷新、提案置 `applied` + `decidedAt` 打点。**旧资源代理键 `res_x`、关系身份、SourceRef 不动**——合并是键改挂，不是行替换。→ 200 返回提案对象（apply 后形状）。
 
-非 pending（已 applied/rejected）→ 409 `conflict`（HTTP 为通用文案「操作与当前状态冲突」；CLI 错误信封 message 含具体当前状态，如 applied）；**新资源已不存在**（典型：其导入批次被回滚，改名证据随之消失）→ 409 `target_missing`（消息建议 reject 后按现状重新导入）；未知 id → 404。CLI 等价：`netopslab renames --db … apply --id <id>`（结构化 JSON stdout；冲突 exit 1 + 错误信封）。
+非 pending（已 applied/rejected）→ 409 `conflict`（HTTP 为通用文案「操作与当前状态冲突」；CLI 错误信封 message 含具体当前状态，如 applied）；**新资源已不存在而提案仍在**（诚实口径：标准批次回滚会先删本批 pending 提案、随后的 apply 将得 404；此 409 是防御性守卫，唯一典型可达触发是新资源被其它路径直接删除而提案幸存）→ 409 `target_missing`（消息建议 reject 后按现状重新导入）；未知 id 或提案已随批次回滚消失 → 404。CLI 等价：`netopslab renames --db … apply --id <id>`（结构化 JSON stdout；冲突 exit 1 + 错误信封）。
 
 ## POST /api/renames/{id}/reject — 拒绝改名（维持独立）
 

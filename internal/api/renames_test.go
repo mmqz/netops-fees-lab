@@ -74,8 +74,8 @@ func buildBaseStationWorkbook(t *testing.T, name, stationIP string) []byte {
 
 // baseStationMappingJSON is the confirmed mapping of the 无线基站表 sheet.
 const baseStationMappingJSON = `{"sheets":[
-	{"sheet":"无线基站表","action":"import","resourceType":"base_station","keyColumns":["base_station_code"],
-	 "columnMapping":{"base_station_type":"基站类型","base_station_name":"无线基站名称","base_station_code":"基站编码","sharing":"电联共享","uplink_a_ip":"归属A IP","ring":"环","chain":"链","uplink_a_name":"归属A名称","uplink_a_port":"归属A端口","gateway_ip":"网关IP","base_station_ip":"基站IP","description":"描述","work_order":"工单号","remark":"备注"}}
+        {"sheet":"无线基站表","action":"import","resourceType":"base_station","keyColumns":["base_station_code"],
+         "columnMapping":{"base_station_type":"基站类型","base_station_name":"无线基站名称","base_station_code":"基站编码","sharing":"电联共享","uplink_a_ip":"归属A IP","ring":"环","chain":"链","uplink_a_name":"归属A名称","uplink_a_port":"归属A端口","gateway_ip":"网关IP","base_station_ip":"基站IP","description":"描述","work_order":"工单号","remark":"备注"}}
 ]}`
 
 // importBaseStationWorkbook uploads the workbook and confirms the
@@ -168,6 +168,8 @@ func TestAPIRenamesFlow(t *testing.T) {
 	if page.Total != 0 {
 		t.Fatalf("list by other type total = %d, want 0", page.Total)
 	}
+	// resource_id matches the proposal's EITHER side (W11-D): the old
+	// side (identity keeper)…
 	resp, body = doRequest(t, srv, http.MethodGet, "/api/renames?resource_id="+rp.ResourceID, nil, "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list by resource: status = %d, want 200", resp.StatusCode)
@@ -175,6 +177,16 @@ func TestAPIRenamesFlow(t *testing.T) {
 	decodeJSON(t, "list by resource", body, &page)
 	if page.Total != 1 {
 		t.Fatalf("list by resource total = %d, want 1", page.Total)
+	}
+	// …and the NEW side too — the W006 issue deep-links to the new
+	// resource's drawer, and the pending-renames panel must render there.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/renames?resource_id="+rp.NewResourceID, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list by new resource: status = %d, want 200", resp.StatusCode)
+	}
+	decodeJSON(t, "list by new resource", body, &page)
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != rp.ID {
+		t.Fatalf("list by new resource = %+v (total %d), want the proposal %s (either-side match)", page.Items, page.Total, rp.ID)
 	}
 	// Bad query values are 400s.
 	for _, q := range []string{"status=bogus", "resource_type=vlan", "limit=0", "limit=abc", "offset=-1", "offset=x"} {
@@ -244,12 +256,15 @@ func TestAPIRenamesFlow(t *testing.T) {
 	}
 }
 
-// TestAPIRenamesRejectAndTargetMissing covers the remaining journey: a
-// second proposal is REJECTED (both resources stay independent), and an
-// apply whose new resource vanished (its batch was rolled back) answers 409
-// target_missing with the reject recommendation in the message — the
-// proposal itself stays pending.
-func TestAPIRenamesRejectAndTargetMissing(t *testing.T) {
+// TestAPIRenamesRejectAndRollback covers the remaining journey: a second
+// proposal is REJECTED (both resources stay independent), and the honest
+// ROLLBACK 口径 (W11-D): rolling back the import batch that recorded a
+// pending proposal deletes that proposal with it (rollback delete chain:
+// pending proposals die before the resources), so a later apply of the
+// now-unknown id answers 404 — NOT the 409 target_missing of the direct-
+// delete route (see TestAPIRenameApplyTargetMissingDirectDelete). The
+// rollback response's deleted.renameProposals=1 is asserted on the way.
+func TestAPIRenamesRejectAndRollback(t *testing.T) {
 	srv := newAPITestServer(t)
 
 	importBaseStationWorkbook(t, srv, "学府路2", "172.7.20.1/30")
@@ -287,8 +302,11 @@ func TestAPIRenamesRejectAndTargetMissing(t *testing.T) {
 		t.Errorf("re-reject: status = %d, want 409\nbody: %s", resp.StatusCode, body)
 	}
 
-	// Target missing: a fresh proposal whose import batch is rolled back
-	// (the new resource disappears with it).
+	// Rollback journey: a fresh proposal whose import batch is rolled
+	// back — the pending proposal dies with the batch (delete chain:
+	// pending proposals BEFORE resources), so the new resource is gone
+	// AND a later apply answers 404, never the 409 target_missing (the
+	// direct-delete route is the one that answers 409).
 	importBaseStationWorkbook(t, srv, "站A", "172.7.30.1/30")
 	importBaseStationWorkbook(t, srv, "站A新", "172.7.30.1/30")
 	resp, body = doRequest(t, srv, http.MethodGet, "/api/renames?status=pending", nil, "")
@@ -364,7 +382,7 @@ func TestAPIRenameApplyTargetMissingDirectDelete(t *testing.T) {
 
 	// Delete the NEW resource directly through the repository — NOT the
 	// rollback route (rollback would take the pending proposal with it and
-	// the apply would answer 404; see TestAPIRenamesRejectAndTargetMissing).
+	// the apply would answer 404; see TestAPIRenamesRejectAndRollback).
 	if err := a.DB.Do(context.Background(), func(tx *repo.Tx) error {
 		_, err := tx.Resources.DeleteByID(context.Background(), rp.NewResourceID)
 		return err

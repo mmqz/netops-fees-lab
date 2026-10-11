@@ -289,7 +289,7 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         load();
       })
       .catch((err: unknown) => {
-        // 409（非 pending / 新资源已随批次回滚消失）等 → 行内错误展示
+        // 409（非 pending / 新资源已不存在而提案仍在——target_missing 防御性守卫）等 → 行内错误展示
         const display = formatApiErrorText(err);
         setRenameErrors((prev) => ({ ...prev, [proposal.id]: display }));
       })

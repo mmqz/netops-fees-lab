@@ -1289,7 +1289,7 @@ func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr i
 	fs, usage := newFlagSet("renames list")
 	status := fs.String("status", "", "状态过滤：pending / applied / rejected / all（缺省 all）")
 	typ := fs.String("type", "", "资源类型过滤：device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port")
-	resourceID := fs.String("resource-id", "", "按资源 id 过滤")
+	resourceID := fs.String("resource-id", "", "按资源 id 过滤（提案任一侧：旧资源或新资源均可命中）")
 	batchID := fs.String("batch-id", "", "按导入批次 id 过滤")
 	limit := fs.Int("limit", renames.DefaultPageSize, "每页条数（最大 100）")
 	offset := fs.Int("offset", 0, "偏移量（非负）")

@@ -229,7 +229,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 `POST /api/renames/{id}/apply` / CLI `netopslab renames --db … apply --id <id>`：
 
-1. 校验：提案必须 pending（否则 409 `conflict`）；旧资源存在（被删则提案已 CASCADE 消失 → 404）；新资源必须仍存在——被批次回滚了则 409 `target_missing`（改名证据随批次消失，把旧资源改向从未落地的键是错的，建议 reject）。
+1. 校验：提案必须 pending（否则 409 `conflict`）；旧资源存在（被删则提案已 CASCADE 消失 → 404）；新资源必须仍存在——**新资源已不存在而提案仍在**则 409 `target_missing`（诚实口径：标准批次回滚会先删本批 pending 提案、apply 将得 404；此 409 是防御性守卫，典型可达触发是新资源被其它路径直接删除而提案幸存；把旧资源改向从未落地的键是错的，建议 reject 后按现状重新导入）。
 2. 新资源的关系 retarget 到旧资源 id（from/to 两端；撞 UNIQUE(from,to,type) 的删新侧边——重复边是双重记账的产物）。
 3. **键分量属性同步 + Name 同步**：新资源的键分量字段（自然键字段 + 兜底字段，`TypeSpec.KeyComponentNames`）里非空者覆写旧资源同名属性——改名后键与其来源属性（如 base_station_name）必须一致，否则每次再导都触发假 W005；新侧为空/缺省则保留库内值（未映射列不是空值证据）。其余属性**证明相等**（匹配前置条件），无需同步。**展示名 Name 一并同步**（v0.5 W9-D）：`resources.name` 是该类型 NameField 值的投影，合并后取新名——取值先看新资源 attributes 里的 NameField 值，键类名称字段（port/ptp_port 的 port_name、ip_pool 的 pool_name）不进 attributes 时取新资源自身的 name（导入时正是按该字段算出的），非空才覆写、同「非空者胜」口径。
 4. 删新资源（其 pending 属性变更随 v11 CASCADE 消失——文档化行为）。
@@ -245,7 +245,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 - `GET /api/renames?status=pending|applied|rejected|all&resource_id=&resource_type=&batch_id=&limit=&offset=`（分页边界同 §9 惯例，信封 `{"items":[…],"total":n}`，按 `created_at, rowid` 排序）；`POST /api/renames/{id}/apply|reject`——契约见 [api.md](api.md)。
 - CLI：`netopslab renames --db <db> list [--status --type --limit] | apply --id <id> | reject --id <id>`（结构化 JSON stdout，错误信封 exit 1）。
-- 前端：资源详情抽屉「疑似改名待确认」面板（旧资源侧；确认/拒绝 + 行内错误；无 pending 不渲染）。
+- 前端：资源详情抽屉「疑似改名待确认」面板（**任一侧资源抽屉均渲染**——`resource_id` 过滤匹配提案任一侧，v0.5 W11-D 起；确认/拒绝 + 行内错误；无 pending 不渲染）。
 
 ## 17. 来源引用版本化（v0.5 W7-D）
 

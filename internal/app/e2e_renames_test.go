@@ -106,6 +106,18 @@ func TestCLIRenamesFlow(t *testing.T) {
 	proposalID, _ := item["id"].(string)
 	oldID, _ := item["resourceId"].(string)
 
+	// resource_id filter matches the proposal's EITHER side (W11-D): the
+	// NEW resource's id — where the W006 issue deep-links to — surfaces
+	// the same pending proposal on the CLI list.
+	newID, _ := item["newResourceId"].(string)
+	byNew, code := runCLIJSON(t, "renames list by new resource", "renames", "--db", db, "list", "--resource-id", newID)
+	if code != 0 {
+		t.Fatalf("renames list by new resource: exit %d, want 0", code)
+	}
+	if total, _ := byNew["total"].(float64); total != 1 {
+		t.Fatalf("renames list by new resource total = %v, want 1 (either-side match)", byNew["total"])
+	}
+
 	// renames apply: the old resource keeps its id and takes the new key;
 	// the new resource is gone.
 	applied, code := runCLIJSON(t, "renames apply", "renames", "--db", db, "apply", "--id", proposalID)

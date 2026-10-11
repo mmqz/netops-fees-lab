@@ -15,7 +15,10 @@ import (
 // The pagination bounds follow the §9 list-endpoint conventions (limit
 // defaults to 20, clamps at 100; offset defaults to 0, must be >= 0) — the
 // same contract as GET /api/attribute-changes. status=all (or absent) lists
-// every status; an unknown status is a 400.
+// every status; an unknown status is a 400. resource_id matches the
+// proposal's EITHER side (resource_id = old resource OR new_resource_id —
+// the W006 issue deep-links to the NEW resource's drawer, and the panel
+// must render there too; W11-D either-side semantics).
 func (s *Server) handleRenamesList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := renames.Filter{
@@ -70,9 +73,12 @@ func (s *Server) handleRenamesList(w http.ResponseWriter, r *http.Request) {
 // handleRenameApply implements POST /api/renames/{id}/apply: 200 with the
 // proposal-after-apply object on success; 409 conflict when the proposal is
 // no longer pending (message names the current status); 409 target_missing
-// (TargetMissingError — the new resource vanished, typically with a rolled
-// back batch; the message recommends rejecting) when the merge target is
-// gone; 404 for an unknown id or a vanished old resource.
+// (TargetMissingError — the new resource vanished while the pending
+// proposal survived; honest reachability: a standard batch rollback deletes
+// the batch's pending proposals first, so a rolled-back proposal answers
+// 404 instead — this fires when the new resource was removed by some other
+// path, e.g. a direct delete; the message recommends rejecting) when the
+// merge target is gone; 404 for an unknown id or a vanished old resource.
 func (s *Server) handleRenameApply(w http.ResponseWriter, r *http.Request) {
 	item, err := s.renames.Apply(r.Context(), r.PathValue("id"))
 	if err != nil {

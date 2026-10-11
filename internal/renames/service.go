@@ -74,7 +74,9 @@ type RenameItem struct {
 // Filter selects rename proposals. Empty Status lists every status (the
 // API's status=all); Limit/Offset pagination (limit defaults to 20, clamps
 // at 100, offset >= 0). ResourceID/BatchID/ResourceType are exact-match
-// filters.
+// filters; ResourceID matches the proposal's EITHER side (old resource or
+// new resource — W11-D: the W006 issue anchors on the new resource, so the
+// drawer-side query must surface the proposal from both sides).
 type Filter struct {
 	Status       domain.RenameStatus
 	ResourceID   string
@@ -166,19 +168,24 @@ func newRenameItem(rp domain.RenameProposal, res domain.Resource) RenameItem {
 }
 
 // TargetMissingError reports the apply refusal of the rename confirmation
-// flow: the proposal's NEW resource no longer exists — typically because
-// the import batch that created it was rolled back (the rename evidence
-// died with the batch). Re-pointing the old resource at a key that never
-// materialized would be a merge into nothing, so the apply refuses and
-// recommends rejecting the proposal. The HTTP layer maps it to 409
-// target_missing.
+// flow: the proposal's NEW resource no longer exists while the proposal
+// itself is still pending. Honest reachability note (W11-D): the STANDARD
+// import-batch rollback deletes this batch's pending proposals BEFORE the
+// resources (importer.Rollback → DeletePendingByBatch), so a rolled-back
+// batch leaves no pending proposal behind and a later apply answers 404,
+// not this error. This guard fires only when the new resource vanished
+// through some other path while the proposal survived (e.g. a direct
+// resource delete). Either way re-pointing the old resource at a key whose
+// resource never materialized would be a merge into nothing, so the apply
+// refuses and recommends rejecting the proposal. The HTTP layer maps it to
+// 409 target_missing.
 type TargetMissingError struct {
 	ProposalID    string
 	NewResourceID string
 }
 
 func (e *TargetMissingError) Error() string {
-	return fmt.Sprintf("renames: 提案 %s 的新资源 %s 已不存在（其导入批次可能已回滚，改名证据随之消失）；建议驳回该提案后按现状重新导入",
+	return fmt.Sprintf("renames: 提案 %s 的新资源 %s 已不存在而提案仍在（标准批次回滚会先删本批提案、apply 将得 404；此情形多为新资源被其它路径直接删除）；建议驳回该提案后按现状重新导入",
 		e.ProposalID, e.NewResourceID)
 }
 
@@ -217,7 +224,10 @@ func (e *TargetMissingError) Error() string {
 // Non-pending proposals answer domain.ErrConflict (409, message naming the
 // current status); an unknown id or a vanished OLD resource answers
 // domain.ErrNotFound (404); a vanished NEW resource answers
-// *TargetMissingError (409 target_missing, reject recommended). Returns the
+// *TargetMissingError (409 target_missing, reject recommended — honest
+// reachability: a standard batch rollback takes the pending proposal with
+// it and answers 404 instead, so this fires only when the new resource was
+// removed by some other path, e.g. a direct delete). Returns the
 // proposal-after-apply item.
 func (s *Service) Apply(ctx context.Context, id string) (RenameItem, error) {
 	var item RenameItem
@@ -236,6 +246,14 @@ func (s *Service) Apply(ctx context.Context, id string) (RenameItem, error) {
 		}
 		newRes, err := tx.Resources.GetByID(ctx, rp.NewResourceID)
 		if err != nil {
+			// Defensive guard (W11-D honest reachability note):
+			// the standard rollback path cannot reach here — it
+			// deletes this batch's pending proposals FIRST
+			// (DeletePendingByBatch), so a rolled-back proposal
+			// answers 404 at the Get above. This branch fires
+			// only when the new resource vanished through some
+			// other path (e.g. a direct resource delete) while
+			// the pending proposal survived.
 			return fmt.Errorf("renames: apply %s: %w", id, &TargetMissingError{ProposalID: id, NewResourceID: rp.NewResourceID})
 		}
 		now := s.clock()

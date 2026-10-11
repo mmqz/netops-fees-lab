@@ -96,8 +96,11 @@ func (r *RenameProposalRepo) Get(ctx context.Context, id string) (domain.RenameP
 }
 
 // RenameFilter selects rename proposals. Empty fields mean "no filter"; an
-// empty Status lists every status (the API's status=all). Limit <= 0 means
-// unlimited; offset < 0 means 0.
+// empty Status lists every status (the API's status=all). ResourceID matches
+// the proposal's EITHER side (resource_id = old resource OR
+// new_resource_id — W11-D: the W006 issue anchors on the new resource, so a
+// drawer-side query must surface the proposal from both sides). Limit <= 0
+// means unlimited; offset < 0 means 0.
 type RenameFilter struct {
 	Status       domain.RenameStatus
 	ResourceID   string
@@ -121,8 +124,13 @@ func (r *RenameProposalRepo) List(ctx context.Context, f RenameFilter) ([]domain
 		args = append(args, f.Status.String())
 	}
 	if f.ResourceID != "" {
-		where = append(where, "resource_id = ?")
-		args = append(args, f.ResourceID)
+		// Either side (W11-D): a proposal must surface from BOTH the
+		// old resource's drawer (resource_id = identity keeper) and
+		// the NEW resource's drawer (new_resource_id — where the W006
+		// issue deep-links to). Single-sided matching hid the panel
+		// on the new side.
+		where = append(where, "(resource_id = ? OR new_resource_id = ?)")
+		args = append(args, f.ResourceID, f.ResourceID)
 	}
 	if f.ResourceType != "" {
 		if !f.ResourceType.IsValid() {

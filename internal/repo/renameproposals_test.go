@@ -77,6 +77,7 @@ func TestRenameProposalInsertListAndLifecycle(t *testing.T) {
 	second := rp("rp_2", tsB)
 	second.BatchID = "bat_ren2"
 	second.NewKey = "动力机房2新2"
+	second.NewResourceID = "res_ren_new2" // distinct new side → either-side counts differ
 	if err := db.RenameProposals.Insert(ctx, second); err != nil {
 		t.Fatalf("insert rp_2: %v", err)
 	}
@@ -98,12 +99,15 @@ func TestRenameProposalInsertListAndLifecycle(t *testing.T) {
 		t.Errorf("matched_fields round-trip = %v, want [base_station_ip]", rps[0].MatchedFields)
 	}
 
-	// Filters: resource, batch, type, status; pagination window.
+	// Filters: resource (either side — W11-D), batch, type, status;
+	// pagination window.
 	for _, tc := range []struct {
 		f    RenameFilter
 		want int
 	}{
-		{RenameFilter{ResourceID: "res_ren_old"}, 3},
+		{RenameFilter{ResourceID: "res_ren_old"}, 3},  // old side: all three
+		{RenameFilter{ResourceID: "res_ren_new"}, 2},  // new side: rp_1 + rp_3 (rp_2 points at res_ren_new2)
+		{RenameFilter{ResourceID: "res_ren_new2"}, 1}, // new side of rp_2 only
 		{RenameFilter{ResourceID: "res_nope"}, 0},
 		{RenameFilter{BatchID: "bat_ren2"}, 1},
 		{RenameFilter{ResourceType: domain.ResourceTypeBaseStation}, 3},

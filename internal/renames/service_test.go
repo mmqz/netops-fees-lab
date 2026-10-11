@@ -165,7 +165,10 @@ func TestRejectLeavesResourcesUntouched(t *testing.T) {
 }
 
 // TestApplyTargetMissing pins the 409 target_missing semantics: when the
-// proposal's NEW resource has vanished (rolled-back batch), the apply
+// proposal's NEW resource has vanished while the proposal itself survived
+// (here simulated by a DIRECT delete — the only reachable trigger: a
+// standard batch rollback deletes the batch's pending proposals first, so
+// a rolled-back proposal answers 404 instead), the apply
 // refuses with *TargetMissingError (recommendation: reject) and the old
 // resource keeps its key — re-pointing identity at a key that never
 // materialized would be a merge into nothing.
@@ -228,8 +231,9 @@ func TestApplyVanishedOldResource(t *testing.T) {
 	}
 }
 
-// TestListFiltersAndPagination pins the list contract: status / resource /
-// type / batch filters, the limit clamps and the created_at ordering.
+// TestListFiltersAndPagination pins the list contract: status / resource
+// (either side — W11-D) / type / batch filters, the limit clamps and the
+// created_at ordering.
 func TestListFiltersAndPagination(t *testing.T) {
 	svc, db, _ := newServiceDB(t)
 	ctx := context.Background()
@@ -274,7 +278,9 @@ func TestListFiltersAndPagination(t *testing.T) {
 	}{
 		{Filter{Status: domain.RenameStatusPending}, 3},
 		{Filter{Status: domain.RenameStatusApplied}, 0},
-		{Filter{ResourceID: "res_old2"}, 2},
+		{Filter{ResourceID: "res_old2"}, 2}, // old side (identity keeper), semantics unchanged
+		{Filter{ResourceID: "res_new"}, 1},  // new side of rp_1 (either side — W11-D)
+		{Filter{ResourceID: "res_new2"}, 2}, // new side of rp_2/rp_3
 		{Filter{BatchID: "bat_ren2"}, 2},
 		{Filter{ResourceType: domain.ResourceTypeBaseStation}, 3},
 		{Filter{ResourceType: domain.ResourceTypeDevice}, 0},
