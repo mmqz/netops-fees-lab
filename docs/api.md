@@ -4,7 +4,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已随批次回滚消失，见 §POST /api/renames/{id}/apply）。
 - 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
@@ -29,9 +29,9 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 - `types[]`（按 Specs 注册序）：`type`（资源类型）、`label`（类型中文名）、`sheetHint`（sheet 名建议锚点）、`nameField`（展示名字段——`NameFieldOverride` 优先、否则「first *_name」启发式）、`nameFieldOverride`（显式展示名钉定，仅 port/base_station/machine_room 有）、`naturalKeyFields[]`（主自然键字段，序 = `|` 拼接序）、`keyFallbackFields[]`（条件键兜底字段，v0.4 仅 base_station）、`fields[]`。
 - `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界；intMax 未投影）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
-- `rules[]`（规则目录，按码序 E001→E006 / W001→W005 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
+- `rules[]`（规则目录，按码序 E001→E006 / W001→W006 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
 
-以下为真实输出截断（完整响应含 7 类共 66 字段与 12 条规则）：
+以下为真实输出截断（完整响应含 7 类共 66 字段与 13 条规则）：
 
 ```json
 {
@@ -120,6 +120,11 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
       "code": "W005",
       "severity": "warning",
       "description": "attribute diff on a duplicate-key row awaits confirmation (row)"
+    },
+    {
+      "code": "W006",
+      "severity": "warning",
+      "description": "name-keyed resource likely renamed (same attrs, new key) awaits confirmation (row)"
     },
     {
       "code": "I001",
@@ -645,6 +650,48 @@ HTTP/1.1 409 Conflict
 仅 pending 可忽略：提案置 `dismissed`（`appliedAt` 保持 null），资源永不触碰，审计线保留 → 200 返回变更后对象；非 pending → 409 `conflict`；未知 id → 404。
 
 > **AI 通道边界**：变更确认是 HTTP/CLI 的人类通道——MCP 工具面冻结为 5 个只读工具，AI 不得经 MCP apply/dismiss（引擎仅仿真态操作，红线见 README）。
+
+## GET /api/renames?status=&resource_id=&resource_type=&batch_id=&limit=&offset= — 疑似改名提案列表
+
+（v0.5 W6-D，migration v12）名称类键类型的新键导入行与旧键消失资源属性全等时记录的**待确认改名提案**（W006）。参数：`status=pending|applied|rejected|all`（缺省 all）；`resource_id`（旧资源=身份保留方）/ `resource_type` / `batch_id` 精确过滤（`resource_type` 非法 → 400）；分页 `limit`（默认 20，>100 截断）/ `offset`（非负，默认 0）——边界遵循 §9 列表端点惯例，同 `GET /api/attribute-changes`。信封 `{"items":[…],"total":n}`，按 `created_at, rowid`（提案入队序）排序。项字段：`id`、`resourceId`（旧资源）、`resourceType` / `naturalKey`（资源侧 join 字段；旧资源被删除时提案随 resource_id CASCADE 先行消失，故列表里 join 恒命中——空串回落分支为防御性实现）、`batchId`、`newResourceId`、`oldKey`、`newKey`、`matchedFields[]`（参与匹配且相等的非键字段名）、`status`、`sheet`、`rowNumber`、`createdAt`、`decidedAt`。
+
+示例（导入基站样例后，把「动力机房2」改名为「动力机房2新」的副本再导一次）：
+
+```json
+{
+  "items": [
+    {
+      "id": "rp_f7fb3724-6eb5-4285-9d1a-be9b7e7ba2bd",
+      "resourceId": "res_39b8dd4a-1194-4b74-8b83-29468ba46d7d",
+      "resourceType": "base_station",
+      "naturalKey": "动力机房2",
+      "batchId": "bat_1c76bbb8-8ea0-4ec4-8b59-18c432d432ac",
+      "newResourceId": "res_586df25f-ec71-4a3f-b3dd-3585e7a9d72e",
+      "oldKey": "动力机房2",
+      "newKey": "动力机房2新",
+      "matchedFields": ["base_station_type", "sharing", "uplink_a_ip", "..."],
+      "status": "pending",
+      "sheet": "无线基站表",
+      "rowNumber": 2,
+      "createdAt": "2026-10-11T03:05:04Z",
+      "decidedAt": null
+    }
+  ],
+  "total": 1
+}
+```
+
+## POST /api/renames/{id}/apply — 确认改名（身份合并，人工确认通道）
+
+确认 pending 提案：单事务完成身份合并——新资源的关系改挂旧资源（UNIQUE 撞车删新侧边）、**键分量属性同步**（新侧非空者覆写旧资源——键换了 base_station_name 也得换，防假 W005）、删新资源（其 pending 属性变更随 v11 CASCADE）、旧资源 `natural_key` 换为新键 + `updated_at` 刷新、提案置 `applied` + `decidedAt` 打点。**旧资源代理键 `res_x`、关系身份、SourceRef 不动**——合并是键改挂，不是行替换。→ 200 返回提案对象（apply 后形状）。
+
+非 pending（已 applied/rejected）→ 409 `conflict`（HTTP 为通用文案「操作与当前状态冲突」；CLI 错误信封 message 含具体当前状态，如 applied）；**新资源已不存在**（典型：其导入批次被回滚，改名证据随之消失）→ 409 `target_missing`（消息建议 reject 后按现状重新导入）；未知 id → 404。CLI 等价：`netopslab renames --db … apply --id <id>`（结构化 JSON stdout；冲突 exit 1 + 错误信封）。
+
+## POST /api/renames/{id}/reject — 拒绝改名（维持独立）
+
+仅 pending 可拒绝：提案置 `rejected` + `decidedAt` 打点，资源零改动——两个资源维持独立（导入的默认结果），提案留作人工决策审计线 → 200 返回提案对象；非 pending → 409 `conflict`；未知 id → 404。CLI 等价：`netopslab renames --db … reject --id <id>`。
+
+> **AI 通道边界（同上）**：改名确认是 HTTP/CLI 的人类通道——MCP 工具面冻结为 5 个只读工具，AI 不得经 MCP 合并身份或改写自然键。
 
 ## 静态资源与 SPA
 

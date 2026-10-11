@@ -18,6 +18,8 @@ func TestRuleCodes(t *testing.T) {
 		"W002": RuleUnknownStatusValue,
 		"W003": RuleCircuitSelfLoop,
 		"W004": RuleKeyFallback,
+		"W005": RuleAttributeChange,
+		"W006": RuleSuspectedRename,
 		"I001": RuleUnlinkedDevice,
 	}
 	for code, constVal := range got {
@@ -49,6 +51,42 @@ func TestRuleCodes(t *testing.T) {
 	}
 	if RuleAttributeChange != "W005" {
 		t.Errorf("RuleAttributeChange = %q, want W005", RuleAttributeChange)
+	}
+	// W006 (suspected rename of a name-keyed resource) is a row-phase WARNING:
+	// the row still imports as a new resource, the rename hypothesis awaits
+	// human confirmation.
+	if sev, ok := SeverityForCode(RuleSuspectedRename); !ok || sev != SeverityWarning {
+		t.Errorf("SeverityForCode(W006) = (%v, %v), want (warning, true)", sev, ok)
+	}
+	if RuleSuspectedRename != "W006" {
+		t.Errorf("RuleSuspectedRename = %q, want W006", RuleSuspectedRename)
+	}
+	// The catalog order is the canonical code order E001..E006, W001..W006,
+	// I001 — AllRuleCodes and the declaration order of the constants agree.
+	wantCodes := []string{
+		RuleDuplicateKey, RuleMissingRequiredField, RuleInvalidReference,
+		RuleInvalidFormat, RuleSubnetOverlap, RuleDuplicateAddress,
+		RuleOrphanRecord, RuleUnknownStatusValue, RuleCircuitSelfLoop,
+		RuleKeyFallback, RuleAttributeChange, RuleSuspectedRename, RuleUnlinkedDevice,
+	}
+	if codes := AllRuleCodes(); len(codes) != len(wantCodes) {
+		t.Fatalf("AllRuleCodes = %d codes, want %d", len(codes), len(wantCodes))
+	} else {
+		for i, c := range wantCodes {
+			if codes[i] != c {
+				t.Errorf("AllRuleCodes[%d] = %q, want %q", i, codes[i], c)
+			}
+		}
+	}
+	// Every catalog code must carry a description and a severity (the schema
+	// endpoint projects both; an entry without them would project half-empty).
+	for _, c := range AllRuleCodes() {
+		if _, ok := RuleDescriptionFor(c); !ok {
+			t.Errorf("RuleDescriptionFor(%s) = missing, want a gloss", c)
+		}
+		if _, ok := SeverityForCode(c); !ok {
+			t.Errorf("SeverityForCode(%s) = missing, want a severity", c)
+		}
 	}
 }
 
@@ -82,6 +120,8 @@ func TestEnumRoundTrips(t *testing.T) {
 		{"RowStatus", []string{"imported", "skipped", "failed"}, "pending"},
 		{"Severity", []string{"error", "warning", "info"}, "fatal"},
 		{"EntityKind", []string{"resource", "relation"}, "batch"},
+		{"ChangeStatus", []string{"pending", "applied", "dismissed"}, "queued"},
+		{"RenameStatus", []string{"pending", "applied", "rejected"}, "queued"},
 	}
 	for _, c := range cases {
 		for _, v := range c.valid {
@@ -146,6 +186,26 @@ func TestEnumRoundTrips(t *testing.T) {
 				if _, err := ParseEntityKind(v); err != nil {
 					t.Errorf("ParseEntityKind(%q): %v", v, err)
 				}
+			case "ChangeStatus":
+				if got := ChangeStatus(v).String(); got != v {
+					t.Errorf("%s.String() = %q, want %q", c.name, got, v)
+				}
+				if !ChangeStatus(v).IsValid() {
+					t.Errorf("%s(%q).IsValid() = false, want true", c.name, v)
+				}
+				if _, err := ParseChangeStatus(v); err != nil {
+					t.Errorf("ParseChangeStatus(%q): %v", v, err)
+				}
+			case "RenameStatus":
+				if got := RenameStatus(v).String(); got != v {
+					t.Errorf("%s.String() = %q, want %q", c.name, got, v)
+				}
+				if !RenameStatus(v).IsValid() {
+					t.Errorf("%s(%q).IsValid() = false, want true", c.name, v)
+				}
+				if _, err := ParseRenameStatus(v); err != nil {
+					t.Errorf("ParseRenameStatus(%q): %v", v, err)
+				}
 			}
 		}
 		// Invalid values must error.
@@ -173,6 +233,14 @@ func TestEnumRoundTrips(t *testing.T) {
 		case "EntityKind":
 			if _, err := ParseEntityKind(c.invalid); err == nil {
 				t.Errorf("ParseEntityKind(%q) succeeded, want error", c.invalid)
+			}
+		case "ChangeStatus":
+			if _, err := ParseChangeStatus(c.invalid); err == nil {
+				t.Errorf("ParseChangeStatus(%q) succeeded, want error", c.invalid)
+			}
+		case "RenameStatus":
+			if _, err := ParseRenameStatus(c.invalid); err == nil {
+				t.Errorf("ParseRenameStatus(%q) succeeded, want error", c.invalid)
 			}
 		}
 	}

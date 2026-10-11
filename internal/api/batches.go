@@ -219,6 +219,10 @@ type rollbackCounts struct {
 	// deleted — the human decision survives its import batch (asymmetric
 	// lifecycle, documented in docs/import-and-validation.md).
 	AttributeChanges int `json:"attributeChanges"`
+	// RenameProposals counts the batch's PENDING rename proposals removed
+	// by the rollback (W6-D) — same asymmetric lifecycle as above
+	// (applied/rejected survive).
+	RenameProposals int `json:"renameProposals"`
 }
 
 // rollbackResponse is the DELETE /api/batches/{id} success body.
@@ -271,6 +275,11 @@ func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 		s.respondErrorFor(w, r, err, "")
 		return
 	}
+	pendingRenames, err := s.db.RenameProposals.CountPendingByBatch(ctx, id)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
 
 	if err := s.importer.Rollback(ctx, id); err != nil {
 		// The in-use refusal (importer.ErrBatchInUse) is the §9 409
@@ -299,8 +308,9 @@ func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 			SourceRefs: sourceRefs,
 			RowResults: rowResults,
 			Issues:     batchIssues,
-			// The count matches DeletePendingByBatch's scope: pending only.
+			// The counts match the DeletePendingByBatch scopes: pending only.
 			AttributeChanges: pendingChanges,
+			RenameProposals:  pendingRenames,
 		},
 	})
 }

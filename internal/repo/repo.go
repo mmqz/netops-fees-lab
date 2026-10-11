@@ -58,6 +58,11 @@ type DB struct {
 	// the importer's duplicate-key skip path (migration v11, W4-D).
 	AttributeChanges *AttributeChangeRepo
 
+	// RenameProposals stores the suspected-rename proposals recorded by the
+	// importer's not-exists insert path of name-keyed types (migration v12,
+	// W6-D).
+	RenameProposals *RenameProposalRepo
+
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
 	Sequences      *SequenceRepo
@@ -110,6 +115,7 @@ func wire(db *DB, q DBTX) {
 	db.RowResults = &RowResultRepo{q: q}
 	db.Issues = &IssueRepo{q: q}
 	db.AttributeChanges = &AttributeChangeRepo{q: q}
+	db.RenameProposals = &RenameProposalRepo{q: q}
 	db.Workspaces = &WorkspaceRepo{q: q}
 	db.Sequences = &SequenceRepo{q: q}
 	db.VirtualDevices = &VirtualDeviceRepo{q: q}
@@ -139,6 +145,11 @@ type Tx struct {
 	// AttributeChanges stores the attribute change proposals recorded on
 	// the importer's duplicate-key skip path (migration v11, W4-D).
 	AttributeChanges *AttributeChangeRepo
+
+	// RenameProposals stores the suspected-rename proposals recorded by the
+	// importer's not-exists insert path of name-keyed types (migration v12,
+	// W6-D).
+	RenameProposals *RenameProposalRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -218,6 +229,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		RowResults:       &RowResultRepo{q: sqlTx},
 		Issues:           &IssueRepo{q: sqlTx},
 		AttributeChanges: &AttributeChangeRepo{q: sqlTx},
+		RenameProposals:  &RenameProposalRepo{q: sqlTx},
 		Workspaces:       &WorkspaceRepo{q: sqlTx},
 		Sequences:        &SequenceRepo{q: sqlTx},
 		VirtualDevices:   &VirtualDeviceRepo{q: sqlTx},

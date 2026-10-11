@@ -15,6 +15,7 @@ import type {
   Paged,
   RelationGraph,
   ResourceDetail,
+  RenameProposalItem,
   ResourceItem,
   ResourceType,
 } from '../api/types';
@@ -28,6 +29,9 @@ import {
   getResourceRelations,
   listAttributeChanges,
   listResources,
+  listRenames,
+  applyRename,
+  rejectRename,
 } from '../api/client';
 import {
   BTN_EXPAND_2HOP,
@@ -72,6 +76,16 @@ import {
   RES_TABLE_LABEL,
   RESOURCE_STATUS_VALUES,
   RESOURCE_TYPE_LABELS,
+  RES_RENAMES_ACTION_FAILED,
+  RES_RENAMES_APPLIED_TOAST,
+  RES_RENAMES_HINT,
+  RES_RENAMES_MATCHED,
+  RES_RENAMES_REJECTED_TOAST,
+  RES_RENAMES_TITLE,
+  RES_RENAME_CONFIRM,
+  RES_RENAME_KEYS,
+  RES_RENAME_REJECT,
+  RES_RENAME_WORKING,
 } from '../i18n';
 import { fieldsForType, fieldLabel } from '../schema';
 import { Drawer } from '../components/Drawer';
@@ -197,6 +211,12 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   const [changeErrors, setChangeErrors] = useState<Record<string, string>>({});
   /** 正在处理中的 change id（按钮禁用）。 */
   const [changeBusy, setChangeBusy] = useState<string | null>(null);
+  /** 疑似改名提案（W6-D）：本资源作为旧资源（身份保留方）的 pending 提案。 */
+  const [pendingRenames, setPendingRenames] = useState<RenameProposalItem[]>([]);
+  /** 改名操作行内错误（按提案 id 定位）。 */
+  const [renameErrors, setRenameErrors] = useState<Record<string, string>>({});
+  /** 正在处理中的提案 id（按钮禁用）。 */
+  const [renameBusy, setRenameBusy] = useState<string | null>(null);
   const toast = useToast();
 
   const load = useCallback((): void => {
@@ -207,12 +227,15 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
       getResource(resourceId),
       getResourceRelations(resourceId, 1),
       listAttributeChanges({ resourceId, status: 'pending', limit: 100 }),
+      listRenames({ resourceId, status: 'pending', limit: 100 }),
     ])
       .then((results) => {
         setDetail(results[0]);
         setGraph(results[1]);
         setPendingChanges(results[2].items);
+        setPendingRenames(results[3].items);
         setChangeErrors({});
+        setRenameErrors({});
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -254,6 +277,39 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         setChangeErrors((prev) => ({ ...prev, [change.id]: display }));
       })
       .finally(() => setChangeBusy(null));
+  }
+
+  /** 确认一条疑似改名：旧资源保留 ID 与关系并改用新键，新资源消失；成功后整抽屉刷新。 */
+  function confirmRename(proposal: RenameProposalItem): void {
+    setRenameBusy(proposal.id);
+    setRenameErrors((prev) => ({ ...prev, [proposal.id]: '' }));
+    applyRename(proposal.id)
+      .then(() => {
+        toast.show(format(RES_RENAMES_APPLIED_TOAST, { old: proposal.oldKey, new: proposal.newKey }), 'success');
+        load();
+      })
+      .catch((err: unknown) => {
+        // 409（非 pending / 新资源已随批次回滚消失）等 → 行内错误展示
+        const display = formatApiErrorText(err);
+        setRenameErrors((prev) => ({ ...prev, [proposal.id]: display }));
+      })
+      .finally(() => setRenameBusy(null));
+  }
+
+  /** 拒绝一条疑似改名：两个资源维持独立（导入的默认结果）；成功后整抽屉刷新。 */
+  function rejectRenameProposal(proposal: RenameProposalItem): void {
+    setRenameBusy(proposal.id);
+    setRenameErrors((prev) => ({ ...prev, [proposal.id]: '' }));
+    rejectRename(proposal.id)
+      .then(() => {
+        toast.show(format(RES_RENAMES_REJECTED_TOAST, { old: proposal.oldKey }), 'info');
+        load();
+      })
+      .catch((err: unknown) => {
+        const display = formatApiErrorText(err);
+        setRenameErrors((prev) => ({ ...prev, [proposal.id]: display }));
+      })
+      .finally(() => setRenameBusy(null));
   }
 
   useEffect(() => {
@@ -374,6 +430,54 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                     {changeError !== '' && (
                       <div className="form-error change-error" role="alert">
                         {format(RES_CHANGES_ACTION_FAILED, { message: changeError })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {pendingRenames.length > 0 && (
+            <div className="change-panel" data-testid="pending-renames">
+              <div className="change-panel-title">{RES_RENAMES_TITLE}</div>
+              <div className="muted-note">{RES_RENAMES_HINT}</div>
+              {pendingRenames.map((proposal) => {
+                const busy = renameBusy === proposal.id;
+                const renameError = renameErrors[proposal.id] ?? '';
+                return (
+                  <div className="change-row" key={proposal.id}>
+                    <div className="change-main">
+                      <span className="cell-strong">{format(RES_RENAME_KEYS, { old: proposal.oldKey, new: proposal.newKey })}</span>
+                      <span className="muted-note">
+                        {format(RES_RENAMES_MATCHED, { count: proposal.matchedFields.length })}
+                        {' · '}
+                        {format(RES_CHANGES_BATCH_ROW, {
+                          batch: proposal.batchId.length > 12 ? `${proposal.batchId.slice(0, 12)}…` : proposal.batchId,
+                          row: proposal.rowNumber,
+                        })}
+                      </span>
+                    </div>
+                    <div className="change-actions">
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        disabled={busy}
+                        onClick={() => confirmRename(proposal)}
+                      >
+                        {busy ? RES_RENAME_WORKING : RES_RENAME_CONFIRM}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        disabled={busy}
+                        onClick={() => rejectRenameProposal(proposal)}
+                      >
+                        {RES_RENAME_REJECT}
+                      </button>
+                    </div>
+                    {renameError !== '' && (
+                      <div className="form-error change-error" role="alert">
+                        {format(RES_RENAMES_ACTION_FAILED, { message: renameError })}
                       </div>
                     )}
                   </div>

@@ -1,18 +1,18 @@
 package domain
 
 // AllRuleCodes lists every rule code of the validation catalog in canonical
-// order (E001..E006, W001..W005, I001 — the declaration order of the
+// order (E001..E006, W001..W006, I001 — the declaration order of the
 // constants in domain.go). The schema-discovery endpoint (GET /api/schema,
 // W5-D) projects this list together with SeverityForCode and
 // RuleDescriptionFor so rule metadata has a single runtime source. A new rule
 // constant must be appended here (and given a description) —
-// TestRuleCatalog pins the list against the constant set.
+// TestRuleCodes pins the constant set and the catalog order.
 func AllRuleCodes() []string {
 	return []string{
 		RuleDuplicateKey, RuleMissingRequiredField, RuleInvalidReference,
 		RuleInvalidFormat, RuleSubnetOverlap, RuleDuplicateAddress,
 		RuleOrphanRecord, RuleUnknownStatusValue, RuleCircuitSelfLoop,
-		RuleKeyFallback, RuleAttributeChange, RuleUnlinkedDevice,
+		RuleKeyFallback, RuleAttributeChange, RuleSuspectedRename, RuleUnlinkedDevice,
 	}
 }
 
@@ -43,6 +43,8 @@ func RuleDescriptionFor(code string) (string, bool) {
 		return "natural key degraded to fallback fields (row)", true
 	case RuleAttributeChange:
 		return "attribute diff on a duplicate-key row awaits confirmation (row)", true
+	case RuleSuspectedRename:
+		return "name-keyed resource likely renamed (same attrs, new key) awaits confirmation (row)", true
 	case RuleUnlinkedDevice:
 		return "device with zero relations (set)", true
 	default:
@@ -60,7 +62,7 @@ func SeverityForCode(code string) (Severity, bool) {
 		RuleInvalidFormat, RuleSubnetOverlap, RuleDuplicateAddress:
 		return SeverityError, true
 	case RuleOrphanRecord, RuleUnknownStatusValue, RuleCircuitSelfLoop, RuleKeyFallback,
-		RuleAttributeChange:
+		RuleAttributeChange, RuleSuspectedRename:
 		return SeverityWarning, true
 	case RuleUnlinkedDevice:
 		return SeverityInfo, true

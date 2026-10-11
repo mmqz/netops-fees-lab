@@ -124,3 +124,42 @@ type AttributeChange struct {
 	CreatedAt  time.Time
 	AppliedAt  *time.Time // set when Status == ChangeStatusApplied
 }
+
+// RenameProposal is one pending rename proposal recorded by the importer's
+// suspected-rename detection (W006, v0.5 W6-D) when a row of a
+// name-keyed type parses to a natural key that does NOT exist yet while an
+// existing resource of the same type carries the same non-key attribute
+// values and its own key has vanished from the source sheet (the
+// "key changed, data unchanged" twin of W005's "key same, data changed").
+// The row still imports as a brand-new resource — the identity merge only
+// happens when a human applies the proposal (HTTP API / CLI, never MCP).
+//
+// ResourceID is the OLD resource (the identity keeper): its proxy id res_x,
+// relations and SourceRefs survive the apply unchanged — only natural_key
+// is rewritten. NewResourceID is the resource created by the detection
+// batch; it is deleted on apply (a plain TEXT column, deliberately NOT a
+// foreign key: after an apply the referenced row is gone and the id must
+// stay as the audit trail). MatchedFields lists the non-key, non-ref,
+// non-computed fields whose normalized values were equal on both sides (the
+// evidence of the "same asset" hypothesis); at least one non-empty field
+// participated or the importer would not have proposed anything.
+//
+// Pending proposals of a batch are deleted by that batch's rollback (the
+// new resource disappears with the batch too, so a dangling proposal would
+// be meaningless); applied/rejected proposals survive it as the human-
+// decision audit trail — the same asymmetric lifecycle as W005.
+type RenameProposal struct {
+	ID            string
+	ResourceID    string
+	NewResourceID string
+	BatchID       string
+	ResourceType  ResourceType
+	OldKey        string
+	NewKey        string
+	MatchedFields []string
+	Status        RenameStatus
+	Sheet         string
+	RowNumber     int // 1-based Excel row; row 1 is the header row
+	CreatedAt     time.Time
+	DecidedAt     *time.Time // set when Status == RenameStatusApplied or RenameStatusRejected
+}

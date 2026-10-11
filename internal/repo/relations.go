@@ -91,6 +91,72 @@ ORDER BY relation_type, id`,
 	return out, nil
 }
 
+// RetargetResource moves every relation endpoint referencing newID over to
+// oldID — the identity-merge step of the rename apply flow (W6-D): the new
+// resource's relations (e.g. an ip_pool's assigned_to edges) must survive the
+// merge, now anchored at the identity keeper. Retargeting may collide with an
+// existing relation of the old resource: UNIQUE (from, to, relation_type)
+// would reject the moved tuple as a duplicate — a duplicate edge is exactly
+// what "same asset recorded twice" produces, so the new-side edge is DELETED
+// (keeping the old side) instead of failing the apply. The loop walks the
+// new resource's relations in ListByResource order (deterministic) and
+// updates/deletes one at a time inside the caller's transaction, so later
+// iterations already see the retargeted state (two new-side edges converging
+// on the same old-side tuple cannot both survive — the second is deleted as
+// a collision).
+//
+// Returns the number of retargeted and deleted relations.
+func (r *RelationRepo) RetargetResource(ctx context.Context, oldID, newID string) (int64, int64, error) {
+	var retargeted, deleted int64
+	rels, err := r.ListByResource(ctx, newID)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, rel := range rels {
+		from, to := rel.FromResourceID, rel.ToResourceID
+		moved := false
+		if from == newID {
+			from = oldID
+			moved = true
+		}
+		if to == newID {
+			to = oldID
+			moved = true
+		}
+		if !moved {
+			continue // defensive: ListByResource only returns participating rows
+		}
+		// A relation with the retargeted endpoints already exists (old side,
+		// or an earlier retargeted new-side edge): the merged identity owns
+		// one such edge — drop the duplicate instead of failing.
+		var collision bool
+		if err := r.q.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM relations WHERE from_resource_id = ? AND to_resource_id = ? AND relation_type = ? AND id <> ?)`,
+			from, to, rel.Type.String(), rel.ID).Scan(&collision); err != nil {
+			return retargeted, deleted, fmt.Errorf("repo: retarget relation %s: %w", rel.ID, err)
+		}
+		if collision {
+			res, err := r.q.ExecContext(ctx, `DELETE FROM relations WHERE id = ?`, rel.ID)
+			if err != nil {
+				return retargeted, deleted, fmt.Errorf("repo: delete colliding relation %s: %w", rel.ID, err)
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return retargeted, deleted, fmt.Errorf("repo: delete colliding relation %s: rows affected: %w", rel.ID, err)
+			}
+			deleted += n
+			continue
+		}
+		if _, err := r.q.ExecContext(ctx,
+			`UPDATE relations SET from_resource_id = ?, to_resource_id = ? WHERE id = ?`,
+			from, to, rel.ID); err != nil {
+			return retargeted, deleted, fmt.Errorf("repo: retarget relation %s: %w", rel.ID, err)
+		}
+		retargeted++
+	}
+	return retargeted, deleted, nil
+}
+
 // DeleteByBatch deletes all relations created by batchID and returns the
 // number of deleted rows.
 func (r *RelationRepo) DeleteByBatch(ctx context.Context, batchID string) (int64, error) {

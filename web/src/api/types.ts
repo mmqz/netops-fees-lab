@@ -42,6 +42,8 @@ export type RuleCode =
   | 'W002'
   | 'W003'
   | 'W004'
+  | 'W005'
+  | 'W006'
   | 'I001';
 
 export type RelationType = 'assigned_to' | 'a_end' | 'z_end' | 'belongs_to';
@@ -332,6 +334,29 @@ export interface AttributeChangeItem {
 /** 列表信封：{items, total}（limit/offset 分页）。 */
 export interface AttributeChangeList {
   items: AttributeChangeItem[];
+  total: number;
+}
+
+/** W6-D：疑似改名提案（GET /api/renames 的项）。resourceId=旧资源（身份保留方）。 */
+export type RenameStatus = 'pending' | 'applied' | 'rejected';
+export interface RenameProposalItem {
+  id: string;
+  resourceId: string;
+  resourceType: string;
+  naturalKey: string;
+  batchId: string;
+  newResourceId: string;
+  oldKey: string;
+  newKey: string;
+  matchedFields: string[];
+  status: RenameStatus;
+  sheet: string;
+  rowNumber: number;
+  createdAt: string;
+  decidedAt: string | null;
+}
+export interface RenameList {
+  items: RenameProposalItem[];
   total: number;
 }
 

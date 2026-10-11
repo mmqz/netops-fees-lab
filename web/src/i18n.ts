@@ -146,6 +146,8 @@ export const RULE_LABELS: Record<RuleCode, string> = {
   W002: '未知状态值',
   W003: '电路自环',
   W004: '身份键退化',
+  W005: '属性变更待确认',
+  W006: '疑似改名待确认',
   I001: '未关联设备',
 };
 
@@ -394,6 +396,22 @@ export const RES_CHANGE_APPLYING = '处理中…';
 export const RES_CHANGES_APPLIED_TOAST = '已应用变更：{field} 已更新';
 export const RES_CHANGES_DISMISSED_TOAST = '已忽略变更：{field} 维持原值';
 export const RES_CHANGES_ACTION_FAILED = '操作失败：{message}';
+
+// ---------------------------------------------------------------------------
+// 资源抽屉 · 疑似改名面板（W6-D）
+// ---------------------------------------------------------------------------
+
+export const RES_RENAMES_TITLE = '疑似改名待确认';
+export const RES_RENAMES_HINT =
+  '新键行与库内旧键资源属性一致，疑似同一资产改名。确认后合并身份（保留本资源的 ID 与关系并改用新键），拒绝则维持两个独立资源。';
+export const RES_RENAME_KEYS = '{old} → {new}';
+export const RES_RENAMES_MATCHED = '{count} 个属性一致';
+export const RES_RENAME_CONFIRM = '确认改名';
+export const RES_RENAME_REJECT = '拒绝';
+export const RES_RENAME_WORKING = '处理中…';
+export const RES_RENAMES_APPLIED_TOAST = '已确认改名：{old} → {new}';
+export const RES_RENAMES_REJECTED_TOAST = '已拒绝改名提案，资源 {old} 保持独立';
+export const RES_RENAMES_ACTION_FAILED = '操作失败：{message}';
 
 // ---------------------------------------------------------------------------
 // 问题清单页

@@ -169,8 +169,8 @@ VALUES ('chg_v11_bad','res_v11_dev','bat_v11','mgmt_ip','a','b','bogus','s',3,?)
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 11 {
-		t.Errorf("max schema version after upgrade = %d, want 11", maxV)
+	if maxV != 12 {
+		t.Errorf("max schema version after upgrade = %d, want 12", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

@@ -191,6 +191,15 @@ func (s *Service) executeSheets(ctx context.Context, tx *repo.Tx, batch domain.I
 			}
 		}
 	}
+	// Phase 2 of the W006 suspected-rename detection (rename.go): every
+	// import sheet has been processed, so the per-type key universe
+	// (st.seen — every parsed row's final key) is complete and the
+	// not-exists rows can be judged against it. Runs INSIDE the same
+	// transaction as the row results and the counts — a half-written
+	// proposal is impossible.
+	if err := st.detectRenames(ctx); err != nil {
+		return counts, err
+	}
 	if err := tx.Batches.UpdateCounts(ctx, batch.ID, counts); err != nil {
 		return counts, fmt.Errorf("importer: update counts of batch %s: %w", batch.ID, err)
 	}
@@ -218,6 +227,13 @@ type sheetState struct {
 	now   time.Time
 	seen  map[string]seenEntry
 	local map[domain.ResourceType]map[string]string
+
+	// imported collects the rows this execution inserted as NEW resources
+	// of rename-detection types (mapping.TypeSpec.RenameDetection) — the
+	// phase-2 input of the W006 detection (rename.go). Rows of other types
+	// and non-inserting branches are never collected, so the list stays
+	// small even on large mixed workbooks.
+	imported []importedRowInfo
 
 	spec      mapping.TypeSpec
 	sheet     *workbook.Sheet
@@ -575,6 +591,18 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 		st.local[st.spec.Type] = map[string]string{}
 	}
 	st.local[st.spec.Type][key] = resource.ID
+	if st.spec.RenameDetection {
+		st.imported = append(st.imported, importedRowInfo{
+			typ:         st.spec.Type,
+			key:         key,
+			resourceID:  resource.ID,
+			sourceRefID: srcRef.ID,
+			vals:        vals,
+			sheet:       st.sheet.Name,
+			rowNumber:   row.Number,
+			derived:     st.derivedFields(vals),
+		})
+	}
 	return nil
 }
 

@@ -16,9 +16,9 @@ import (
 var ErrBatchInUse = fmt.Errorf("batch entities are referenced by relations of other batches: %w", domain.ErrConflict)
 
 // Rollback reverses a completed batch (PROJECT_BRIEF §8): all resources,
-// relations, source refs, row results, issues and PENDING attribute change
-// proposals it created are deleted and the batch becomes rolled_back, which
-// enables clean re-import workflows.
+// relations, source refs, row results, issues, PENDING attribute change
+// proposals and PENDING rename proposals it created are deleted and the
+// batch becomes rolled_back, which enables clean re-import workflows.
 //
 // Only completed batches can be rolled back (any other status refuses with
 // an error wrapping domain.ErrConflict). If any entity created by the
@@ -87,6 +87,16 @@ func (s *Service) Rollback(ctx context.Context, batchID string) error {
 		// not just those the cascade would have missed (proposals
 		// targeting OTHER batches' resources).
 		if _, err := tx.AttributeChanges.DeletePendingByBatch(ctx, batchID); err != nil {
+			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
+		}
+		// Pending rename proposals (W6-D): same asymmetric lifecycle — the
+		// batch's unconfirmed suggestions die with it (the NEW resource the
+		// proposal pointed at disappears with the batch too, so a dangling
+		// proposal would be meaningless); applied/rejected proposals stay
+		// as the human-decision audit trail. Proposals whose OLD resource
+		// is deleted below are removed by the resource_id ON DELETE CASCADE
+		// regardless of status — the audited resource no longer exists.
+		if _, err := tx.RenameProposals.DeletePendingByBatch(ctx, batchID); err != nil {
 			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
 		}
 		if _, err := tx.Resources.DeleteByBatch(ctx, batchID); err != nil {

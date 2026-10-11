@@ -304,6 +304,19 @@ type TypeSpec struct {
 	// key. Every referenced field must exist in Fields (pinned by
 	// TestBaseStationSpec validation of all Specs).
 	KeyFallbackFields []string
+	// RenameDetection enables the importer's suspected-rename detection
+	// (W006, v0.5 W6-D) for this type. It is set ONLY for types whose
+	// natural key carries a NAME component — ip_pool (pool_name),
+	// base_station (the city|name fallback key) and port (the
+	// device_name|port_name composite): a source-side rename changes
+	// such a key, and the re-imported row would otherwise insert as a
+	// brand-new resource while the old-key resource lingers forever
+	// (identity split, nobody informed). Code-keyed types (device,
+	// circuit, site, machine_room) keep this OFF on doctrine: their keys
+	// are system-issued identifiers, and a changed code IS another
+	// resource by definition — proposing a merge would be wrong (see
+	// docs/natural-keys.md §2/§4).
+	RenameDetection bool
 	// Fields lists the target fields in canonical order.
 	Fields []FieldSpec
 }
@@ -339,6 +352,21 @@ func (t TypeSpec) NaturalKeyNames() []string {
 		}
 	}
 	return names
+}
+
+// KeyComponentNames returns every field name that participates in the
+// type's key computation: the strict natural-key fields plus the
+// conditional fallback fields (KeyFallbackFields). The rename apply flow
+// (renames service) uses it to decide which attributes must be re-pointed
+// from the short-lived new resource onto the identity-keeping old resource:
+// a confirmed rename rewrites the natural key, so a key-bearing attribute
+// (base_station_name of a fallback-key row, device_name of a port) must not
+// keep the old value — the key and its source attribute would contradict
+// each other and every re-import of the renamed source would fire a W005
+// diff on that field.
+func (t TypeSpec) KeyComponentNames() []string {
+	names := t.NaturalKeyNames()
+	return append(names, t.KeyFallbackFields...)
 }
 
 // NameField returns the field whose value becomes the resource Name: the
@@ -393,9 +421,10 @@ var deviceSpec = TypeSpec{
 
 // ipPoolSpec is the ip_pool schema of §6.
 var ipPoolSpec = TypeSpec{
-	Type:      domain.ResourceTypeIPPool,
-	Label:     "IP地址池",
-	SheetHint: "池", // substring match covers 地址池 and a bare 池
+	Type:            domain.ResourceTypeIPPool,
+	Label:           "IP地址池",
+	SheetHint:       "池",  // substring match covers 地址池 and a bare 池
+	RenameDetection: true, // pool_name key: a source rename splits identity (W006)
 	Fields: []FieldSpec{
 		{Name: "pool_name", Label: "地址池名称", Required: true, NaturalKey: true, Kind: KindString,
 			Synonyms: []string{"地址池名称", "池名称", "名称"}},
@@ -448,6 +477,7 @@ var portSpec = TypeSpec{
 	Label:             "设备端口",
 	SheetHint:         "端口",
 	NameFieldOverride: "port_name",
+	RenameDetection:   true, // device_name|port_name composite key: renames split identity (W006)
 	Fields: []FieldSpec{
 		{Name: "device_name", Label: "设备名称", Required: true, NaturalKey: true, Kind: KindString,
 			Synonyms: []string{"设备名称", "网元名称", "设备名"}},
@@ -502,6 +532,7 @@ var baseStationSpec = TypeSpec{
 	SheetHint:         "基站",
 	NameFieldOverride: "base_station_name",
 	KeyFallbackFields: []string{"city", "base_station_name"},
+	RenameDetection:   true, // name-bearing fallback key: renames split identity (W006)
 	Fields: []FieldSpec{
 		{Name: "base_station_type", Label: "基站类型", Kind: KindString,
 			Synonyms: []string{"基站类型", "基站类别"}},

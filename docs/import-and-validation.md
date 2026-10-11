@@ -61,6 +61,7 @@
 | W003 | 电路自环 | 警告 | a_end == z_end（两端都解析成功） | circuit_code, device |
 | W004 | 身份键退化 | 警告 | 条件自然键类型的主键字段值任一为空，键退化为兜底字段拼接（行照常导入；base_station：基站编码缺失 → 地市\|无线基站名称 兜底，缺地市列则为纯名称） | type, natural_key, missing_fields, fallback_fields |
 | W005 | 属性变更待确认 | 警告 | 同键再导命中库内资源且属性值不同（行=skipped 不改库；diff 逐字段记 pending 提案，人工 apply 后生效，v0.4 W4-D） | type, natural_key, resource_id, fields, change_count, sheet, row_number |
+| W006 | 疑似改名待确认 | 警告 | 名称类键类型的新键行与某旧键已从源消失的资源属性全等（行照常按新资源导入；记 pending 改名提案，人工 apply 合并身份 / reject 维持独立，v0.5 W6-D） | type, old_key, new_key, resource_id, new_resource_id, matched_fields, matched_count, sheet, row_number |
 
 **集合级（全局）**（对全库状态计算，可重算，`batch_id IS NULL`，报告中 `applicationGenerated: true`）：
 
@@ -200,3 +201,48 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **非致命语义**：删除失败（权限等）记 slog Warn 并计入 `errors`，不中断启动、不改变退出码；uploads 目录不存在（全新安装）为 no-op；uploads 下的子目录跳过不递归（保守）。
 - **匹配口径**：引用路径按 Clean 后原值、绝对形式与**基名**三形态匹配（上传文件名含 sha256 前缀，全局唯一）；基名命中优先保留——误保留（多留一个文件）远轻于误删除（丢证据）。
 - 测试钉死（internal/app/gc_test.go）：孤儿被删 / completed+failed+rolled_back 三状态引用保留（含相对路径形态）/ 幂等二跑 / 目录缺失 no-op / 删除失败非致命 / CLI 契约（exit 0 + 单 JSON + usage 错误 2）。
+
+
+## 16. 疑似改名检测与身份合并人工流（v0.5，W6-D）
+
+闭环 [natural-keys.md](natural-keys.md) §2/§6 差距 #3——「名称变 = 身份变更事件」的人工确认流（migration v12 的 `rename_proposals` 表，DDL 与设计决策见 [data-model.md](data-model.md) §15）。
+
+**与 W005 的对偶关系**：W005 是「键没变、数据变」（同键行 skip + 属性 diff 待确认）；W006 是「键变了、数据没变」（新键行照常导入 + 改名提案待确认）——两者合起来覆盖「带变化再导入」的两半。
+
+### 16.1 检测五条件（全部满足才提案，否则保守沉默）
+
+1. **类型开启**：`mapping.TypeSpec.RenameDetection`——仅名称类键类型（ip_pool / base_station / port）；编号类键类型（device/circuit/site/machine_room）按教义不开启（编号是系统签发身份，变了就是另一资源）。
+2. **旧键消失**：候选旧资源的 natural_key 不在本次导入该类型的键全集里（全集 = 本批全部成功解析行的最终键，含 skip 行——改名 = 旧名字从源消失）。
+3. **属性全等**：候选旧资源与新行在全部非键、非兜底键、非 ref、非枚举、非计算字段上归一化后相等（空串视同缺省，与 attributes()/W005 diff 同一取值口径）；未映射列产生 "" 与库内非空值**不等**（sheet 停止映射某列不会静默「匹配」）。
+4. **双射**：恰一个候选匹配该新行、且该候选不被其它新行同时匹配；0 个或 ≥2 个（任一侧）一律沉默。
+5. **非空洞**：至少一个非空属性参与匹配（名称-only 表的空属性全等不发 W006）。
+
+**已知误报面（诚实声明）**：条件 2 假定本 sheet 是该类型的**全量快照**；增量导入（sheet 只含部分资产）时，未出现在 sheet 里的旧资源会被误判「消失」——若其属性恰与新行全等则产生一条假提案。这是保守方向的误报（假提案只产生一条 W006 warning + 一条 pending 提案等待人工，绝不自动合并），人工 reject 即可；按教义宁可误报不可漏报+自动合并。
+
+### 16.2 行为与幂等
+
+- 命中后：行**照常作为新资源导入**（安全默认 = 既有行为，绝不拦截导入）+ 行挂 W006 warning（evidence 含 old_key/new_key/matched_fields 等）+ 同一执行事务写入一条 pending 提案（半账不可能）。
+- **再导同一 sheet 幂等**：新键资源已存在 → 行走 skip 路径属性全等 → 纯 skip 零 issue 零新提案（首轮 pending 提案仍在等人工决策）。
+- **apply 之后**：旧资源换键且键分量属性同步（见 16.3），再导该 sheet → 纯 skip 零 issue。
+
+### 16.3 确认改名（apply）——单事务身份合并
+
+`POST /api/renames/{id}/apply` / CLI `netopslab renames --db … apply --id <id>`：
+
+1. 校验：提案必须 pending（否则 409 `conflict`）；旧资源存在（被删则提案已 CASCADE 消失 → 404）；新资源必须仍存在——被批次回滚了则 409 `target_missing`（改名证据随批次消失，把旧资源改向从未落地的键是错的，建议 reject）。
+2. 新资源的关系 retarget 到旧资源 id（from/to 两端；撞 UNIQUE(from,to,type) 的删新侧边——重复边是双重记账的产物）。
+3. **键分量属性同步**：新资源的键分量字段（自然键字段 + 兜底字段，`TypeSpec.KeyComponentNames`）里非空者覆写旧资源同名属性——改名后键与其来源属性（如 base_station_name）必须一致，否则每次再导都触发假 W005；新侧为空/缺省则保留库内值（未映射列不是空值证据）。其余属性**证明相等**（匹配前置条件），无需同步。
+4. 删新资源（其 pending 属性变更随 v11 CASCADE 消失——文档化行为）。
+5. 旧资源 natural_key = 新键（新资源已删故 UNIQUE 无碰撞）+ updated_at 刷新；提案置 applied + decided_at。**旧资源代理键 res_x、关系、SourceRef 不动**（新资源的 SourceRef 行刻意保留为审计痕迹；来源谱系版本化是后续路线，见 natural-keys §6 #4）。
+
+### 16.4 拒绝（reject）与回滚不对称
+
+- `POST /api/renames/{id}/reject` / CLI `… reject --id`：提案置 rejected + decided_at，资源零改动（两资源各自独立 = 导入的默认结果）。
+- **回滚不对称（镜像 v11 语义）**：批次回滚显式删除该批 **pending** 提案（新资源随之消失，悬空提案无意义）；applied/rejected 留审计线（人工决策与导入批次生命周期解耦）。例外：旧资源本身被回滚删除 → 提案随 resource_id CASCADE 消失（含终态）——被审计资源已不存在，记录随之消失是正确行为。
+- **MCP 工具面 5 个冻结**：改名确认是 HTTP/CLI 的人类通道，AI 不得经 MCP 合并身份或改键（同 W005 apply 红线）。
+
+### 16.5 API / CLI / 前端面
+
+- `GET /api/renames?status=pending|applied|rejected|all&resource_id=&resource_type=&batch_id=&limit=&offset=`（分页边界同 §9 惯例，信封 `{"items":[…],"total":n}`，按 `created_at, rowid` 排序）；`POST /api/renames/{id}/apply|reject`——契约见 [api.md](api.md)。
+- CLI：`netopslab renames --db <db> list [--status --type --limit] | apply --id <id> | reject --id <id>`（结构化 JSON stdout，错误信封 exit 1）。
+- 前端：资源详情抽屉「疑似改名待确认」面板（旧资源侧；确认/拒绝 + 行内错误；无 pending 不渲染）。

@@ -243,6 +243,70 @@ func (r *ResourceRepo) CountByBatch(ctx context.Context, batchID string) (int, e
 	return n, nil
 }
 
+// ListByType returns every resource of the given type, ordered by
+// (natural_key, id) for deterministic iteration. The importer's rename
+// detection (W6-D) uses it to enumerate the candidate pool of a type.
+func (r *ResourceRepo) ListByType(ctx context.Context, resourceType domain.ResourceType) ([]domain.Resource, error) {
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT `+resourceColumns+` FROM resources WHERE resource_type = ? ORDER BY natural_key, id`,
+		resourceType.String())
+	if err != nil {
+		return nil, fmt.Errorf("repo: list resources of type %s: %w", resourceType, err)
+	}
+	defer rows.Close()
+	out := make([]domain.Resource, 0)
+	for rows.Next() {
+		res, err := scanResource(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repo: scan resource: %w", err)
+		}
+		out = append(out, res)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: list resources of type %s: %w", resourceType, err)
+	}
+	return out, nil
+}
+
+// UpdateNaturalKey rewrites the natural key of the resource with the given
+// id and refreshes updated_at. It is the key write of the rename apply flow
+// (renames service): the caller has verified inside the SAME DB.Do
+// transaction that the new key's resource (if any) is already deleted, so
+// the UNIQUE (resource_type, natural_key) constraint cannot fire. An
+// unknown id answers domain.ErrNotFound.
+func (r *ResourceRepo) UpdateNaturalKey(ctx context.Context, id, naturalKey string, updatedAt time.Time) error {
+	res, err := r.q.ExecContext(ctx, `UPDATE resources SET natural_key = ?, updated_at = ? WHERE id = ?`,
+		naturalKey, formatTime(updatedAt), id)
+	if err != nil {
+		return fmt.Errorf("repo: update natural key of resource %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("repo: update natural key of resource %s: rows affected: %w", id, err)
+	} else if n == 0 {
+		return fmt.Errorf("repo: update natural key of resource %s: %w", id, domain.ErrNotFound)
+	}
+	return nil
+}
+
+// DeleteByID deletes one resource by id and returns whether a row was
+// deleted. The rename apply flow (renames service) uses it to remove the
+// short-lived new resource after its relations were retargeted — its
+// pending attribute change proposals vanish via the resource_id ON DELETE
+// CASCADE (documented behavior). Relations still referencing the id (none
+// after a retarget) would be removed by the relations-side CASCADE, the
+// same semantics the rollback delete chain relies on.
+func (r *ResourceRepo) DeleteByID(ctx context.Context, id string) (bool, error) {
+	res, err := r.q.ExecContext(ctx, `DELETE FROM resources WHERE id = ?`, id)
+	if err != nil {
+		return false, fmt.Errorf("repo: delete resource %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("repo: delete resource %s: rows affected: %w", id, err)
+	}
+	return n > 0, nil
+}
+
 // UpdateAttributes overwrites the attributes JSON of the resource with the
 // given id and refreshes updated_at. It is the write side of the attribute
 // change apply flow (changes service): the caller has verified the

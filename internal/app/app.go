@@ -21,6 +21,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/query"
+	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/report"
 	"github.com/mmqz/netops-lab/internal/sim"
@@ -69,6 +70,8 @@ type App struct {
 	Query *query.Service
 	// Changes is the attribute change confirmation service (W4-D).
 	Changes *changes.Service
+	// Renames is the rename confirmation service (W6-D).
+	Renames *renames.Service
 	// Lab is the simulation workbench engine (Phase 2: materialize, ops,
 	// checks, undo, checkpoints).
 	Lab *sim.Service
@@ -111,6 +114,7 @@ func New(cfg Config) (*App, error) {
 		Validation: validation.New(db),
 		Query:      query.New(db),
 		Changes:    changes.New(db),
+		Renames:    renames.New(db),
 		Lab:        sim.New(db),
 		Report:     report.New(db),
 	}

@@ -1,6 +1,6 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **11**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系与 v11 属性变更历史表 `resource_attribute_changes` 为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **12**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表 `resource_attribute_changes` 与 v12 改名提案表 `rename_proposals` 为后续追加节，历史章节保持原貌）。
 
 ## 1. ID 与时间戳约定
 
@@ -547,3 +547,45 @@ CREATE INDEX idx_attr_changes_status ON resource_attribute_changes(status);
 - **diff 归集口径**：参与比较的字段 = 导入行映射后的**非键、非枚举、非空**属性值（与首次导入的 attributes 归集完全一致；ref 字段（如机房的 site_id 属性快照）也在其中——apply 只改属性快照，**不重建派生关系**，ref 变更的正确路径是回滚批次重导，E003 顺序约束重新生效）。
 - **与撤销红线的零交集**：本表属于**资源域**；lab 三层撤销/检查点属于**仿真域**（仅操作 `virtual_devices`/`sim_links`/变更集等 P2 表），两域无共享表、无代码路径交叉（`internal/sim` 零引用 `resource_attribute_changes`/`resources.attributes`）。
 - **API/CLI 面**：`GET /api/attribute-changes`（status/resource_id/batch_id/limit/offset 过滤）与 `POST …/{id}/apply`、`POST …/{id}/dismiss`（契约见 [api.md](api.md)）；CLI `netopslab changes --db … list|apply|dismiss`。**MCP 工具面 5 个冻结不变**——AI 不得经 MCP 改资源属性（引擎仅仿真态操作）。
+
+
+# DDL v12 — 疑似改名提案表 rename_proposals
+
+> Migration `12` name `rename_proposals`（`internal/repo/migrations_v12.go`，经 `init()` 自注册追加 + 按版本排序，机制同 v4–v11）。**当前 schema version = 12**。纯 `CREATE TABLE` + 三个索引，**无表重建**、无数据搬迁，FK 始终强制（非 ForeignKeysOff 形）——完全照 v11 模式。
+
+## 15. 疑似改名提案与身份合并生命周期（W6-D）
+
+闭环 [natural-keys.md](natural-keys.md) §2/§6 差距 #3 的「名称变 = 身份变更事件」：名称类键类型（ip_pool/base_station/port，`TypeSpec.RenameDetection`）的新键导入行与某「旧键已从源消失」的同类型资源属性全等时，importer 记一条 **pending** 提案 + 一条 W006 warning issue，行照常按新资源导入（绝不自动合并）；人工经 HTTP API / CLI（`renames` 子命令）apply 合并身份或 reject 维持独立。检测五条件与幂等语义见 [import-and-validation.md](import-and-validation.md) §16。
+
+### 15.1 DDL v12 全文
+
+```sql
+CREATE TABLE rename_proposals (
+  id TEXT PRIMARY KEY,                          -- rp_<uuid>
+  resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,  -- 旧资源（身份保留方）
+  new_resource_id TEXT NOT NULL,                -- 新资源 id，纯文本留档（apply 后该行已删，无 FK）
+  batch_id TEXT NOT NULL REFERENCES import_batches(id),  -- 无 cascade，同 v11 batch_id 口径
+  resource_type TEXT NOT NULL,
+  old_key TEXT NOT NULL,
+  new_key TEXT NOT NULL,
+  matched_fields TEXT NOT NULL DEFAULT '[]',    -- JSON 数组：参与匹配且相等的非键字段名
+  status TEXT NOT NULL CHECK (status IN ('pending','applied','rejected')),
+  sheet TEXT NOT NULL,
+  row_number INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+CREATE INDEX idx_rename_proposals_status ON rename_proposals(status);
+CREATE INDEX idx_rename_proposals_resource ON rename_proposals(resource_id);
+CREATE INDEX idx_rename_proposals_batch ON rename_proposals(batch_id);
+```
+
+### 15.2 设计决策与不变式
+
+- **生命周期**：`pending`（导入记录）→ `applied`（人工确认合并，`decided_at` 打点）或 `rejected`（人工拒绝，两资源独立）；后两者为终态，重复 apply/reject 均拒绝（409）。
+- **id 前缀**：`rp_`（`domain.NewID`，UUID）。
+- **resource_id = 旧资源（身份保留方）**：ON DELETE CASCADE——旧资源被删（含回滚删除链）则其改名史随之消失；`new_resource_id` 刻意**无 FK**（apply 删除它指向的行，id 必须以纯文本活下来作审计）。`batch_id` 刻意**无 cascade**（同 v11 裁决）：回滚只显式删本批 pending 提案，applied/rejected 是与批次生命周期解耦的人工决策审计线。
+- **apply 的合并事务**（单 DB.Do）：关系 retarget（UNIQUE 撞车删新侧边）→ 键分量属性同步（`TypeSpec.KeyComponentNames`，新侧非空者覆写旧资源——防「键换了而 base_station_name 还留旧值」引发的假 W005）→ 删新资源（其 pending 属性变更随 v11 CASCADE）→ 旧资源换键 + updated_at 刷新 → 提案置 applied。**旧资源代理键 res_x 与 SourceRef 不动**。
+- **与 W005 的对偶**：W005 记「键不变数据变」，本表记「键变数据不变」；两通道都只产生待确认提案，人工确认才生效——「自动合并」在整个身份治理体系里不存在。
+- **API/CLI 面**：`GET /api/renames` + `POST …/{id}/apply|reject`；CLI `netopslab renames … list|apply|reject`。**MCP 工具面 5 个冻结不变**。
+- **与撤销红线的零交集**：本表属**资源域**；`internal/sim` 零引用（同 v11 立场）。

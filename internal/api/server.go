@@ -34,6 +34,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/query"
+	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/report"
 	"github.com/mmqz/netops-lab/internal/sim"
@@ -47,8 +48,8 @@ import (
 const maxUploadBytes = 10 << 20
 
 // Server is the HTTP API server. It owns its service instances (importer,
-// validation engine, query service, report generator, attribute change
-// confirmation service), all bound to the shared *repo.DB.
+// validation engine, query service, report generator, attribute change and
+// rename confirmation services), all bound to the shared *repo.DB.
 type Server struct {
 	log        *slog.Logger
 	db         *repo.DB
@@ -60,6 +61,7 @@ type Server struct {
 	sim        *sim.Service
 	lab        *report.LabGenerator
 	changes    *changes.Service
+	renames    *renames.Service
 }
 
 // New returns a Server bound to db; uploads are stored under
@@ -82,6 +84,7 @@ func New(log *slog.Logger, db *repo.DB, dataDir string) *Server {
 		sim:        simSvc,
 		lab:        report.NewLab(db, simSvc),
 		changes:    changes.New(db),
+		renames:    renames.New(db),
 	}
 }
 
@@ -124,6 +127,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/attribute-changes", s.handleAttributeChangesList)
 	mux.HandleFunc("POST /api/attribute-changes/{id}/apply", s.handleAttributeChangeApply)
 	mux.HandleFunc("POST /api/attribute-changes/{id}/dismiss", s.handleAttributeChangeDismiss)
+
+	// Rename confirmation (W6-D, migration v12): the HUMAN channel of the
+	// "name change = identity change event" semantics. The MCP tool surface
+	// stays frozen at the five read-only tools — an AI must never merge
+	// resource identities (resource-domain writes are HTTP/CLI only).
+	mux.HandleFunc("GET /api/renames", s.handleRenamesList)
+	mux.HandleFunc("POST /api/renames/{id}/apply", s.handleRenameApply)
+	mux.HandleFunc("POST /api/renames/{id}/reject", s.handleRenameReject)
 
 	// Simulation workbench (PROJECT_BRIEF_P2 §7). The sim engine owns ALL
 	// writes to the sim tables; the handlers only decode, call and project.

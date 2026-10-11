@@ -257,3 +257,43 @@ func ParseChangeStatus(s string) (ChangeStatus, error) {
 	}
 	return v, nil
 }
+
+// RenameStatus enumerates the lifecycle states of a rename proposal
+// (rename_proposals.status, migration v12). pending is the only operable
+// state (apply/reject both refuse anything else); applied and rejected are
+// terminal — an applied proposal has merged the two resources (the new
+// resource is deleted, the old one carries the new key), a rejected one
+// left both resources independent (the import's default outcome). Both
+// survive a batch rollback as the human-decision audit trail (pending
+// proposals of the rolled-back batch are deleted).
+type RenameStatus string
+
+// Rename statuses.
+const (
+	RenameStatusPending  RenameStatus = "pending"
+	RenameStatusApplied  RenameStatus = "applied"
+	RenameStatusRejected RenameStatus = "rejected"
+)
+
+// String implements fmt.Stringer.
+func (r RenameStatus) String() string { return string(r) }
+
+// IsValid reports whether r is a known rename status. The values must stay
+// in sync with the rename_proposals CHECK constraint (migrations v12).
+func (r RenameStatus) IsValid() bool {
+	switch r {
+	case RenameStatusPending, RenameStatusApplied, RenameStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseRenameStatus converts s into a RenameStatus.
+func ParseRenameStatus(s string) (RenameStatus, error) {
+	v := RenameStatus(s)
+	if !v.IsValid() {
+		return "", fmt.Errorf("domain: invalid rename status %q", s)
+	}
+	return v, nil
+}

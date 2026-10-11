@@ -50,6 +50,8 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceDetail,
   WorkspaceSummary,
+  RenameList,
+  RenameProposalItem,
 } from './types';
 import { ERR_API_CHECKPOINT_MISSING_FILE, ERR_API_CONFLICT, ERR_API_INVALID_REQUEST, ERR_API_NOT_FOUND, ERR_API_NOT_LATEST, ERR_API_OP_FAILED, ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
 
@@ -459,6 +461,44 @@ export function applyAttributeChange(id: string): Promise<AttributeChangeItem> {
 export function dismissAttributeChange(id: string): Promise<AttributeChangeItem> {
   return requestJson<AttributeChangeItem>(
     `/attribute-changes/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
+  );
+}
+
+/** W6-D：疑似改名提案列表（GET /api/renames）。 */
+export interface RenamesQuery {
+  status?: string;
+  resourceId?: string;
+  resourceType?: string;
+  batchId?: string;
+  limit?: number;
+  offset?: number;
+}
+export function listRenames(query: RenamesQuery): Promise<RenameList> {
+  return requestJson<RenameList>(
+    `/renames${buildQuery({
+      status: query.status,
+      resource_id: query.resourceId,
+      resource_type: query.resourceType,
+      batch_id: query.batchId,
+      limit: query.limit,
+      offset: query.offset,
+    })}`,
+  );
+}
+
+/** 确认改名（POST /api/renames/{id}/apply）：合并身份，旧资源保留 ID 并接管新键。 */
+export function applyRename(id: string): Promise<RenameProposalItem> {
+  return requestJson<RenameProposalItem>(
+    `/renames/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  );
+}
+
+/** 拒绝改名（POST /api/renames/{id}/reject）：两个资源维持独立。 */
+export function rejectRename(id: string): Promise<RenameProposalItem> {
+  return requestJson<RenameProposalItem>(
+    `/renames/${encodeURIComponent(id)}/reject`,
     { method: 'POST' },
   );
 }
