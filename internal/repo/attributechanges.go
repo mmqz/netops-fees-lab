@@ -223,6 +223,32 @@ func (r *AttributeChangeRepo) DeletePendingByBatch(ctx context.Context, batchID 
 	return n, nil
 }
 
+// CountByStatus returns the number of attribute change proposals per
+// lifecycle status over the whole table (COUNT aggregate — the governance
+// summary's pending/decided accounting). The map carries only the statuses
+// actually present; an empty table answers an empty map, and the caller
+// zero-fills the shape's fixed keys.
+func (r *AttributeChangeRepo) CountByStatus(ctx context.Context) (map[domain.ChangeStatus]int, error) {
+	rows, err := r.q.QueryContext(ctx, `SELECT status, COUNT(*) FROM resource_attribute_changes GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("repo: count attribute changes by status: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[domain.ChangeStatus]int)
+	for rows.Next() {
+		var s string
+		var n int
+		if err := rows.Scan(&s, &n); err != nil {
+			return nil, fmt.Errorf("repo: scan count: %w", err)
+		}
+		counts[domain.ChangeStatus(s)] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: count attribute changes by status: %w", err)
+	}
+	return counts, nil
+}
+
 // CountPendingByBatch returns the number of pending change proposals
 // attributed to batchID (COUNT aggregate — the rollback response's
 // deleted.attributeChanges accounting, same scope as DeletePendingByBatch).

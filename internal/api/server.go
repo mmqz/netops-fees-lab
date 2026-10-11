@@ -31,6 +31,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/ptpconfig"
@@ -68,6 +69,7 @@ type Server struct {
 	lab        *report.LabGenerator
 	changes    *changes.Service
 	renames    *renames.Service
+	governance *governance.Service
 }
 
 // New returns a Server wired from svc — the single composition root the
@@ -94,6 +96,7 @@ func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 		lab:        svc.LabReport,
 		changes:    svc.Changes,
 		renames:    svc.Renames,
+		governance: svc.Governance,
 	}
 }
 
@@ -136,6 +139,13 @@ func (s *Server) Routes() http.Handler {
 	// read-only tools (an export is a bulk read, but the freeze is the
 	// doctrine; nothing new is exposed to the AI channel).
 	mux.HandleFunc("GET /api/exports/resources", s.handleExportResources)
+
+	// Governance overview (W14-D, v0.6): the read-only aggregate of the
+	// pending confirmation queues, the decision audit counters, the issue
+	// distribution and the inventory shapes. No parameters, always 200
+	// (all-zero structure on an empty database). MCP stays frozen at the
+	// five read-only tools — nothing new is exposed to the AI channel.
+	mux.HandleFunc("GET /api/governance/summary", s.handleGovernanceSummary)
 
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/issues", s.handleIssues)

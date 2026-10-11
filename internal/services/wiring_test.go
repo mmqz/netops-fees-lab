@@ -53,6 +53,7 @@ func TestAppSharesOneServiceComposition(t *testing.T) {
 		{"Query", a.Query, svc.Query},
 		{"Changes", a.Changes, svc.Changes},
 		{"Renames", a.Renames, svc.Renames},
+		{"Governance", a.Governance, svc.Governance},
 		{"Lab", a.Lab, svc.Lab},
 		{"Report", a.Report, svc.Report},
 	} {

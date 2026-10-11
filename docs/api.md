@@ -558,6 +558,52 @@ HTTP/1.1 409 Conflict
 
 `byType` 键集动态（新增类型如 port/site/machine_room 仅在有数据时出现，R1-D4 起前端按实际键动态渲染）；`byRelationType` 的四个已知关系类型恒出现（含 v0.4 W3-D 起的 `belongs_to`，计 0 亦发）。上例为三张合成工作簿的种子数据，故不含新类型键。
 
+## GET /api/governance/summary — 治理总览（v0.6 W14-D）
+
+无参数的只读聚合端点：把「待确认队列 + 决策审计 + 问题分布 + 资源/关系/批次形态」汇成一屏——治理工作的入口视角。**恒 200**（空库也返回全零结构，不存在 204/404）；响应带 `Cache-Control: no-store`（全 /api 纪律）；所有计数走 SQL COUNT 聚合（GROUP BY，无全表拉取）。下方示例为三张合成种子工作簿导入后的真实输出（pending 全 0 是因为该库尚无人工确认工作，generatedAt 截断）：
+
+```json
+{
+  "pending": {
+    "attributeChanges": 0,
+    "renameProposals": 0
+  },
+  "decided": {
+    "attributeChanges": { "applied": 0, "dismissed": 0 },
+    "renameProposals": { "applied": 0, "rejected": 0 }
+  },
+  "issues": {
+    "bySeverity": { "error": 13, "info": 1, "warning": 3 },
+    "byRule": [
+      { "rule": "E004", "count": 4 },
+      { "rule": "E002", "count": 3 },
+      { "rule": "E001", "count": 2 },
+      { "rule": "E003", "count": 2 },
+      { "rule": "E005", "count": 1 },
+      "…按 count 降序、同 count 按规则码升序，前 10 条…"
+    ]
+  },
+  "resources": { "total": 64, "byType": { "circuit": 21, "device": 27, "ip_pool": 16 } },
+  "relations": { "total": 57, "byType": { "a_end": 21, "assigned_to": 15, "z_end": 21 } },
+  "batches": { "total": 3, "byStatus": { "completed": 3 } },
+  "generatedAt": "2026-10-11T17:18:52Z…"
+}
+```
+
+**口径与确定性**：
+
+- `pending`：两个待确认队列的当前长度（`resource_attribute_changes` / `rename_proposals` 的 pending 计数）；`decided`：两确认流的终态审计计数（恒发 applied/dismissed 与 applied/rejected 四个固定键，计 0 亦发）。
+- `issues`：**全库全批次**口径（行级 + 集合级都在 issues 表）；`bySeverity` 恒发 error/warning/info 三键；`byRule` 为 (count 降序、规则码升序) 的前 10 条，空库为 `[]`。
+- `byType` / `byStatus` 的 map 键 = 库内实际出现的类型/状态字面量（空库为 `{}`）；`total` = map 值之和。
+- 除 `generatedAt`（`time.Now().UTC()`，RFC3339）外**全字段确定性**：同一数据库两次调用逐字段相等（Go map 的 JSON 键序由 encoding/json 排序，序列化字节亦确定）；测试钉死该性质并显式豁免 generatedAt。
+- 空库返回全零结构：标量 0、固定键 0、动态 map 为 `{}`、`byRule` 为 `[]`。
+
+**CLI 等价物**：`netopslab query --db <path> governance`（stdout 单一 JSON，同上形状；`--db` 在 query 层与 stats/relations 同位）。
+
+**web**：概览页「治理总览」区消费本端点（待确认双卡 / 问题分布小表 / 形态小表 / 批次状态行；取数失败降级为面板内错误条，不阻塞页面其余区）。
+
+**MCP 零新增**：工具面冻结在恰 5 个只读工具（治理总览是 HTTP/CLI/web 通道的聚合读，不进 AI 通道）。
+
 ## GET /api/issues?batchId=&severity=&ruleCode=&page=&pageSize= — 问题清单
 
 条目带**解析后的来源**（`source`）或 `applicationGenerated: true`。示例 `?severity=error&pageSize=1`：

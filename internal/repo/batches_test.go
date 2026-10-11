@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -153,4 +154,46 @@ func ids(bs []domain.ImportBatch) []string {
 		out[i] = b.ID
 	}
 	return out
+}
+
+// TestBatchCountByStatus pins the W14-D COUNT aggregate: real SQL GROUP BY
+// counts per batch status; an empty table answers an empty map.
+func TestBatchCountByStatus(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	counts, err := db.Batches.CountByStatus(ctx)
+	if err != nil {
+		t.Fatalf("CountByStatus on empty: %v", err)
+	}
+	if len(counts) != 0 {
+		t.Errorf("empty table counts = %v, want empty map", counts)
+	}
+
+	completed := newBatch("bat_cs1", simTS)
+	completed.Status = domain.BatchStatusCompleted
+	completed2 := newBatch("bat_cs2", simTS)
+	completed2.Status = domain.BatchStatusCompleted
+	failed := newBatch("bat_cs3", simTS)
+	failed.Status = domain.BatchStatusFailed
+	rolled := newBatch("bat_cs4", simTS)
+	rolled.Status = domain.BatchStatusRolledBack
+	for _, b := range []domain.ImportBatch{completed, completed2, failed, rolled} {
+		if err := db.Batches.Create(ctx, b); err != nil {
+			t.Fatalf("Create %s: %v", b.ID, err)
+		}
+	}
+
+	counts, err = db.Batches.CountByStatus(ctx)
+	if err != nil {
+		t.Fatalf("CountByStatus: %v", err)
+	}
+	want := map[domain.BatchStatus]int{
+		domain.BatchStatusCompleted:  2,
+		domain.BatchStatusFailed:     1,
+		domain.BatchStatusRolledBack: 1,
+	}
+	if !reflect.DeepEqual(counts, want) {
+		t.Errorf("counts = %v, want %v", counts, want)
+	}
 }

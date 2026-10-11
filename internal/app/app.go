@@ -20,6 +20,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/api"
 	"github.com/mmqz/netops-lab/internal/changes"
+	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
@@ -79,6 +80,8 @@ type App struct {
 	Changes *changes.Service
 	// Renames is the rename confirmation service (W6-D).
 	Renames *renames.Service
+	// Governance is the governance overview aggregation service (W14-D).
+	Governance *governance.Service
 	// Lab is the simulation workbench engine (Phase 2: materialize, ops,
 	// checks, undo, checkpoints).
 	Lab *sim.Service
@@ -129,6 +132,7 @@ func New(cfg Config) (*App, error) {
 		Query:      svc.Query,
 		Changes:    svc.Changes,
 		Renames:    svc.Renames,
+		Governance: svc.Governance,
 		Lab:        svc.Lab,
 		Report:     svc.Report,
 	}

@@ -21,6 +21,7 @@ import type {
   CheckRunItem,
   DeleteWorkspaceResult,
   DiffResult,
+  GovernanceSummary,
   HealthResponse,
   ImportAnalysisResponse,
   ImportResultResponse,
@@ -379,6 +380,14 @@ export function getResourceRelations(id: string, depth: 1 | 2): Promise<Relation
 /** GET /api/stats */
 export function getStats(): Promise<StatsResponse> {
   return requestJson<StatsResponse>('/stats');
+}
+
+/**
+ * GET /api/governance/summary（v0.6 W14-D 治理总览）：待确认队列 + 决策审计 +
+ * 问题分布 + 资源/关系/批次形态的一屏聚合（只读、无参数、空库恒全零）。
+ */
+export function getGovernanceSummary(): Promise<GovernanceSummary> {
+  return requestJson<GovernanceSummary>('/governance/summary');
 }
 
 /** GET /api/issues?batchId=&severity=&ruleCode=&page=&pageSize= */

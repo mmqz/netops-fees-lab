@@ -349,6 +349,18 @@ button {
   color: var(--muted);
 }
 
+/* 治理总览：待确认双卡（v0.6 W14-D，其余治理小表复用 ov-grid / kv-table） */
+.gov-pending {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.gov-pending .card {
+  margin-bottom: 0;
+}
+
 /* 概览双列（分布 + 快捷操作） */
 .ov-grid {
   display: grid;

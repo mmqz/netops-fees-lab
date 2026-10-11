@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -223,3 +224,50 @@ var errBoom = errors.New("boom")
 func isNotFoundErr(err error) bool { return errors.Is(err, domain.ErrNotFound) }
 
 func isConflictErr(err error) bool { return errors.Is(err, domain.ErrConflict) }
+
+// TestAttributeChangeCountByStatus pins the W14-D COUNT aggregate: real SQL
+// GROUP BY counts over the seeded lifecycle states (pending via InsertBatch,
+// applied/dismissed via the guarded transitions), an empty table answering
+// an empty map (the governance summary zero-fills its fixed keys itself).
+func TestAttributeChangeCountByStatus(t *testing.T) {
+	db := newChangeDB(t)
+	ctx := context.Background()
+
+	// Empty table: empty map, not nil.
+	counts, err := db.AttributeChanges.CountByStatus(ctx)
+	if err != nil {
+		t.Fatalf("CountByStatus on empty: %v", err)
+	}
+	if len(counts) != 0 {
+		t.Errorf("empty table counts = %v, want empty map", counts)
+	}
+
+	if err := db.Do(ctx, func(tx *Tx) error {
+		if err := tx.AttributeChanges.InsertBatch(ctx, []domain.AttributeChange{
+			chg("chg_s1", "mgmt_ip", "10.0.0.1", "10.0.0.9", tsA),
+			chg("chg_s2", "vendor", "华为", "中兴", tsB),
+			chg("chg_s3", "model", "NE40E", "NE80E", tsB),
+		}); err != nil {
+			return err
+		}
+		if err := tx.AttributeChanges.MarkApplied(ctx, "chg_s1", tsC); err != nil {
+			return err
+		}
+		return tx.AttributeChanges.MarkDismissed(ctx, "chg_s2")
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	counts, err = db.AttributeChanges.CountByStatus(ctx)
+	if err != nil {
+		t.Fatalf("CountByStatus: %v", err)
+	}
+	want := map[domain.ChangeStatus]int{
+		domain.ChangeStatusPending:   1,
+		domain.ChangeStatusApplied:   1,
+		domain.ChangeStatusDismissed: 1,
+	}
+	if !reflect.DeepEqual(counts, want) {
+		t.Errorf("counts = %v, want %v", counts, want)
+	}
+}

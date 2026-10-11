@@ -252,6 +252,32 @@ func (r *BatchRepo) WorkbookPath(ctx context.Context, id string) (string, error)
 	return stringFromNull(path), nil
 }
 
+// CountByStatus returns the number of import batches per batch-status over
+// the whole table (COUNT aggregate — the governance summary's batches
+// accounting). The map carries only the statuses actually present; an
+// empty table answers an empty map, and the caller zero-fills the shape's
+// fixed keys.
+func (r *BatchRepo) CountByStatus(ctx context.Context) (map[domain.BatchStatus]int, error) {
+	rows, err := r.q.QueryContext(ctx, `SELECT status, COUNT(*) FROM import_batches GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("repo: count batches by status: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[domain.BatchStatus]int)
+	for rows.Next() {
+		var s string
+		var n int
+		if err := rows.Scan(&s, &n); err != nil {
+			return nil, fmt.Errorf("repo: scan count: %w", err)
+		}
+		counts[domain.BatchStatus(s)] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: count batches by status: %w", err)
+	}
+	return counts, nil
+}
+
 // ListWorkbookPaths returns the workbook_path of EVERY batch in the
 // database, regardless of status — completed, failed, rolled_back,
 // awaiting_mapping, all of it. It is the reference set of the uploads

@@ -208,6 +208,44 @@ func (r *IssueRepo) CountByBatch(ctx context.Context, batchID string) (int, erro
 	return n, nil
 }
 
+// IssueRuleCount is one (rule_code, COUNT(*)) pair of the by-rule issue
+// distribution (the governance summary's issues.byRule list).
+type IssueRuleCount struct {
+	RuleCode string
+	Count    int
+}
+
+// CountByRule returns the issue counts per rule code over the WHOLE table
+// (row-phase and set-level issues alike — batch_id is deliberately not a
+// filter), ordered by (count DESC, rule_code ASC) so the distribution is
+// deterministic. limit caps the number of returned rules; limit <= 0 means
+// every rule. An empty table answers an empty (non-nil) slice.
+func (r *IssueRepo) CountByRule(ctx context.Context, limit int) ([]IssueRuleCount, error) {
+	query := `SELECT rule_code, COUNT(*) FROM issues GROUP BY rule_code ORDER BY COUNT(*) DESC, rule_code ASC`
+	args := []any{}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := r.q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("repo: count issues by rule: %w", err)
+	}
+	defer rows.Close()
+	out := make([]IssueRuleCount, 0)
+	for rows.Next() {
+		var rc IssueRuleCount
+		if err := rows.Scan(&rc.RuleCode, &rc.Count); err != nil {
+			return nil, fmt.Errorf("repo: scan count: %w", err)
+		}
+		out = append(out, rc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: count issues by rule: %w", err)
+	}
+	return out, nil
+}
+
 // stringsToAny converts []string to []any for query arguments.
 func stringsToAny(ss []string) []any {
 	out := make([]any, len(ss))

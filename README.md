@@ -70,11 +70,12 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **来源引用版本化（v0.5 W7-D，零迁移）**：skip 即谱系版本——同键再导入（纯 skip 与 W005 diff-skip）对每批每实体追加一条 `source_refs`（行语义零变化；E001 批内重复不追加），资源详情 API 的 `sourceRefs[]` 按 rowid 版本序展示全史（创建批次在前、`raw` 记录该批工作簿原话），回滚随批消失（`batch_id ON DELETE CASCADE`）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §17。
 - **PTP 配置脚本导入通道（v0.5 W8-D，migration v13）**：第 4 类真实电信材料——中兴 VRP 风格 PTP 配置脚本（`.txt`/`.cfg`）经确定性解析器产出「PTP配置」虚拟 sheet，**完整复用既有 analyze → 映射确认 → 导入执行管线**（全规则/幂等/回滚/来源版本化/改名检测天然适用，无旁路）；新资源类型 `ptp_port`（第 8 类，复合自然键 `设备型号|接口名称`，23 字段，模型级模板身份诚实声明）；解析失败 422 带行号；样例 `samples/ptp-config-script.txt`；见 [docs/import-and-validation.md](docs/import-and-validation.md) §18、[docs/data-model.md](docs/data-model.md) §16。
 - **资源导出通道（v0.6 W12-D）**：`GET /api/exports/resources?types=` / `netopslab export --db --out [--types]` / 资源页「导出资源」按钮——把当前资源清单导出为与导入工作簿同构的 xlsx（每类型一 sheet、表头 = 字段 Label、行 = 属性快照，含 W005/W006 apply 后状态），**字节级确定性**（同库同参数两次导出逐字节一致）；**回源幂等**：导出文件直接走既有 analyze → suggest → import 管线导入全新库，资源集合与关系集合（ref 重新派生）等价；MCP 零新增；见 [docs/api.md](docs/api.md) 导出节 + [docs/import-and-validation.md](docs/import-and-validation.md) §19。
+- **治理总览看板（v0.6 W14-D）**：`GET /api/governance/summary` / `netopslab query --db <path> governance` / 概览页「治理总览」区——把待确认队列（属性变更 / 疑似改名）、决策审计计数、问题分布（按严重级 + 按规则 Top 10）与资源/关系/批次形态汇成一屏的只读聚合；全部计数走 SQL COUNT（无全表拉取），除 generatedAt 外全字段确定性（同库两次调用逐字段相等），空库恒全零；MCP 零新增；见 [docs/api.md](docs/api.md) 治理总览节。
 - **schema 动态发现与 uploads 垃圾回收（v0.4 W5-D 发布轮）**：`GET /api/schema` 返回 `mapping.Specs` 的忠实投影（八类资源的字段/键位/枚举/ref/同义词 + 13 条规则目录，机械生成禁止手抄，仅 HTTP 不进 MCP）；`serve` 启动与 CLI `netopslab gc` 清理未被任何批次引用的孤儿上传文件（任何状态的批次都算引用）；前端构建 manualChunks 分包（主 chunk 795 → 187 kB）。
 - **HTTP API**：`/api/...` 全套 REST 风格接口（错误统一 `{"error":{"code","message"}}` 信封）+ 17 条 §7 仿真路由。
 - **嵌入式 React 前端**：概览 / 数据导入（三步向导）/ 资源浏览（抽屉 + 二跳）/ 问题清单 / 质量报告 / 工作台列表 / 拓扑工作台 中文界面，`go:embed` 打进单二进制。
 - **结构化 CLI**：`analyze / import / export / validate / report / query / changes / renames / serve / mcp / gc / testdata / lab`，成功输出单一 JSON 对象，退出码 0/1/2（TeleAgent 的 CLI 回退路径）。
-- **工程化**：**309 个 Go 顶层测试**（19 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）；**组合根单一装配**（v0.5 W9-D：`internal/services` 是服务装配唯一事实源，app/HTTP API/MCP 共享同一实例，指针级测试钉死）。
+- **工程化**：**331 个 Go 顶层测试**（20 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）；**组合根单一装配**（v0.5 W9-D：`internal/services` 是服务装配唯一事实源，app/HTTP API/MCP 共享同一实例，指针级测试钉死）。
 
 ## 3. 快速开始
 
@@ -82,7 +83,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ```bash
 # 1) 测试
-make test            # go test -count=1 -timeout 15m ./...（309 个顶层测试 / 19 包 ok）
+make test            # go test -count=1 -timeout 15m ./...（331 个顶层测试 / 20 包 ok）
 
 # 2) 构建前端（产物嵌入 internal/webui/dist，供 go:embed 使用）
 make web             # cd web && npm ci && npm run build
@@ -154,7 +155,7 @@ netopslab lab checkpoint --db $DB --workspace <wsId> --restore --id cp-1
 | 前端 | React 18 + TypeScript 5.6（strict）+ Vite 6 | 手写设计系统 CSS，无 UI 框架 |
 | 拓扑图 | cytoscape 3.32.0（精确版本，无插件） | /lab 画布；单 chunk 嵌入（ADR-0009） |
 | 嵌入 | go:embed all:dist | 前端产物打进二进制，单文件分发 |
-| 测试 | go test（table-driven） | 309 个顶层测试 / 19 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
+| 测试 | go test（table-driven） | 331 个顶层测试 / 20 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
 
 ## 6. 仓库结构
 
@@ -230,7 +231,7 @@ netopslab import   --file devices.xlsx --map map.json --db ./data/netops.db
 netopslab export   --db ./data/netops.db --out resources.xlsx [--types device,ip_pool]  # 导出当前资源清单（xlsx，可回源导入）
 netopslab validate --db ./data/netops.db [--batch <id>]
 netopslab report   --db ./data/netops.db --format html --out report.html
-netopslab query    --db ./data/netops.db resources|stats|relations …
+netopslab query    --db ./data/netops.db resources|stats|relations|governance …       # 治理总览聚合（governance 输出单 JSON）
 netopslab lab      --db ./data/netops.db workspace create --name <n> [--all-batches]   # 仿真工作台
 netopslab lab      … topology|path|apply|checks|diff|undo|checkpoint                   # 见 docs/teleagent-integration.md §4.2
 netopslab serve    --addr :8080 --db ./data/netops.db
@@ -262,7 +263,7 @@ TeleAgent 集成：MCP 注册方式与 CLI 回退路径（以结构化 JSON 供 
 
 ## 10. English Summary
 
-NetOps Lab is a local-first cloud-network resource governance and AI simulation workbench delivering Stage 0 + Phase 1 + Phase 2. Phase 1 imports eight resource types (devices, IP pools, circuits, ports, base stations, machine rooms, sites, PTP ports — base stations/machine rooms/sites are v0.4 real-telecom workbook types, ptp_port is the v0.5 real-telecom script channel) through a user-confirmed column mapping (scripts map through a deterministic parser to a virtual sheet) into SQLite (pure Go, no CGO), with single-transaction atomicity, row-level accounting, idempotent re-import (skip-path re-imports append per-batch source-ref provenance, W7), batch rollback, attribute-change and suspected-rename proposals with human-confirmed apply/reject flows (W005/W006), and a deterministic, versioned validation engine (13 rules, E001–E006/W001–W006/I001) with source evidence. Phase 2 adds the simulation workbench: one-click materialization of a virtual topology (27 devices / 40 interfaces / 20 links in the demo), a closed set of 10 typed operations (including fault injection) that humans AND the AI (via MCP) apply through the same engine path as atomic changesets, five deterministic checks (CHK-001..005, score 100−5E−1W), up-only BFS connectivity, before/after run diff (business-key matching, connectivity lost/gained pairs, score delta), and three-tier undo: transaction rollback for failed changesets, LIFO changeset-inverse undo (undo-of-undo works), and checkpoints via the SQLite Online Backup API with workspace-scoped restore-as-forward-ops (hash-equal verification, no-op detection). Exits: stdlib HTTP API (17 new §7 routes), embedded React 18 UI with a Cytoscape topology canvas (/lab), structured-JSON CLI (lab subcommand tree), and an MCP stdio server exposing exactly five tools (one read-only search + four typed lab tools; no workspace create/delete for the AI), all wired through a single composition root (internal/services, W9 — N+1-free MCP reads). Verified: 309 top-level Go tests green (v0.6.0 dev-round count, W12-D export round, counting convention in docs/verified-capabilities.md), live-server API journey, CLI e2e, in-process MCP round-trip + real-process stdio smoke, determinism (two fresh DBs), atomicity, checkpoint round-trip, repeatable demo-lab.sh double-run. Unverified: deployed-TeleAgent MCP invocation, Windows/macOS builds (the /lab browser smoke passed in the 2026-10-10 final review and again at v0.4.0). No production write capability anywhere; all data is synthetic, with the single documented `samples/` exception (real telecom export samples, owner-authorized, private-repository-only — see samples/README.md).
+NetOps Lab is a local-first cloud-network resource governance and AI simulation workbench delivering Stage 0 + Phase 1 + Phase 2. Phase 1 imports eight resource types (devices, IP pools, circuits, ports, base stations, machine rooms, sites, PTP ports — base stations/machine rooms/sites are v0.4 real-telecom workbook types, ptp_port is the v0.5 real-telecom script channel) through a user-confirmed column mapping (scripts map through a deterministic parser to a virtual sheet) into SQLite (pure Go, no CGO), with single-transaction atomicity, row-level accounting, idempotent re-import (skip-path re-imports append per-batch source-ref provenance, W7), batch rollback, attribute-change and suspected-rename proposals with human-confirmed apply/reject flows (W005/W006), and a deterministic, versioned validation engine (13 rules, E001–E006/W001–W006/I001) with source evidence. Phase 2 adds the simulation workbench: one-click materialization of a virtual topology (27 devices / 40 interfaces / 20 links in the demo), a closed set of 10 typed operations (including fault injection) that humans AND the AI (via MCP) apply through the same engine path as atomic changesets, five deterministic checks (CHK-001..005, score 100−5E−1W), up-only BFS connectivity, before/after run diff (business-key matching, connectivity lost/gained pairs, score delta), and three-tier undo: transaction rollback for failed changesets, LIFO changeset-inverse undo (undo-of-undo works), and checkpoints via the SQLite Online Backup API with workspace-scoped restore-as-forward-ops (hash-equal verification, no-op detection). Exits: stdlib HTTP API (17 new §7 routes), embedded React 18 UI with a Cytoscape topology canvas (/lab), structured-JSON CLI (lab subcommand tree), and an MCP stdio server exposing exactly five tools (one read-only search + four typed lab tools; no workspace create/delete for the AI), all wired through a single composition root (internal/services, W9 — N+1-free MCP reads). Verified: 331 top-level Go tests green (v0.6.0 dev-round count, W14-D governance-overview round, counting convention in docs/verified-capabilities.md), and a one-screen governance overview (pending queues, decision audit, issue distribution, inventory shapes — SQL-COUNT aggregate, deterministic except generatedAt), live-server API journey, CLI e2e, in-process MCP round-trip + real-process stdio smoke, determinism (two fresh DBs), atomicity, checkpoint round-trip, repeatable demo-lab.sh double-run. Unverified: deployed-TeleAgent MCP invocation, Windows/macOS builds (the /lab browser smoke passed in the 2026-10-10 final review and again at v0.4.0). No production write capability anywhere; all data is synthetic, with the single documented `samples/` exception (real telecom export samples, owner-authorized, private-repository-only — see samples/README.md).
 
 ## 文档索引
 

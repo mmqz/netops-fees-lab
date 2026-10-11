@@ -230,6 +230,32 @@ func (r *RenameProposalRepo) DeletePendingByBatch(ctx context.Context, batchID s
 	return n, nil
 }
 
+// CountByStatus returns the number of rename proposals per lifecycle
+// status over the whole table (COUNT aggregate — the governance summary's
+// pending/decided accounting). The map carries only the statuses actually
+// present; an empty table answers an empty map, and the caller zero-fills
+// the shape's fixed keys.
+func (r *RenameProposalRepo) CountByStatus(ctx context.Context) (map[domain.RenameStatus]int, error) {
+	rows, err := r.q.QueryContext(ctx, `SELECT status, COUNT(*) FROM rename_proposals GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("repo: count rename proposals by status: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[domain.RenameStatus]int)
+	for rows.Next() {
+		var s string
+		var n int
+		if err := rows.Scan(&s, &n); err != nil {
+			return nil, fmt.Errorf("repo: scan count: %w", err)
+		}
+		counts[domain.RenameStatus(s)] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: count rename proposals by status: %w", err)
+	}
+	return counts, nil
+}
+
 // CountPendingByBatch returns the number of pending rename proposals
 // attributed to batchID (COUNT aggregate — same scope as
 // DeletePendingByBatch, for the rollback response accounting).

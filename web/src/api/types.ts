@@ -285,6 +285,55 @@ export interface StatsResponse {
 }
 
 // ---------------------------------------------------------------------------
+// 11b. GET /api/governance/summary（v0.6 W14-D 治理总览）
+// ---------------------------------------------------------------------------
+
+/** 治理总览：待确认队列（属性变更 / 疑似改名）。 */
+export interface GovernancePendingCounts {
+  attributeChanges: number;
+  renameProposals: number;
+}
+
+/** 治理总览：决策审计计数（两确认流的终态；后端恒发四个固定键）。 */
+export interface GovernanceDecidedCounts {
+  attributeChanges: Partial<Record<'applied' | 'dismissed', number>>;
+  renameProposals: Partial<Record<'applied' | 'rejected', number>>;
+}
+
+/** 治理总览：问题按规则分布的一行（后端 count 降序 / 码升序，前 10）。 */
+export interface GovernanceRuleCount {
+  rule: RuleCode;
+  count: number;
+}
+
+/** 治理总览聚合（除 generatedAt 外全字段确定性；空库恒全零）。 */
+export interface GovernanceSummary {
+  pending: GovernancePendingCounts;
+  decided: GovernanceDecidedCounts;
+  issues: {
+    /** 后端恒发 error/warning/info 三个键（计 0 亦发）。 */
+    bySeverity: PartialIssueCounts;
+    byRule: GovernanceRuleCount[];
+  };
+  resources: {
+    total: number;
+    /** 动态键 map：键集 = 库内实际出现的类型字面量。 */
+    byType: Record<string, number>;
+  };
+  relations: {
+    total: number;
+    /** 动态键 map：键集 = 库内实际出现的关系类型字面量。 */
+    byType: Partial<Record<RelationType, number>>;
+  };
+  batches: {
+    total: number;
+    /** 动态键 map：键集 = 库内实际出现的批次状态字面量。 */
+    byStatus: Partial<Record<BatchStatus, number>>;
+  };
+  generatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // 12. GET /api/issues?batchId=&severity=&ruleCode=&page=&pageSize=
 // ---------------------------------------------------------------------------
 

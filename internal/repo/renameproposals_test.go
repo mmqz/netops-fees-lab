@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -328,5 +329,49 @@ func TestRenameApplyRepoMerge(t *testing.T) {
 	}
 	if rels, err := db.Relations.ListByResource(ctx, "res_ren_old"); err != nil || len(rels) != 0 {
 		t.Errorf("relations after cascade delete = %v (err %v), want the rel_cascade edge gone with its endpoint", rels, err)
+	}
+}
+
+// TestRenameProposalCountByStatus pins the W14-D COUNT aggregate: real SQL
+// GROUP BY counts over the three lifecycle states (Insert creates pending
+// rows; MarkApplied/MarkRejected produce the decided ones); an empty table
+// answers an empty map.
+func TestRenameProposalCountByStatus(t *testing.T) {
+	db := newRenameDB(t)
+	ctx := context.Background()
+
+	counts, err := db.RenameProposals.CountByStatus(ctx)
+	if err != nil {
+		t.Fatalf("CountByStatus on empty: %v", err)
+	}
+	if len(counts) != 0 {
+		t.Errorf("empty table counts = %v, want empty map", counts)
+	}
+
+	if err := db.Do(ctx, func(tx *Tx) error {
+		for _, id := range []string{"rp_s1", "rp_s2", "rp_s3"} {
+			if err := tx.RenameProposals.Insert(ctx, rp(id, simTS)); err != nil {
+				return err
+			}
+		}
+		if err := tx.RenameProposals.MarkApplied(ctx, "rp_s1", simTS); err != nil {
+			return err
+		}
+		return tx.RenameProposals.MarkRejected(ctx, "rp_s2", simTS)
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	counts, err = db.RenameProposals.CountByStatus(ctx)
+	if err != nil {
+		t.Fatalf("CountByStatus: %v", err)
+	}
+	want := map[domain.RenameStatus]int{
+		domain.RenameStatusPending:  1,
+		domain.RenameStatusApplied:  1,
+		domain.RenameStatusRejected: 1,
+	}
+	if !reflect.DeepEqual(counts, want) {
+		t.Errorf("counts = %v, want %v", counts, want)
 	}
 }

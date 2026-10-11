@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -228,5 +229,51 @@ func TestIssueCountByBatchMatchesList(t *testing.T) {
 	}
 	if n, err := db.Issues.CountByBatch(ctx, "bat_none"); err != nil || n != 0 {
 		t.Errorf("CountByBatch(missing batch) = %d, %v; want 0", n, err)
+	}
+}
+
+// TestIssueCountByRule pins the W14-D COUNT aggregate: real SQL GROUP BY
+// counts per rule_code with the deterministic (count DESC, rule_code ASC)
+// order and the limit cap. The seedIssues mix yields W001 x2 plus seven
+// singletons (E001/E002/E005/E006/I001/W003); limit <= 0 returns all.
+func TestIssueCountByRule(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Empty table: empty (non-nil) slice.
+	got, err := db.Issues.CountByRule(ctx, 0)
+	if err != nil {
+		t.Fatalf("CountByRule on empty: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("empty table by-rule = %#v, want empty non-nil slice", got)
+	}
+
+	seedIssues(t, db)
+
+	got, err = db.Issues.CountByRule(ctx, 0)
+	if err != nil {
+		t.Fatalf("CountByRule: %v", err)
+	}
+	want := []IssueRuleCount{
+		{RuleCode: "W001", Count: 2},
+		{RuleCode: "E001", Count: 1},
+		{RuleCode: "E002", Count: 1},
+		{RuleCode: "E005", Count: 1},
+		{RuleCode: "E006", Count: 1},
+		{RuleCode: "I001", Count: 1},
+		{RuleCode: "W003", Count: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("by-rule = %v\nwant    %v (count DESC, code ASC)", got, want)
+	}
+
+	// The limit cap keeps the head of the same order.
+	capped, err := db.Issues.CountByRule(ctx, 3)
+	if err != nil {
+		t.Fatalf("CountByRule limit=3: %v", err)
+	}
+	if len(capped) != 3 || capped[0] != want[0] || capped[1] != want[1] || capped[2] != want[2] {
+		t.Errorf("capped = %v, want the first 3 of %v", capped, want)
 	}
 }

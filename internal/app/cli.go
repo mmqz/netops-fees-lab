@@ -522,11 +522,11 @@ func cmdReport(args []string, stdout, stderr io.Writer) error {
 	return a.Report.WriteJSON(ctx, *batch, dest)
 }
 
-// cmdQuery implements `netopslab query --db <path> resources|stats|relations …`.
+// cmdQuery implements `netopslab query --db <path> resources|stats|relations|governance …`.
 // The sub-subcommand may appear before or after the query-level flags; only
 // --db is accepted at the query level.
 func cmdQuery(args []string, stdout, stderr io.Writer) error {
-	dbPath, sub, subArgs, err := splitSubArgs("query", "resources / stats / relations", args)
+	dbPath, sub, subArgs, err := splitSubArgs("query", "resources / stats / relations / governance", args)
 	if err != nil {
 		return err
 	}
@@ -544,8 +544,10 @@ func cmdQuery(args []string, stdout, stderr io.Writer) error {
 		return cmdQueryStats(ctx, a, subArgs, stdout, stderr)
 	case "relations":
 		return cmdQueryRelations(ctx, a, subArgs, stdout, stderr)
+	case "governance":
+		return cmdQueryGovernance(ctx, a, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("query 子命令必须是 resources、stats 或 relations，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("query 子命令必须是 resources、stats、relations 或 governance，收到 %q", sub)}
 	}
 }
 
@@ -749,6 +751,26 @@ func cmdQueryRelations(ctx context.Context, a *App, args []string, stdout, stder
 		return err
 	}
 	return writeJSON(stdout, result)
+}
+
+// cmdQueryGovernance implements `query governance` — the governance
+// overview aggregate (the CLI twin of GET /api/governance/summary): the
+// pending confirmation queues, the decision audit counters, the issue
+// distribution and the inventory shapes as ONE JSON object on stdout. It
+// takes no flags of its own (the database path is the query-level --db).
+func cmdQueryGovernance(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("query governance")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "query governance 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	summary, err := a.Governance.Summary(ctx)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, summary)
 }
 
 // cmdMCP implements `netopslab mcp [--db]` (also env NETOPS_DB): run the MCP

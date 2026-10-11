@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/changes"
+	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
@@ -48,6 +49,10 @@ type Services struct {
 	Changes *changes.Service
 	// Renames is the rename confirmation service (W6-D).
 	Renames *renames.Service
+	// Governance is the governance overview aggregation service (W14-D):
+	// the read-only summary of the pending queues, decision audit, issue
+	// distribution and inventory shapes.
+	Governance *governance.Service
 	// Lab is the simulation workbench engine (materialize, ops, checks,
 	// undo, checkpoints) — the App's Lab field and the MCP lab tools share
 	// this one instance.
@@ -101,6 +106,7 @@ func New(db *repo.DB, opts ...Option) *Services {
 		Query:      query.New(db),
 		Changes:    changes.New(db),
 		Renames:    renames.New(db),
+		Governance: governance.New(db),
 		Lab:        lab,
 		Report:     report.New(db),
 		LabReport:  report.NewLab(db, lab),
