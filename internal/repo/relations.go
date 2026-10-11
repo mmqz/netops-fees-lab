@@ -157,6 +157,62 @@ func (r *RelationRepo) RetargetResource(ctx context.Context, oldID, newID string
 	return retargeted, deleted, nil
 }
 
+// UpdateTarget retargets the to-endpoint of the resource's derived relation
+// of the given type to newToResourceID: UPDATE relations SET to_resource_id
+// WHERE from_resource_id = ? AND relation_type = ? (from and type stay
+// fixed). It is the W13-D write of the attribute-change apply flow: a
+// confirmed ref-field change (machine_room.site_id, ip_pool.assigned_device,
+// circuit a/z_end …) moves the derived edge to the newly confirmed target
+// inside the caller's apply transaction. The CALLER has verified the
+// preconditions — the field is a ref field of the from-resource's schema,
+// the new target exists (natural-key resolution, the same lookup the
+// importer's E003 uses) and relationType is the derivation mapping's answer
+// for that (type, field) pair (mapping.RelationTypeFor, direction from =
+// the owning resource, exactly as the importer created the edge).
+//
+// Returns the number of updated rows. 0 means the resource has NO derived
+// relation of that type — the apply then keeps the attribute-only
+// semantics (e.g. a machine_room imported with an empty optional site_id:
+// W001 orphan, no edge) and NEVER creates one: every relation row's
+// first_batch_id anchors its workbook evidence, a human apply has no
+// workbook row to anchor, so an evidence-free edge would break the
+// provenance invariant. Retargeting is different — the edge already has
+// lineage, the confirmation only corrects where it points (the change row
+// itself is the audit line).
+//
+// UNIQUE (from, to, relation_type) safety argument: from and type are
+// unchanged, only to moves. A conflict with an existing tuple requires a
+// second edge with the SAME (from, type) already pointing at newTo — in
+// the importer-derived world each single-valued ref field owns at most one
+// edge per (from, type), and an edge already pointing at newTo would mean
+// the attribute already carried the new value, which contradicts the W005
+// old-value guard upstream (old != new is why the proposal exists). The
+// one theoretical source of two same-(from, type) edges is a rename-merge
+// (RetargetResource) of two resources whose same-type edges have different
+// targets; retargeting both rows to one target then violates UNIQUE, the
+// statement aborts, the caller's transaction rolls back — the apply fails
+// atomically instead of corrupting the edge set.
+//
+// Lineage is untouched: first_batch_id, attributes and created_at keep
+// their imported values (the relations table has no updated_at column —
+// retargeting is recorded on the attribute-change row, not on the edge;
+// the edge is not re-created). See docs/import-and-validation.md §14.
+func (r *RelationRepo) UpdateTarget(ctx context.Context, fromResourceID string, relationType domain.RelationType, newToResourceID string) (int64, error) {
+	res, err := r.q.ExecContext(ctx,
+		`UPDATE relations SET to_resource_id = ? WHERE from_resource_id = ? AND relation_type = ?`,
+		newToResourceID, fromResourceID, relationType.String())
+	if err != nil {
+		return 0, fmt.Errorf("repo: retarget relation of %s (%s → %s): %w",
+			fromResourceID, relationType, newToResourceID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("repo: retarget relation of %s (%s): rows affected: %w",
+			fromResourceID, relationType, err)
+	}
+	return n, nil
+}
+
 // DeleteByBatch deletes all relations created by batchID and returns the
 // number of deleted rows.
 func (r *RelationRepo) DeleteByBatch(ctx context.Context, batchID string) (int64, error) {

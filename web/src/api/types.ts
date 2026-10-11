@@ -330,6 +330,8 @@ export interface AttributeChangeItem {
   rowNumber: number;
   createdAt: string;
   appliedAt?: string | null;
+  /** W13-D：apply 响应里是“确认时已同步改挂派生关系”的真值；待确认列表里是同一判定的预览（引用字段且已有派生关系 → 确认后会改挂，用于行内提示与 toast）。非引用字段恒 false。 */
+  relationRetargeted: boolean;
 }
 
 /** 列表信封：{items, total}（limit/offset 分页）。 */

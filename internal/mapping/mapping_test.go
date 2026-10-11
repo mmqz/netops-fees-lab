@@ -1604,3 +1604,36 @@ func TestSiteMachineRoomValidate(t *testing.T) {
 		})
 	}
 }
+
+// TestRelationTypeFor pins the ref-field → relation-type derivation mapping
+// (moved here from internal/importer in v0.6 W13-D together with the function
+// itself): the belongs_to case, the unchanged legacy behaviour for every
+// other combination, and the "" sentinel for unmapped combinations. The
+// importer (edge creation at import time) and the attribute-change apply
+// flow (edge retarget on confirm) share this ONE mapping — a divergent
+// second table would let the two flows disagree about which edge a ref
+// field owns.
+func TestRelationTypeFor(t *testing.T) {
+	cases := []struct {
+		rt    domain.ResourceType
+		field string
+		want  domain.RelationType
+	}{
+		{domain.ResourceTypeIPPool, "assigned_device", domain.RelationTypeAssignedTo},
+		{domain.ResourceTypeCircuit, "a_end_device", domain.RelationTypeAEnd},
+		{domain.ResourceTypeCircuit, "z_end_device", domain.RelationTypeZEnd},
+		{domain.ResourceTypeMachineRoom, "site_id", domain.RelationTypeBelongsTo},
+		// Unmapped combinations stay "" (no relation is derived from them).
+		{domain.ResourceTypeMachineRoom, "city", ""},
+		{domain.ResourceTypeMachineRoom, "device_name", ""},
+		{domain.ResourceTypeIPPool, "site_id", ""},
+		{domain.ResourceTypeSite, "site_id", ""},
+		{domain.ResourceTypeCircuit, "assigned_device", ""},
+		{domain.ResourceTypeDevice, "site_id", ""},
+	}
+	for _, tc := range cases {
+		if got := RelationTypeFor(tc.rt, tc.field); got != tc.want {
+			t.Errorf("RelationTypeFor(%s, %q) = %q, want %q", tc.rt, tc.field, got, tc.want)
+		}
+	}
+}

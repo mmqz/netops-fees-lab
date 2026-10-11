@@ -12,19 +12,20 @@ import (
 // changeListItem mirrors one item of GET /api/attribute-changes (the exact
 // §W4-D field names — a field-name regression fails to compile).
 type changeListItem struct {
-	ID           string  `json:"id"`
-	ResourceID   string  `json:"resourceId"`
-	ResourceType string  `json:"resourceType"`
-	NaturalKey   string  `json:"naturalKey"`
-	BatchID      string  `json:"batchId"`
-	Field        string  `json:"field"`
-	OldValue     string  `json:"oldValue"`
-	NewValue     string  `json:"newValue"`
-	Status       string  `json:"status"`
-	Sheet        string  `json:"sheet"`
-	RowNumber    int     `json:"rowNumber"`
-	CreatedAt    string  `json:"createdAt"`
-	AppliedAt    *string `json:"appliedAt"`
+	ID                 string  `json:"id"`
+	ResourceID         string  `json:"resourceId"`
+	ResourceType       string  `json:"resourceType"`
+	NaturalKey         string  `json:"naturalKey"`
+	BatchID            string  `json:"batchId"`
+	Field              string  `json:"field"`
+	OldValue           string  `json:"oldValue"`
+	NewValue           string  `json:"newValue"`
+	Status             string  `json:"status"`
+	Sheet              string  `json:"sheet"`
+	RowNumber          int     `json:"rowNumber"`
+	CreatedAt          string  `json:"createdAt"`
+	AppliedAt          *string `json:"appliedAt"`
+	RelationRetargeted bool    `json:"relationRetargeted"`
 }
 
 type changesPage struct {
@@ -280,5 +281,263 @@ func TestAPIAttributeChangesFlow(t *testing.T) {
 	decodeJSON(t, "final all", body, &page)
 	if page.Total != 2 {
 		t.Errorf("final all total = %d, want 2 (1 applied + 1 dismissed)", page.Total)
+	}
+}
+
+// buildSiteWorkbook builds the one-row site workbook (局站资源表) with the
+// given site_id.
+func buildSiteWorkbook(t *testing.T, siteID string) []byte {
+	t.Helper()
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "局站资源表"); err != nil {
+		t.Fatalf("rename default sheet: %v", err)
+	}
+	rows := [][]string{
+		{"局站ID", "局站名称", "地市"},
+		{siteID, "站" + siteID, "杭州"},
+	}
+	for r, row := range rows {
+		for c, v := range row {
+			cell, err := excelize.CoordinatesToCellName(c+1, r+1)
+			if err != nil {
+				t.Fatalf("cell name: %v", err)
+			}
+			if err := f.SetCellStr("局站资源表", cell, v); err != nil {
+				t.Fatalf("set cell: %v", err)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// buildRoomWorkbook builds the one-row machine room workbook (机房资源表)
+// with the given site_id ref value.
+func buildRoomWorkbook(t *testing.T, siteID string) []byte {
+	t.Helper()
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "机房资源表"); err != nil {
+		t.Fatalf("rename default sheet: %v", err)
+	}
+	rows := [][]string{
+		{"机房ID", "机房名称", "局站ID"},
+		{"RM-001", "机房一", siteID},
+	}
+	for r, row := range rows {
+		for c, v := range row {
+			cell, err := excelize.CoordinatesToCellName(c+1, r+1)
+			if err != nil {
+				t.Fatalf("cell name: %v", err)
+			}
+			if err := f.SetCellStr("机房资源表", cell, v); err != nil {
+				t.Fatalf("set cell: %v", err)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close workbook: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// siteImportMapping / roomImportMapping are the confirmed mappings of the
+// two readings (site pass + machine_room pass of the 机房局站 story).
+const siteImportMapping = `{"sheets":[
+	{"sheet":"局站资源表","action":"import","resourceType":"site","keyColumns":["site_id"],
+	 "columnMapping":{"site_id":"局站ID","site_name":"局站名称","city":"地市"}}
+]}`
+
+const roomImportMapping = `{"sheets":[
+	{"sheet":"机房资源表","action":"import","resourceType":"machine_room","keyColumns":["machine_room_id"],
+	 "columnMapping":{"machine_room_id":"机房ID","machine_room_name":"机房名称","site_id":"局站ID"}}
+]}`
+
+// importMapped uploads the workbook and confirms the given mapping JSON,
+// returning the import summary (with the batch id).
+func importMapped(t *testing.T, srv *httptest.Server, filename string, content []byte, mapping string) importSummary {
+	t.Helper()
+	resp, body := uploadFile(t, srv, filename, content)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("upload %s: status = %d, want 202\nbody: %s", filename, resp.StatusCode, body)
+	}
+	var a importAnalysis
+	decodeJSON(t, "upload "+filename, body, &a)
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/imports/"+a.BatchID+"/mapping",
+		[]byte(mapping), "application/json")
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("mapping %s: status = %d, want 202\nbody: %s", filename, resp.StatusCode, body)
+	}
+	var sum importSummary
+	decodeJSON(t, "mapping "+filename, body, &sum)
+	return sum
+}
+
+// TestAPIAttributeChangesRefRetarget walks the W13-D ref-field
+// confirmation journey over HTTP: two site imports (SITE-B in its own
+// batch), a machine room whose site_id re-import moves SITE-A → SITE-B
+// (one pending proposal whose list preview carries relationRetargeted),
+// the target site's batch rolled back AFTER the proposal exists (the
+// reachable trigger of the guard) → apply answers 409 ref_target_missing
+// with the field / target key / referenced type in the message and ZERO
+// changes (attribute, edge, proposal status all unchanged); the site is
+// re-imported → the same apply now succeeds, the attribute AND the
+// belongs_to edge retarget to SITE-B and the 200 body carries
+// relationRetargeted=true; the second apply keeps the plain conflict 409.
+func TestAPIAttributeChangesRefRetarget(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	importMapped(t, srv, "site-a.xlsx", buildSiteWorkbook(t, "SITE-A"), siteImportMapping)
+	siteB := importMapped(t, srv, "site-b.xlsx", buildSiteWorkbook(t, "SITE-B"), siteImportMapping)
+	importMapped(t, srv, "room-v1.xlsx", buildRoomWorkbook(t, "SITE-A"), roomImportMapping)
+	importMapped(t, srv, "room-v2.xlsx", buildRoomWorkbook(t, "SITE-B"), roomImportMapping)
+
+	// The room resource and both site resources (for edge endpoint checks).
+	resp, body := doRequest(t, srv, http.MethodGet, "/api/resources?type=machine_room", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resources: status = %d, want 200", resp.StatusCode)
+	}
+	var rooms resourcesPage
+	decodeJSON(t, "rooms", body, &rooms)
+	if rooms.Total != 1 {
+		t.Fatalf("machine_room count = %d, want 1", rooms.Total)
+	}
+	roomID := rooms.Items[0].ID
+	siteIDByKey := map[string]string{}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=site", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sites: status = %d, want 200", resp.StatusCode)
+	}
+	var sites resourcesPage
+	decodeJSON(t, "sites", body, &sites)
+	for _, s := range sites.Items {
+		siteIDByKey[s.NaturalKey] = s.ID
+	}
+
+	// The pending proposal with the retarget PREVIEW (the web hint's
+	// predicate) — and the W001-free happy path edge exists to SITE-A.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/attribute-changes?status=pending", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list pending: status = %d, want 200", resp.StatusCode)
+	}
+	var page changesPage
+	decodeJSON(t, "list pending", body, &page)
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("pending list = %d items (total %d), want 1/1", len(page.Items), page.Total)
+	}
+	ch := page.Items[0]
+	if ch.Field != "site_id" || ch.OldValue != "SITE-A" || ch.NewValue != "SITE-B" {
+		t.Fatalf("change item = %+v, want site_id SITE-A→SITE-B", ch)
+	}
+	if !ch.RelationRetargeted {
+		t.Errorf("pending list preview relationRetargeted = false, want true (ref field with an edge)")
+	}
+	edgeTo := func() string {
+		resp, body := doRequest(t, srv, http.MethodGet, "/api/resources/"+roomID+"/relations", nil, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("relations: status = %d, want 200", resp.StatusCode)
+		}
+		var rels relationsResp
+		decodeJSON(t, "relations", body, &rels)
+		for _, e := range rels.Edges {
+			if e.RelationType == "belongs_to" && e.FromID == roomID {
+				return e.ToID
+			}
+		}
+		return ""
+	}
+	if got := edgeTo(); got != siteIDByKey["SITE-A"] {
+		t.Fatalf("belongs_to edge before apply points at %q, want SITE-A (%q)", got, siteIDByKey["SITE-A"])
+	}
+
+	// Roll back the SITE-B batch AFTER the proposal exists: legal (no
+	// relation references SITE-B; the proposal belongs to the room's
+	// re-import batch) — the reachable trigger of the ref-target guard.
+	resp, body = doRequest(t, srv, http.MethodDelete, "/api/batches/"+siteB.BatchID, nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rollback site-B batch: status = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+
+	// Apply → 409 ref_target_missing with the field / target key / type in
+	// the message, and ZERO changes on the resource and the edge.
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/attribute-changes/"+ch.ID+"/apply", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("apply with vanished target: status = %d, want 409\nbody: %s", resp.StatusCode, body)
+	}
+	var errEnvelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	decodeJSON(t, "ref target missing", body, &errEnvelope)
+	if errEnvelope.Error.Code != "ref_target_missing" {
+		t.Errorf("apply refused: error.code = %q, want ref_target_missing", errEnvelope.Error.Code)
+	}
+	for _, want := range []string{"site_id", "SITE-B", "site"} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Errorf("ref_target_missing message %q must contain %q", errEnvelope.Error.Message, want)
+		}
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=machine_room", nil, "")
+	decodeJSON(t, "rooms after refusal", body, &rooms)
+	if rooms.Items[0].Attributes["site_id"] != "SITE-A" {
+		t.Errorf("resource after refusal = %v, want site_id still SITE-A (zero changes)", rooms.Items[0].Attributes)
+	}
+	if got := edgeTo(); got != siteIDByKey["SITE-A"] {
+		t.Errorf("edge after refusal points at %q, want still SITE-A (zero changes)", got)
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/attribute-changes?status=pending", nil, "")
+	decodeJSON(t, "pending after refusal", body, &page)
+	if page.Total != 1 {
+		t.Errorf("pending after refusal = %d, want 1 (the proposal stays pending)", page.Total)
+	}
+
+	// Re-import the site (a NEW batch — SITE-A's batch is untouched) and
+	// apply again: the attribute AND the belongs_to edge follow SITE-B.
+	importMapped(t, srv, "site-b-again.xlsx", buildSiteWorkbook(t, "SITE-B"), siteImportMapping)
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=site", nil, "")
+	decodeJSON(t, "sites after re-import", body, &sites)
+	for _, s := range sites.Items {
+		siteIDByKey[s.NaturalKey] = s.ID
+	}
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/attribute-changes/"+ch.ID+"/apply", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply after re-import: status = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+	var applied changeListItem
+	decodeJSON(t, "apply", body, &applied)
+	if applied.Status != "applied" || applied.Field != "site_id" {
+		t.Fatalf("applied item = %+v, want applied site_id", applied)
+	}
+	if !applied.RelationRetargeted {
+		t.Errorf("applied item relationRetargeted = false, want true (the edge moved)")
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=machine_room", nil, "")
+	decodeJSON(t, "rooms after apply", body, &rooms)
+	if rooms.Items[0].Attributes["site_id"] != "SITE-B" {
+		t.Errorf("resource after apply = %v, want site_id SITE-B", rooms.Items[0].Attributes)
+	}
+	if got := edgeTo(); got != siteIDByKey["SITE-B"] {
+		t.Errorf("belongs_to edge after apply points at %q, want SITE-B (%q)", got, siteIDByKey["SITE-B"])
+	}
+
+	// The second apply of the now-applied proposal → the plain conflict.
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/attribute-changes/"+ch.ID+"/apply", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("re-apply: status = %d, want 409\nbody: %s", resp.StatusCode, body)
+	}
+	decodeJSON(t, "re-apply", body, &errEnvelope)
+	if errEnvelope.Error.Code != "conflict" {
+		t.Errorf("re-apply error.code = %q, want conflict", errEnvelope.Error.Code)
 	}
 }

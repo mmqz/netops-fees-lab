@@ -420,10 +420,14 @@ export const RES_TABLE_LABEL = '资源列表';
 export const RES_CHANGES_TITLE = '待确认属性变更';
 export const RES_CHANGES_HINT = '同键再导入检测到属性差异，行已跳过；人工确认后变更才会生效。';
 export const RES_CHANGES_BATCH_ROW = '批次 {batch} · 行 {row}';
+// W13-D：引用字段的行内轻提示（relationRetargeted 预览为真时渲染）。
+export const RES_CHANGES_REF_FIELD_HINT = '引用字段 · 确认后将同步改挂关系（需目标已存在）';
 export const RES_CHANGE_APPLY = '应用';
 export const RES_CHANGE_DISMISS = '忽略';
 export const RES_CHANGE_APPLYING = '处理中…';
 export const RES_CHANGES_APPLIED_TOAST = '已应用变更：{field} 已更新';
+// W13-D：apply 响应 relationRetargeted=true 时使用（派生关系已随确认改挂）。
+export const RES_CHANGES_APPLIED_RETARGETED_TOAST = '已应用变更：{field} 已更新，关系已改挂';
 export const RES_CHANGES_DISMISSED_TOAST = '已忽略变更：{field} 维持原值';
 export const RES_CHANGES_ACTION_FAILED = '操作失败：{message}';
 

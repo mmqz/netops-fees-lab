@@ -129,6 +129,13 @@ func cliErrorCode(err error) string {
 	if errors.As(err, &fieldErr) {
 		return "validation"
 	}
+	// The W13-D ref-target guard of the attribute-change apply: the CLI
+	// mirrors the HTTP 409 ref_target_missing code (the taxonomy parity the
+	// docstring promises).
+	var refMissing *changes.RefTargetMissingError
+	if errors.As(err, &refMissing) {
+		return "ref_target_missing"
+	}
 	switch {
 	case errors.Is(err, workbook.ErrNotXLSX):
 		return "not_xlsx"

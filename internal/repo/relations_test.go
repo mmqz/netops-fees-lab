@@ -234,3 +234,88 @@ func TestRelationListAll(t *testing.T) {
 		t.Errorf("rels[1] = %+v, want z_end res_c → res_b", rels[1])
 	}
 }
+
+// TestRelationUpdateTarget pins the W13-D retarget write of the
+// attribute-change apply flow: the to-endpoint of the (from, type) edge
+// moves, lineage columns (first_batch_id, attributes, created_at) stay as
+// imported, a missing (from, type) edge updates nothing (the "no edge →
+// never create" guard), and the rename-merge corner — two same-(from,
+// type) edges with different targets — aborts the statement with the
+// UNIQUE violation instead of half-retargeting.
+func TestRelationUpdateTarget(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	devA, devB, circuit := seedGraph(t, db)
+
+	// Retarget the circuit's a_end edge: DEV-001 → DEV-002.
+	n, err := db.Relations.UpdateTarget(ctx, circuit.ID, domain.RelationTypeAEnd, devB.ID)
+	if err != nil || n != 1 {
+		t.Fatalf("UpdateTarget(a_end) = %d, %v; want 1 row updated", n, err)
+	}
+	rels, err := db.Relations.ListByResource(ctx, circuit.ID)
+	if err != nil {
+		t.Fatalf("ListByResource: %v", err)
+	}
+	var aEnd domain.Relation
+	for _, rel := range rels {
+		if rel.Type == domain.RelationTypeAEnd {
+			aEnd = rel
+		}
+	}
+	if aEnd.ToResourceID != devB.ID {
+		t.Errorf("a_end after retarget points at %s, want %s", aEnd.ToResourceID, devB.ID)
+	}
+	// Lineage is untouched: the edge keeps its creating batch and timestamp
+	// (retargeting corrects the pointer, it does not re-create the edge).
+	if aEnd.FirstBatchID != "bat_2" {
+		t.Errorf("a_end first_batch_id = %q, want bat_2 (lineage untouched)", aEnd.FirstBatchID)
+	}
+	if !aEnd.CreatedAt.Equal(time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)) {
+		t.Errorf("a_end created_at = %v, want the seeded timestamp (untouched)", aEnd.CreatedAt)
+	}
+	if len(aEnd.Attributes) != 0 {
+		t.Errorf("a_end attributes = %v, want empty (untouched)", aEnd.Attributes)
+	}
+
+	// No edge of that (from, type): 0 rows, no insert (never create).
+	// DEV-001 owns no a_end edge as the from side.
+	n, err = db.Relations.UpdateTarget(ctx, devA.ID, domain.RelationTypeAEnd, devB.ID)
+	if err != nil || n != 0 {
+		t.Fatalf("UpdateTarget(no matching edge) = %d, %v; want 0 rows, no error", n, err)
+	}
+	counts, err := db.Relations.CountByType(ctx)
+	if err != nil {
+		t.Fatalf("CountByType: %v", err)
+	}
+	if counts[domain.RelationTypeAEnd] != 1 || counts[domain.RelationTypeZEnd] != 1 {
+		t.Errorf("relation counts after the no-op retarget = %v, want a_end 1 / z_end 1 (nothing created)", counts)
+	}
+
+	// The rename-merge corner: a second a_end edge of the circuit with a
+	// different target is legal (UNIQUE is (from, to, type)). Retargeting
+	// BOTH to the same new target then collides with itself: the statement
+	// must abort with the UNIQUE violation and leave both rows unchanged.
+	second := domain.Relation{
+		ID: "rel_second", Type: domain.RelationTypeAEnd, FromResourceID: circuit.ID,
+		ToResourceID: devA.ID, FirstBatchID: "bat_2", CreatedAt: time.Now(),
+	}
+	if err := db.Relations.Insert(ctx, second); err != nil {
+		t.Fatalf("Insert second a_end edge: %v", err)
+	}
+	_, err = db.Relations.UpdateTarget(ctx, circuit.ID, domain.RelationTypeAEnd, devB.ID)
+	if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		t.Fatalf("UpdateTarget(colliding) = %v, want UNIQUE constraint failure", err)
+	}
+	rels, err = db.Relations.ListByResource(ctx, circuit.ID)
+	if err != nil {
+		t.Fatalf("ListByResource after collision: %v", err)
+	}
+	for _, rel := range rels {
+		if rel.Type != domain.RelationTypeAEnd {
+			continue
+		}
+		if rel.ToResourceID != devB.ID && rel.ToResourceID != devA.ID {
+			t.Errorf("a_end edge %s drifted to %s after the aborted statement", rel.ID, rel.ToResourceID)
+		}
+	}
+}

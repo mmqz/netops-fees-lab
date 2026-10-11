@@ -49,10 +49,12 @@ import {
   RES_CHANGE_APPLYING,
   RES_CHANGE_DISMISS,
   RES_CHANGES_ACTION_FAILED,
+  RES_CHANGES_APPLIED_RETARGETED_TOAST,
   RES_CHANGES_APPLIED_TOAST,
   RES_CHANGES_BATCH_ROW,
   RES_CHANGES_DISMISSED_TOAST,
   RES_CHANGES_HINT,
+  RES_CHANGES_REF_FIELD_HINT,
   RES_CHANGES_TITLE,
   RES_COL_KEY,
   RES_COL_NAME,
@@ -248,13 +250,18 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
       });
   }, [resourceId]);
 
-  /** 应用一条待确认变更：成功后行内刷新（重拉详情/关联/剩余 pending）。 */
+  /** 应用一条待确认变更：成功后行内刷新（重拉详情/关联/剩余 pending）；
+   *  W13-D：引用字段且已有派生关系的 apply 会同步改挂关系，toast 文案带「关系已改挂」
+   *  （relationRetargeted 由 apply 响应回真值）。 */
   function applyChange(change: AttributeChangeItem): void {
     setChangeBusy(change.id);
     setChangeErrors((prev) => ({ ...prev, [change.id]: '' }));
     applyAttributeChange(change.id)
-      .then(() => {
-        toast.show(format(RES_CHANGES_APPLIED_TOAST, { field: fieldLabel(change.field) }), 'success');
+      .then((applied) => {
+        const template = applied.relationRetargeted
+          ? RES_CHANGES_APPLIED_RETARGETED_TOAST
+          : RES_CHANGES_APPLIED_TOAST;
+        toast.show(format(template, { field: fieldLabel(change.field) }), 'success');
         load();
       })
       .catch((err: unknown) => {
@@ -404,6 +411,9 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                         <span className="change-arrow" aria-hidden="true">→</span>
                         <span className="change-new">{change.newValue}</span>
                       </span>
+                      {change.relationRetargeted && (
+                        <span className="muted-note">{RES_CHANGES_REF_FIELD_HINT}</span>
+                      )}
                       <span className="muted-note">
                         {format(RES_CHANGES_BATCH_ROW, {
                           batch: change.batchId.length > 12 ? `${change.batchId.slice(0, 12)}…` : change.batchId,

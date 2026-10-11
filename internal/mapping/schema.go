@@ -728,3 +728,35 @@ func SpecByType(t domain.ResourceType) (TypeSpec, bool) {
 	}
 	return TypeSpec{}, false
 }
+
+// RelationTypeFor maps a ref field of a resource type to the relation type
+// the importer derives from it (PROJECT_BRIEF §6 + the v0.4 extension):
+// ip_pool.assigned_device → assigned_to, circuit.a_end_device → a_end,
+// circuit.z_end_device → z_end, machine_room.site_id → belongs_to (the
+// container attribution of a machine room to its site; the ref itself
+// resolves through the same E003 path as any other ref, so the import
+// order 先局站后机房 is enforced by E003, not by this switch). Any other
+// combination returns "" — no relation is derived from it.
+//
+// This is the SINGLE ref-field → relation-type derivation mapping of the
+// codebase (v0.6 W13-D moved it here from the importer's private
+// relationTypeFor so a second consumer could exist without a second copy):
+// the importer calls it when creating the derived edge at import time, and
+// the attribute-change apply flow (internal/changes) calls the same mapping
+// to decide which edge a confirmed ref-field change must retarget — same
+// field, same direction (from = the owning resource), same type, never a
+// divergent second table.
+func RelationTypeFor(rt domain.ResourceType, field string) domain.RelationType {
+	switch {
+	case rt == domain.ResourceTypeIPPool && field == "assigned_device":
+		return domain.RelationTypeAssignedTo
+	case rt == domain.ResourceTypeCircuit && field == "a_end_device":
+		return domain.RelationTypeAEnd
+	case rt == domain.ResourceTypeCircuit && field == "z_end_device":
+		return domain.RelationTypeZEnd
+	case rt == domain.ResourceTypeMachineRoom && field == "site_id":
+		return domain.RelationTypeBelongsTo
+	default:
+		return domain.RelationType("")
+	}
+}

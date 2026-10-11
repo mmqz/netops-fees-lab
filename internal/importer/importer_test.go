@@ -1766,33 +1766,9 @@ func machineRoomReadingMapping(sheet string, withSiteRef bool) mapping.Mapping {
 	}}}
 }
 
-// TestRelationTypeFor pins the ref-field → relation-type mapping of the
-// importer, including the new belongs_to case and the unchanged legacy
-// behaviour for every other combination.
-func TestRelationTypeFor(t *testing.T) {
-	cases := []struct {
-		rt    domain.ResourceType
-		field string
-		want  domain.RelationType
-	}{
-		{domain.ResourceTypeIPPool, "assigned_device", domain.RelationTypeAssignedTo},
-		{domain.ResourceTypeCircuit, "a_end_device", domain.RelationTypeAEnd},
-		{domain.ResourceTypeCircuit, "z_end_device", domain.RelationTypeZEnd},
-		{domain.ResourceTypeMachineRoom, "site_id", domain.RelationTypeBelongsTo},
-		// Unmapped combinations stay "" (no relation is derived from them).
-		{domain.ResourceTypeMachineRoom, "city", ""},
-		{domain.ResourceTypeMachineRoom, "device_name", ""},
-		{domain.ResourceTypeIPPool, "site_id", ""},
-		{domain.ResourceTypeSite, "site_id", ""},
-		{domain.ResourceTypeCircuit, "assigned_device", ""},
-		{domain.ResourceTypeDevice, "site_id", ""},
-	}
-	for _, tc := range cases {
-		if got := relationTypeFor(tc.rt, tc.field); got != tc.want {
-			t.Errorf("relationTypeFor(%s, %q) = %q, want %q", tc.rt, tc.field, got, tc.want)
-		}
-	}
-}
+// (TestRelationTypeFor moved to internal/mapping/mapping_test.go in v0.6
+// W13-D together with the function itself — the derivation mapping is now
+// the shared mapping.RelationTypeFor, so its table test lives beside it.)
 
 // TestImportMachineRoomAndSite drives the two-reading import story of the
 // real 机房局站 export (先局站后机房) plus its order/optional/idempotency

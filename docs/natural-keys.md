@@ -29,7 +29,7 @@
 
 | 事件 | 语义 | 处置原则 |
 | --- | --- | --- |
-| **IP 变**（同一资源的属性变化） | **属性变更事件** | 命中同一资源（靠稳定自然键），产生 diff + 变更历史记录。**已落地（v0.4 W4-D）**：diff 逐字段记入 `resource_attribute_changes` 待确认记录（W005 issue + 行仍 skip），人工经 HTTP API/CLI apply 后生效，dismiss 可忽略（详见 [import-and-validation.md](import-and-validation.md)） |
+| **IP 变**（同一资源的属性变化） | **属性变更事件** | 命中同一资源（靠稳定自然键），产生 diff + 变更历史记录。**已落地（v0.4 W4-D）**：diff 逐字段记入 `resource_attribute_changes` 待确认记录（W005 issue + 行仍 skip），人工经 HTTP API/CLI apply 后生效，dismiss 可忽略；**v0.6 W13-D** 起 ref 类字段（机房 site_id、地址池归属设备、电路 a/z 端）的 apply 同事务把对应派生关系改挂到新目标（目标解析不到 → 409 `ref_target_missing`；无边的引用字段只改属性、绝不新建无谱系关系——建边仍需重导，语义三分支详见 [import-and-validation.md](import-and-validation.md) §14） |
 | **名称变**（疑似改名/新资源） | **身份变更事件** | **人工确认**，绝不自动合并：确认改名 → 更新 natural_key 并保留代理键；确认是另一资源 → 各自独立。**已落地（v0.5 W6-D）**：名称类键类型的导入行命中新键且属性与某「旧键已从源消失」的资源全等时，行照常按新资源导入并发 W006 + pending 改名提案；人工经 HTTP API / CLI（`renames` 子命令）apply 合并身份（关系改挂旧资源、新资源删除、旧资源换键），reject 维持独立（详见 [import-and-validation.md](import-and-validation.md) §16） |
 
 ## 3. 唯一性作用域规则
