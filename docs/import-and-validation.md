@@ -291,3 +291,17 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 - **模型级模板身份**：脚本只携带设备型号（标题行），不携带设备实例身份——ptp_port 行表达「该型号模板下此接口的 PTP 配置」；与 device 资源的实例级关联需要脚本未提供的数据（编号/名称），故无 ref 字段、无派生关系。
 - 脚本通道当前仅支持 PTP 配置形态（第 1 个解析器）；其它脚本家族沿用此框架扩展（解析器接口不变，新 spec + 列头同义词即可）。
+
+## 19. 资源导出与回源（v0.6 W12-D）
+
+**通道面**：`GET /api/exports/resources?types=`（xlsx 下载，Content-Type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、Content-Disposition 固定文件名 `netops-resources.xlsx`）+ `netopslab export --db <path> --out <file.xlsx> [--types a,b]`（stdout 单一 JSON `{"file","types","totalRows"}`；`--out` 必填、已存在则覆盖；非法 `--types` 值 exit 2）+ 资源页「导出资源」按钮（浏览器导航式下载，`window.location.assign`——二进制响应不走 requestJson；当前**类型**筛选进 `types` 参数，搜索关键词与状态筛选不参与导出——导出的是资源集合，不是检索结果子集）。**MCP 工具面冻结不动（恰 5）**。
+
+**导出语义**：当前状态快照——含 W005 属性确认（§14）与 W006 改名确认（§16）apply 之后的最新值；不是任何源工作簿的重建。形态与导入工作簿同构：每个有资源的类型一个 sheet（Specs 注册序，无资源的类型不出 sheet）、表头 = spec 全部字段 Label、行 = 属性快照、行序 = natural_key 字典序。**字节级确定性**：同库同参数两次导出逐字节一致（excelize zip 条目时间戳为固定常量，无 wall-clock 进入输出；文档属性时间也是常量，真实导出时刻不落盘）。空库导出成功但仅含一个中性占位空 sheet「资源导出」（无类型提示，重导入得 `empty_workbook` 422——诚实拒绝）。
+
+**建议引擎回投（回源自动化的前提）**：字段 Label 恒为该字段自身同义词（个别列大小写归一命中字段名），导出工作簿 analyze 的建议映射即全字段映射、零人工。**实测置信 0.75（同义词档）**，ip_pool 的 CIDR 列 0.9（归一档）——不是 1.0：exact 档只对英文字段名生效。端到端契约由 exporter 测试钉死。
+
+**键分量回填**（attributes 不存键字段，导出需从键反推键分量列）：单键类型键列 = 键整体（含 `|` 不拆）；复合键（port/ptp_port）末分量 = 资源 Name、前缀精确还原（分量含 `|` 亦无损）；条件键（base_station）退化身份行主键列置空、兜底列走属性值（回源复记 W004），否则键整体写入编码列。已知精度限制：兜底键因 W005 漂移的行按主键路径整写（键精确还原、等价性不受影响，编码列内容非真实系统编码）。细节与裁决理由见 docs/api.md 导出节。
+
+**回源幂等（验收核心）**：导出 xlsx → `analyze`（建议映射即全字段映射）→ `import` 全新库——资源集合 (type, natural_key, attributes) 与原库等价、关系经 ref 列重新派生等价（sheet 按 Specs 序天然满足 E003 引用顺序：device 先于 ip_pool/circuit、site 先于 machine_room，单批次整簿回源）。同库直接回导 = 纯 skip + 零行级 issue（导出值与库内值逐字段一致，不触发 W005）。端到端契约由 `TestCLIExportRoundTrip`（八类型种子 + W005/W006 apply 后状态 → 双库资源/关系集合等价断言）与 API 测试钉死。
+
+**E003 与部分导出**：`--types`/`?types=` 只导部分类型时，导出行可能携带指向未导出类型的 ref 值（如只导 ip_pool 时「归属设备」引用未导出的 device）——回源导入该行 E003 失败（引用不存在）。**全量导出（缺省 types）默认规避**；部分导出回源前需先导出并导入被引用类型。

@@ -37,6 +37,7 @@ import {
   BTN_EXPAND_2HOP,
   BTN_COLLAPSE_2HOP,
   BTN_IMPORT_DATA,
+  BTN_EXPORT_RESOURCES,
   FILTER_ALL,
   format,
   formatDateTime,
@@ -63,6 +64,7 @@ import {
   RES_DRAWER_TAB_SOURCE,
   RES_EMPTY_DESC,
   RES_EMPTY_TITLE,
+  RES_EXPORT_HINT,
   RES_FILTER_SEARCH,
   RES_FILTER_STATUS,
   RES_FILTER_TYPE,
@@ -97,7 +99,7 @@ import { StatusChip } from '../components/StatusChip';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
 import { TypeChip } from '../components/TypeChip';
-import { IconSearch, IconUpload } from '../components/icons';
+import { IconSearch, IconUpload, IconDownload } from '../components/icons';
 import { useToast } from '../components/Toast';
 import { TOAST_COPIED } from '../i18n';
 
@@ -731,6 +733,20 @@ export function ResourcesPage() {
   const noFilters = type === '' && status === '' && query === '';
   const showEmptyState = !loading && error === null && data !== null && data.total === 0 && noFilters;
 
+  // 导出（W12-D）：导航式下载——浏览器直接请求导出端点，响应携带
+  // Content-Disposition: attachment，页面不跳转、无异步状态（无 busy 态）。
+  // 二进制下载不走 requestJson；这里用 window.location.assign 触发浏览器下载。
+  // 范围口径：当前类型筛选生效（未选类型 = 全量导出），搜索关键词与状态
+  // 筛选不参与（导出的是资源集合，不是检索结果子集——RES_EXPORT_HINT 同口径）。
+  function exportResources(): void {
+    const params = new URLSearchParams();
+    if (type !== '') {
+      params.set('types', type);
+    }
+    const qs = params.toString();
+    window.location.assign(`/api/exports/resources${qs === '' ? '' : `?${qs}`}`);
+  }
+
   return (
     <>
       <div className="card">
@@ -788,6 +804,15 @@ export function ResourcesPage() {
               />
             </div>
           </div>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={exportResources}
+            title={RES_EXPORT_HINT}
+          >
+            <IconDownload />
+            {BTN_EXPORT_RESOURCES}
+          </button>
         </div>
 
         {error !== null ? (

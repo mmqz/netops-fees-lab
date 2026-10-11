@@ -17,6 +17,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/exporter"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/mcpserver"
@@ -45,7 +46,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, validate, report, query, changes, renames, lab, mcp, gc, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, export, validate, report, query, changes, renames, lab, mcp, gc, testdata")
 		return exitUsage
 	}
 
@@ -57,6 +58,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdAnalyze(args[1:], stdout, stderr)
 	case "import":
 		err = cmdImport(args[1:], stdout, stderr)
+	case "export":
+		err = cmdExport(args[1:], stdout, stderr)
 	case "validate":
 		err = cmdValidate(args[1:], stdout, stderr)
 	case "report":
@@ -76,7 +79,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, export, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -332,6 +335,63 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 	out.Summary.RowsSkipped = sum.RowsSkipped
 	out.Summary.RowsFailed = sum.RowsFailed
 	return writeJSON(stdout, out)
+}
+
+// exportResponse is the stdout contract of `netopslab export`: the written
+// file path, the per-type row counts (only types with at least one
+// resource) and the total row count.
+type exportResponse struct {
+	File      string         `json:"file"`
+	Types     map[string]int `json:"types"`
+	TotalRows int            `json:"totalRows"`
+}
+
+// cmdExport implements `netopslab export --db <path> --out <file.xlsx>
+// [--types a,b]`: project the CURRENT resource inventory into an .xlsx
+// workbook that is isomorphic to an import workbook (W12-D — one sheet per
+// resource type in mapping.Specs order, headers = field Labels, rows =
+// attribute snapshot sorted by natural key; see internal/exporter for the
+// round-trip semantics and the determinism guarantees). The output file is
+// created or TRUNCATED — an existing file is overwritten (script-friendly,
+// same semantics as `report --out`). An empty database (or a types filter
+// matching no resources) exports successfully with zero rows: the workbook
+// then carries only the neutral placeholder sheet. A bad --types value is
+// a usage error (exit 2) naming the offending type.
+func cmdExport(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("export")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	out := fs.String("out", "", "输出 xlsx 文件路径，必填（已存在则覆盖）")
+	types := fs.String("types", "", "逗号分隔的资源类型列表（缺省导出全部类型：device, ip_pool, circuit, port, base_station, site, machine_room, ptp_port）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *out == "" {
+		return &usageError{msg: "缺少 --out 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "export 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	filter, err := exporter.ParseTypes(*types)
+	if err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	resources, err := a.Query.AllByTypes(ctx, filter)
+	if err != nil {
+		return err
+	}
+	summary, err := exporter.WriteFile(*out, resources, filter)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, exportResponse{File: *out, Types: summary.Types, TotalRows: summary.TotalRows})
 }
 
 // validateResponse mirrors POST /api/validate.

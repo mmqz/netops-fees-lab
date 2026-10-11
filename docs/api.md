@@ -515,6 +515,34 @@ HTTP/1.1 409 Conflict
 
 遍历无向（a_end 可从设备侧走回电路；belongs_to 可从局站侧走回机房）；节点按 `(type, natural_key)` 排序，输出确定。`relationType` 的取值集为 `assigned_to` / `a_end` / `z_end` / `belongs_to`（后者 machine_room → site，v0.4 W3-D 起入 relations CHECK 封闭集，migration v10）。
 
+## GET /api/exports/resources?types= — 资源导出（xlsx 下载，v0.6 W12-D）
+
+把**当前资源清单**导出为与导入工作簿同构的 .xlsx：每个有资源的类型一个 sheet（`mapping.Specs` 注册序：device → ip_pool → circuit → port → base_station → site → machine_room → ptp_port），表头 = 该类型 spec 的全部字段 Label（中文），每行 = 一个资源的**当前属性快照**——含 W005 属性确认 / W006 改名确认 apply 之后的最新值（导出的是当前状态，不是任何源工作簿的重建）。行序 = natural_key 字典序（与插入序无关）。
+
+**参数**：`types` — 逗号分隔的资源类型列表（如 `?types=device,ip_pool`）；空/缺省 = 全部类型。顺序归一到 Specs 序、去重、空段跳过；含未知类型值 → **400 bad_request**（错误信封，消息点名非法值与合法清单）。无资源的类型不产出 sheet（空类型不出现在导出中，回源导入时自然跳过）。
+
+**响应**：`200` + xlsx 字节流，带
+
+- `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+- `Content-Disposition: attachment; filename="netops-resources.xlsx"`（文件名固定，types 不进文件名）
+
+空库导出同样成功（200）：工作簿仅含一个名为「资源导出」的中性占位空 sheet（excelize 容器要求至少一个 worksheet；该名不带任何类型提示，无法被误认为某个空类型；对它重走导入会被 `empty_workbook`（422）诚实拒绝——库里本来就没有可导入的东西）。
+
+**确定性声明（字节级）**：同一数据库状态、同一 types 参数，两次导出的 xlsx **字节一致**——行按 natural_key 排序、sheet 按 Specs 序、excelize 写入的 zip 条目时间戳为固定常量（无 wall-clock 进入输出；代价是文档属性中的创建/修改时间也是常量，真实导出时刻不落盘）。测试钉死「同状态两次导出字节相等」与「输入顺序无关」两点。
+
+**回源语义（回源幂等，验收核心）**：导出的 xlsx 可直接走既有 `POST /api/imports` → 映射确认 → 导入管线——analyze 的建议映射对每列恰为其自身字段（字段 Label 恒为该字段的同义词；实测置信 0.75，ip_pool 的 CIDR 列因大小写归一命中字段名而得 0.9——非 1.0，exact 档只对英文字段名生效），零人工映射。sheet 顺序满足 E003 引用顺序（device 在 ip_pool/circuit 之前、site 在 machine_room 之前），单批次即可整簿回源；全新库回源后资源集合 (type, natural_key, attributes) 与原库等价，关系经 ref 列重新派生等价。
+
+**键分量回填与精度限制（诚实声明）**：attributes 不存键字段，键分量列按下述规则回填——
+
+- 单键类型（device/ip_pool/circuit/site/machine_room）：键列 = natural_key 整体（键值本身含 `|` 也不拆分，往返无损）；
+- 复合键（port/ptp_port，`device|port` 形）：末分量 = 资源 Name（NameField 恒为末键分量且必填非空），前缀精确还原——任一分量自身含 `|` 也无损（比按 `|` 平铺拆分更稳）；
+- 条件键（base_station）：若 natural_key 恰等于兜底字段属性按 KeyFallbackFields 顺序的非空值拼接（「跳过空值」语义），判定为退化身份行——主键列（基站编码）置**空**，地市/无线基站名称列走属性值，回源导入重新派生同一退化键并复记 W004；否则按主键路径把键整体写入编码列。已知精度限制：兜底键入库后因 W005 漂移（如事后补了地市属性）的行按主键路径整写——键仍精确还原、回源等价性不受影响，但该行编码列携带的是键内容而非真实系统编码；
+- 枚举列（device/ip_pool/circuit 的 状态、ptp_port 的 延迟机制）= `resources.status` 当前值。
+
+**E003 注意（部分导出）**：`types` 只导部分类型时，导出行可能携带指向**未导出类型**的 ref 值（如只导 ip_pool 时「归属设备」列引用未导出的 device）——回源导入该行将 E003 失败。全量导出（types 缺省）默认规避；部分导出回源前需先导出并导入被引用类型。
+
+**CLI 等价物**：`netopslab export --db <path> --out <file.xlsx> [--types a,b]`（stdout 单一 JSON `{"file","types","totalRows"}`；`--out` 已存在则覆盖；非法 `--types` 值 exit 2 usage_error）。
+
 ## GET /api/stats — 全库统计
 
 ```json

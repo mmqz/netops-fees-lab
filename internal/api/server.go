@@ -130,6 +130,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/resources/{id}", s.handleResourceDetail)
 	mux.HandleFunc("GET /api/resources/{id}/relations", s.handleResourceRelations)
 
+	// Resource export channel (W12-D, v0.6): GET the current resource
+	// inventory as an import-isomorphic xlsx download. HTTP + CLI + web
+	// button only — the MCP tool surface stays frozen at the five
+	// read-only tools (an export is a bulk read, but the freeze is the
+	// doctrine; nothing new is exposed to the AI channel).
+	mux.HandleFunc("GET /api/exports/resources", s.handleExportResources)
+
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/issues", s.handleIssues)
 	mux.HandleFunc("POST /api/validate", s.handleValidate)

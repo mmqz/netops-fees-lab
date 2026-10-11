@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/topology"
 )
@@ -304,6 +305,47 @@ func (s *Service) Relations(ctx context.Context, id string, depth int) (Relation
 		edges = []topology.Edge{}
 	}
 	return RelationsResult{Center: center, Nodes: nodes, Edges: edges}, nil
+}
+
+// AllByTypes loads EVERY resource of the given types for the export
+// channel (W12-D): types is the empty list for "all types", else the
+// selected types (normalized to mapping.Specs order). Each type is read
+// with an unlimited search (repo orders by natural key), so the result is
+// the complete, deterministic inventory the exporter projects — types with
+// no resources simply contribute nothing (the export sheet is absent).
+// An unknown type value is rejected (it cannot reach here through
+// exporter.ParseTypes; the guard keeps the method safe for direct callers).
+func (s *Service) AllByTypes(ctx context.Context, types []domain.ResourceType) ([]domain.Resource, error) {
+	// selected never aliases the input slice (the [:0:0] reset drops the
+	// backing array): appending must not write into the caller's memory.
+	selected := types[:0:0]
+	if len(types) == 0 {
+		for _, spec := range mapping.Specs {
+			selected = append(selected, spec.Type)
+		}
+	} else {
+		wanted := make(map[domain.ResourceType]bool, len(types))
+		for _, t := range types {
+			wanted[t] = true
+		}
+		for _, spec := range mapping.Specs {
+			if wanted[spec.Type] {
+				selected = append(selected, spec.Type)
+			}
+		}
+	}
+	var all []domain.Resource
+	for _, t := range selected {
+		if !t.IsValid() {
+			return nil, fmt.Errorf("query: export resources: invalid type %q: %w", t, domain.ErrNotFound)
+		}
+		resources, _, err := s.db.Resources.Search(ctx, repo.ResourceSearchFilter{Type: t})
+		if err != nil {
+			return nil, fmt.Errorf("query: export type %s: %w", t, err)
+		}
+		all = append(all, resources...)
+	}
+	return all, nil
 }
 
 // Stats is the /api/stats aggregate (§9): resource counts by type and

@@ -71,6 +71,7 @@ export const BTN_REVALIDATE = '重新校验';
 export const BTN_EXPAND_2HOP = '展开二跳';
 export const BTN_COLLAPSE_2HOP = '收起二跳';
 export const BTN_PROCESSING = '处理中…';
+export const BTN_EXPORT_RESOURCES = '导出资源';
 
 export const LOADING_TEXT = '加载中…';
 export const EMPTY_TEXT = '暂无数据';
@@ -387,6 +388,8 @@ export const RES_FILTER_TYPE = '类型';
 export const RES_FILTER_STATUS = '状态';
 export const RES_FILTER_SEARCH = '搜索';
 export const RES_SEARCH_PLACEHOLDER = '搜索编码 / 名称 / 属性值';
+/** 导出按钮 title：说明导出范围与回源能力（W12-D）。 */
+export const RES_EXPORT_HINT = '把当前资源清单导出为 xlsx（当前类型筛选生效，搜索关键词不参与）；导出文件可再导入回库';
 export const RES_COL_KEY = '编码';
 export const RES_COL_NAME = '名称';
 export const RES_COL_TYPE = '类型';
