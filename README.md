@@ -67,11 +67,12 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **site / machine_room 资源类型与 belongs_to 关联（v0.4，migration v10）**：真实机房局站工作簿（样例 `samples/telecom-site-machine-room.xlsx`）同一张 sheet 双读法——先局站后机房，机房ID/局站ID 数字编码作键（前导零即身份），机房可选 局站ID ref 派生 `belongs_to` 关系（E003 钉死导入顺序）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §13、[docs/data-model.md](docs/data-model.md) §13。
 - **属性变更历史与人工确认（v0.4 W4-D，migration v11）**：同键再导不再静默丢弃属性差异——diff 逐字段记为**待确认变更**（`resource_attribute_changes`，W005 issue，行仍 skip 幂等不变），人工经 HTTP API / CLI（`changes` 子命令）apply 后属性才真正生效（旧值校验 + 同事务写入），dismiss 可忽略；回滚只删本批 pending，人工决策审计线保留；见 [docs/import-and-validation.md](docs/import-and-validation.md) §14、[docs/data-model.md](docs/data-model.md) §14。
 - **疑似改名检测与身份合并人工流（v0.5 W6-D，migration v12）**：名称类键类型（ip_pool / base_station / port）的新键导入行与「旧键已从源消失」的库内资源属性全等时，行照常按新资源导入并发 **W006** + pending 改名提案（`rename_proposals`；检测五条件保守判定，绝不自动合并）；人工经 HTTP API / CLI（`renames` 子命令）apply 合并身份——关系改挂旧资源、键分量属性同步、旧资源换键而代理键 `res_x` 与 SourceRef 不动——或 reject 维持独立；回滚不对称语义与 v11 一致（删本批 pending、留终态审计线）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §16、[docs/data-model.md](docs/data-model.md) §15。
+- **来源引用版本化（v0.5 W7-D，零迁移）**：skip 即谱系版本——同键再导入（纯 skip 与 W005 diff-skip）对每批每实体追加一条 `source_refs`（行语义零变化；E001 批内重复不追加），资源详情 API 的 `sourceRefs[]` 按 rowid 版本序展示全史（创建批次在前、`raw` 记录该批工作簿原话），回滚随批消失（`batch_id ON DELETE CASCADE`）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §17。
 - **schema 动态发现与 uploads 垃圾回收（v0.4 W5-D 发布轮）**：`GET /api/schema` 返回 `mapping.Specs` 的忠实投影（七类资源的字段/键位/枚举/ref/同义词 + 13 条规则目录，机械生成禁止手抄，仅 HTTP 不进 MCP）；`serve` 启动与 CLI `netopslab gc` 清理未被任何批次引用的孤儿上传文件（任何状态的批次都算引用）；前端构建 manualChunks 分包（主 chunk 795 → 187 kB）。
 - **HTTP API**：`/api/...` 全套 REST 风格接口（错误统一 `{"error":{"code","message"}}` 信封）+ 17 条 §7 仿真路由。
 - **嵌入式 React 前端**：概览 / 数据导入（三步向导）/ 资源浏览（抽屉 + 二跳）/ 问题清单 / 质量报告 / 工作台列表 / 拓扑工作台 中文界面，`go:embed` 打进单二进制。
 - **结构化 CLI**：`analyze / import / validate / report / query / changes / renames / serve / mcp / gc / testdata / lab`，成功输出单一 JSON 对象，退出码 0/1/2（TeleAgent 的 CLI 回退路径）。
-- **工程化**：**261 个 Go 顶层测试**（16 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）。
+- **工程化**：**267 个 Go 顶层测试**（16 个含测试的包；`go test -list '.*'` 顶层函数口径）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）。
 
 ## 3. 快速开始
 
@@ -79,7 +80,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ```bash
 # 1) 测试
-make test            # go test -count=1 -timeout 15m ./...（261 个顶层测试 / 16 包 ok）
+make test            # go test -count=1 -timeout 15m ./...（267 个顶层测试 / 16 包 ok）
 
 # 2) 构建前端（产物嵌入 internal/webui/dist，供 go:embed 使用）
 make web             # cd web && npm ci && npm run build
@@ -151,7 +152,7 @@ netopslab lab checkpoint --db $DB --workspace <wsId> --restore --id cp-1
 | 前端 | React 18 + TypeScript 5.6（strict）+ Vite 6 | 手写设计系统 CSS，无 UI 框架 |
 | 拓扑图 | cytoscape 3.32.0（精确版本，无插件） | /lab 画布；单 chunk 嵌入（ADR-0009） |
 | 嵌入 | go:embed all:dist | 前端产物打进二进制，单文件分发 |
-| 测试 | go test（table-driven） | 261 个顶层测试 / 16 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
+| 测试 | go test（table-driven） | 267 个顶层测试 / 16 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
 
 ## 6. 仓库结构
 

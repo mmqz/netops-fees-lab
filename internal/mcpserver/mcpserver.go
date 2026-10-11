@@ -189,9 +189,13 @@ func resourceSearch(ctx context.Context, db *repo.DB, in searchInput) (searchOut
 			Status:     r.Status,
 			Attributes: attrs,
 		}
-		// Resolve the creating source ref (the ref whose batch created the
-		// resource; re-imports skip rows and never add refs, so exactly one
-		// ref exists for imported resources).
+		// Resolve the creating source ref (the ref whose batch created
+		// the resource). Re-imports append version refs since v0.5
+		// W7-D (skip rows record provenance), so an imported resource
+		// may carry several refs — the FirstBatchID match below still
+		// selects the CREATING batch's ref (MCP provenance shows the
+		// first source by design; the full version history is the
+		// resource detail API's job).
 		refs, refErr := db.SourceRefs.ListByEntity(ctx, domain.EntityKindResource, r.ID)
 		if refErr != nil {
 			return searchOutput{}, fmt.Errorf("解析来源失败：%w", refErr)

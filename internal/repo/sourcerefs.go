@@ -58,12 +58,21 @@ VALUES (?,?,?,?,?,?,?,?)`,
 }
 
 // ListByEntity returns all source refs recorded for the given entity,
-// ordered by (batch_id, row_number).
+// ordered by insertion order (rowid, the chronological version order).
+//
+// v0.5 W7-D: the order used to be (batch_id, row_number), but batch_id is a
+// random UUID — with re-imports now appending one version row per batch
+// (importer skip path), a batch_id lexicographic order interleaves versions
+// meaninglessly. rowid is assigned monotonically by SQLite on insert
+// (one larger than the current maximum), so it equals the temporal order the
+// versions were recorded in; rolling back a batch deletes rows but never
+// renumbers the survivors, so the remaining order is stable. row_number is
+// kept as a defensive tiebreaker (rowid is already unique per row).
 func (r *SourceRefRepo) ListByEntity(ctx context.Context, kind domain.EntityKind, entityID string) ([]domain.SourceRef, error) {
 	rows, err := r.q.QueryContext(ctx,
 		`SELECT `+sourceRefColumns+` FROM source_refs
 WHERE entity_kind = ? AND entity_id = ?
-ORDER BY batch_id, row_number`,
+ORDER BY rowid, row_number`,
 		kind.String(), entityID)
 	if err != nil {
 		return nil, fmt.Errorf("repo: list source refs of %s %s: %w", kind, entityID, err)

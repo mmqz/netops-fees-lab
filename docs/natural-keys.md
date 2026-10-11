@@ -67,14 +67,14 @@
 
 ## 6. 现状差距（诚实声明）与路线图
 
-~~现状导入路径是 Insert-only（`ResourceRepo` 无 upsert），由此产生的差距~~ 前两项已随 v0.4 W4-D 闭环：
+~~现状导入路径是 Insert-only（`ResourceRepo` 无 upsert），由此产生的差距~~ 前四项已全部闭环（#1/#2 随 v0.4 W4-D、#3 随 v0.5 W6-D、#4 随 v0.5 W7-D）：
 
-1. ~~**同键再导 → 整行 skip，属性变更静默丢弃**~~（如设备重划 IP 后同 device_code 再导，新 IP 永远写不进库）→ **已闭环**：同键再导的属性 diff 逐字段记为待确认变更（W005），行仍 skip，人工 apply 后属性才真正生效；同值再导仍纯 skip（零记录零 issue，幂等不变）；
+1. ~~**同键再导 → 整行 skip，属性变更静默丢弃**~~（如设备重划 IP 后同 device_code 再导，新 IP 永远写不进库）→ **已闭环**：同键再导的属性 diff 逐字段记为待确认变更（W005），行仍 skip，人工 apply 后属性才真正生效；同值再导仍纯 skip（零 issue，幂等不变；source_refs 谱系版本除外，见 #4）；
 2. ~~**无属性变更历史表**——「IP 变 = 属性变更事件」没有落点~~ → **已闭环**（migration v11 的 `resource_attribute_changes`，status 生命周期 pending→applied/dismissed）；
 3. ~~**无改名人工流**（「同属性不同键」的疑似改名检测与确认）~~ → **已闭环**（v0.5 W6-D，migration v12 的 `rename_proposals` + W006 检测 + apply/reject 人工流，键与关系语义见 §2 名称变行）；
-4. **SourceRef 无版本化**：同资源再导入被 skip，来源引用停留在首个批次。
+4. ~~**SourceRef 无版本化**：同资源再导入被 skip，来源引用停留在首个批次~~ → **已闭环**（v0.5 W7-D，零迁移）：skip 即版本——再导入（纯 skip 与 W005 diff-skip 两形态）对每批每【resource】实体追加一条 source_refs（**仅资源**：关系行的 refs 恒为创建批——E003 解析只发生在插入路径；UNIQUE(entity_kind, entity_id, batch_id) 天生每批一行；E001 批内重复到不了 skip 检查点不追加），资源详情 API 的 sourceRefs[] 按 rowid 版本序展示全史（创建批次在前），回滚随批消失（batch_id ON DELETE CASCADE）；详见 [import-and-validation.md](import-and-validation.md) §17。
 
-均为已识别差距，非隐性缺陷。名称改名的人工确认流（#3）与 SourceRef 版本化（#4）待后续排期。~~port 换键迁移（migration v8）~~ 已落地（v8 就地重算 natural_key，冲突保留原键，详见 §4）。
+均为已识别差距，非隐性缺陷。~~名称改名的人工确认流（#3）与 SourceRef 版本化（#4）待后续排期~~ 四项差距已全部闭环（#1/#2：v0.4 W4-D；#3：v0.5 W6-D；#4：v0.5 W7-D）。~~port 换键迁移（migration v8）~~ 已落地（v8 就地重算 natural_key，冲突保留原键，详见 §4）。
 
 ## 7. UI 落地（v0.3.2 起生效；migration v8 后 port 提示升级）
 
@@ -88,5 +88,5 @@
 ## 8. 相关文档
 
 - [docs/data-model.md](data-model.md) —— `resources` DDL（`id TEXT PRIMARY KEY` + `UNIQUE (resource_type, natural_key)`）与 v7/v8 迁移；
-- [docs/import-and-validation.md](import-and-validation.md) —— 幂等 / skip-duplicate / E001 的行为细节；
+- [docs/import-and-validation.md](import-and-validation.md) —— 幂等 / skip-duplicate / E001 的行为细节，及 §17 来源引用版本化（本节 #4 的落地语义）；
 - [samples/README.md](../samples/README.md) —— 真实样例的授权与披露（本规范的数据依据之一）。

@@ -436,6 +436,8 @@ HTTP/1.1 409 Conflict
 
 `raw` 即原始 Excel 行（表头→值）。
 
+**sourceRefs 版本化（v0.5 W7-D）**：`sourceRefs[]` 不止首源——同键再导入的 skip 行对每个再导入批次追加一条版本引用（每批至多一条，`UNIQUE (entity_kind, entity_id, batch_id)`；E001 批内重复行不追加），数组按**版本序**（rowid = 插入序：创建批次在前，每次再导在后）返回；`raw` 记录该批次当时工作簿的原话（W005 属性变更尚未 apply 时，版本行已记录新值）。批次回滚（`DELETE /api/batches/{id}`）后该批的版本行随批消失（`batch_id ON DELETE CASCADE` + 回滚删除链），数组回到剩余版本；回滚响应的 `deleted.sourceRefs` 计数含 skip 追加行——诚实语义：该批记录的引用数（含确证版本）。行为细节见 [import-and-validation.md](import-and-validation.md) §17。
+
 **port 类型的复合自然键（v0.3.1 引入；migration v8 换键）**：port 资源的 `naturalKey` 是复合键 `device_name|port_name` 按此顺序以 `|` 拼接落库（例如 `B2|bvi2.1008`，取自真实样例 `samples/telecom-port-multi-header.xlsx`：设备名称 B2 + 端口名 bvi2.1008）；检索/幂等判重（E001/skip）均以拼接后的完整键匹配。单键类型（device/ip_pool/circuit）拼接退化为原值，行为不变。键的设备侧自 migration v8 起锚定设备**名称**而非 IP（设备重划 IP 不再分裂资源；`device_ip` 为必填 ipv4 值列，落在 `attributes` 中）——稳定性评估见 [natural-keys.md](natural-keys.md)。
 
 **base_station 的条件自然键（v0.4 引入，W004）**：基站的主自然键字段是 `base_station_code`（基站编码，非必填——真实表编码列存在但值常为空）。编码值**非空**时 `naturalKey` = 编码（全局唯一）；**为空**时键退化为兜底字段 `(city, base_station_name)` 按序以 `|` 拼接、跳过空值——工作簿无地市列（真实形态）即退化为纯名称（如真实样例的 `动力机房2`），映射了地市列则为 `哈尔滨|花园小区1`。行照常导入并记 **W004**（身份键退化，warning 级）治理 issue，evidence 含 `natural_key`（所用兜底键）、`missing_fields`（缺失的主键字段）、`fallback_fields`。E001 判重与幂等 skip 都在解析后的最终键上判定：编码行与同名兜底行是两个身份。基站IP 真实值带 /30 掩码，为 string 值列（可变属性，非身份）；条件键机制由 spec 声明（`TypeSpec.KeyFallbackFields`）驱动，见 [natural-keys.md](natural-keys.md) §4/§5。

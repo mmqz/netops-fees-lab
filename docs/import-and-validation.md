@@ -91,7 +91,7 @@ completeness = round(100 × imported / rows_total)   （rows_total = 0 时记 10
 - 重导同一工作簿（同映射）→ 0 新资源、全部数据行 `skipped`（消息"重复导入：资源已存在于批次 \<id\>"）、集合级问题经重算后不变；
 - 集合级校验本身幂等：Run = 单事务"删全部集合级问题 → 重算 → 按序插入"，重复运行结果集相同（`TestSetLevelRecomputeIdempotent`）；
 - `netopslab testdata` 与 `cmd/testdatagen` 输出字节级确定（重生成 sha256 一致）；
-- **同值再导零记录零 issue（W4-D diff-skip 语义）**：同键行属性与库内一致 → 纯 skip，不产生变更提案也不记 W005；**重复的 pending diff 去重**：同资源同字段已有 pending 提案且 new 值相同 → 不重复记录（也不重记 W005）；new 值又变 → 新提案（多 pending 并存，按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段旧值不匹配 → 409 `attribute_conflict`，详见 §14）。
+- **同值再导零 issue 零新提案（W4-D diff-skip 语义；W7-D 起追加谱系版本行）**：同键行属性与库内一致 → 纯 skip，不产生变更提案也不记 W005（「零记录」的精确边界：变更提案与 issue 零新增；**source_refs 版本化例外**——每个再导入批次追加一行来源引用，见 §17）；**重复的 pending diff 去重**：同资源同字段已有 pending 提案且 new 值相同 → 不重复记录（也不重记 W005）；new 值又变 → 新提案（多 pending 并存，按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段旧值不匹配 → 409 `attribute_conflict`，详见 §14）。
 
 **回滚（S0-6 / DELETE /api/batches/{id}）**：
 
@@ -186,7 +186,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 **update-on-diff 导入模式**（闭环 R4 裁决「IP 变 = 属性变更事件」，natural-keys.md §2/§6 差距 #1/#2；表结构 `resource_attribute_changes` 见 [data-model.md](data-model.md) §14）：
 
-- **diff-skip 语义**：同键再导入命中库内资源时，取该行映射后的属性字段值（**非键、非枚举、非空**——与首次导入的 attributes 归集同口径），与库内资源逐字段比较。**仅 new 值非空且 ≠ old 的字段**产生一条 pending 变更提案（field/old_value/new_value + sheet/row_number）；行本身**仍走 skip**（row_result 语义不变、rule_code 保持 E001），发一条 **W005** warning issue（evidence：type/natural_key/resource_id/fields/change_count/sheet/row_number），diff 非空才记。diff 为空 → 纯 skip，零记录零 issue（TestReimportIdempotent 语义不破坏）。**空新值永不记录**（空值不写属性的既有语义：首轮导入该列为空的字段，再导也带不来空值覆盖）；枚举（status）字段不参与（attrs 本就不含）。
+- **diff-skip 语义**：同键再导入命中库内资源时，取该行映射后的属性字段值（**非键、非枚举、非空**——与首次导入的 attributes 归集同口径），与库内资源逐字段比较。**仅 new 值非空且 ≠ old 的字段**产生一条 pending 变更提案（field/old_value/new_value + sheet/row_number）；行本身**仍走 skip**（row_result 语义不变、rule_code 保持 E001），发一条 **W005** warning issue（evidence：type/natural_key/resource_id/fields/change_count/sheet/row_number），diff 非空才记。diff 为空 → 纯 skip，零 issue 零新提案（TestReimportIdempotent 语义不破坏；W7-D 起 skip 追加一行 source_refs 版本记录，行语义不变，见 §17）。**空新值永不记录**（空值不写属性的既有语义：首轮导入该列为空的字段，再导也带不来空值覆盖）；枚举（status）字段不参与（attrs 本就不含）。
 - **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染）。**MCP 工具面 5 个冻结**——AI 不得经 MCP 改资源属性。
 - **幂等去重口径**：同一资源同一字段已有 **pending** 且 new 值相同 → 再导不重复记录（也不重记 W005，零痕迹）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409。
 - **回滚不对称**：批次回滚删除链删**本批 pending 提案**；applied/dismissed 保留（人工决策与导入批次生命周期解耦的审计线）；提案的资源被本批删除时 FK 级联连带删除其全部记录（含终态）——被审计资源已不存在，正确行为。见 §5 回滚节。
@@ -222,7 +222,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 ### 16.2 行为与幂等
 
 - 命中后：行**照常作为新资源导入**（安全默认 = 既有行为，绝不拦截导入）+ 行挂 W006 warning（evidence 含 old_key/new_key/matched_fields 等）+ 同一执行事务写入一条 pending 提案（半账不可能）。
-- **再导同一 sheet 幂等**：新键资源已存在 → 行走 skip 路径属性全等 → 纯 skip 零 issue 零新提案（首轮 pending 提案仍在等人工决策）。
+- **再导同一 sheet 幂等**：新键资源已存在 → 行走 skip 路径属性全等 → 纯 skip 零 issue 零新提案（首轮 pending 提案仍在等人工决策；W7-D 起 skip 追加 source_refs 版本行，见 §17）。
 - **apply 之后**：旧资源换键且键分量属性同步（见 16.3），再导该 sheet → 纯 skip 零 issue。
 
 ### 16.3 确认改名（apply）——单事务身份合并
@@ -233,7 +233,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 2. 新资源的关系 retarget 到旧资源 id（from/to 两端；撞 UNIQUE(from,to,type) 的删新侧边——重复边是双重记账的产物）。
 3. **键分量属性同步**：新资源的键分量字段（自然键字段 + 兜底字段，`TypeSpec.KeyComponentNames`）里非空者覆写旧资源同名属性——改名后键与其来源属性（如 base_station_name）必须一致，否则每次再导都触发假 W005；新侧为空/缺省则保留库内值（未映射列不是空值证据）。其余属性**证明相等**（匹配前置条件），无需同步。
 4. 删新资源（其 pending 属性变更随 v11 CASCADE 消失——文档化行为）。
-5. 旧资源 natural_key = 新键（新资源已删故 UNIQUE 无碰撞）+ updated_at 刷新；提案置 applied + decided_at。**旧资源代理键 res_x、关系、SourceRef 不动**（新资源的 SourceRef 行刻意保留为审计痕迹；来源谱系版本化是后续路线，见 natural-keys §6 #4）。
+5. 旧资源 natural_key = 新键（新资源已删故 UNIQUE 无碰撞）+ updated_at 刷新；提案置 applied + decided_at。**旧资源代理键 res_x、关系、SourceRef 不动**（新资源的 SourceRef 行刻意保留为审计痕迹；旧资源的来源谱系版本化自 v0.5 W7-D 起落地——skip 即版本，见 §17 与 natural-keys §6 #4）。
 
 ### 16.4 拒绝（reject）与回滚不对称
 
@@ -246,3 +246,18 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - `GET /api/renames?status=pending|applied|rejected|all&resource_id=&resource_type=&batch_id=&limit=&offset=`（分页边界同 §9 惯例，信封 `{"items":[…],"total":n}`，按 `created_at, rowid` 排序）；`POST /api/renames/{id}/apply|reject`——契约见 [api.md](api.md)。
 - CLI：`netopslab renames --db <db> list [--status --type --limit] | apply --id <id> | reject --id <id>`（结构化 JSON stdout，错误信封 exit 1）。
 - 前端：资源详情抽屉「疑似改名待确认」面板（旧资源侧；确认/拒绝 + 行内错误；无 pending 不渲染）。
+
+## 17. 来源引用版本化（v0.5 W7-D）
+
+闭环 [natural-keys.md](natural-keys.md) §6 差距 #4——「这个键最近被哪个工作簿确认过」的谱系。**零迁移**：`source_refs` 表的 `UNIQUE (entity_kind, entity_id, batch_id)`（每批每实体至多一行）与 `batch_id ON DELETE CASCADE`（随批消失）天生支持版本化，append 即版本，无 migration v13。
+
+**语义：skip = 源确认过该键。**
+
+- **skip 路径追加版本行**：同键再导入（纯 skip 与 W005 diff-skip 两形态——同一代码点）的行依然纯 skip——行结果（skipped 状态、E001 rule_code、消息）、计数、issue 语义**零变化**，但对当前批次**追加一条** `source_refs` 版本行：`entity_kind=resource`、`entity_id=既有资源`、`batch_id=本批`、`workbook/sheet/row_number/raw=本行证据`（与 insert 路径的来源引用同一构造，镜像先例）。这是纯增量的谱系记录，不是数据变更。
+- **每批每实体至多一行**：UNIQUE 约束保证；同批内第二行同键在 **E001 检查点**失败返回，到不了 skip 检查点，不追加（这也保证 skip 路径的插入永不撞 UNIQUE）。
+- **版本序（读侧）**：`SourceRefRepo.ListByEntity` 排序自 W7-D 起为 `ORDER BY rowid`（插入序 = 时间上的版本序；batch_id 是随机 UUID，字典序无意义）。`GET /api/resources/{id}` 的 `sourceRefs[]` 按此序返回——创建批次在前，每次再导在后。回滚删行不重编号剩余行，序稳定。
+- **回滚随批消失**：版本行与批次共存亡（回滚删除链的 `DeleteByBatch`；DDL 的 `batch_id ON DELETE CASCADE` 同语义）。回滚再导入批次 → 该批版本行消失，资源回到创建批次时的引用数；创建批次的引用不受影响。`DELETE /api/batches/{id}` 响应的 `deleted.sourceRefs` 计数现含 skip 追加行——诚实语义（该批记录的引用数，含确证版本）。
+- **版本行记录当时工作簿的原话**：W005 diff-skip 的版本行 `raw` 记录**新值**（如新管理 IP），即使属性变更提案尚 pending 未 apply——谱系不等人工决策，先记录事实。
+- **E001 批内重复不记**：失败行到不了 skip 检查点（见上），同批重复键不会产生第二条版本行。
+- **读侧触点**：资源详情 API/前端「来源」标签展示完整版本列表（列表渲染已有，零改动）；**MCP 溯源仍展示首源**（FirstBatchID 匹配逻辑不受排序与多版本影响，展示语义不变）；rename apply 后新资源的 SourceRef 行保留为审计痕迹（W6-D 语义不变），旧资源的版本链完整。
+- 测试钉死（internal/importer/sourcerefversion_test.go + repo/api 同名测试）：纯 skip 2 版本 / diff-skip 2 版本且 pending 提案并存 / E001 批内重复不追加 / 回滚版本随批消失 / ListByEntity 版本序（插入序非 batch_id 字典序）/ 详情 API 三轮导入三版本。

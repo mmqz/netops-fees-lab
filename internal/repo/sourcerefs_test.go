@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -106,5 +107,77 @@ func TestSourceRefGetByID(t *testing.T) {
 
 	if _, err := db.SourceRefs.GetByID(ctx, "src_missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("GetByID(missing) = %v, want domain.ErrNotFound", err)
+	}
+}
+
+// TestSourceRefListByEntityVersionOrder pins the v0.5 W7-D ordering of
+// ListByEntity: INSERTION order (rowid), not batch_id lexicographic order.
+// batch_id is a random UUID, so with multiple versions per entity (re-import
+// skips append one ref per batch) a batch_id sort would interleave versions
+// meaninglessly. The batch ids below are deliberately chosen so that their
+// lexicographic order (bat_a < bat_m < bat_z) differs from the insertion
+// order (bat_z, bat_a, bat_m) — the old ORDER BY batch_id would fail this
+// test. Deleting a middle version must not reorder the survivors (rowids are
+// never renumbered by deletion; SQLite assigns new rowids above the current
+// maximum, so a later insert still sorts last).
+func TestSourceRefListByEntityVersionOrder(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	_, _, _ = seedGraph(t, db)
+
+	// Insertion order: bat_z, then bat_a, then bat_m.
+	for _, tc := range []struct{ batch, id string }{
+		{"bat_z", "src_z"}, {"bat_a", "src_a"}, {"bat_m", "src_m"},
+	} {
+		if err := db.Batches.Create(ctx, newBatch(tc.batch, time.Now())); err != nil {
+			t.Fatalf("Create %s: %v", tc.batch, err)
+		}
+		ref := domain.SourceRef{
+			ID: tc.id, EntityKind: domain.EntityKindResource, EntityID: "res_c",
+			BatchID: tc.batch, Workbook: "w.xlsx", Sheet: "s", RowNumber: 2,
+			Raw: map[string]string{"k": "v"},
+		}
+		if err := db.SourceRefs.Insert(ctx, ref); err != nil {
+			t.Fatalf("Insert %s: %v", tc.id, err)
+		}
+	}
+
+	refs, err := db.SourceRefs.ListByEntity(ctx, domain.EntityKindResource, "res_c")
+	if err != nil {
+		t.Fatalf("ListByEntity: %v", err)
+	}
+	if len(refs) != 3 {
+		t.Fatalf("ListByEntity = %d refs, want 3", len(refs))
+	}
+	gotOrder := []string{refs[0].ID, refs[1].ID, refs[2].ID}
+	wantOrder := []string{"src_z", "src_a", "src_m"} // insertion order, NOT bat_a/bat_m/bat_z
+	if !slices.Equal(gotOrder, wantOrder) {
+		t.Errorf("ref order = %v, want %v (insertion/version order, not batch_id lexicographic)", gotOrder, wantOrder)
+	}
+
+	// Deleting the middle version (batch bat_a) leaves the survivors in
+	// their relative order, and a NEW version still sorts after both.
+	if _, err := db.SourceRefs.DeleteByBatch(ctx, "bat_a"); err != nil {
+		t.Fatalf("DeleteByBatch(bat_a): %v", err)
+	}
+	if err := db.Batches.Create(ctx, newBatch("bat_n", time.Now())); err != nil {
+		t.Fatalf("Create bat_n: %v", err)
+	}
+	refN := domain.SourceRef{
+		ID: "src_n", EntityKind: domain.EntityKindResource, EntityID: "res_c",
+		BatchID: "bat_n", Workbook: "w.xlsx", Sheet: "s", RowNumber: 2,
+		Raw: map[string]string{"k": "v"},
+	}
+	if err := db.SourceRefs.Insert(ctx, refN); err != nil {
+		t.Fatalf("Insert src_n: %v", err)
+	}
+	refs, err = db.SourceRefs.ListByEntity(ctx, domain.EntityKindResource, "res_c")
+	if err != nil {
+		t.Fatalf("ListByEntity after delete+insert: %v", err)
+	}
+	gotOrder = []string{refs[0].ID, refs[1].ID, refs[2].ID}
+	wantOrder = []string{"src_z", "src_m", "src_n"}
+	if !slices.Equal(gotOrder, wantOrder) {
+		t.Errorf("ref order after delete+insert = %v, want %v (stable survivor order, new version last)", gotOrder, wantOrder)
 	}
 }

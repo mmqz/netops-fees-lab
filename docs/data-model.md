@@ -99,6 +99,8 @@ CREATE INDEX idx_source_refs_entity ON source_refs(entity_kind, entity_id);
 
 `row_number` 为 **1-based Excel 行号**（表头=第 1 行，数据从第 2 行起）；`raw` 保留整行原始值（表头→值）。问题/报告的“来源证据”由此解析。
 
+**版本化行为注记（v0.5 W7-D 起，零 schema 变更）**：`UNIQUE (entity_kind, entity_id, batch_id)` 使该表天然可作**版本谱系**——导入器自 W7-D 起在 skip 路径也追加一行（每批每实体至多一条：同键再导 = 源确认过该键，append 即版本；E001 批内重复行到不了 skip 检查点故不追加），读侧 `ListByEntity` 按 `rowid`（插入序）返回版本序；`batch_id ON DELETE CASCADE` 使版本随批次回滚消失。DDL 逐字节未动、无 migration v13——行为语义详见 [import-and-validation.md](import-and-validation.md) §17。
+
 ### import_row_results（行级记账）
 
 ```sql

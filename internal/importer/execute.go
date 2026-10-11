@@ -469,7 +469,9 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	}
 
 	// Idempotency: the key exists from an EARLIER batch ⇒ skipped, no
-	// mutation, no issue (the row result carries the message).
+	// mutation of business data, no issue (the row result carries the
+	// message). The only write is the SourceRef version row below —
+	// provenance, not a data change.
 	if existing, found, err := st.lookupExisting(ctx, st.spec.Type, key); err != nil {
 		return err
 	} else if found {
@@ -486,6 +488,37 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 		// enum/status field never participates (attributes() already
 		// excludes key and enum fields).
 		if err := st.recordAttributeDiff(ctx, existing, vals, row); err != nil {
+			return err
+		}
+		// SourceRef versioning (v0.5 W7-D): the skipped row still
+		// CONFIRMS this key against the current batch's
+		// workbook/sheet/row, so append one version row — the full
+		// provenance of "which workbook last confirmed this key"
+		// instead of only the first batch. The UNIQUE
+		// (entity_kind, entity_id, batch_id) constraint keeps it at
+		// most one row per batch (a second same-key row in the same
+		// batch fails E001 above and never reaches this point), and
+		// the batch_id ON DELETE CASCADE removes the version with a
+		// rollback — zero schema change. The insert mirrors the
+		// insert path's srcRef below verbatim. Placed BEFORE the row
+		// result append (both are inside the batch transaction, so
+		// the ordering is semantically equivalent — an insert
+		// failure aborts the whole batch either way) to keep the
+		// "evidence written for a skip" (diff + version) grouped
+		// together. Purely additive provenance: row result
+		// (still skipped), counts, issues and the E001 rule code
+		// are all unchanged.
+		skipRef := domain.SourceRef{
+			ID:         domain.NewID("src"),
+			EntityKind: domain.EntityKindResource,
+			EntityID:   existing.ID,
+			BatchID:    st.batch.ID,
+			Workbook:   st.batch.WorkbookName,
+			Sheet:      st.sheet.Name,
+			RowNumber:  row.Number,
+			Raw:        row.Values,
+		}
+		if err := st.tx.SourceRefs.Insert(ctx, skipRef); err != nil {
 			return err
 		}
 		*results = append(*results, domain.RowResult{
