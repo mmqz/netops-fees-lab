@@ -471,7 +471,7 @@ ALTER TABLE resources_new RENAME TO resources;
 
 面向真实机房局站表（`samples/telecom-site-machine-room.xlsx`：8 真实业务列——地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；**同一张 sheet 承载两类实体**，导入故事为先局站后机房的双读法，行为细节见 [import-and-validation.md](import-and-validation.md) §13）。`site` 键 = `site_id`（12 位数字编码，全局唯一，KindString——前导零即身份）；`machine_room` 键 = `machine_room_id`（17 位数字编码，全局唯一，KindString 同理）。机房 spec 携带**可选 ref 字段** `site_id`（KindRef → site）：映射后按 E003 既有语义解析（局站须先入库），解析成功派生一条 `machine_room --belongs_to--> site` 关系；不映射则零关系 + W001。机房名称/局站名称/设备名称为昵称（展示名/属性），IP地址为 KindIPv4 可变属性——字段表与同义词见 `internal/mapping/schema.go` 的 `siteSpec` / `machineRoomSpec`。
 
-**关系封闭集扩容**：v10 是首个同时重建 `relations` 的迁移——`relation_type` CHECK 增加 `'belongs_to'`（machine_room → site 的容器归属，ref→关系派生映射 `relationTypeFor` 新增 `machine_room.site_id` → `belongs_to` 一例——该映射 v0.6 W13-D 起迁至 `internal/mapping.RelationTypeFor` 单一事实源，导入建边与属性确认改挂共用；其余四类旧关系行为不变）。同时 `resources` CHECK 增加 `'site'` 与 `'machine_room'`。
+**关系封闭集扩容**：v10 是首个同时重建 `relations` 的迁移——`relation_type` CHECK 增加 `'belongs_to'`（machine_room → site 的容器归属，ref→关系派生映射 `relationTypeFor` 新增 `machine_room.site_id` → `belongs_to` 一例——该映射 v0.6.0 W13-D 起迁至 `internal/mapping.RelationTypeFor` 单一事实源，导入建边与属性确认改挂共用；其余四类旧关系行为不变）。同时 `resources` CHECK 增加 `'site'` 与 `'machine_room'`。
 
 ### 13.1 DDL v10 全文（FK 安全的双表重建，v9 同构 ×2）
 
@@ -546,9 +546,9 @@ CREATE INDEX idx_attr_changes_status ON resource_attribute_changes(status);
 - **apply 的 updated_at 语义**：`resources.updated_at` 仅在两处刷新——导入首次插入与属性变更 apply（`ResourceRepo.UpdateAttributes`）；skip 路径永不触碰。
 - **回滚不对称（声明性语义）**：批次回滚删除链含「删本批 pending 提案」（`DeletePendingByBatch`）；**applied/dismissed 保留**——人工决策是与导入批次生命周期解耦的审计线。不对称例外：若提案的资源本身被该批回滚删除，`resource_id ON DELETE CASCADE` 会连带删除其全部变更记录（含终态）——被审计的资源已不存在，记录随之消失是正确行为。`batch_id` 刻意**不**设 CASCADE：回滚只删 pending（显式），终态不随批次死。
 - **old_value 可为空串**：资源原本无该属性（attributes 只存非空值）而新导入带来值时，old_value = ''（约束 `NOT NULL DEFAULT ''`，空串非 NULL）；apply 校验同口径（当前值缺失 == ""）。
-- **diff 归集口径**：参与比较的字段 = 导入行映射后的**非键、非枚举、非空**属性值（与首次导入的 attributes 归集完全一致；ref 字段（如机房的 site_id 属性快照）也在其中——v0.6 W13-D 起 apply 对 ref 字段叠加目标解析守卫与派生关系同事务改挂，语义三分支见 [import-and-validation.md](import-and-validation.md) §14：非 ref 只改属性 / ref 有边同步改挂（谱系不动）/ ref 无边只改属性且绝不建边（建边需重导，谱系不变式））。
+- **diff 归集口径**：参与比较的字段 = 导入行映射后的**非键、非枚举、非空**属性值（与首次导入的 attributes 归集完全一致；ref 字段（如机房的 site_id 属性快照）也在其中——v0.6.0 W13-D 起 apply 对 ref 字段叠加目标解析守卫与派生关系同事务改挂，语义三分支见 [import-and-validation.md](import-and-validation.md) §14：非 ref 只改属性 / ref 有边同步改挂（谱系不动）/ ref 无边只改属性且绝不建边（建边需重导，谱系不变式））。
 - **与撤销红线的零交集**：本表属于**资源域**；lab 三层撤销/检查点属于**仿真域**（仅操作 `virtual_devices`/`sim_links`/变更集等 P2 表），两域无共享表、无代码路径交叉（`internal/sim` 零引用 `resource_attribute_changes`/`resources.attributes`）。
-- **API/CLI 面**：`GET /api/attribute-changes`（status/resource_id/batch_id/limit/offset 过滤）与 `POST …/{id}/apply`、`POST …/{id}/dismiss`（契约见 [api.md](api.md)；v0.6 W13-D 起项字段含 `relationRetargeted`，apply 响应为改挂事实、列表为预览，ref 目标解析失败 409 `ref_target_missing`）；CLI `netopslab changes --db … list|apply|dismiss`（输出透传同一字段）。**MCP 工具面 5 个冻结不变**——AI 不得经 MCP 改资源属性（引擎仅仿真态操作）。
+- **API/CLI 面**：`GET /api/attribute-changes`（status/resource_id/batch_id/limit/offset 过滤）与 `POST …/{id}/apply`、`POST …/{id}/dismiss`（契约见 [api.md](api.md)；v0.6.0 W13-D 起项字段含 `relationRetargeted`，apply 响应为改挂事实、列表为预览，ref 目标解析失败 409 `ref_target_missing`）；CLI `netopslab changes --db … list|apply|dismiss`（输出透传同一字段）。**MCP 工具面 5 个冻结不变**——AI 不得经 MCP 改资源属性（引擎仅仿真态操作）。
 
 
 # DDL v12 — 疑似改名提案表 rename_proposals

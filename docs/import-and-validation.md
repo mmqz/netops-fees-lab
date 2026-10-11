@@ -182,7 +182,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - 样例实测（CLI，6 行双读法）：局站读法 2 imported / 4 failed（2×E001 局站ID 批内重复 + E004 + E002）；机房读法 4 imported / 2 failed + 1×W001；**3×belongs_to**；前导零键 `000123`、`00045600000000013/14` 逐字节保留；重导幂等（0 新增、关系不重复）。
 - 键策略裁决见 [natural-keys.md](natural-keys.md) §4；schema v10（resources + relations 双表重建）见 [data-model.md](data-model.md) §13；API 形态见 [api.md](api.md) 的 site / machine_room 段落。
 
-## 14. 属性变更历史与人工确认（v0.4，W4-D；ref 重挂语义 v0.6，W13-D）
+## 14. 属性变更历史与人工确认（v0.4，W4-D；ref 重挂语义 v0.6.0，W13-D）
 
 **update-on-diff 导入模式**（闭环 R4 裁决「IP 变 = 属性变更事件」，natural-keys.md §2/§6 差距 #1/#2；表结构 `resource_attribute_changes` 见 [data-model.md](data-model.md) §14）：
 
@@ -190,7 +190,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务；ref 字段还叠加「目标解析 + 派生关系同事务改挂」，见下条重挂语义）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。**Name 同步**（v0.5 W9-D）：apply 的变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时，`resources.name` 一并写成新值——name 是该字段值的投影，不同步则资源列表永远显示旧名；非 NameField 字段的 apply 不触碰 name。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染；引用字段的行附「确认后将同步改挂关系（需目标已存在）」轻提示）。**MCP 工具面 5 个冻结**——AI 不得经 MCP 改资源属性。
 - **幂等去重口径**：同一资源同一字段已有 **pending** 且 new 值相同 → 再导不重复记录（也不重记 W005，零痕迹）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409。
 - **回滚不对称**：批次回滚删除链删**本批 pending 提案**；applied/dismissed 保留（人工决策与导入批次生命周期解耦的审计线）；提案的资源被本批删除时 FK 级联连带删除其全部记录（含终态）——被审计资源已不存在，正确行为。见 §5 回滚节。
-- **ref 变更的重挂语义（v0.6 W13-D，三分支——取代 v0.4「apply 只写属性快照不重建派生关系」的边界声明）**：
+- **ref 变更的重挂语义（v0.6.0 W13-D，三分支——取代 v0.4「apply 只写属性快照不重建派生关系」的边界声明）**：
   1. **非 ref 字段**：只写 attributes 快照——行为与 v0.4 完全不变，关系零触碰；
   2. **ref 字段、资源已有派生关系**（from=该资源 且 type=该字段派生关系类型——派生映射用导入侧同一张 `mapping.RelationTypeFor`，方向与导入派生一致，绝不第二张表）：新值先按被引用类型（spec.RefType）的自然键解析（与 E003 同一查法；导入路径里悬空引用本就过不了 E003，人工确认也不引入第二条产生悬空引用的路）——**解析不到 → 409 `ref_target_missing`**（message 含字段/目标键/被引用类型，建议先导入目标再确认；提案保持 pending，资源与关系零改动）；解析成功 → 新值写入 attributes 且**同一事务内**把该派生关系的 `to_resource_id` 改挂到新目标（apply 响应带 `relationRetargeted: true`，CLI 透传）。改挂不创建不删除关系行：`first_batch_id` / `source_refs` / `attributes` / `created_at` 谱系列原样保留（改挂只修正指向，创建谱系不变——变更记录本身是审计线；relations 表无 updated_at 列，如实声明不刷新时间戳）。UNIQUE(from,to,type) 安全性：from 与 type 不动、仅 to 移动，与既有边相撞需要「同 from 同 type 已指向新目标」——导入派生世界里每个单值 ref 字段至多一条边，边已指向新目标则属性已等于新值、W005 旧值守卫在上游就否了提案；唯一的理论来源是改名合并（RetargetResource）把两条同 (from,type) 异 to 边留在同一资源上，此时改挂两条到同一目标必撞 UNIQUE、语句中止、整个 apply 事务回滚——原子失败而非脏边集；
   3. **ref 字段、资源无边**（如机房 site_id 空导入的 W001 孤儿，或目标资源连带删除后属性残留）：只改属性快照**绝不建边**（apply 响应 `relationRetargeted: false`）——每条 relation 行的 first_batch_id 锚定其工作簿证据（导入来源），人工 apply 没有工作簿行可作谱系，建无证据的边破坏溯源不变式；改挂不同——边已有谱系，确认只是修正指向。需要「从无边到有边」仍走回滚批次后重导（E003 顺序约束重新生效）。
@@ -295,7 +295,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **模型级模板身份**：脚本只携带设备型号（标题行），不携带设备实例身份——ptp_port 行表达「该型号模板下此接口的 PTP 配置」；与 device 资源的实例级关联需要脚本未提供的数据（编号/名称），故无 ref 字段、无派生关系。
 - 脚本通道当前仅支持 PTP 配置形态（第 1 个解析器）；其它脚本家族沿用此框架扩展（解析器接口不变，新 spec + 列头同义词即可）。
 
-## 19. 资源导出与回源（v0.6 W12-D）
+## 19. 资源导出与回源（v0.6.0 W12-D）
 
 **通道面**：`GET /api/exports/resources?types=`（xlsx 下载，Content-Type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、Content-Disposition 固定文件名 `netops-resources.xlsx`）+ `netopslab export --db <path> --out <file.xlsx> [--types a,b]`（stdout 单一 JSON `{"file","types","totalRows"}`；`--out` 必填、已存在则覆盖；非法 `--types` 值 exit 2）+ 资源页「导出资源」按钮（浏览器导航式下载，`window.location.assign`——二进制响应不走 requestJson；当前**类型**筛选进 `types` 参数，搜索关键词与状态筛选不参与导出——导出的是资源集合，不是检索结果子集）。**MCP 工具面冻结不动（恰 5）**。
 

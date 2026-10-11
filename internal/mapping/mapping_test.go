@@ -1606,7 +1606,7 @@ func TestSiteMachineRoomValidate(t *testing.T) {
 }
 
 // TestRelationTypeFor pins the ref-field → relation-type derivation mapping
-// (moved here from internal/importer in v0.6 W13-D together with the function
+// (moved here from internal/importer in v0.6.0 W13-D together with the function
 // itself): the belongs_to case, the unchanged legacy behaviour for every
 // other combination, and the "" sentinel for unmapped combinations. The
 // importer (edge creation at import time) and the attribute-change apply

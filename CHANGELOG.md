@@ -2,6 +2,43 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.6.0] — 2026-10-11
+
+**治理三部曲终章与数据双向闭环版**（五轮迭代：W11 治理债务收口轮 + W12-W14 三轮功能开发（回源导出 / 关系重挂 / 治理总览）+ W15 发布轮收口；需求驱动为 v0.5.0 各轮质量审查与审后处置留下的治理债务清单（target_missing 失实口径、W006 深链任一侧可达性、冒烟验证资产丢失、api.md 契约基线并存 P3）与「导入数据经治理后可回源」的双向闭环、治理工作量一屏入口的演进需求）。核心：治理三部曲终章（W005 属性 / W006 身份 / W13 关系——ref 字段确认时同事务改挂派生关系），数据从单向导入走向双向闭环（确定性 xlsx 导出、回源幂等），治理工作获得一屏入口视角（SQL COUNT 聚合总览），并清偿 v0.5.0 的口径与验证资产债务。
+
+### 修复 — 治理债务收口（W11-D，零迁移）
+- **target_missing 诚实口径**：`importer.Rollback` 删除链先删本批 pending 提案再删资源——标准回滚后改名提案已消失，apply 实得 **404**（W6 时代「回滚后 apply 得 409 target_missing」的文档/注释口径失实）。409 `target_missing` 是防御性守卫，唯一典型可达触发 = 新资源被其它路径直接删除而提案幸存；错误文案、api.md、import-and-validation、web 行内注释等全仓触点统一为诚实口径，`TestAPIRenamesRejectAndRollback` 更名并钉住「回滚 → deleted.renameProposals=1 → apply 404」旅程。
+- **renames `resource_id` 任一侧过滤**：W006 issue 的 EntityID 落在新资源侧，深链打开新资源抽屉时 `GET /api/renames?resource_id=<新id>` 此前查不到（待确认面板不渲染）——List 条件改 `(resource_id = ? OR new_resource_id = ?)`（COUNT/SELECT 共享同一 where 与参数序），repo/服务/HTTP/CLI 四层测试钉死，双侧抽屉均渲染（W11-Q 真浏览器补测关闭缺口）。
+- **w7/w8 冒烟脚本重建**：环境重置丢失的两份验证资产按原规格重建并实测 SMOKE-OK（SourceRef 版本化三轮 + 回滚随批消失 deleted 记数；PTP 脚本 4/0/0 + W006 协同 apply 键迁移 + 零警重导）。
+
+### 新增 — 资源导出通道与回源幂等（W12-D，零迁移）
+- **确定性导出**：`internal/exporter` 纯函数核心（Build/BuildBytes/WriteFile）——每个有资源的类型一张 sheet（8 张固定名字表，`SuggestType` 回投不变量钉死）、表头 = spec 全部字段 Label、行 = 当前属性快照（含 W005/W006 apply 后状态）、行序 = natural_key 字典序。excelize v2.11.0 输出全链无 wall-clock（zip 条目时间戳恒 1980-01、文档属性时间为库内常量），钉**字节级确定性**：同库同参数两次导出逐字节一致、输入顺序无关、CLI 与 HTTP 跨通道字节相同；文档属性时间为常量（真实导出时刻不落盘）的代价在 api.md 与 §19 两处诚实声明。
+- **键分量三规则回填**（朴素 `split('|')` 取首段必破坏幂等——base_station 退化键「哈尔滨|基站名称」会写错编码列，负对照测试红）：①单键类型键列 = 键整体不拆（键含 `|` 亦无损）；②复合键（port/ptp_port）末分量 = Resource.Name，`TrimSuffix(key, "|"+Name)` 精确还原前缀（分量自身含 `|` 也无损）；③条件键（base_station）退化行按 KeyFallbackFields 非空属性值拼接恰等于 natural_key 判定——主键列置空、兜底列走属性值（回源重新派生同一退化键并复记 W004，身份语义保真而非把站名洗进编码列）。W005 致兜底键漂移的行（city 事后补）落主键路径——键仍精确还原，编码列内容非真实系统编码（已知精度限制，文档诚实声明，测试钉死该例）。
+- **回源幂等（验收核心）**：导出 xlsx 直接走既有 analyze → suggest → import 管线导入全新库——建议映射全字段完整回填（实测置信 0.75×65 + 0.9×1——Label 走同义词档而非 exact 档，非 1.0，docs 两处如实钉）、八类型资源集合与关系集合（ref 重新派生）双库等价（CLI e2e 含 W005/W006 apply 后状态 + 退化键三形态；w12 冒烟 80 资源/60 关系 sqlite 级等价）；同库回导纯 skip 且零行级 issue。
+- **三通道**：HTTP `GET /api/exports/resources?types=`（200 + xlsx 双头；types 逗号分隔、归一 Specs 序、去重、空段跳过，坏值 400 点名合法值清单）、CLI `netopslab export --db --out [--types]`（stdout 单 JSON `{file,types,totalRows}`；缺 --out/坏 types exit 2）、资源页「导出资源」按钮（filter bar 末尾常态可见，当前类型筛选进 types 参数、搜索关键词与状态筛选不参与——三处同口径）。空库导出成功但仅含中性占位空 sheet「资源导出」（重导入 422 `empty_workbook` 诚实拒绝）。
+- **E003 部分导出诚实声明**：`?types=ip_pool` 部分导出的文件独立回源会因引用缺失 E003 失败（行照实 failed + 证据链），api.md 与 §19 两处声明「部分导出文件不适合独立回源」（W12-Q 实测钉死）。
+
+### 新增 — ref 属性变更的关系重挂（W13-D，零迁移，治理三部曲终章）
+- **三分支语义**：W005 确认流对 ref 类字段（机房 `site_id`、地址池 `assigned_device`、电路 a_end/z_end）的 apply——①非 ref 字段只改属性（关系零触碰）；②ref 字段且资源已有派生边 → 新值按被引用类型自然键解析成功后在**同一事务内**把边改挂到新目标（`relationRetargeted: true`；谱系 `first_batch_id`/`source_refs`/`attributes` 原样不动——relations 表无 updated_at 列，改挂的审计线 = 变更记录本身）；③ref 字段无边（空旧值 W001 孤儿路径）→ 只改属性**绝不新建无谱系关系**（`relationRetargeted: false`，建边仍需重导——每条关系行锚定其工作簿证据，人工 apply 没有工作簿行可作谱系）。目标解析守卫对**所有** ref 字段 apply 生效（含无边分支——否则 apply 可把导入路径必拒的悬空引用写进 attributes 且永不自愈）。
+- **409 `ref_target_missing`**：新值解析不到 → 409 拒绝（message 含字段/目标键/被引用类型），提案保持 pending、资源与关系**零改动**（目标解析在任何写入之前）。可达触发 = 提案记录后目标资源被其它路径删除（回滚/直删）——E003 解析先于 diff 检测，「新值悬空的提案」不可能由导入通道产生；四层（服务/HTTP/CLI/冒烟）测试用自然旅程构造：独立批次导入目标 → 提案 → 回滚 → 409 → 重导目标 → 同一提案 apply 200。
+- **同事务原子性**：属性写、NameField 同步、改挂、提案置 applied 全在一个 `DB.Do` 里——注入测试钉死（改挂撞 UNIQUE（改名合并残留形态）→ 整个 apply 回滚，属性/提案/双边零残留）；UNIQUE(from,to,type) 安全性论证：from 与 type 不动仅 to 移动，撞边需要同 (from,type) 已指向新目标的第二条边——导入派生世界每个单值 ref 字段至多一条边且此时 W005 旧值守卫在上游否决提案，唯一理论来源改名合并在改挂时原子失败而非脏边集。a_end/z_end 多 ref 字段独立改挂互不干扰（双向不干扰测试钉死）。
+- **`relationRetargeted` 全链透传**：列表项上为实时谓词重算（引用字段且当前有派生边 → true——pending 项作确认预览，web 渲染「确认后将同步改挂关系」提示；applied 与 dismiss 后同为重算值，仅语义预览）；apply/dismiss 响应上为操作事实（apply 重挂成功 true / dismiss 恒 false）。HTTP/CLI/web 三通道同字段名。
+- **`mapping.RelationTypeFor` 单一映射**：ref 字段 → 派生关系类型的映射从 importer 私有函数迁至 `internal/mapping`（纯数据包、仅依赖 domain+stdlib）——导入建边与确认改挂共用**同一张表**，绝不第二映射（语义逐字节零漂移，表测试随迁）。
+
+### 新增 — 治理总览（W14-D，零迁移）
+- **只读聚合端点** `GET /api/governance/summary`（无参数恒 200 + no-store）：待确认双队列（属性变更/疑似改名 pending 计数）、决策审计（applied/dismissed/rejected）、问题分布（按严重级三固定键 + 按规则 Top 10——`ORDER BY COUNT(*) DESC, rule_code ASC` 钉死在 repo SQL，TopRuleLimit=10 平局按码序裁决）、资源/关系/批次形态小表（byType/byRelationType 动态键）。**全部 6 条 SQL COUNT GROUP BY 下推，零全表拉取零 len()**（包注释声明该纪律）。
+- **确定性**：除 generatedAt（time.Now.UTC()，契约即墙钟、测试显式豁免）外全字段是库状态的纯函数——同库两次调用逐字段相等 + 六数据块 JSON 字节相等；空库恒全零（固定键 0 / 动态 map {} / byRule []）。
+- **CLI 等价物与组合根**：`netopslab query --db <path> governance`（单 JSON 输出）与 HTTP 端点逐字段相等（generatedAt 豁免，冒烟钉跨通道相等）；组合根第 8 组装配（`internal/services` Governance 字段，wiring_test 指针恒等 8 组在表）；新增 4 个最小 COUNT repo 方法（AttributeChange/RenameProposal/Batch 各 CountByStatus + Issue.CountByRule）。
+- **web 概览页「治理总览」区**：待确认双卡（N>0 时 `stat-value--error` 高亮 + 「去确认」跳 /resources）、问题分布（severity 三行 + 规则 Top 5 中文规则名）、形态小表、批次状态行；独立取数点 + 面板内降级（ErrorBlock compact 不阻塞页面其余区，真浏览器拦截实证；重试可恢复）。
+
+### 发布轮（W15-D）
+- 版本四处事实源统一 **v0.6.0**（`domain.AppVersion` + CHANGELOG 头 + api.md 契约基线 + web i18n；`TestAppVersionP2` 断言随发布适配并在注释声明）；CHANGELOG 0.6.0 段、docs/verified-capabilities.md v0.6.0 段（CI 运行态按 v0.4.0/v0.5.0 先例推送后补记）、README 版本行/能力清单/英文摘要/MCP version 对齐；api.md 文内 v0.6 W12-D/W13-D/W14-D 能力标注统一为 v0.6.0 口径（收口 W12-Q/W13-Q/W14-Q 的「契约基线 v0.5.0 与 v0.6 标注并存」P3）；W13-Q P3-2 补电路双端 List 预览断言（既有测试函数内，计数不变）；全仓 `v0.5.0` 残留逐处判定（版本事实点已升，历史段/时点事实/里程碑引用保留）。
+- 发布验收全量实测：六门禁全绿 + `make build` + live serve（`/api/health` 实报 v0.6.0、`GET /api/schema` 8 类 / 89 字段 / 13 规则、`/` 与 SPA 路由及全部 chunk/worker/favicon 200）+ `testdata/devices.xlsx` 完整导入基线（30 行 27/0/3 + issues 4E/1W/27I）+ `samples/ptp-config-script.txt` 脚本通道（4/0/0）+ 六个冒烟脚本（w6/w7/w8/w12/w13/w14）全 SMOKE-OK + demo.sh + demo-lab.sh 全过 + MCP 真进程 stdio 握手（serverInfo v0.6.0、恰 5 工具）+ 治理总览与导出端点 live 实测 + 全仓凭据扫描零命中。
+
+### 测试
+- Go **331 个顶层测试**全绿（v0.5.0 基线 296 + 本里程碑四轮新增：W11 +0 / W12 +13 / W13 +9 / W14 +13 = +35，`go test -list '.*'` 顶层函数实测口径——W12 分项 exporter 9 / api 2 / app 2，W13 分项 changes 6 / repo 1 / api 1 / app 1 / mapping +1 与 importer −1（`TestRelationTypeFor` 迁移净零），W14 分项 governance 4 / repo 4 / api 2 / app 3；W15 发布轮零新增测试函数（版本断言随发布适配 + W13-Q P3-2 断言补入既有函数）；键回填三规则 / 字节确定性 / 回源双库等价 / 同事务改挂 / 409 零改动 / 绝不建边 / COUNT 下推 / byRule 平局裁决等；既有断言零放宽，唯一例外为 `TestAppVersionP2` 版本断言随发布适配【注释声明】）。门禁六项全绿：gofmt 空 · vet 0 告警 · 20 含测试包全 ok · `-race` 0（changes/repo/api/governance 等重点包）· tsc 0 错误 · build ✓（最终实测计数与 CI 运行态——**待推送后补记**——见 docs/verified-capabilities.md v0.6.0 段）。
+- 端到端冒烟：W12/W13/W14 各轮独立冒烟脚本（w12/w13/w14）+ W11 重建的 w7/w8 + 既有 w6 + demo.sh / demo-lab.sh 全脚本可重复。
+
 ## [0.5.0] — 2026-10-11
 
 **身份治理闭环与来源谱系版**（四轮迭代：W6-W8 三轮功能开发 + W9 重构收敛轮 + W10 发布轮收口；需求驱动为 R0-W5 发布时留下的下轮候选清单：名称改名的人工身份变更流、SourceRef 版本化、PTP 配置脚本导入通道、D2/D3 组合根收敛与四个语义尾巴）。核心：身份确认流补上最后一块拼图（改名合并人工流），来源证据从「首源」进化为「全史版本」，真实材料从三类工作簿扩展到第四类（配置脚本），服务装配收敛到唯一组合根。

@@ -1,6 +1,6 @@
 // Package exporter projects the CURRENT resource inventory of a database
 // back into an .xlsx workbook that is structurally isomorphic to an import
-// workbook (W12-D, v0.6): one sheet per resource type (mapping.Specs order,
+// workbook (W12-D, v0.6.0): one sheet per resource type (mapping.Specs order,
 // only types that carry resources), the header row of each sheet is the
 // spec's field Labels, and one row per resource is the attribute snapshot
 // of its current state (including values that only became current through

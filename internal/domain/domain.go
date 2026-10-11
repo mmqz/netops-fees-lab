@@ -22,16 +22,18 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.5.0
-// closes the identity-governance loop (W006 suspected-rename merge flow,
-// migration v12), versions the source lineage (skip-path SourceRef provenance
-// rows, zero migration), adds the fourth real-telecom material (PTP config
-// scripts, ptp_port type, migration v13) and converges the wiring on a
-// single composition root (internal/services). TestAppVersionP2 pins this
-// constant and TestAppVersionMatchesChangelogHead enforces the CHANGELOG
-// single fact source, so the three-way hand-copied versions cannot drift
-// again.
-const AppVersion = "v0.5.0"
+// the health endpoint, the MCP server implementation and the CLI. v0.6.0
+// finishes the governance trilogy and closes the data loop: W11-D retires
+// the inherited governance debt (honest target_missing wording, either-side
+// rename filter), W12-D adds the deterministic xlsx export channel that
+// re-imports equivalently (source round-trip), W13-D makes ref-field
+// applies retarget the derived relation in the same transaction (the
+// W005/W006/W13 governance arc complete), and W14-D adds the one-screen
+// governance overview (SQL-COUNT aggregate over the confirmation queues).
+// TestAppVersionP2 pins this constant and TestAppVersionMatchesChangelogHead
+// enforces the CHANGELOG single fact source, so the three-way hand-copied
+// versions cannot drift again.
+const AppVersion = "v0.6.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

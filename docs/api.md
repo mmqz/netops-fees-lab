@@ -4,19 +4,19 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）与 `ref_target_missing`（409，v0.6 W13-D，apply 的 ref 字段新值解析不到被引用类型资源——目标被删除或提案外漂入，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已不存在而提案仍在——标准批次回滚会先删本批提案、apply 将得 404，此 409 多为新资源被其它路径直接删除，见 §POST /api/renames/{id}/apply）。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）与 `ref_target_missing`（409，v0.6.0 W13-D，apply 的 ref 字段新值解析不到被引用类型资源——目标被删除或提案外漂入，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已不存在而提案仍在——标准批次回滚会先删本批提案、apply 将得 404，此 409 多为新资源被其它路径直接删除，见 §POST /api/renames/{id}/apply）。
 - 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.5.0（2026-10-11）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.6.0（2026-10-11）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.5.0",
+  "version": "v0.6.0",
   "ruleVersion": "1.0.0"
 }
 ```
@@ -515,7 +515,7 @@ HTTP/1.1 409 Conflict
 
 遍历无向（a_end 可从设备侧走回电路；belongs_to 可从局站侧走回机房）；节点按 `(type, natural_key)` 排序，输出确定。`relationType` 的取值集为 `assigned_to` / `a_end` / `z_end` / `belongs_to`（后者 machine_room → site，v0.4 W3-D 起入 relations CHECK 封闭集，migration v10）。
 
-## GET /api/exports/resources?types= — 资源导出（xlsx 下载，v0.6 W12-D）
+## GET /api/exports/resources?types= — 资源导出（xlsx 下载，v0.6.0 W12-D）
 
 把**当前资源清单**导出为与导入工作簿同构的 .xlsx：每个有资源的类型一个 sheet（`mapping.Specs` 注册序：device → ip_pool → circuit → port → base_station → site → machine_room → ptp_port），表头 = 该类型 spec 的全部字段 Label（中文），每行 = 一个资源的**当前属性快照**——含 W005 属性确认 / W006 改名确认 apply 之后的最新值（导出的是当前状态，不是任何源工作簿的重建）。行序 = natural_key 字典序（与插入序无关）。
 
@@ -558,7 +558,7 @@ HTTP/1.1 409 Conflict
 
 `byType` 键集动态（新增类型如 port/site/machine_room 仅在有数据时出现，R1-D4 起前端按实际键动态渲染）；`byRelationType` 的四个已知关系类型恒出现（含 v0.4 W3-D 起的 `belongs_to`，计 0 亦发）。上例为三张合成工作簿的种子数据，故不含新类型键。
 
-## GET /api/governance/summary — 治理总览（v0.6 W14-D）
+## GET /api/governance/summary — 治理总览（v0.6.0 W14-D）
 
 无参数的只读聚合端点：把「待确认队列 + 决策审计 + 问题分布 + 资源/关系/批次形态」汇成一屏——治理工作的入口视角。**恒 200**（空库也返回全零结构，不存在 204/404）；响应带 `Cache-Control: no-store`（全 /api 纪律）；所有计数走 SQL COUNT 聚合（GROUP BY，无全表拉取）。下方示例为三张合成种子工作簿导入后的真实输出（pending 全 0 是因为该库尚无人工确认工作，generatedAt 截断）：
 
@@ -725,7 +725,7 @@ HTTP/1.1 409 Conflict
 
 ## GET /api/attribute-changes?status=&resource_id=&batch_id=&limit=&offset= — 属性变更提案列表
 
-（v0.4 W4-D，migration v11）同键再导入检测到属性差异时逐字段记录的**待确认变更**（W005）。参数：`status=pending|applied|dismissed|all`（缺省 all）；`resource_id` / `batch_id` 精确过滤；分页用 `limit`（默认 20，>100 截断）/ `offset`（非负，默认 0）——边界遵循既有列表端点惯例（§9）。信封 `{"items":[…],"total":n}`，按 `created_at, rowid`（提案入队序）排序。`resourceType` / `naturalKey` 为资源侧 join 字段（提案的资源被回滚级联删除后为空串）。`relationRetargeted`（v0.6 W13-D）——列表项上为**实时谓词重算**（引用字段且该资源当前已有对应派生关系 → true；非引用字段与无派生关系的引用字段恒 false），pending 项作确认预览（前端提示用它），applied 项因改挂后边仍存在而与 apply 结果一致、dismissed 项同为重算值（仅语义预览，dismiss 操作本身恒不改挂）；apply/dismiss 响应上为**该操作的事实结果**（apply 重挂成功 true / dismiss 恒 false）。
+（v0.4 W4-D，migration v11）同键再导入检测到属性差异时逐字段记录的**待确认变更**（W005）。参数：`status=pending|applied|dismissed|all`（缺省 all）；`resource_id` / `batch_id` 精确过滤；分页用 `limit`（默认 20，>100 截断）/ `offset`（非负，默认 0）——边界遵循既有列表端点惯例（§9）。信封 `{"items":[…],"total":n}`，按 `created_at, rowid`（提案入队序）排序。`resourceType` / `naturalKey` 为资源侧 join 字段（提案的资源被回滚级联删除后为空串）。`relationRetargeted`（v0.6.0 W13-D）——列表项上为**实时谓词重算**（引用字段且该资源当前已有对应派生关系 → true；非引用字段与无派生关系的引用字段恒 false），pending 项作确认预览（前端提示用它），applied 项因改挂后边仍存在而与 apply 结果一致、dismissed 项同为重算值（仅语义预览，dismiss 操作本身恒不改挂）；apply/dismiss 响应上为**该操作的事实结果**（apply 重挂成功 true / dismiss 恒 false）。
 
 示例（导入 `testdata/devices.xlsx` 后，把某行管理IP 改为 `10.0.0.9` 再导入同一设备编码）：
 
@@ -757,7 +757,7 @@ HTTP/1.1 409 Conflict
 
 ## POST /api/attribute-changes/{id}/apply — 应用待确认变更（人工确认通道）
 
-仅 pending 可应用。校验**资源当前属性值 == 提案旧值**：相等 → 新值写入 `resources.attributes`、`updated_at` 刷新、提案置 `applied`（`appliedAt` 打点），同一事务内原子完成 → 200 返回变更后对象（形态同上，`status: "applied"`）。**变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时 `resources.name` 一并同步**（v0.5 W9-D——name 是该字段值的投影，否则资源列表将一直显示旧名）；非 NameField 字段的 apply 不触碰 name。**ref 类字段的重挂**（v0.6 W13-D）：变更字段是引用字段（机房 `site_id`、地址池 `assigned_device`、电路 a/z 端等）时，新值先按被引用类型的自然键解析（与 E003 同一查法）——解析不到 → **409 `ref_target_missing`**（message 含字段/目标键/被引用类型，建议先导入目标再确认；提案保持 pending，资源与关系零改动——典型触发：提案记录后目标资源被其它路径删除，导入路径本身必拒悬空引用，不会产生这种提案）；解析成功且资源已有派生关系 → 该关系的 `to_resource_id` 在**同一事务内**改挂到新目标，200 响应 `relationRetargeted: true`（谱系 `first_batch_id` 等不动，relations 表无 updated_at 列）；解析成功但资源无派生关系（如空 site_id 导入的 W001 孤儿）→ 只改属性不建边，`relationRetargeted: false`。三分支的完整语义与「建边需重导（谱系不变式）」见 [import-and-validation.md](import-and-validation.md) §14。该字段已被其它变更修改（当前值 ≠ 旧值）→ **409 `attribute_conflict`**，message 含字段名与两个值，资源不动：
+仅 pending 可应用。校验**资源当前属性值 == 提案旧值**：相等 → 新值写入 `resources.attributes`、`updated_at` 刷新、提案置 `applied`（`appliedAt` 打点），同一事务内原子完成 → 200 返回变更后对象（形态同上，`status: "applied"`）。**变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时 `resources.name` 一并同步**（v0.5 W9-D——name 是该字段值的投影，否则资源列表将一直显示旧名）；非 NameField 字段的 apply 不触碰 name。**ref 类字段的重挂**（v0.6.0 W13-D）：变更字段是引用字段（机房 `site_id`、地址池 `assigned_device`、电路 a/z 端等）时，新值先按被引用类型的自然键解析（与 E003 同一查法）——解析不到 → **409 `ref_target_missing`**（message 含字段/目标键/被引用类型，建议先导入目标再确认；提案保持 pending，资源与关系零改动——典型触发：提案记录后目标资源被其它路径删除，导入路径本身必拒悬空引用，不会产生这种提案）；解析成功且资源已有派生关系 → 该关系的 `to_resource_id` 在**同一事务内**改挂到新目标，200 响应 `relationRetargeted: true`（谱系 `first_batch_id` 等不动，relations 表无 updated_at 列）；解析成功但资源无派生关系（如空 site_id 导入的 W001 孤儿）→ 只改属性不建边，`relationRetargeted: false`。三分支的完整语义与「建边需重导（谱系不变式）」见 [import-and-validation.md](import-and-validation.md) §14。该字段已被其它变更修改（当前值 ≠ 旧值）→ **409 `attribute_conflict`**，message 含字段名与两个值，资源不动：
 
 ```json
 { "error": { "code": "attribute_conflict",

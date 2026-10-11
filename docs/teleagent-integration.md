@@ -1,6 +1,6 @@
 # NetOps Lab — TeleAgent 集成指南（MCP 注册 + CLI 回退）
 
-> ⚠️ **诚实声明**：部署态 TeleAgent 的 MCP 调用**未在本开发环境验证**（环境内没有 TeleAgent 实例；v0.2.0 时点状态与 Phase 1 相同）。已验证的是：进程内 MCP stdio 回环（go-sdk 客户端 × `mcpserver.Run`，`TestMCPServerResourceSearch` / `TestMCPToolRegistry` / `TestMCPLab*` ×4）**以及**真子进程 stdio 冒烟（`netopslab mcp --db <fresh>` 裸 JSON-RPC initialize + tools/list → 服务器身份 `netops-lab v0.2.0`〔该冒烟为 v0.2.0 时点捕获，版本号现随 `domain.AppVersion` 演进为 v0.5.0〕、工具恰好 5 个）。**接入部署态时请按本文操作，并把结果（成功/报错/协议差异）反馈给工程组。** 在验证完成前，建议优先使用 CLI 回退路径（§4）——它与 MCP 共用同一引擎，输出同为结构化 JSON。
+> ⚠️ **诚实声明**：部署态 TeleAgent 的 MCP 调用**未在本开发环境验证**（环境内没有 TeleAgent 实例；v0.2.0 时点状态与 Phase 1 相同）。已验证的是：进程内 MCP stdio 回环（go-sdk 客户端 × `mcpserver.Run`，`TestMCPServerResourceSearch` / `TestMCPToolRegistry` / `TestMCPLab*` ×4）**以及**真子进程 stdio 冒烟（`netopslab mcp --db <fresh>` 裸 JSON-RPC initialize + tools/list → 服务器身份 `netops-lab v0.2.0`〔该冒烟为 v0.2.0 时点捕获，版本号现随 `domain.AppVersion` 演进为 v0.6.0〕、工具恰好 5 个）。**接入部署态时请按本文操作，并把结果（成功/报错/协议差异）反馈给工程组。** 在验证完成前，建议优先使用 CLI 回退路径（§4）——它与 MCP 共用同一引擎，输出同为结构化 JSON。
 
 ## 1. 前置
 
@@ -24,7 +24,7 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 ### 2.2 服务器身份与工具清单
 
 - name：`netops-lab`
-- version：`v0.5.0`（`domain.AppVersion` 常量，MCP initialize 响应报告；v0.3.2 起该常量由 `TestAppVersionMatchesChangelogHead` 与 CHANGELOG 头版本锚定，此示例值随版本演进——以握手实际响应为准）
+- version：`v0.6.0`（`domain.AppVersion` 常量，MCP initialize 响应报告；v0.3.2 起该常量由 `TestAppVersionMatchesChangelogHead` 与 CHANGELOG 头版本锚定，此示例值随版本演进——以握手实际响应为准）
 - 工具清单（`tools/list`）：**恰好 5 个**（无 SQL/Shell/SSH/文件工具；`TestMCPToolRegistry` 断言排序比较）：
 
 | 工具 | 类别 | 一句话职责 |

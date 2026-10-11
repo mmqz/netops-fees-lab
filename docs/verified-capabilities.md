@@ -1,7 +1,7 @@
 # NetOps Lab — 已验证 / 未验证能力清单
 
 > 诚实为本：每一条"已验证"都可追溯到具体的验证方式与日期；未验证事项显式列出，不粉饰。
-> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版）。
+> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版 · v0.6.0 治理三部曲终章与数据双向闭环版）。
 
 ## ✅ 已验证（2026-10-09，linux/amd64）
 
@@ -72,6 +72,33 @@
 | **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
+
+## v0.6.0（2026-10-11）治理三部曲终章与数据双向闭环版
+
+五轮迭代（W11 治理债务收口轮 + W12-W14 三轮功能开发 + W15-D 发布轮），主代理逐轮派发开发子代理并派 W11-Q/W12-Q/W13-Q/W14-Q 只读质检（四轮均 **PASS**：0 P0/P1/P2，P3 分别 4/3/3/3——均为记录精度与策略延续项；「api.md 契约基线 v0.5.0 与 v0.6 标注并存」P3 已由本轮 W15-D 收口）；里程碑提交 14bf12e（W11）/ d34a68b（W12）/ 6fa5de9（W13）/ 967b5d4（W14）+ 本轮发布提交。以下为本轮（W15-D）实测；W11-W14 各轮的独立实测记录见 worklog 各 Task ID 小节。
+
+### ✅ 已验证（2026-10-11，linux/amd64 · 2 核沙箱）
+
+| 能力 | 验证方式 | 备注 |
+| --- | --- | --- |
+| **331 个顶层测试全绿** | `gofmt -l .` 空；`go vet ./...` 0 告警；`go test -count=1 -timeout 15m ./...` 20 个含测试的包全部 ok（日志显式 grep FAIL=0）；`-race -count=1` changes/repo/api/governance/exporter/app 六包 0 race（7.7s/29.0s/16.3s/2.5s/1.4s/4.9s）；`npx tsc -b` 0 错误；`npm run build` ✓ 5.08s | 计数口径：`go test -list '.*' ./... \| grep -c '^Test'` = **331** = v0.5.0 基线 296 + W11 +0 / W12 +13 / W13 +9 / W14 +13 = +35（W12 分项 exporter 9 / api 2 / app 2；W13 分项 changes 6 / repo 1 / api 1 / app 1 / mapping +1 与 importer −1（TestRelationTypeFor 迁移净零）；W14 分项 governance 4 / repo 4 / api 2 / app 3；W15 发布轮零新增测试函数——版本断言随发布适配 + W13-Q P3-2 电路双端 List 预览断言补入既有函数；既有断言零放宽，唯一例外 = TestAppVersionP2 版本断言随发布适配，测试内注释声明） |
+| 版本事实源 | `domain.AppVersion = v0.6.0`；`TestAppVersionP2` + `TestAppVersionMatchesChangelogHead` 双锚定实跑 PASS；live serve `/api/health` 实报 v0.6.0；api.md 契约基线、README、i18n.ts APP_VERSION、teleagent-integration 两处同步；MCP 真进程 stdio 握手 serverInfo v0.6.0 | 版本事实点本轮改动 13 处（7 文件：domain 常量+注释 2 / sim_test 断言 3 行 / i18n 1 / api.md 基线行+health 示例 2 / README 版本行+MCP version+英文摘要 3 / teleagent 2；另 CHANGELOG 头新增 0.6.0 段与 verified 日期行为本轮 A/B 交付件）；api.md 及全仓 v0.6 W12-D/W13-D/W14-D 能力标注统一为 v0.6.0 口径（25 处、14 文件：api.md 5 / README 3 / data-model 3 / import-and-validation 3 / natural-keys 1 / Go 注释 6 / web 注释 4——收口 W12-Q/W13-Q/W14-Q 基线并存 P3）；全仓 `v0.5.0` 残留 13 处（CHANGELOG 6 / verified 7）逐处判定为合法历史段/基线引用/发布轮行动描述，零违规 |
+| 发布验收（W15-D live serve，HTTP 层） | 28 项断言全 PASS：`/api/health` v0.6.0；`GET /api/schema` 8 类 / 89 字段 / 13 规则（ptp_port sheetHint="PTP" + 复合键 device_model+port_name + 23 字段；ip_pool.vlan_id intMin/Max 1/4094；base_station 兜底键 city+base_station_name；machine_room.site_id refType=site）；`/` 与 SPA 路由（/resources /import /issues /report /lab + 深链 /resources/DEV-001、/lab/:id）全 200；index.html 引用 4 资产 + maplibre 异步 chunk/CSS/worker + favicon 逐个 200；devices.xlsx 完整导入 30 行 27/0/3 + issues 4E/1W/27I 与 v0.5.0 基线一致，再导 0/27/3 纯 skip；PTP 脚本通道 4/0/0（响应携带的 E006×1/I001×27 为全局集合级重算结果，非 PTP 行级问题）；`GET /api/exports/resources` 200 + xlsx 双头 + device sheet 27 行 + ptp sheet 4 行 + 间隔 2s 两次导出字节一致；`GET /api/governance/summary` 200 + no-store + 真数据（31 资源=27 device+4 ptp / 3 completed 批次 / bySeverity E7-W1-I27 / byRule 首位 I001=27） | make build ✓（bin 32,142,704 B）；验收脚本 /tmp（仓库零污染）； governance E7 = devices 行级 4 + 再导行级 3（E001/E002/E004 各 +1） |
+| W11-W14 旅程（汇总自各轮独立验证） | W11：target_missing 诚实口径——serve 双负对照（回滚 → deleted.renameProposals=1 → apply **404**；repo 直删新资源 → **409 新文案**）；resource_id 任一侧——四层测试 + 真浏览器双侧抽屉实测（W11-Q）；w7/w8 冒烟重建 SMOKE-OK。W12：回源幂等四层证实（CLI e2e 八类型含 W005/W006 apply 后状态双库 sqlite 级等价、API 同库回导纯 skip 零行级 issue、冒烟 80 资源/60 关系等价、W12-Q 自建脏库独立复现）；字节确定性（同库两次 + CLI/HTTP 跨通道 + 50 次乱序洗牌探针）；键回填三规则负对照（朴素 split → 6 断言红）；E003 部分导出实测（W12-Q）。W13：三分支语义 + 409 `ref_target_missing` 四层自然旅程（回滚目标 → 409 零改动三件套 → 重导 → 同一提案 200）+ 同事务注入回滚（UpdateTarget 故障 → 属性/提案/边全回滚）+ 绝不建边反转负对照 + RelationTypeFor 迁移逐字节零漂移（W13-Q）；w13 冒烟 SMOKE-OK。W14：治理总览 SQL COUNT 六条全下推（注入排序翻转 → 四层红）、空库全零双通道、CLI/HTTP/sqlite 三方逐字段相等（W14-Q 自建脏库）、真浏览器面板渲染+拦截降级+重试恢复；w14 冒烟 SQL oracle 对账 SMOKE-OK | 详见 worklog W11-D…W14-Q 小节与 CHANGELOG 0.6.0；本轮发布验收复验了 schema 契约 / 导入基线 / PTP 通道 / 治理端点 / 导出端点（上两行） |
+| 冒烟与演示脚本（全部复跑） | w6/w7/w8/w12/w13/w14 六冒烟全 SMOKE-OK（发布二进制驱动）；demo.sh 64 资源/57 关系/E13/W3/I1/评分 32；demo-lab.sh 九步全过，物化/撤销/恢复哈希 aea27501fa59… 与历史基线一致 | 均为本轮 make build 产物 |
+| MCP 真进程 stdio | 握手 serverInfo netops-lab/**v0.6.0**；tools/list 恰 5（resource_search + 4 lab 工具）；tools/call resource_search DEV-001 → total 1 + source{devices.xlsx/设备清单/row 2}；未知工具 → JSON-RPC -32602 | MCP 工具面冻结红线未破（v0.4.0 起恒 5） |
+
+### ⏳ CI 运行态（推送后补记）
+
+- 本轮发布提交（release/tag v0.6.0）与四轮里程碑提交（14bf12e / d34a68b / 6fa5de9 / 967b5d4）的 GitHub Actions 运行态**待推送后补记**（v0.4.0/v0.5.0 先例：发布轮不预填 CI 结果，推送后按既有格式补 run 号）。历史基线：v0.5.0 release 0e0ebe8 → run 38126225593 全绿；v0.4.0 release d71874d → run 38072980042 全绿。
+
+## ⚠️ 未验证（v0.6.0 诚实声明，沿 v0.5.0 清单）
+
+- 部署态 TeleAgent 的 MCP 调用（环境无 TeleAgent 实例；进程内回环 + 真子进程 stdio 冒烟已验证，含 5 工具握手）。
+- Windows / macOS 构建（仅 linux/amd64 实际产出）。
+- 长时运行 / 并发负载（无 7×24 或压测数据；GC 语义按单进程 serve 设计）。
+- 浏览器级对 /api/schema 的消费 UI（前端镜像未切换——按发布决策「稳定性优先」，schema.ts 注释已注明可经端点校验）。
+- **本轮（W15-D）发布验收为 HTTP 层**（SPA 路由/资产 200 + API 契约 + 导出字节确定性）：未重做 v0.4.0 轮的浏览器级交互回归；v0.6.0 前端增量（W12 导出按钮 / W13 重挂提示与 toast / W14 治理面板）经 tsc/build 门禁与逻辑审查，其中导出按钮（W12-Q 真浏览器点击）与治理面板（W14-Q 真浏览器渲染/降级/重试恢复）曾在各轮 Q 实测，本轮未重复。
 
 ## v0.5.0（2026-10-11）身份治理闭环与来源谱系版
 

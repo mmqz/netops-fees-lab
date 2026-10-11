@@ -739,7 +739,7 @@ func SpecByType(t domain.ResourceType) (TypeSpec, bool) {
 // combination returns "" — no relation is derived from it.
 //
 // This is the SINGLE ref-field → relation-type derivation mapping of the
-// codebase (v0.6 W13-D moved it here from the importer's private
+// codebase (v0.6.0 W13-D moved it here from the importer's private
 // relationTypeFor so a second consumer could exist without a second copy):
 // the importer calls it when creating the derived edge at import time, and
 // the attribute-change apply flow (internal/changes) calls the same mapping

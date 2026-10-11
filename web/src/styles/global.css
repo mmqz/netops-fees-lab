@@ -349,7 +349,7 @@ button {
   color: var(--muted);
 }
 
-/* 治理总览：待确认双卡（v0.6 W14-D，其余治理小表复用 ov-grid / kv-table） */
+/* 治理总览：待确认双卡（v0.6.0 W14-D，其余治理小表复用 ov-grid / kv-table） */
 .gov-pending {
   display: grid;
   grid-template-columns: 1fr 1fr;

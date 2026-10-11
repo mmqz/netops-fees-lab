@@ -1766,7 +1766,7 @@ func machineRoomReadingMapping(sheet string, withSiteRef bool) mapping.Mapping {
 	}}}
 }
 
-// (TestRelationTypeFor moved to internal/mapping/mapping_test.go in v0.6
+// (TestRelationTypeFor moved to internal/mapping/mapping_test.go in v0.6.0
 // W13-D together with the function itself — the derivation mapping is now
 // the shared mapping.RelationTypeFor, so its table test lives beside it.)
 

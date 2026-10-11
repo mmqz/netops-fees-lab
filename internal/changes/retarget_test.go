@@ -451,6 +451,23 @@ func TestApplyCircuitEndsRetargetIndependently(t *testing.T) {
 	svc := New(db)
 	svc.Now = func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) }
 
+	// List preview (W15-D, closing the W13-Q P3-2 observation): both circuit-end
+	// proposals are ref fields whose derived edges exist, so the real-time
+	// predicate behind relationRetargeted recomputes true for each end
+	// independently — BEFORE any apply has run.
+	lr, err := svc.List(ctx, Filter{Status: domain.ChangeStatusPending, ResourceID: circuit.ID})
+	if err != nil {
+		t.Fatalf("List preview: %v", err)
+	}
+	if lr.Total != 2 || len(lr.Items) != 2 {
+		t.Fatalf("List preview = %d items (total %d), want both circuit-end proposals", len(lr.Items), lr.Total)
+	}
+	for _, it := range lr.Items {
+		if !it.RelationRetargeted {
+			t.Errorf("List preview %s (%s) relationRetargeted = false, want true (ref field with an existing derived edge)", it.ID, it.Field)
+		}
+	}
+
 	// Apply the a_end proposal: only the a_end edge moves.
 	item, err := svc.Apply(ctx, aCh.ID)
 	if err != nil {

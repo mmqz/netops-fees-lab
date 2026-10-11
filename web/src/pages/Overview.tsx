@@ -111,7 +111,7 @@ function StatCard({
   );
 }
 
-/** 治理总览（v0.6 W14-D）：待确认队列 + 决策审计 + 问题分布 + 形态小表。 */
+/** 治理总览（v0.6.0 W14-D）：待确认队列 + 决策审计 + 问题分布 + 形态小表。 */
 function GovernancePanel({
   gov,
   error,
