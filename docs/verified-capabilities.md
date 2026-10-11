@@ -89,9 +89,9 @@
 | 冒烟与演示脚本（全部复跑） | w3/w4/w6/w7/w8 五冒烟全 SMOKE-OK；demo.sh 64 资源/57 关系/E13/W3/I1/评分 32；demo-lab.sh 九步全过，物化/撤销/恢复哈希 aea27501fa59… 与历史基线一致 | 均为发布二进制（bin/netopslab）驱动 |
 | MCP 真进程 stdio | 握手 serverInfo netops-lab/**v0.5.0**；tools/list 恰 5（resource_search + 4 lab 工具）；resource_search 描述含「PTP端口」（W9 补触点）；tools/call DEV-001 → total 1 + source{devices.xlsx/设备清单/row 2} + appGen=false；未知工具 → JSON-RPC -32602 | 与 W9-Q live 探针同口径；MCP 工具面冻结红线未破 |
 
-### ⏳ CI 运行态（推送后补记）
+### ✅ CI 运行态（已补记）
 
-- 本轮发布提交的 GitHub Actions 运行态：**待推送后补记**（v0.4.0 先例：发布提交推送后由编排者补 run 号，不预填）。
+- 本轮发布提交的 GitHub Actions 运行态：release 0e0ebe8（v0.5.0，tag v0.5.0）→ **run 38126225593 全绿**；里程碑四提交 CI 全绿（d5e940f→38115053488 / 10b140b→38116649543 / 95727da→38120135549 / 15800f9→38122612024）。历史：v0.4.0 release d71874d → run 38072980042 全绿；v0.3.2 提交 84294e3 → run 38056776554 全绿。
 
 ## ⚠️ 未验证（v0.5.0 诚实声明，沿 v0.4.0 清单）
 
