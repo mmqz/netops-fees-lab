@@ -4,22 +4,32 @@
  * 在 TopologyCanvas 的视图维度（拓扑图 | 2D 地图 | 3D 地图）中承载后两种：
  * - 设备按 geoLat/geoLng 落位为 HTML Marker（状态色圆点 + 编码牌，
  *   键盘可聚焦、Enter/Space 触发选择，与右侧表格联动语义同拓扑图 tap）；
+ *   GCJ-02 底图（高德）渲染前经 projLngLat 投影，WGS84 底图（ESRI/离线）原样；
  * - 链路为 GeoJSON LineString 图层：up #5b8fd9 2px 实线 / down #ff5252 3px
  *   虚线（rAF 驱动 marching-ants 动画，prefers-reduced-motion 关闭）/
  *   选中 #2f9dff 4px；端点缺坐标的链路跳过（右下角计数 chip 提示）；
- * - 3D 塔（fill-extrusion）：像素高 16 + 连接数×9（按 zoom 反比换算米高，
- *   省级恒定可见），仅 3D 视图可见；
- *   2D↔3D 切换 easeTo pitch 0|58（3D 同时 bearing -30 斜视角）；
- * - 底图 ESRI World_Dark_Gray 栅格瓦片（Base + Reference 双层，免密钥；attribution
- *   法律要求保留）；瓦片连续 ≥3 次
- *   失败 → 重建无栅格样式（本地 GeoJSON 恒可渲染）+「离线底图模式」chip；
+ * - 3D 示意柱（fill-extrusion，仅 3D 视图可见）：屏幕高 18 + 连接数×10 px
+ *   折算米高并钳制 [TOWER_MIN_M, TOWER_MAX_M]（#9：杜绝数十公里光柱；
+ *   footprint 恒定 7px 屏宽——metersPerPixel 按 MapLibre 512px 世界坐标
+ *   修正，zoom 期间 rAF 节流同帧重建高度与底面）；
+ *   2D↔3D 切换 easeTo pitch 0|58（3D 为倾斜相机示意，非地形高程，见
+ *   LAB_VIEW_GEO3D_TITLE 与 README「3D 视图定位」）；
+ * - 底图四模式可切换（#11，geoBasemap.ts 注册表）：高德街道 / 高德卫星 /
+ *   ESRI 极简 / 离线极简；离线叠加图层（行政区划/铁路/公路，黑龙江本地
+ *   OSM 数据 © OpenStreetMap contributors，go:embed 随二进制分发）仅在
+ *   WGS84 底图下可用；铁路默认关闭（用户要求：不得干扰主观看，可一键开）；
+ * - 图层面板（W16「画布决定显示什么」）：底图模式 + 叠加图层 + 业务图层，
+ *   偏好 localStorage 持久化（隐私模式静默降级）；
+ * - 瓦片连续 ≥3 次失败 → 离线底图降级（重建无栅格样式，叠加图层保留
+ *   WGS84 语义 +「离线底图模式」chip）；切换底图即重置失败计数再试；
  * - 全部设备无坐标 → 居中引导 +「返回拓扑图」；
- * - 悬停地标复用画布左上角信息条（onHoverInfo 回调，文案同拓扑 hover）；
- * - 自带 ResizeObserver → map.resize()（zen 全屏 / 分栏拖拽由父级传
- *   resizeSuspended 挂起，拖完补偿一次）；卸载 map.remove() + 取消 rAF，
+ * - 悬停地标复用画布左上角信息条（onHoverInfo 回调）；
+ * - 自带 ResizeObserver → map.resize()；卸载 map.remove() + 取消 rAF，
  *   反复切换视图不泄漏 WebGL 上下文。
  * maplibre-gl 经 `await import(...)` 懒加载（独立异步 chunk，主包不增重）。
- * 调试探针：实例挂 window.__geomap（供 e2e 验证 getPitch/getBearing 等）。
+ * 调试探针：实例挂 window.__geomap（getPitch/getBearing 等），底图切换/
+ * 降级链路挂 window.__geotrace（create/rebuild/map-err/switch-eff 时间线，
+ * e2e 验证降级假阳性修复用）。
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -30,25 +40,61 @@ import type {
   MapSourceDataEvent,
   MapStyleDataEvent,
   Marker as MLMarker,
-  StyleSpecification,
 } from 'maplibre-gl';
-import type { LayerSpecification, FilterSpecification, ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { Feature, FeatureCollection, LineString, Point, Polygon, Position } from 'geojson';
 // maplibre 全家（库本体 / 样式表 / worker URL）均不静态 import（W5-D 分包）：
-// 静态 import 会把 vendor-maplibre 变成入口的静态依赖（modulepreload
-// ~1.08 MB JS + 首屏 CSS），失去 ADR-0009 的懒加载语义；三者在首次
 // 地理视图挂载时同点动态 import。
 import type { SimEntityStatus, SimTopology } from '../../api/types';
 import type { SelectedEntity } from './selection';
 import {
+  BASEMAP_REF_SOURCE_ID,
+  BASEMAP_SOURCE_ID,
+  LINK_LAYERS,
+  OVERLAY_LAYERS,
+  TOWER_MAX_M,
+  TOWER_MIN_M,
+  basemapIsGCJ,
+  buildGeoStyle,
+  loadGeoLayerPrefs,
+  overlaysAvailable,
+  projLngLat,
+  saveGeoLayerPrefs,
+} from './geoBasemap';
+import type { BasemapId, GeoLayerPrefs, OverlayId, StyleOptions } from './geoBasemap';
+import {
   LAB_CANVAS_LEGEND_LABEL,
+  LAB_GEO_BIZ_DEVICES,
+  LAB_GEO_BIZ_DEVICES_TITLE,
+  LAB_GEO_BIZ_LINKS,
+  LAB_GEO_BIZ_LINKS_TITLE,
+  LAB_GEO_BM_AMAP,
+  LAB_GEO_BM_AMAP_SAT,
+  LAB_GEO_BM_AMAP_SAT_TITLE,
+  LAB_GEO_BM_AMAP_TITLE,
+  LAB_GEO_BM_ESRI,
+  LAB_GEO_BM_ESRI_TITLE,
+  LAB_GEO_BM_OFFLINE,
+  LAB_GEO_BM_OFFLINE_TITLE,
   LAB_GEO_LEGEND_TOWER,
+  LAB_GEO_LAYERS_BASEMAP,
+  LAB_GEO_LAYERS_BUSINESS,
+  LAB_GEO_LAYERS_LABEL,
+  LAB_GEO_LAYERS_OVERLAY,
+  LAB_GEO_LAYERS_TOGGLE,
+  LAB_GEO_LAYERS_TOGGLE_TITLE,
   LAB_GEO_MAP_LABEL,
   LAB_GEO_MARKER_LABEL,
   LAB_GEO_NOGEO,
   LAB_GEO_NOGEO_BACK,
   LAB_GEO_OFFLINE,
   LAB_GEO_OFFLINE_TITLE,
+  LAB_GEO_OV_ADMIN,
+  LAB_GEO_OV_ADMIN_TITLE,
+  LAB_GEO_OV_RAIL,
+  LAB_GEO_OV_RAIL_TITLE,
+  LAB_GEO_OV_ROAD,
+  LAB_GEO_OV_ROAD_TITLE,
+  LAB_GEO_OV_UNAVAILABLE,
   LAB_GEO_PARTIAL,
   LAB_GEO_PARTIAL_TITLE,
   LAB_LEGEND_DEVICE_DOWN,
@@ -62,34 +108,9 @@ import {
 
 // —— 常量（与规格及 global.css 同步） ——
 
-/** ESRI 深色画布底图（Canvas/World_Dark_Gray，免密钥匿名可用；2026-10 实测
- *  CARTO dark_all 对匿名 IP 统一返回 2513B 的「API KEY REQUIRED」水印砖，已弃用）。
- *  Reference 层叠加地名/边界注记，提供地理参照。注意 ESRI 的 z/y/x 路径顺序。 */
-const ESRI_DARK_BASE_TILES =
-  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-const ESRI_DARK_REF_TILES =
-  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
-const BASEMAP_SOURCE_ID = 'basemap';
-const BASEMAP_REF_SOURCE_ID = 'basemap-ref';
-const BASEMAP_ATTRIBUTION = 'Esri, HERE, Garmin, FAO, NOAA, USGS';
-
-/** 画布底色（与 .lab-canvas-wrap--dark / style background 一致，加载期不闪白）。 */
-const GEO_BG = '#0e1626';
-
-/** 链路配色（规格钉死：up #5b8fd9 2 / down #ff5252 3 虚线 / 选中 #2f9dff 4）。 */
-const LINK_UP_COLOR = '#5b8fd9';
-const LINK_DOWN_COLOR = '#ff5252';
-const LINK_SELECTED_COLOR = '#2f9dff';
-
-/** 设备地面圆点（与拓扑节点徽章同系：up 浅蓝底 / down 停机红）。 */
-const DEVICE_UP_FILL = '#dce6f7';
-const DEVICE_UP_STROKE = '#8fa6ce';
-const DEVICE_DOWN_FILL = '#f2554a';
-const DEVICE_DOWN_STROKE = '#ff9d95';
-
-/** 3D 塔参数：footprint 恒定像素宽（随 zoom 重建多边形，亚像素问题修复：
- *  固定 0.0016° 在省级缩放下仅 0.04px，光栅化不出面）与像素高 18 + 连接数 × 10
- *  （样式层按 zoom 几何插值换算米高，省级恒定可见）。 */
+/** 3D 示意柱参数：footprint 恒定屏幕宽 7px（直径语义；buildTowerCollection
+ *  按 MapLibre 512px 世界坐标的 metersPerPixel 换算半宽，zoom 期间 rAF 重建，
+ *  #9 修复：v0.6.0 用 256px 基准公式导致宽度系统性放大 ~2× 且随缩放漂移）。 */
 const TOWER_FOOTPRINT_PX = 7;
 const TOWER_PX_BASE = 18;
 const TOWER_PX_PER_DEGREE = 10;
@@ -113,8 +134,17 @@ const ZOOM_3D_STEP_BACK = 1.3;
 const DEFAULT_CENTER: [number, number] = [105, 36];
 const DEFAULT_ZOOM = 3.2;
 
-/** 底图瓦片连续失败阈值 → 切离线底图模式。 */
+/** 底图瓦片连续失败阈值 → 离线降级看门狗触发条件之一。 */
 const TILE_FAIL_LIMIT = 3;
+/** 降级看门狗窗口（毫秒）：距「最近一次底图成功数据 or 样式重建」≥ 此值
+ *  且连续失败 ≥ TILE_FAIL_LIMIT 才降级。双保险：
+ *  - 相机飞动会取消在途瓦片，MapLibre 对取消也发 AJAXError: Failed to fetch (0)
+ *    （与真实断网无法从消息区分）——飞行后的新瓦片 ~1s 内成功 → 计数清零；
+ *  - 错误波可能停在宽限期内不再重发（实测：初始 6 错误后无新错误）——
+ *    看门狗周期复查，覆盖「错误已停但底图从未成功」的停滞态。 */
+const TILE_FAIL_WINDOW_MS = 4000;
+/** 看门狗复查间隔。 */
+const TILE_WATCHDOG_MS = 1000;
 
 /** 故障链路虚线参数（marching-ants 帧间隔与帧序列）。 */
 const DASH_ON = 2;
@@ -165,8 +195,11 @@ interface GeoLinkProps {
 interface GeoTowerProps {
   id: string;
   status: SimEntityStatus;
-  /** 3D 塔目标像素高：16 + 连接数 × 9（样式层按 zoom 换算为米）。 */
+  /** 3D 柱目标屏幕像素高：18 + 连接数 × 10。 */
   towerPx: number;
+  /** 柱高（米）：towerPx × 每像素米数，钳制 [TOWER_MIN_M, TOWER_MAX_M]。
+   *  每次塔重建（zoom 变化，rAF 节流）时按当前 zoom 重算。 */
+  heightM: number;
 }
 
 export interface GeoData {
@@ -181,7 +214,7 @@ export interface GeoData {
   skippedLinks: number;
   /** down 链路数（虚线动画仅在 >0 时运行）。 */
   downLinks: number;
-  /** 设备包围盒（fitBounds 用）；无设备为 null。 */
+  /** 设备包围盒（fitBounds 用，已按当前底图坐标系投影）；无设备为 null。 */
   bbox: [[number, number], [number, number]] | null;
 }
 
@@ -218,12 +251,22 @@ function towerPolygon(lng: number, lat: number, halfLng: number, halfLat: number
   ];
 }
 
-/** zoom 下某纬度每屏幕像素的米数（Web 墨卡托）。 */
-function metersPerPixel(lat: number, zoom: number): number {
-  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
+/**
+ * zoom 下某纬度每屏幕像素的米数（Web 墨卡托，#9 修正）。
+ * MapLibre 世界坐标 z0 世界宽 512px（transform.worldSize = 512·2^zoom），
+ * 每像素米数 = 赤道周长 × cos(lat) / (512·2^z) = 78271.517·cos(lat)/2^z。
+ * v0.6.0 用 156543.03（256px 瓦片基准）→ 系统性偏大约 2×，footprint
+ * 随缩放漂移最多 11 倍（issue #9 实测 19→217px）。
+ */
+export function metersPerPixel(lat: number, zoom: number): number {
+  return (78271.51696 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
 }
 
-export function buildGeoData(topology: SimTopology | null, selected: SelectedEntity | null): GeoData {
+export function buildGeoData(
+  topology: SimTopology | null,
+  selected: SelectedEntity | null,
+  toGCJ: boolean,
+): GeoData {
   const deviceFeatures: Array<Feature<Point, GeoDeviceProps>> = [];
   const linkFeatures: Array<Feature<LineString, GeoLinkProps>> = [];
   const coords = new Map<string, [number, number]>();
@@ -238,7 +281,7 @@ export function buildGeoData(topology: SimTopology | null, selected: SelectedEnt
         missingCount += 1;
         continue;
       }
-      const pos: [number, number] = [lng, lat];
+      const pos: [number, number] = projLngLat(lng, lat, toGCJ);
       coords.set(node.id, pos);
       deviceFeatures.push({
         type: 'Feature',
@@ -299,8 +342,8 @@ export function buildGeoData(topology: SimTopology | null, selected: SelectedEnt
   return {
     devices: { type: 'FeatureCollection', features: deviceFeatures },
     links: { type: 'FeatureCollection', features: linkFeatures },
-    // 塔不在此构建：footprint 需按当前 zoom 换算（恒定像素宽），由
-    // buildTowerCollection + zoomend 重建路径单独供给（首次渲染前为空集）。
+    // 塔不在此构建：footprint/heightM 需按当前 zoom 换算，由
+    // buildTowerCollection + zoom rAF 重建路径单独供给（首次渲染前为空集）。
     towers: emptyFC() as FeatureCollection<Polygon, GeoTowerProps>,
     deviceCount: deviceFeatures.length,
     missingCount,
@@ -310,11 +353,16 @@ export function buildGeoData(topology: SimTopology | null, selected: SelectedEnt
   };
 }
 
-/** 塔集合（纯函数）：塔与设备一一对应，footprint 按当前 zoom 恒定 7px 宽，
- *  像素高 18 + 连接数 × 10（高度换算见样式层注释）。zoom 变化后重建。 */
+/**
+ * 塔集合（纯函数）：塔与设备一一对应。footprint 按当前 zoom 恒定 7px 屏宽
+ * （直径语义，512px 世界坐标 mpp），屏幕高 18 + 连接数×10 px 折算米高并
+ * 钳制 [TOWER_MIN_M, TOWER_MAX_M]（#9：缩小时不再出现数十公里光柱）。
+ * zoom 变化（含动画期间，rAF 节流）后重建。
+ */
 export function buildTowerCollection(
   topology: SimTopology | null,
-  zoom: number
+  zoom: number,
+  toGCJ: boolean,
 ): FeatureCollection<Polygon, GeoTowerProps> {
   const features: Array<Feature<Polygon, GeoTowerProps>> = [];
   if (topology === null) return { type: 'FeatureCollection', features };
@@ -329,140 +377,32 @@ export function buildTowerCollection(
     if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) {
       continue;
     }
-    const mpp = metersPerPixel(lat, zoom);
-    const halfLat = (TOWER_FOOTPRINT_PX * mpp) / 111320;
     const cosLat = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
-    const halfLng = (TOWER_FOOTPRINT_PX * mpp) / (111320 * cosLat);
+    const mpp = metersPerPixel(lat, zoom);
+    const halfLat = ((TOWER_FOOTPRINT_PX / 2) * mpp) / 111320;
+    const halfLng = ((TOWER_FOOTPRINT_PX / 2) * mpp) / (111320 * cosLat);
+    const towerPx = TOWER_PX_BASE + (degree.get(node.id) ?? 0) * TOWER_PX_PER_DEGREE;
+    const heightM = Math.min(TOWER_MAX_M, Math.max(TOWER_MIN_M, towerPx * mpp));
+    const [plng, plat] = projLngLat(lng, lat, toGCJ);
     features.push({
       type: 'Feature',
       id: node.id,
-      geometry: { type: 'Polygon', coordinates: towerPolygon(lng, lat, halfLng, halfLat) },
-      properties: {
-        id: node.id,
-        status: node.status,
-        towerPx: TOWER_PX_BASE + (degree.get(node.id) ?? 0) * TOWER_PX_PER_DEGREE,
-      },
+      geometry: { type: 'Polygon', coordinates: towerPolygon(plng, plat, halfLng, halfLat) },
+      properties: { id: node.id, status: node.status, towerPx, heightM },
     });
   }
   return { type: 'FeatureCollection', features };
 }
 
-// —— 样式构建（纯函数：瓦片失败后可按 withRaster=false 重建） ——
-
-const statusMatch = (down: string, up: string): ExpressionSpecification =>
-  ['match', ['get', 'status'], 'down', down, up] as unknown as ExpressionSpecification;
-
-const eqFilter = (field: string, value: string): FilterSpecification =>
-  ['==', ['get', field], value] as unknown as FilterSpecification;
-
-const isTrueFilter = (field: string): FilterSpecification =>
-  ['==', ['get', field], true] as unknown as FilterSpecification;
+// —— 小工具 ——
 
 function emptyFC(): FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
 }
 
-export function buildGeoStyle(withRaster: boolean): StyleSpecification {
-  const sources: StyleSpecification['sources'] = {
-    devices: { type: 'geojson', data: emptyFC() },
-    links: { type: 'geojson', data: emptyFC() },
-    towers: { type: 'geojson', data: emptyFC() },
-  };
-  if (withRaster) {
-    sources[BASEMAP_SOURCE_ID] = {
-      type: 'raster',
-      tiles: [ESRI_DARK_BASE_TILES],
-      maxzoom: 16,
-      tileSize: 256,
-      attribution: BASEMAP_ATTRIBUTION,
-    };
-    sources[BASEMAP_REF_SOURCE_ID] = {
-      type: 'raster',
-      tiles: [ESRI_DARK_REF_TILES],
-      maxzoom: 16,
-      tileSize: 256,
-    };
-  }
-  const layers: LayerSpecification[] = [
-    { id: 'geo-bg', type: 'background', paint: { 'background-color': GEO_BG } },
-  ];
-  if (withRaster) {
-    layers.push({ id: BASEMAP_SOURCE_ID, type: 'raster', source: BASEMAP_SOURCE_ID, paint: {} });
-    layers.push({
-      id: BASEMAP_REF_SOURCE_ID,
-      type: 'raster',
-      source: BASEMAP_REF_SOURCE_ID,
-      paint: { 'raster-opacity': 0.85 },
-    });
-  }
-  layers.push(
-    {
-      id: 'links-up',
-      type: 'line',
-      source: 'links',
-      filter: eqFilter('status', 'up'),
-      paint: { 'line-color': LINK_UP_COLOR, 'line-width': 2 },
-    },
-    {
-      id: 'links-down',
-      type: 'line',
-      source: 'links',
-      filter: eqFilter('status', 'down'),
-      paint: { 'line-color': LINK_DOWN_COLOR, 'line-width': 3, 'line-dasharray': [DASH_ON, DASH_OFF] },
-    },
-    {
-      id: 'links-selected',
-      type: 'line',
-      source: 'links',
-      filter: isTrueFilter('selected'),
-      paint: { 'line-color': LINK_SELECTED_COLOR, 'line-width': 4 },
-    },
-    {
-      id: 'towers',
-      type: 'fill-extrusion',
-      source: 'towers',
-      layout: { visibility: 'none' },
-      paint: {
-        'fill-extrusion-color': statusMatch(LINK_DOWN_COLOR, LINK_UP_COLOR),
-        // 塔高（米）= 设备像素高 × 该 zoom 每像素米数。MapLibre 表达式规范：paint
-        // 属性里 ["zoom"] 只能作顶层 interpolate 的输入，故用 exponential-2 双停止点
-        // z0→9e4、z16→9e4/2^16，几何插值恒等于 9e4×2^-zoom（已折入中纬余弦≈0.66）。
-        // 省级 z≈3.2 时 16–51px 恒定可见；街道级 z≈12 时回到真实建筑尺度。
-        'fill-extrusion-height': [
-          'interpolate',
-          ['exponential', 2],
-          ['zoom'],
-          0,
-          ['*', ['get', 'towerPx'], 90000],
-          16,
-          ['*', ['get', 'towerPx'], 90000 / 65536],
-        ] as unknown as ExpressionSpecification,
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0.85,
-      },
-    },
-    {
-      id: 'devices-ground',
-      type: 'circle',
-      source: 'devices',
-      paint: {
-        'circle-radius': 7,
-        'circle-color': statusMatch(DEVICE_DOWN_FILL, DEVICE_UP_FILL),
-        'circle-opacity': 0.28,
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': statusMatch(DEVICE_DOWN_STROKE, DEVICE_UP_STROKE),
-        'circle-stroke-opacity': 0.7,
-      },
-    },
-  );
-  return { version: 8, sources, layers };
-}
-
-// —— 小工具 ——
-
 function applyDataToMap(map: MLMap, data: GeoData): void {
-  // 塔不在此处供给（geoData.towers 恒为空集占位）：footprint 需按当前 zoom
-  // 重建，由数据 effect 与 zoomend 防抖路径单独 setData，否则会被此处清空。
+  // 塔不在此处供给（geoData.towers 恒为空集占位）：footprint/heightM 依赖
+  // 当前 zoom，由数据 effect 与 zoom rAF 重建路径单独 setData，否则会被清空。
   const entries: Array<[string, FeatureCollection]> = [
     ['devices', data.devices],
     ['links', data.links],
@@ -479,16 +419,38 @@ function applyTowerVisibility(map: MLMap, view: 'geo2d' | 'geo3d'): void {
   }
 }
 
+/** 叠加/业务图层可见性批量应用（叠加仅在 WGS84 底图下放行）。 */
+function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: BasemapId): void {
+  const overlaysOn = overlaysAvailable(effective);
+  for (const id of OVERLAY_LAYERS.admin) {
+    if (map.getLayer(id) !== undefined) {
+      map.setLayoutProperty(id, 'visibility', prefs.overlays.admin && overlaysOn ? 'visible' : 'none');
+    }
+  }
+  for (const id of OVERLAY_LAYERS.railway) {
+    if (map.getLayer(id) !== undefined) {
+      map.setLayoutProperty(id, 'visibility', prefs.overlays.railway && overlaysOn ? 'visible' : 'none');
+    }
+  }
+  for (const id of OVERLAY_LAYERS.road) {
+    if (map.getLayer(id) !== undefined) {
+      map.setLayoutProperty(id, 'visibility', prefs.overlays.road && overlaysOn ? 'visible' : 'none');
+    }
+  }
+  const linkVis = prefs.links ? 'visible' : 'none';
+  for (const id of LINK_LAYERS) {
+    if (map.getLayer(id) !== undefined) map.setLayoutProperty(id, 'visibility', linkVis);
+  }
+}
+
 /**
  * fitGeoBounds：按**目标视图**适配相机（v0.3.1）。
  *
  * 2D：沿用 v0.3.0 的 fitBounds（平视假设正确，行为已验收）。
  *
  * 3D：不用 MapLibre 的 fitBounds/cameraForBounds——它们的「恰好容纳」解在
- * 大倾角下过于保守（塔群挤成一撮占屏宽 ~3%，实测 zoom 2.84 相当于全球
- * 视野），而 2D 假设的解在斜视下又怼脸。正解是墨卡托几何直解：给定容器
- * 像素与 bbox 弧度跨度，让塔群占屏宽 ~55%、等效高 ~30%（斜视垂直压缩），
- * clamp [3, 7.2]。一次 easeTo 把 pitch/bearing/zoom/center 全部到位。
+ * 大倾角下过于保守，而 2D 假设的解在斜视下又怼脸。正解是墨卡托几何直解
+ * （zoomForBBox3D）。
  */
 function fitGeoBounds(map: MLMap, data: GeoData, view: 'geo2d' | 'geo3d'): void {
   if (data.bbox === null) return;
@@ -504,8 +466,6 @@ function fitGeoBounds(map: MLMap, data: GeoData, view: 'geo2d' | 'geo3d'): void 
     }
     const rect = map.getContainer().getBoundingClientRect();
     const zoom = zoomForBBox3D(data.bbox, rect.width, rect.height);
-    // center 北移 ~18% 的 bbox 高：pitch 58 的地面投影中心偏屏幕下方，
-    // 北移让塔群落在屏幕中央条带。
     const latSpan = data.bbox[1][1] - data.bbox[0][1];
     map.easeTo({
       center: [center[0], center[1] + latSpan * 0.18],
@@ -520,17 +480,6 @@ function fitGeoBounds(map: MLMap, data: GeoData, view: 'geo2d' | 'geo3d'): void 
   map.fitBounds(data.bbox, { padding: FIT_PADDING_PX, maxZoom: FIT_MAX_ZOOM, duration });
 }
 
-/**
- * 3D 斜视的 bbox → zoom 直解（纯函数，可用手算复核）：
- * 世界像素宽 256·2^z 对应 2π 弧度。要求 bbox 弧度宽占容器宽 TOWER_FIT_W3D
- * （0.55），墨卡托弧度高占容器高 TOWER_FIT_H3D（0.30 —— 斜视把垂直跨度
- * 压缩到约一半再留地面余量）。zoom 取两个约束的较小者并夹紧。
- *
- * 手算复核（黑龙江孪生 bbox ≈ lng 122.5..130.4 / lat 43.5..53，容器
- * 564×359）：bw = 7.9°·rad = 0.138；mercY(53)−mercY(43.5) ≈ 0.248；
- * zw = log2(564·2π / (256·0.55·0.138)) ≈ 7.5；zh = log2(359·2π /
- * (256·0.30·0.248)) ≈ 6.9 → zoom 6.9（塔群占屏宽 ~55%）。
- */
 const TOWER_FIT_W3D = 0.55;
 const TOWER_FIT_H3D = 0.3;
 function zoomForBBox3D(bbox: [[number, number], [number, number]], wPx: number, hPx: number): number {
@@ -546,8 +495,9 @@ function zoomForBBox3D(bbox: [[number, number], [number, number]], wPx: number, 
 }
 
 /**
- * 底图瓦片错误判定：tile 失败事件运行时携带 tile 数据（当前样式唯一瓦片源即
- * 底图；本地 GeoJSON 不产瓦片错误），另兜底匹配 sourceId / 消息中的源名或瓦片域名。
+ * 底图瓦片错误判定：tile 失败事件运行时携带 tile 数据（当前样式瓦片源均
+ * 为底图；本地 GeoJSON 不产瓦片错误），另兜底匹配 sourceId / 消息中的源名
+ * 或瓦片域名（arcgisonline / autonavi）。
  */
 function isBasemapError(ev: MLErrorEvent): boolean {
   const rec = ev as unknown as Record<string, unknown>;
@@ -562,7 +512,7 @@ function isBasemapError(ev: MLErrorEvent): boolean {
     typeof err === 'object' && err !== null && 'message' in err
       ? String((err as Record<string, unknown>)['message'])
       : String(err ?? '');
-  return msg.includes(BASEMAP_SOURCE_ID) || msg.includes('cartocdn') || msg.includes('arcgisonline');
+  return msg.includes(BASEMAP_SOURCE_ID) || msg.includes('cartocdn') || msg.includes('arcgisonline') || msg.includes('autonavi');
 }
 
 // —— 组件 ——
@@ -602,7 +552,6 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   const geoDataRef = useRef<GeoData | null>(null);
   const topoRef = useRef<SimTopology | null>(topology);
-  const offlineRef = useRef(false);
   const didFitRef = useRef(false);
   const onSelectRef = useRef(onSelect);
   const onHoverInfoRef = useRef(onHoverInfo);
@@ -611,14 +560,42 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const viewRef = useRef(view);
   topoRef.current = topology;
   const resizeSuspendedRef = useRef(resizeSuspended);
+
+  // —— W16：底图/图层偏好（localStorage 持久化）与瓦片降级态 ——
+  const [prefs, setPrefs] = useState<GeoLayerPrefs>(() => loadGeoLayerPrefs());
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  /** 底图瓦片连续失败 → 强制离线降级（不改用户偏好，切底图即重置）。 */
+  const [tileFallback, setTileFallback] = useState(false);
+  const tileFallbackRef = useRef(false);
+  /** 当前实际渲染的底图（降级时为 offline）。 */
+  const effective: BasemapId = tileFallback ? 'offline' : prefs.basemap;
+  const effectiveRef = useRef<BasemapId>(effective);
+  effectiveRef.current = effective;
+  const gcj = basemapIsGCJ(effective);
+  const gcjRef = useRef(gcj);
+  gcjRef.current = gcj;
+  /** 图层面板开合（会话内状态，不持久化）。 */
+  const [panelOpen, setPanelOpen] = useState(false);
+
   /** style 的 geojson source 是否就绪（初始加载 / setStyle 重建后置 true）。 */
   const [sourcesReady, setSourcesReady] = useState(false);
-  /** 底图瓦片连续失败 → 离线底图模式（重建无 raster 样式）。 */
-  const [offline, setOffline] = useState(false);
+
+  useEffect(() => {
+    saveGeoLayerPrefs(prefs);
+  }, [prefs]);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
+
+  // —— 实例生命周期：挂载即懒加载 maplibre → 建图 → 控件/事件；卸载全量回收 ——
+  /** 样式重建（底图切换/离线降级）：setStyle + 一次性 styledata 回填。 */
+  const rebuildStyleRef = useRef<((id: BasemapId) => void) | null>(null);
+  /** 底图切换去重（初始样式在建图时已按当值构建）。 */
+  const styleKeyRef = useRef<string | null>(null);
+  /** 瓦片失败计数（挂载 effect 与切底图 handler 共享）。 */
+  const tileFailStreakRef = useRef(0);
 
   useEffect(() => {
     onHoverInfoRef.current = onHoverInfo;
@@ -640,13 +617,15 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     resizeSuspendedRef.current = resizeSuspended;
   }, [resizeSuspended]);
 
-  const geoData = useMemo(() => buildGeoData(topology, selected), [topology, selected]);
+  const geoData = useMemo(() => buildGeoData(topology, selected, gcj), [topology, selected, gcj]);
 
   useEffect(() => {
     geoDataRef.current = geoData;
   }, [geoData]);
 
-  // —— 实例生命周期：挂载即懒加载 maplibre → 建图 → 控件/事件；卸载全量回收 ——
+  // —— 塔重建（#9）：zoom 动画期间 rAF 节流同帧重建 footprint + heightM ——
+  const scheduleTowerRebuildRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const div = mapDivRef.current;
     if (div === null) return undefined;
@@ -668,25 +647,66 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       // 必须在建图之前：worker URL 默认按 import.meta.url 推导（打包后指向不存在的
       // 未哈希文件名 → Worker 加载失败）。?url 资源地址在构建期注入，恒有效。
       maplibregl.setWorkerUrl(workerUrlMod.default);
+      const styleOpts = (id: BasemapId): StyleOptions => ({
+        withRaster: true,
+        overlayVisibility: {
+          admin: prefsRef.current.overlays.admin && overlaysAvailable(id),
+          railway: prefsRef.current.overlays.railway && overlaysAvailable(id),
+          road: prefsRef.current.overlays.road && overlaysAvailable(id),
+        },
+        linksVisible: prefsRef.current.links,
+      });
       const map = new maplibregl.Map({
         container: div,
-        style: buildGeoStyle(true),
+        style: buildGeoStyle(effectiveRef.current, styleOpts(effectiveRef.current)),
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
         // 初始 pitch/bearing 按目标视图设置（v0.3.1）：否则「挂载即 3D」时
-        // view effect 会发 easeTo 纠正 pitch，打断首批 fitBounds 动画——
-        // 相机停在 DEFAULT_CENTER，正是「3D 视图怼脸/不飞向数据」的竞态根因。
+        // view effect 会发 easeTo 纠正 pitch，打断首批 fitBounds 动画。
         pitch: viewRef.current === 'geo3d' ? PITCH_3D : PITCH_2D,
         bearing: viewRef.current === 'geo3d' ? BEARING_3D : 0,
         attributionControl: { compact: true },
       });
       localMap = map;
       mapRef.current = map;
+      styleKeyRef.current = effectiveRef.current;
+      // W16 调试探针：底图切换/降级全链路（浏览器 e2e 用，正式版移除）
+      (window as unknown as Record<string, unknown>).__geotrace = [
+        { t: 'create', id: effectiveRef.current, prefs: prefsRef.current.basemap },
+      ];
       // e2e 调试探针（getPitch / getBearing / getLayoutProperty 断言用）
       (window as unknown as Record<string, unknown>).__geomap = map;
 
       map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
       map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+
+      // 样式重建公共路径：setStyle → 等业务 source 就绪 → 回填数据/塔/可见性
+      const rebuildStyle = (id: BasemapId): void => {
+        (window as unknown as { __geotrace?: Array<Record<string, unknown>> }).__geotrace?.push({ t: 'rebuild', id });
+        try {
+          map.setStyle(buildGeoStyle(id, styleOpts(id)));
+        } catch {
+          return; // setStyle 异常：保留当前样式（本地数据层未受影响）
+        }
+        // styleKey 事实源统一在此维护：离线降级与切换路径共用，保证
+        // 「降级后切回同一底图」也能重建（否则 styleKey 恒为旧值 → 死锁）。
+        styleKeyRef.current = id;
+        styleSetAt = Date.now();
+        tileFailStreakRef.current = 0;
+        const reapply = (): void => {
+          if (disposed || map.getSource('devices') === undefined) return;
+          map.off('styledata', reapply);
+          if (geoDataRef.current !== null) applyDataToMap(map, geoDataRef.current);
+          const topo = topoRef.current;
+          const tsrc = map.getSource('towers') as GeoJSONSourceLike | undefined;
+          if (topo !== null && tsrc !== undefined) tsrc.setData(buildTowerCollection(topo, map.getZoom(), gcjRef.current));
+          applyTowerVisibility(map, viewRef.current);
+          applyLayerVisibilities(map, prefsRef.current, effectiveRef.current);
+        };
+        map.on('styledata', reapply);
+        cleanups.push(() => map.off('styledata', reapply));
+      };
+      rebuildStyleRef.current = rebuildStyle;
 
       // style 的 geojson source 就绪门（初始与 setStyle 重建后都经此置位）
       const onStyleData = (): void => {
@@ -698,56 +718,68 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       cleanups.push(() => map.off('styledata', onStyleData));
       onStyleData();
 
-      // 底图瓦片失败统计：≥3 连续失败 → 离线底图模式（本地数据层恒可渲染）
-      let tileFailStreak = 0;
+      // 底图瓦片失败看门狗：连续 ≥3 失败 且 距最近成功/样式重建 ≥ 窗口 →
+      // 离线底图降级（本地数据层恒可渲染，叠加图层保留 WGS84 语义——offline
+      // 底图下区划/铁路/公路照常显示）。onMapError 只计数，判定统一在看门狗
+      // 周期里做（见 TILE_FAIL_WINDOW_MS 注释的双保险 rationale）。
+      let lastBasemapDataAt = 0;
+      let styleSetAt = Date.now();
+      const fallback = (): void => {
+        if (disposed || tileFallbackRef.current) return;
+        tileFallbackRef.current = true;
+        setTileFallback(true);
+        rebuildStyle('offline');
+      };
       const onMapError = (ev: MLErrorEvent): void => {
-        if (disposed || offlineRef.current || !isBasemapError(ev)) return;
-        tileFailStreak += 1;
-        if (tileFailStreak < TILE_FAIL_LIMIT) return;
-        offlineRef.current = true;
-        setOffline(true);
-        try {
-          map.setStyle(buildGeoStyle(false));
-          // 样式重建后 source 全空：等 sources 重建再回填数据与塔可见性
-          const reapply = (): void => {
-            if (disposed || map.getSource('devices') === undefined) return;
-            map.off('styledata', reapply);
-            if (geoDataRef.current !== null) applyDataToMap(map, geoDataRef.current);
-            const topo = topoRef.current;
-            const tsrc = map.getSource('towers') as GeoJSONSourceLike | undefined;
-            if (topo !== null && tsrc !== undefined) tsrc.setData(buildTowerCollection(topo, map.getZoom()));
-            applyTowerVisibility(map, viewRef.current);
-          };
-          map.on('styledata', reapply);
-          cleanups.push(() => map.off('styledata', reapply));
-        } catch {
-          // setStyle 异常：保留当前样式（本地数据层未受影响，仅无底图切换）
-        }
+        if (disposed || tileFallbackRef.current || !isBasemapError(ev)) return;
+        tileFailStreakRef.current += 1;
       };
       const onMapData = (ev: MapSourceDataEvent | MapStyleDataEvent): void => {
-        if ((ev as MapSourceDataEvent).sourceId === BASEMAP_SOURCE_ID) tileFailStreak = 0;
+        const sid = (ev as MapSourceDataEvent).sourceId;
+        if (sid === BASEMAP_SOURCE_ID || sid === BASEMAP_REF_SOURCE_ID) {
+          tileFailStreakRef.current = 0;
+          lastBasemapDataAt = Date.now();
+        }
       };
-      // 塔footprint随zoom重建（防抖 150ms；zoom 动画结束后一次到位）
-      let towerTimer: ReturnType<typeof setTimeout> | null = null;
-      const onZoomEnd = (): void => {
-        if (disposed || towerTimer !== null) return;
-        towerTimer = setTimeout(() => {
-          towerTimer = null;
-          if (disposed) return;
-          const topo = topoRef.current;
-          if (topo === null) return;
-          const src = map.getSource('towers') as GeoJSONSourceLike | undefined;
-          if (src !== undefined) src.setData(buildTowerCollection(topo, map.getZoom()));
-        }, 150);
-      };
+      const watchdog = window.setInterval((): void => {
+        if (disposed || tileFallbackRef.current) return;
+        if (tileFailStreakRef.current < TILE_FAIL_LIMIT) return;
+        const since = Math.max(lastBasemapDataAt, styleSetAt);
+        if (Date.now() - since < TILE_FAIL_WINDOW_MS) return;
+        fallback();
+      }, TILE_WATCHDOG_MS);
       map.on('error', onMapError);
       map.on('data', onMapData);
-      map.on('zoomend', onZoomEnd);
       cleanups.push(() => {
         map.off('error', onMapError);
         map.off('data', onMapData);
-        map.off('zoomend', onZoomEnd);
-        if (towerTimer !== null) clearTimeout(towerTimer);
+        window.clearInterval(watchdog);
+      });
+
+      // —— 塔重建（#9）：zoom 动画期间 rAF 节流（缩放中 footprint/heightM
+      // 每帧跟手，恒定 7px 屏宽与钳制高度不再「动画结束才跳变」）——
+      let towerRaf = 0;
+      const rebuildTowersNow = (): void => {
+        if (disposed) return;
+        const topo = topoRef.current;
+        const src = map.getSource('towers') as GeoJSONSourceLike | undefined;
+        if (topo !== null && src !== undefined) src.setData(buildTowerCollection(topo, map.getZoom(), gcjRef.current));
+      };
+      const scheduleTowerRebuild = (): void => {
+        if (disposed || towerRaf !== 0) return;
+        towerRaf = requestAnimationFrame(() => {
+          towerRaf = 0;
+          rebuildTowersNow();
+        });
+      };
+      scheduleTowerRebuildRef.current = scheduleTowerRebuild;
+      map.on('zoom', scheduleTowerRebuild);
+      map.on('zoomend', scheduleTowerRebuild);
+      cleanups.push(() => {
+        map.off('zoom', scheduleTowerRebuild);
+        map.off('zoomend', scheduleTowerRebuild);
+        if (towerRaf !== 0) cancelAnimationFrame(towerRaf);
+        scheduleTowerRebuildRef.current = null;
       });
 
       // 容器尺寸变化 → map.resize（zen / 分栏 / 视口变化；拖拽中由父级挂起）
@@ -771,7 +803,10 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       localMap?.remove();
       mapRef.current = null;
       libRef.current = null;
-      offlineRef.current = false;
+      rebuildStyleRef.current = null;
+      styleKeyRef.current = null;
+      tileFallbackRef.current = false;
+      tileFailStreakRef.current = 0;
       didFitRef.current = false;
       if ((window as unknown as Record<string, unknown>).__geomap === localMap) {
         delete (window as unknown as Record<string, unknown>).__geomap;
@@ -781,22 +816,50 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     };
   }, []);
 
+  // —— 底图切换（#11）：setStyle 重建 + 相机保持（setStyle 不动 center/zoom/pitch）——
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === null || !sourcesReady) return;
+    (window as unknown as { __geotrace?: Array<Record<string, unknown>> }).__geotrace?.push({
+      t: 'switch-eff',
+      effective,
+      styleKey: styleKeyRef.current,
+    });
+    if (styleKeyRef.current === effective) return;
+    rebuildStyleRef.current?.(effective);
+  }, [effective, sourcesReady]);
+
+  // —— 偏好变化 → 叠加/业务图层可见性（setStyle 重建路径已按当值烘焙，此处覆盖
+  //    prefs 微调（不换底图）的即时生效）——
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === null || !sourcesReady) return;
+    applyLayerVisibilities(map, prefs, effective);
+  }, [prefs, effective, sourcesReady]);
+
   // —— 数据 → GeoJSON source（setData 原地更新，相机保持；首批数据 fitBounds）——
   useEffect(() => {
     const map = mapRef.current;
     if (map === null || !sourcesReady) return;
     geoDataRef.current = geoData;
     applyDataToMap(map, geoData);
-    // 塔footprint依赖当前 zoom：单独供给（zoomend 防抖重建，见挂载 effect）
+    // 塔依赖当前 zoom：单独供给（zoom rAF 重建路径见挂载 effect）
     const tsrc = map.getSource('towers') as GeoJSONSourceLike | undefined;
-    if (tsrc !== undefined) tsrc.setData(buildTowerCollection(topology, map.getZoom()));
+    if (tsrc !== undefined) tsrc.setData(buildTowerCollection(topology, map.getZoom(), gcj));
     if (!didFitRef.current && geoData.deviceCount > 0) {
       didFitRef.current = true;
       fitGeoBounds(map, geoData, view);
     }
-  }, [geoData, sourcesReady, topology, view]);
+  }, [geoData, sourcesReady, topology, view, gcj]);
 
-  // —— 地标（HTML Marker）：设备增删/状态变化重建；选中与标签走类切换 ——
+  // —— 底图坐标系切换（WGS84↔GCJ-02）→ 塔体同帧重投影 ——
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === null || !sourcesReady) return;
+    scheduleTowerRebuildRef.current?.();
+  }, [gcj, sourcesReady]);
+
+  // —— 地标（HTML Marker）：设备增删/状态/坐标系变化重建；选中与标签走类切换 ——
   const rebuildMarkers = useCallback((): void => {
     const map = mapRef.current;
     const lib = libRef.current;
@@ -808,6 +871,8 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     if (topology === null) return;
     const selectedId = selectedRef.current?.kind === 'device' ? selectedRef.current.id : null;
     const showLabels = labelsRef.current;
+    const devicesVisible = prefsRef.current.devices;
+    const toGCJ = gcjRef.current;
     for (const node of topology.nodes) {
       const lat = node.geoLat;
       const lng = node.geoLng;
@@ -815,6 +880,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       // 外层 div 由 maplibre 定位（anchor center，transform 由其管理）；
       // 内层 button 承载视觉与交互（原生 role=button，键盘 Enter/Space 触发选择）
       const outer = document.createElement('div');
+      if (!devicesVisible) outer.style.display = 'none';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.tabIndex = 0;
@@ -849,25 +915,27 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       btn.addEventListener('blur', hoverOut);
       outer.appendChild(btn);
       const marker = new lib.Marker({ element: outer, anchor: 'center' })
-        .setLngLat([lng, lat])
+        .setLngLat(projLngLat(lng, lat, toGCJ))
         .addTo(map);
       markersRef.current.set(node.id, { marker, btn });
     }
-  }, [topology]);
+  }, [topology, gcj]);
 
   useEffect(() => {
     if (!sourcesReady) return;
     rebuildMarkers();
-  }, [topology, sourcesReady, rebuildMarkers]);
+  }, [topology, sourcesReady, rebuildMarkers, gcj]);
 
-  // 选中 / 标签开关 → 地标类切换（setView 数据更新由 links-selected 图层过滤承担）
+  // 选中 / 标签开关 / 设备可见性 → 地标类与显隐切换
   useEffect(() => {
     const selectedId = selected?.kind === 'device' ? selected.id : null;
     markersRef.current.forEach((entry, id) => {
       entry.btn.classList.toggle('geo-marker--selected', selectedId === id);
       entry.btn.classList.toggle('geo-marker--nolabel', !labels);
+      const el = entry.marker.getElement();
+      el.style.display = prefs.devices ? '' : 'none';
     });
-  }, [selected, labels, topology]);
+  }, [selected, labels, prefs.devices, topology]);
 
   // —— 2D↔3D：pitch 0|58 + 3D 斜视 bearing -30（easeTo 700ms；reduced-motion 0）——
   useEffect(() => {
@@ -901,7 +969,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [geoData.downLinks, sourcesReady, offline]);
+  }, [geoData.downLinks, sourcesReady, tileFallback]);
 
   // —— resize 补偿：分栏拖拽结束 / zen 切换后补一次 map.resize ——
   useEffect(() => {
@@ -930,6 +998,44 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     [],
   );
 
+  // —— W16：底图/图层偏好 handlers（切底图重置瓦片降级，重新探测外网）——
+  const chooseBasemap = useCallback(
+    (id: BasemapId): void => {
+      setPrefs((p) => (p.basemap === id ? p : { ...p, basemap: id }));
+      if (tileFallbackRef.current) {
+        tileFallbackRef.current = false;
+        setTileFallback(false);
+      }
+      tileFailStreakRef.current = 0;
+    },
+    [],
+  );
+  const toggleOverlay = useCallback(
+    (id: OverlayId): void => {
+      setPrefs((p) => ({ ...p, overlays: { ...p.overlays, [id]: !p.overlays[id] } }));
+    },
+    [],
+  );
+  const toggleBusiness = useCallback(
+    (id: 'links' | 'devices'): void => {
+      setPrefs((p) => ({ ...p, [id]: !p[id] }));
+    },
+    [],
+  );
+
+  const overlaysUsable = overlaysAvailable(effective);
+  const basemapChoices: Array<{ id: BasemapId; label: string; title: string }> = [
+    { id: 'amap', label: LAB_GEO_BM_AMAP, title: LAB_GEO_BM_AMAP_TITLE },
+    { id: 'amap-satellite', label: LAB_GEO_BM_AMAP_SAT, title: LAB_GEO_BM_AMAP_SAT_TITLE },
+    { id: 'esri', label: LAB_GEO_BM_ESRI, title: LAB_GEO_BM_ESRI_TITLE },
+    { id: 'offline', label: LAB_GEO_BM_OFFLINE, title: LAB_GEO_BM_OFFLINE_TITLE },
+  ];
+  const overlayChoices: Array<{ id: OverlayId; label: string; title: string }> = [
+    { id: 'admin', label: LAB_GEO_OV_ADMIN, title: LAB_GEO_OV_ADMIN_TITLE },
+    { id: 'railway', label: LAB_GEO_OV_RAIL, title: LAB_GEO_OV_RAIL_TITLE },
+    { id: 'road', label: LAB_GEO_OV_ROAD, title: LAB_GEO_OV_ROAD_TITLE },
+  ];
+
   return (
     <div className="geo-canvas" aria-label={LAB_GEO_MAP_LABEL}>
       <div ref={mapDivRef} className="geo-map" />
@@ -944,7 +1050,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           )}
         </div>
       )}
-      {offline && (
+      {tileFallback && (
         <div className="geo-overlay geo-chip geo-chip--offline" role="status" title={LAB_GEO_OFFLINE_TITLE}>
           {LAB_GEO_OFFLINE}
         </div>
@@ -954,6 +1060,70 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           {format(LAB_GEO_PARTIAL, { n: geoData.missingCount })}
         </div>
       )}
+      {/* W16 图层面板：底图模式 + 叠加图层 + 业务图层（画布决定显示什么）。
+          右上角常驻折叠钮，展开为分区面板；叠加图层在 GCJ 底图下禁用并提示。 */}
+      <div className="geo-layerpanel" role="group" aria-label={LAB_GEO_LAYERS_LABEL}>
+        <button
+          type="button"
+          className="geo-layerpanel-toggle"
+          aria-expanded={panelOpen}
+          title={LAB_GEO_LAYERS_TOGGLE_TITLE}
+          onClick={() => setPanelOpen((v) => !v)}
+        >
+          {LAB_GEO_LAYERS_TOGGLE}
+        </button>
+        {panelOpen && (
+          <div className="geo-layerpanel-body">
+            <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_BASEMAP}</div>
+            <div className="geo-layerpanel-options" role="radiogroup" aria-label={LAB_GEO_LAYERS_BASEMAP}>
+              {basemapChoices.map((b) => (
+                <label key={b.id} className="geo-layerpanel-opt" title={b.title}>
+                  <input
+                    type="radio"
+                    name="geo-basemap"
+                    /* 反映 effective（降级后显示离线选中）：瓦片失败降级时，
+                     * 用户点回原底图按钮是真实变更（chooseBasemap 会重置降级
+                     * 重试），若显示 prefs 值则点已选中项是 no-op，卡死降级态。 */
+                    checked={effective === b.id}
+                    onChange={() => chooseBasemap(b.id)}
+                  />
+                  {b.label}
+                </label>
+              ))}
+            </div>
+            <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_OVERLAY}</div>
+            <div className="geo-layerpanel-options">
+              {overlayChoices.map((o) => (
+                <label
+                  key={o.id}
+                  className={`geo-layerpanel-opt${overlaysUsable ? '' : ' geo-layerpanel-opt--disabled'}`}
+                  title={overlaysUsable ? o.title : LAB_GEO_OV_UNAVAILABLE}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={!overlaysUsable}
+                    checked={prefs.overlays[o.id] && overlaysUsable}
+                    onChange={() => toggleOverlay(o.id)}
+                  />
+                  {o.label}
+                </label>
+              ))}
+              {!overlaysUsable && <p className="geo-layerpanel-hint">{LAB_GEO_OV_UNAVAILABLE}</p>}
+            </div>
+            <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_BUSINESS}</div>
+            <div className="geo-layerpanel-options">
+              <label className="geo-layerpanel-opt" title={LAB_GEO_BIZ_LINKS_TITLE}>
+                <input type="checkbox" checked={prefs.links} onChange={() => toggleBusiness('links')} />
+                {LAB_GEO_BIZ_LINKS}
+              </label>
+              <label className="geo-layerpanel-opt" title={LAB_GEO_BIZ_DEVICES_TITLE}>
+                <input type="checkbox" checked={prefs.devices} onChange={() => toggleBusiness('devices')} />
+                {LAB_GEO_BIZ_DEVICES}
+              </label>
+            </div>
+          </div>
+        )}
+      </div>
       {/* 地图图例：设备·运行/停机、链路·正常/故障（3D 视图附塔高条目）；左下角，
           抬升避开 ScaleControl；配色与地图图层同步（global.css .geo-legend 覆盖） */}
       <div className="lab-canvas-legend geo-legend" aria-label={LAB_CANVAS_LEGEND_LABEL}>

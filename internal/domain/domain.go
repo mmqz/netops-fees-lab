@@ -22,18 +22,17 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.6.0
-// finishes the governance trilogy and closes the data loop: W11-D retires
-// the inherited governance debt (honest target_missing wording, either-side
-// rename filter), W12-D adds the deterministic xlsx export channel that
-// re-imports equivalently (source round-trip), W13-D makes ref-field
-// applies retarget the derived relation in the same transaction (the
-// W005/W006/W13 governance arc complete), and W14-D adds the one-screen
-// governance overview (SQL-COUNT aggregate over the confirmation queues).
+// the health endpoint, the MCP server implementation and the CLI. v0.6.1 is
+// the map-repair round (issues #1/#2/#9/#11): the 2D/3D canvas collapse and
+// the Windows .mjs MIME defect are fixed, the hard-coded ESRI-only basemap
+// becomes four switchable modes (AMap street / AMap satellite / ESRI minimal
+// / offline), Heilongjiang OSM admin/railway/road overlays ship embedded for
+// offline intranet use, 3D tower heights get physical clamps, and a layer
+// panel lets the canvas decide what is shown (railway off by default).
 // TestAppVersionP2 pins this constant and TestAppVersionMatchesChangelogHead
 // enforces the CHANGELOG single fact source, so the three-way hand-copied
 // versions cannot drift again.
-const AppVersion = "v0.6.0"
+const AppVersion = "v0.6.1"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

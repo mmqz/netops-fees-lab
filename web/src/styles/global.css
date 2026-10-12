@@ -2589,10 +2589,106 @@ body.lab-split-dragging {
    二者特异性相同（0,1,0），而 vendor-maplibre.css 在 index.css 之后加载，
    于是 relative 胜出 —— 容器失去绝对定位后高度塌陷为 0，
    MapLibre 读到 0 高度便把 canvas 退回默认 300px，地图区域一片空白。
-   以 .geo-canvas 作前导把特异性提到 (0,2,0)，稳定压过 vendor 规则。 */
+   以 .geo-canvas 作前导把特异性提到 (0,2,0)，稳定压过 vendor 规则。
+   （W16-D 与 issue 报告者 acd9b52 的修复同思路落地；v0.6.1 浏览器级
+   回归实测画布 756×544。） */
 .geo-canvas .geo-map {
   position: absolute;
   inset: 0;
+}
+
+/* W16：图层面板（底图模式 + 叠加图层 + 业务图层）。右上角常驻折叠钮，
+   展开为分区面板；与 .geo-canvas 同 z 层系但需接收指针。 */
+.geo-layerpanel {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 176px;
+  max-width: 248px;
+  border: 1px solid rgba(125, 162, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(14, 22, 38, 0.92);
+  color: #c9d6ec;
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.geo-layerpanel-toggle {
+  align-self: stretch;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #c9d6ec;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.geo-layerpanel-toggle:hover {
+  background: rgba(125, 162, 255, 0.12);
+}
+
+.geo-layerpanel-toggle:focus-visible {
+  outline: 2px solid #2f9dff;
+  outline-offset: -2px;
+}
+
+.geo-layerpanel-body {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px 10px;
+  border-top: 1px solid rgba(125, 162, 255, 0.22);
+}
+
+.geo-layerpanel-section {
+  margin: 6px 0 3px;
+  color: #8da0bf;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.geo-layerpanel-options {
+  display: grid;
+  gap: 1px;
+}
+
+.geo-layerpanel-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.geo-layerpanel-opt:hover {
+  background: rgba(125, 162, 255, 0.1);
+}
+
+.geo-layerpanel-opt input {
+  margin: 0;
+  accent-color: #2f9dff;
+}
+
+.geo-layerpanel-opt--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.geo-layerpanel-hint {
+  margin: 4px 0 0;
+  color: #7d8fae;
+  font-size: 10.5px;
+  line-height: 1.45;
 }
 
 /* 悬浮层公共（同 .lab-canvas-overlay 语义：容器不接指针，控件自身可点） */
@@ -2616,9 +2712,11 @@ body.lab-split-dragging {
   font-variant-numeric: tabular-nums;
 }
 
+/* 离线底图降级 chip：右上角已被图层面板占用 → 移到右下角堆叠
+   （partial chip 之上，NavigationControl 之上再抬一级）。 */
 .geo-chip--offline {
-  top: 10px;
   right: 10px;
+  bottom: 112px;
 }
 
 /* 右下角 NavigationControl（28×2 按钮高 + 10px 边距）之上 */

@@ -77,3 +77,10 @@ osmium export water.osm.pbf -o water.geojson
 
 - 接入 `netops-lab` 作为离线底图 provider（配合在线底图的降级链）
 - 视需要扩展内蒙古大兴安岭部分（呼伦贝尔根河市、鄂伦春旗等）
+
+## 运行时资产（随二进制分发）
+
+前端离线叠加图层的**运行时数据**不放在本目录，而在 `web/public/mapdata/`（v0.6.1 W16）：
+本目录描述的 Release 原始数据经 RDP 简化（admin 0.0006° / rail 0.0005° / roads 0.0005° / dxa 0.0003°）+
+属性精简 + 5 位小数圆整后共 ~1.7MB（.geojson.gz），随 vite 构建进 `internal/webui/dist` 并
+`go:embed` 进二进制——内网部署无需回 Release 下载。原始 40MB PBF 仍只在 Release（不入库）。

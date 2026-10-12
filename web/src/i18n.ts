@@ -28,7 +28,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.6.0';
+export const APP_VERSION = 'v0.6.1';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -766,7 +766,7 @@ export const LAB_VIEW_GEO2D = '2D 地图';
 export const LAB_VIEW_GEO3D = '3D 地图';
 export const LAB_VIEW_TOPO_TITLE = '拓扑图视图（关系拓扑 · 布局 / 路径 / 聚焦 / PNG 导出）';
 export const LAB_VIEW_GEO2D_TITLE = '2D 地图（俯视 · 设备按真实经纬度落位）';
-export const LAB_VIEW_GEO3D_TITLE = '3D 地图（斜视 58° · 塔高示意设备连接数 · 右键拖拽旋转）';
+export const LAB_VIEW_GEO3D_TITLE = '3D 地图（斜视 58° · 柱体高度示意连接数，非地形高程 · 右键拖拽旋转）';
 
 /** 地图视图：适配视图（快捷键 F，与拓扑视图一致）。 */
 export const LAB_GEO_FIT = '适配视图（快捷键 F · 缩放至全部设备可见）';
@@ -801,6 +801,40 @@ export const LAB_GEO_LEGEND_TOWER = '塔高 = 连接数';
 
 /** 地图容器 aria-label。 */
 export const LAB_GEO_MAP_LABEL = '地理地图';
+
+// —— W16：底图多模式与图层控制（画布决定显示什么） ——
+
+/** 图层面板（开关抽屉）aria-label 与触发按钮。 */
+export const LAB_GEO_LAYERS_LABEL = '图层控制（底图模式与叠加图层）';
+export const LAB_GEO_LAYERS_TOGGLE = '图层';
+export const LAB_GEO_LAYERS_TOGGLE_TITLE = '选择底图模式与叠加图层（行政区划 / 铁路 / 公路 / 业务图层）';
+/** 图层面板分区标题。 */
+export const LAB_GEO_LAYERS_BASEMAP = '底图';
+export const LAB_GEO_LAYERS_OVERLAY = '叠加图层';
+export const LAB_GEO_LAYERS_BUSINESS = '业务图层';
+/** 底图模式名（与 geoBasemap.ts BASEMAPS 一一对应）。 */
+export const LAB_GEO_BM_AMAP = '高德街道';
+export const LAB_GEO_BM_AMAP_TITLE = '高德街道图（中文标注 · 行政区划 · 交通路网 · 需外网）';
+export const LAB_GEO_BM_AMAP_SAT = '高德卫星';
+export const LAB_GEO_BM_AMAP_SAT_TITLE = '高德卫星影像 + 路网中文标注叠加（需外网）';
+export const LAB_GEO_BM_ESRI = '极简';
+export const LAB_GEO_BM_ESRI_TITLE = 'ESRI 深色极简画布（低信息量，突出设备分布）';
+export const LAB_GEO_BM_OFFLINE = '离线';
+export const LAB_GEO_BM_OFFLINE_TITLE = '离线极简底图（内网可用：画布底色 + 本地行政区划/铁路/公路叠加，© OpenStreetMap contributors）';
+/** 叠加图层名。 */
+export const LAB_GEO_OV_ADMIN = '行政区划';
+export const LAB_GEO_OV_ADMIN_TITLE = '省/市/县边界与地名（黑龙江本地数据，© OpenStreetMap contributors）';
+export const LAB_GEO_OV_RAIL = '铁路';
+export const LAB_GEO_OV_RAIL_TITLE = '铁路线（滨洲线等，含名称标注 · 默认关闭避免干扰主观看）';
+export const LAB_GEO_OV_ROAD = '公路';
+export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（黑龙江本地数据 · 默认关闭）';
+/** GCJ 底图下叠加不可用提示。 */
+export const LAB_GEO_OV_UNAVAILABLE = '高德底图自带交通与区划，本地叠加仅在极简/离线底图下可用';
+/** 业务图层名。 */
+export const LAB_GEO_BIZ_LINKS = '链路';
+export const LAB_GEO_BIZ_LINKS_TITLE = '设备间链路（正常/故障/选中）';
+export const LAB_GEO_BIZ_DEVICES = '设备';
+export const LAB_GEO_BIZ_DEVICES_TITLE = '设备地标（状态色圆点 + 编码牌）';
 
 // —— 设备标签页 ——
 
