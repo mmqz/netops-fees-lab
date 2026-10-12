@@ -18,10 +18,12 @@
  *   随 zoom 分档自适应：远观强到可见、近观回真实）、2D hillshade 山体
  *   阴影、等高线图层（200m/500m，GCJ 变体预投影任意底图可用）+ 光标处
  *   实时海拔读数（terrarium 瓦片客户端解码采样）；
- * - 底图四模式可切换（#11，geoBasemap.ts 注册表）：高德街道 / 高德卫星 /
- *   ESRI 极简 / 离线极简；离线叠加图层（行政区划/铁路/公路，黑龙江本地
- *   OSM 数据 © OpenStreetMap contributors，go:embed 随二进制分发）仅在
- *   WGS84 底图下可用；铁路默认关闭（用户要求：不得干扰主观看，可一键开）；
+ * - 底图四模式可切换（#11，geoBasemap.ts 注册表）：离线简洁（默认，v0.6.4
+ *   浅色无 POI）/ 高德街道 / 高德卫星 / ESRI 极简；离线叠加图层（行政区划/
+ *   铁路/公路 + 自然地表覆盖/地名，黑龙江本地 OSM 数据
+ *   © OpenStreetMap contributors，go:embed 随二进制分发）；区划/交通仅在
+ *   WGS84 底图下可用，自然要素/地名双坐标变体任意底图可用；铁路默认关闭
+ *   （用户要求：不得干扰主观看，可一键开）；
  * - 图层面板（W16「画布决定显示什么」）：底图模式 + 叠加图层 + 业务图层，
  *   偏好 localStorage 持久化（隐私模式静默降级）；
  * - 瓦片连续 ≥3 次失败 → 离线底图降级（重建无栅格样式，叠加图层保留
@@ -52,6 +54,7 @@ import type { Feature, FeatureCollection, LineString, Point, Polygon, Position }
 import type { SimEntityStatus, SimTopology } from '../../api/types';
 import type { SelectedEntity } from './selection';
 import {
+  ANY_BASEMAP_OVERLAYS,
   BASEMAP_REF_SOURCE_ID,
   BASEMAP_SOURCE_ID,
   CONTOUR_LAYERS,
@@ -61,6 +64,8 @@ import {
   OVERLAY_LAYERS,
   TOWER_MAX_M,
   TOWER_MIN_M,
+  WGS84_ONLY_OVERLAYS,
+  basemapBg,
   basemapIsGCJ,
   buildGeoStyle,
   loadGeoLayerPrefs,
@@ -94,6 +99,7 @@ import {
   LAB_GEO_LAYERS_BASEMAP,
   LAB_GEO_LAYERS_BUSINESS,
   LAB_GEO_LAYERS_LABEL,
+  LAB_GEO_LAYERS_NATURAL,
   LAB_GEO_LAYERS_OVERLAY,
   LAB_GEO_LAYERS_TOGGLE,
   LAB_GEO_LAYERS_TOGGLE_TITLE,
@@ -109,6 +115,12 @@ import {
   LAB_GEO_OV_ADMIN_TITLE,
   LAB_GEO_OV_CONTOUR,
   LAB_GEO_OV_CONTOUR_TITLE,
+  LAB_GEO_OV_FOREST,
+  LAB_GEO_OV_FOREST_TITLE,
+  LAB_GEO_OV_GREEN,
+  LAB_GEO_OV_GREEN_TITLE,
+  LAB_GEO_OV_PLACES,
+  LAB_GEO_OV_PLACES_TITLE,
   LAB_GEO_OV_RAIL,
   LAB_GEO_OV_RAIL_TITLE,
   LAB_GEO_OV_ROAD,
@@ -116,6 +128,8 @@ import {
   LAB_GEO_OV_TERRAIN,
   LAB_GEO_OV_TERRAIN_TITLE,
   LAB_GEO_OV_UNAVAILABLE,
+  LAB_GEO_OV_WATER,
+  LAB_GEO_OV_WATER_TITLE,
   LAB_GEO_PARTIAL,
   LAB_GEO_PARTIAL_TITLE,
   LAB_LEGEND_DEVICE_DOWN,
@@ -473,23 +487,24 @@ function applyTerrainFor(map: MLMap, view: 'geo2d' | 'geo3d', terrain: boolean):
   }
 }
 
-/** 叠加/业务图层可见性批量应用（叠加仅在 WGS84 底图下放行；等高线与
- *  terrain 同源 DEM，GCJ 变体预投影，任意底图可用）。 */
+/** 叠加/业务图层可见性批量应用。区划/交通叠加仅在 WGS84 底图下放行；
+ * 自然要素/地名与等高线为双坐标变体，任意底图可用（terrain 同源 DEM）。 */
 function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: BasemapId): void {
   const overlaysOn = overlaysAvailable(effective);
-  for (const id of OVERLAY_LAYERS.admin) {
-    if (map.getLayer(id) !== undefined) {
-      map.setLayoutProperty(id, 'visibility', prefs.overlays.admin && overlaysOn ? 'visible' : 'none');
+  for (const id of WGS84_ONLY_OVERLAYS) {
+    const on = prefs.overlays[id] && overlaysOn;
+    for (const layerId of OVERLAY_LAYERS[id]) {
+      if (map.getLayer(layerId) !== undefined) {
+        map.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none');
+      }
     }
   }
-  for (const id of OVERLAY_LAYERS.railway) {
-    if (map.getLayer(id) !== undefined) {
-      map.setLayoutProperty(id, 'visibility', prefs.overlays.railway && overlaysOn ? 'visible' : 'none');
-    }
-  }
-  for (const id of OVERLAY_LAYERS.road) {
-    if (map.getLayer(id) !== undefined) {
-      map.setLayoutProperty(id, 'visibility', prefs.overlays.road && overlaysOn ? 'visible' : 'none');
+  for (const id of ANY_BASEMAP_OVERLAYS) {
+    const on = prefs.overlays[id];
+    for (const layerId of OVERLAY_LAYERS[id]) {
+      if (map.getLayer(layerId) !== undefined) {
+        map.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none');
+      }
     }
   }
   const contourVis = prefs.contours ? 'visible' : 'none';
@@ -729,9 +744,15 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       const styleOpts = (id: BasemapId): StyleOptions => ({
         withRaster: true,
         overlayVisibility: {
+          // 区划/交通：仅 WGS84 底图（GCJ 会偏移且栅格已含）
           admin: prefsRef.current.overlays.admin && overlaysAvailable(id),
           railway: prefsRef.current.overlays.railway && overlaysAvailable(id),
           road: prefsRef.current.overlays.road && overlaysAvailable(id),
+          // 自然要素/地名：双坐标变体，任意底图
+          forest: prefsRef.current.overlays.forest,
+          water: prefsRef.current.overlays.water,
+          green: prefsRef.current.overlays.green,
+          places: prefsRef.current.overlays.places,
         },
         linksVisible: prefsRef.current.links,
         terrainVisible: prefsRef.current.terrain,
@@ -1310,19 +1331,27 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
 
   const overlaysUsable = overlaysAvailable(effective);
   const basemapChoices: Array<{ id: BasemapId; label: string; title: string }> = [
+    { id: 'offline', label: LAB_GEO_BM_OFFLINE, title: LAB_GEO_BM_OFFLINE_TITLE },
     { id: 'amap', label: LAB_GEO_BM_AMAP, title: LAB_GEO_BM_AMAP_TITLE },
     { id: 'amap-satellite', label: LAB_GEO_BM_AMAP_SAT, title: LAB_GEO_BM_AMAP_SAT_TITLE },
     { id: 'esri', label: LAB_GEO_BM_ESRI, title: LAB_GEO_BM_ESRI_TITLE },
-    { id: 'offline', label: LAB_GEO_BM_OFFLINE, title: LAB_GEO_BM_OFFLINE_TITLE },
   ];
+  /** 自然要素/地名（双坐标变体，任意底图可用）。 */
+  const naturalChoices: Array<{ id: OverlayId; label: string; title: string }> = [
+    { id: 'places', label: LAB_GEO_OV_PLACES, title: LAB_GEO_OV_PLACES_TITLE },
+    { id: 'forest', label: LAB_GEO_OV_FOREST, title: LAB_GEO_OV_FOREST_TITLE },
+    { id: 'water', label: LAB_GEO_OV_WATER, title: LAB_GEO_OV_WATER_TITLE },
+    { id: 'green', label: LAB_GEO_OV_GREEN, title: LAB_GEO_OV_GREEN_TITLE },
+  ];
+  /** 交通/区划（仅 WGS84 底图可用）。 */
   const overlayChoices: Array<{ id: OverlayId; label: string; title: string }> = [
     { id: 'admin', label: LAB_GEO_OV_ADMIN, title: LAB_GEO_OV_ADMIN_TITLE },
-    { id: 'railway', label: LAB_GEO_OV_RAIL, title: LAB_GEO_OV_RAIL_TITLE },
     { id: 'road', label: LAB_GEO_OV_ROAD, title: LAB_GEO_OV_ROAD_TITLE },
+    { id: 'railway', label: LAB_GEO_OV_RAIL, title: LAB_GEO_OV_RAIL_TITLE },
   ];
 
   return (
-    <div className="geo-canvas" aria-label={LAB_GEO_MAP_LABEL}>
+    <div className="geo-canvas" aria-label={LAB_GEO_MAP_LABEL} style={{ background: basemapBg(effective) }}>
       <div ref={mapDivRef} className="geo-map" />
       {topology === null && <div className="geo-overlay geo-state">{LOADING_TEXT}</div>}
       {topology !== null && geoData.deviceCount === 0 && (
@@ -1359,8 +1388,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
             : LAB_GEO_ELEV_OUT}
         </div>
       )}
-      {/* W16 图层面板：底图模式 + 叠加图层 + 业务图层（画布决定显示什么）。
-          右上角常驻折叠钮，展开为分区面板；叠加图层在 GCJ 底图下禁用并提示。 */}
+      {/* W16 图层面板：底图模式 + 自然要素 + 交通区划 + 业务图层（画布决定
+          显示什么）。v0.6.4：自然要素/地名任意底图可用；交通/区划在 GCJ 底图
+          下禁用并提示。右上角常驻折叠钮，展开为分区面板。 */}
       <div className="geo-layerpanel" role="group" aria-label={LAB_GEO_LAYERS_LABEL}>
         <button
           type="button"
@@ -1387,6 +1417,15 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
                     onChange={() => chooseBasemap(b.id)}
                   />
                   {b.label}
+                </label>
+              ))}
+            </div>
+            <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_NATURAL}</div>
+            <div className="geo-layerpanel-options">
+              {naturalChoices.map((o) => (
+                <label key={o.id} className="geo-layerpanel-opt" title={o.title}>
+                  <input type="checkbox" checked={prefs.overlays[o.id]} onChange={() => toggleOverlay(o.id)} />
+                  {o.label}
                 </label>
               ))}
             </div>

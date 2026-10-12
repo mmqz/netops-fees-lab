@@ -28,7 +28,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.6.3';
+export const APP_VERSION = 'v0.6.4';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -807,27 +807,39 @@ export const LAB_GEO_MAP_LABEL = '地理地图';
 /** 图层面板（开关抽屉）aria-label 与触发按钮。 */
 export const LAB_GEO_LAYERS_LABEL = '图层控制（底图模式与叠加图层）';
 export const LAB_GEO_LAYERS_TOGGLE = '图层';
-export const LAB_GEO_LAYERS_TOGGLE_TITLE = '选择底图模式与叠加图层（行政区划 / 铁路 / 公路 / 业务图层）';
+export const LAB_GEO_LAYERS_TOGGLE_TITLE = '选择底图模式与叠加图层（自然要素 / 交通区划 / 业务图层）';
 /** 图层面板分区标题。 */
 export const LAB_GEO_LAYERS_BASEMAP = '底图';
-export const LAB_GEO_LAYERS_OVERLAY = '叠加图层';
+export const LAB_GEO_LAYERS_NATURAL = '自然要素';
+export const LAB_GEO_LAYERS_OVERLAY = '交通与区划';
 export const LAB_GEO_LAYERS_BUSINESS = '业务图层';
 /** 底图模式名（与 geoBasemap.ts BASEMAPS 一一对应）。 */
 export const LAB_GEO_BM_AMAP = '高德街道';
-export const LAB_GEO_BM_AMAP_TITLE = '高德街道图（中文标注 · 行政区划 · 交通路网 · 需外网）';
+export const LAB_GEO_BM_AMAP_TITLE = '高德街道图（中文标注 · 行政区划 · 交通路网 · 需外网 · 含商铺 POI 标注）';
 export const LAB_GEO_BM_AMAP_SAT = '高德卫星';
 export const LAB_GEO_BM_AMAP_SAT_TITLE = '高德卫星影像 + 路网中文标注叠加（需外网）';
 export const LAB_GEO_BM_ESRI = '极简';
 export const LAB_GEO_BM_ESRI_TITLE = 'ESRI 深色极简画布（低信息量，突出设备分布）';
-export const LAB_GEO_BM_OFFLINE = '离线';
-export const LAB_GEO_BM_OFFLINE_TITLE = '离线极简底图（内网可用：画布底色 + 本地行政区划/铁路/公路叠加，© OpenStreetMap contributors）';
-/** 叠加图层名。 */
+export const LAB_GEO_BM_OFFLINE = '简洁（离线）';
+export const LAB_GEO_BM_OFFLINE_TITLE =
+  '离线简洁底图（内网可用：森林绿地 + 河流水系 + 地名 + 交通区划，类标准地图但无商铺标注 · © OpenStreetMap contributors）';
+/** 自然要素图层名（v0.6.4/#15：任意底图可用，双坐标变体）。 */
+export const LAB_GEO_OV_PLACES = '地名';
+export const LAB_GEO_OV_PLACES_TITLE = '城市/区县/乡镇/村庄地名标注（黑龙江本地数据 · © OpenStreetMap contributors）';
+export const LAB_GEO_OV_FOREST = '森林';
+export const LAB_GEO_OV_FOREST_TITLE = '林地覆盖（大兴安岭连片林区为绿色底面 · © OpenStreetMap contributors）';
+export const LAB_GEO_OV_WATER = '水系';
+export const LAB_GEO_OV_WATER_TITLE =
+  '河流/溪流线划 + 湖泊水库水面（树枝状河网含名称标注 · © OpenStreetMap contributors）';
+export const LAB_GEO_OV_GREEN = '草地农田';
+export const LAB_GEO_OV_GREEN_TITLE = '草地/湿地/灌木/农田（浅绿浅黄底面 · © OpenStreetMap contributors）';
+/** 交通/区划图层名（仅 WGS84 底图可用）。 */
 export const LAB_GEO_OV_ADMIN = '行政区划';
 export const LAB_GEO_OV_ADMIN_TITLE = '省/市/县边界与地名（黑龙江本地数据，© OpenStreetMap contributors）';
 export const LAB_GEO_OV_RAIL = '铁路';
 export const LAB_GEO_OV_RAIL_TITLE = '铁路线（滨洲线等，含名称标注 · 默认关闭避免干扰主观看）';
 export const LAB_GEO_OV_ROAD = '公路';
-export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（黑龙江本地数据 · 默认关闭）';
+export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（含大兴安岭地方道路 · 默认开启）';
 /** 地形高程开关（W17：离线 DEM，任何底图下可用）。 */
 export const LAB_GEO_OV_TERRAIN = '地形高程';
 export const LAB_GEO_OV_TERRAIN_TITLE =
@@ -843,8 +855,8 @@ export const LAB_GEO_ELEV_TITLE = '光标处实时海拔（离线 DEM 采样，�
 /** 聚簇气泡（W17：屏幕碰撞聚合，点击放大展开）。 */
 export const LAB_GEO_CLUSTER_ARIA = '{n} 台设备聚簇（含 {down} 台故障），点击放大查看';
 export const LAB_GEO_CLUSTER_TITLE = '{n} 台设备（{down} 台故障）：{codes} —— 点击放大展开';
-/** GCJ 底图下叠加不可用提示。 */
-export const LAB_GEO_OV_UNAVAILABLE = '高德底图自带交通与区划，本地叠加仅在极简/离线底图下可用';
+/** GCJ 底图下叠加不可用提示（仅限交通/区划；自然要素任意底图可用）。 */
+export const LAB_GEO_OV_UNAVAILABLE = '交通/区划本地叠加仅在简洁（离线）/极简底图下可用；森林/水系/地名任意底图可用';
 /** 业务图层名。 */
 export const LAB_GEO_BIZ_LINKS = '链路';
 export const LAB_GEO_BIZ_LINKS_TITLE = '设备间链路（正常/故障/选中）';

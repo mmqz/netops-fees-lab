@@ -15,6 +15,10 @@
 | `hlj-roads-main.geojson.gz` | 主要公路网（22,158 条） | 2.18 MB |
 | `hlj-roads-daxinganling-full.geojson.gz` | 大兴安岭全量路网（5,012 条） | 0.55 MB |
 | `hlj-railways.geojson.gz` | 铁路（17,257 条） | 1.03 MB |
+| `hlj-natural.geojson.gz` | 自然地表覆盖 WGS84（v0.6.4：森林/水面/河流/溪流/渠/草地/农田/湿地，29,449 条） | 3.90 MB |
+| `hlj-natural-gcj.geojson.gz` | 自然地表覆盖 GCJ-02 预投影变体（高德底图用） | 3.91 MB |
+| `hlj-places.geojson.gz` | 地名点 WGS84（市/县/镇/村，17,615 个） | 0.25 MB |
+| `hlj-places-gcj.geojson.gz` | 地名点 GCJ-02 预投影变体 | 0.25 MB |
 
 ### 高程衍生（随二进制内嵌，无需下载）
 
@@ -26,6 +30,13 @@ Mapzen，SRTM/GMTED 融合，公开免密钥）与由它派生的等高线（v0.
 | `web/public/mapdata/dem/{z}/{x}/{y}.png` | terrarium DEM 瓦片（z8 原生 ~610m/px） | ≈6.4 MB |
 | `web/public/mapdata/hlj-contours.geojson.gz` | 等高线 WGS84（200m 首曲线 / 500m 计曲线 + 高程标注，18,604 条折线） | 1.40 MB |
 | `web/public/mapdata/hlj-contours-gcj.geojson.gz` | 等高线 GCJ-02 预投影变体（高德底图用，逐顶点已偏移） | 1.43 MB |
+
+### 自然要素与地名（v0.6.4，随二进制内嵌）
+
+由 `scripts/gen_natural.py` 从上述 PBF 提取（GDAL OSM 驱动 + shapely 分级
+RDP 简化 + 坐标量化 + GCJ-02 预投影双变体），随二进制内嵌离线可用；
+简化参数保住大兴安岭树枝状水系形态（河流 ~30m / 溪流 ~24m 容差）。
+数据 © OpenStreetMap contributors。详见 [docs/adr/0013](../docs/adr/0013-map-natural-landcover.md)。
 
 等高线由 `scripts/gen_contours.py` 从同一批 DEM 瓦片生成（matplotlib
 marching squares + RDP 简化），可重跑/扩展；数据署名与 DEM 相同

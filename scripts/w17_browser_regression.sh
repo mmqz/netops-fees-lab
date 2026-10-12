@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # NetOps Lab — W17 浏览器级回归：2D 聚簇（「锁在一起」修复）+ 离线 DEM 地形。
+# v0.6.4 扩展（#15）：自然要素/地名/干净离线底图（N 组断言）+ GCJ 变体切换。
 #
-# 前置：dist 已构建（含 web/public/mapdata/dem 瓦片 + hlj-contours*.geojson.gz）。
+# 前置：dist 已构建（含 web/public/mapdata/dem 瓦片 + hlj-contours*/hlj-natural*/hlj-places*.geojson.gz）。
 # 本脚本：
 #   0. 构建 netopslab 二进制
 #   1. testdata -geo → 导入 geodevices/geocircuits → 物化地理工作台
 #   2. serve（18099）→ agent-browser（1600×900）断言：
 #      A. 2D 初始视野：≥2 个聚簇（哈尔滨 3 台 + 大兴安岭 2 台同城扎堆）
 #         且可见单例地标数 < 总设备数（标签不再糊成黑块）
+#      N.（v0.6.4/#15）自然要素：natural 源加载 ≥2 万条要素；森林/水面/
+#         河流图层默认可见；地名图层存在；公路默认可见（干净 2D 含交通）；
+#         默认底图无栅格源（离线简洁）；四份自然资产 HTTP 200；
+#         切高德底图 → natural 源切换 GCJ 预投影变体，切回 → WGS84
 #      B. 点击聚簇 → 相机放大、簇展开为单例地标（一次到位，cameraForBounds）
 #      C. 3D 视图：getTerrain() 绑定离线 dem 源；hillshade 图层存在且可见；
 #         夸张系数随 zoom 分档自适应（低 zoom 远观档 ≠ 近观档）
@@ -75,8 +80,8 @@ echo "[3/4] 浏览器断言"
 agent-browser set viewport 1600 900 >/dev/null
 agent-browser open "http://127.0.0.1:$PORT/" >/dev/null
 agent-browser wait --load networkidle >/dev/null 2>&1 || true
-# 预置离线底图偏好：沙箱页面世界封禁 autonavi，避免 4s 看门狗降级的等待与噪声
-agent-browser storage local set netops-lab.geo.layers '{"basemap":"offline","overlays":{"admin":true,"railway":false,"road":false},"links":true,"devices":true,"terrain":true}' >/dev/null
+# 预置离线底图偏好 v2（沙箱页面世界封禁 autonavi，避免 4s 看门狗降级的等待与噪声）
+agent-browser storage local set netops-lab.geo.layers.v2 '{"basemap":"offline","overlays":{"admin":true,"railway":false,"road":true,"forest":true,"water":true,"green":true,"places":true},"links":true,"devices":true,"terrain":true,"contours":true}' >/dev/null
 agent-browser open "http://127.0.0.1:$PORT/lab/$WS" >/dev/null
 # 工具带就绪门：首次运行浏览器冷启动慢，无条件等待会点到不存在的按钮
 agent-browser wait --fn "!!document.querySelector('.canvas-seg button')" --timeout 20000 >/dev/null 2>&1 || true
@@ -107,6 +112,54 @@ if [[ "$CONTOURS_VIS" == "visible" ]]; then ok "A3 等高线图层默认可见";
 if [[ "$CONTOUR_LOADED" == "true" ]]; then ok "A4 等高线源加载完成（$CONTOUR_FEATS 条折线）"; else bad "A4 等高线源未加载（$CONTOUR_FEATS 条）"; fi
 ZOOM_BEFORE="$(jeval "window.__geomap ? window.__geomap.getZoom().toFixed(2) : 'NO-MAP'")"
 agent-browser screenshot "$SHOT_DIR/w17-2d-clusters.png" >/dev/null
+
+# —— N.（v0.6.4/#15）自然要素 + 干净离线底图 ——
+agent-browser wait --fn "window.__geomap && window.__geomap.isSourceLoaded('natural')" --timeout 30000 >/dev/null 2>&1 || true
+agent-browser wait 800 >/dev/null
+# 说明：URL 型 geojson 源加载后 getSource()._data 不持有解析结果（恒 0），
+# 特征数改用 querySourceFeatures（当前视口已加载瓦片的特征）。
+NAT_LOADED="$(jeval "window.__geomap ? String(window.__geomap.isSourceLoaded('natural')) : 'false'")"
+NAT_FEATS="$(jeval "(() => { try { return window.__geomap.querySourceFeatures('natural').length; } catch (e) { return -1; } })()")"
+FOREST_VIS="$(jeval "window.__geomap && window.__geomap.getLayer('natural-forest-fill') ? String(window.__geomap.getLayoutProperty('natural-forest-fill','visibility')) : 'NO-LAYER'")"
+WATERFILL_VIS="$(jeval "window.__geomap && window.__geomap.getLayer('natural-water-fill') ? String(window.__geomap.getLayoutProperty('natural-water-fill','visibility')) : 'NO-LAYER'")"
+RIVER_VIS="$(jeval "window.__geomap && window.__geomap.getLayer('natural-river-line') ? String(window.__geomap.getLayoutProperty('natural-river-line','visibility')) : 'NO-LAYER'")"
+GREEN_VIS="$(jeval "window.__geomap && window.__geomap.getLayer('natural-green-fill') ? String(window.__geomap.getLayoutProperty('natural-green-fill','visibility')) : 'NO-LAYER'")"
+PLACES_LAYER="$(jeval "window.__geomap && window.__geomap.getLayer('places-city') ? 'YES' : 'NO'")"
+PLACES_FEATS="$(jeval "(() => { try { return window.__geomap.querySourceFeatures('places').length; } catch (e) { return -1; } })()")"
+ROAD_DEFAULT="$(jeval "window.__geomap && window.__geomap.getLayer('offline-roads-main-line') ? String(window.__geomap.getLayoutProperty('offline-roads-main-line','visibility')) : 'NO-LAYER'")"
+BASEMAP_SRC="$(jeval "window.__geomap && window.__geomap.getSource('basemap') ? 'RASTER' : 'NONE'")"
+# 加载后 getStyle().sources.natural.data 会被替换为已解析对象——两种取值均可接受
+NAT_KIND="$(jeval "(() => { const st = window.__geomap && window.__geomap.getStyle(); const d = st && st.sources && st.sources.natural && st.sources.natural.data; if (d === undefined) return 'NO-SRC'; return typeof d === 'string' ? d : 'LOADED-OBJ'; })()")"
+if [[ "$NAT_LOADED" == "true" && "$NAT_FEATS" -ge 50 ]]; then ok "N1 natural 源加载（当前视口 $NAT_FEATS 条要素：森林/水域/水系/草地）"; else bad "N1 natural loaded=$NAT_LOADED feats=$NAT_FEATS（<50）"; fi
+if [[ "$FOREST_VIS" == "visible" ]]; then ok "N2 森林图层默认可见"; else bad "N2 natural-forest-fill = $FOREST_VIS"; fi
+if [[ "$WATERFILL_VIS" == "visible" ]]; then ok "N3 水面图层默认可见"; else bad "N3 natural-water-fill = $WATERFILL_VIS"; fi
+if [[ "$RIVER_VIS" == "visible" ]]; then ok "N4 河流线划默认可见"; else bad "N4 natural-river-line = $RIVER_VIS"; fi
+if [[ "$GREEN_VIS" == "visible" ]]; then ok "N5 草地农田默认可见"; else bad "N5 natural-green-fill = $GREEN_VIS"; fi
+if [[ "$PLACES_LAYER" == "YES" && "$PLACES_FEATS" -ge 5 ]]; then ok "N6 地名图层存在（当前视口 $PLACES_FEATS 个地名点）"; else bad "N6 places-city = $PLACES_LAYER feats=$PLACES_FEATS"; fi
+if [[ "$ROAD_DEFAULT" == "visible" ]]; then ok "N7 公路默认可见（干净 2D 含交通）"; else bad "N7 offline-roads-main-line = $ROAD_DEFAULT"; fi
+if [[ "$BASEMAP_SRC" == "NONE" && ("$NAT_KIND" == "LOADED-OBJ" || "$NAT_KIND" == *"hlj-natural.geojson.gz"*) ]]; then ok "N8 默认离线简洁底图（无栅格源 + WGS84 自然要素变体已加载）"; else bad "N8 basemap=$BASEMAP_SRC natural=$NAT_KIND"; fi
+NAT_HTTP1="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mapdata/hlj-natural.geojson.gz")"
+NAT_HTTP2="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mapdata/hlj-natural-gcj.geojson.gz")"
+PLA_HTTP1="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mapdata/hlj-places.geojson.gz")"
+PLA_HTTP2="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mapdata/hlj-places-gcj.geojson.gz")"
+if [[ "$NAT_HTTP1" == "200" && "$NAT_HTTP2" == "200" && "$PLA_HTTP1" == "200" && "$PLA_HTTP2" == "200" ]]; then ok "N9 自然要素/地名资产双坐标变体 HTTP 200 ×4"; else bad "N9 资产 $NAT_HTTP1/$NAT_HTTP2/$PLA_HTTP1/$PLA_HTTP2"; fi
+
+# —— N10/N11. 高德底图切换 → GCJ 预投影变体（沙箱封禁 autonavi，4s 看门狗
+#     降级前即完成检查，随后切回离线重置失败计数） ——
+agent-browser eval "document.querySelector('.geo-layerpanel-toggle')?.click() || 'NO-PANEL'" >/dev/null
+agent-browser wait 400 >/dev/null
+agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('高德街道')); const rb=row?.querySelector('input[type=radio]'); if(!rb) return 'NO-RB'; rb.click(); return 'clicked'; })()" >/dev/null
+agent-browser wait --fn "window.__geomap && String(window.__geomap.getStyle().sources.natural.data).includes('hlj-natural-gcj')" --timeout 15000 >/dev/null 2>&1 || true
+NAT_GCJ_URL="$(jeval "window.__geomap ? String(window.__geomap.getStyle().sources.natural.data) : 'NO'")"
+if [[ "$NAT_GCJ_URL" == *"hlj-natural-gcj"* ]]; then ok "N10 高德底图 → natural 源切换 GCJ 预投影变体"; else bad "N10 高德底图 natural = $NAT_GCJ_URL"; fi
+agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('简洁')); const rb=row?.querySelector('input[type=radio]'); rb?.click(); return 'ok'; })()" >/dev/null
+agent-browser wait --fn "window.__geomap && String(window.__geomap.getStyle().sources.natural.data).includes('hlj-natural.geojson.gz')" --timeout 15000 >/dev/null 2>&1 || true
+NAT_BACK_URL="$(jeval "window.__geomap ? String(window.__geomap.getStyle().sources.natural.data) : 'NO'")"
+if [[ "$NAT_BACK_URL" == *"hlj-natural.geojson.gz"* ]]; then ok "N11 切回离线 → WGS84 变体恢复"; else bad "N11 切回后 natural = $NAT_BACK_URL"; fi
+# 关闭面板，保持后续 E 组断言的初始态假设（E 组开头会重新打开）
+agent-browser eval "document.querySelector('.geo-layerpanel-toggle')?.click() || 'NO-PANEL'" >/dev/null
+agent-browser wait 400 >/dev/null
+agent-browser screenshot "$SHOT_DIR/w17-2d-natural.png" >/dev/null
 
 # —— B. 点击聚簇展开 ——
 agent-browser eval "document.querySelector('.geo-cluster')?.click() || 'NO-CLUSTER'" >/dev/null
@@ -160,9 +213,11 @@ CONTOUR_HTTP="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/m
 CONTOUR_GCJ_HTTP="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mapdata/hlj-contours-gcj.geojson.gz")"
 if [[ "$CONTOUR_HTTP" == "200" && "$CONTOUR_GCJ_HTTP" == "200" ]]; then ok "D3 等高线资产 WGS84/GCJ 双变体 200"; else bad "D3 等高线资产 $CONTOUR_HTTP/$CONTOUR_GCJ_HTTP"; fi
 
-# —— E. 图层面板地形/等高线开关 ——
+# —— E. 图层面板地形/等高线开关（v0.6.4：面板含自然要素/交通与区划分区） ——
 agent-browser eval "document.querySelector('.geo-layerpanel-toggle')?.click() || 'NO-PANEL'" >/dev/null
 agent-browser wait 400 >/dev/null
+PANEL_TEXT="$(agent-browser eval "document.querySelector('.geo-layerpanel-body') ? document.querySelector('.geo-layerpanel-body').textContent : 'NO-BODY'")"
+if [[ "$PANEL_TEXT" == *"自然要素"* && "$PANEL_TEXT" == *"交通与区划"* ]]; then ok "E0 面板分区含自然要素/交通与区划"; else bad "E0 面板分区缺失：$PANEL_TEXT"; fi
 agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('地形高程')); const cb=row?.querySelector('input[type=checkbox]'); if(!cb) return 'NO-CB'; cb.click(); return 'toggled'; })()" >/dev/null
 agent-browser wait 1200 >/dev/null
 TERRAIN_OFF="$(jeval "window.__geomap && window.__geomap.getTerrain() === null ? 'NULL' : (window.__geomap.getTerrain() ? 'ON' : 'NULL')")"
@@ -174,6 +229,19 @@ agent-browser wait 800 >/dev/null
 CONTOURS_OFF="$(jeval "String(window.__geomap.getLayoutProperty('contours-major','visibility'))")"
 if [[ "$CONTOURS_OFF" == "none" ]]; then ok "E3 等高线开关隐藏 contours-*"; else bad "E3 contours-major = $CONTOURS_OFF"; fi
 agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('等高线')); const cb=row?.querySelector('input[type=checkbox]'); if(!cb) return 'NO-CB'; cb.click(); return 'restored'; })()" >/dev/null
+agent-browser wait 400 >/dev/null
+# v0.6.4：森林/水系开关（自然要素分组）
+agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('森林')); const cb=row?.querySelector('input[type=checkbox]'); if(!cb) return 'NO-CB'; cb.click(); return 'toggled'; })()" >/dev/null
+agent-browser wait 800 >/dev/null
+FOREST_OFF="$(jeval "window.__geomap && window.__geomap.getLayer('natural-forest-fill') ? String(window.__geomap.getLayoutProperty('natural-forest-fill','visibility')) : 'NO-LAYER'")"
+if [[ "$FOREST_OFF" == "none" ]]; then ok "E4 森林开关隐藏 natural-forest-fill"; else bad "E4 forest off = $FOREST_OFF"; fi
+agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('森林')); const cb=row?.querySelector('input[type=checkbox]'); cb?.click(); return 'restored'; })()" >/dev/null
+agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('水系')); const cb=row?.querySelector('input[type=checkbox]'); if(!cb) return 'NO-CB'; cb.click(); return 'toggled'; })()" >/dev/null
+agent-browser wait 800 >/dev/null
+RIVER_OFF="$(jeval "window.__geomap && window.__geomap.getLayer('natural-river-line') ? String(window.__geomap.getLayoutProperty('natural-river-line','visibility')) : 'NO-LAYER'")"
+WATERFILL_OFF="$(jeval "window.__geomap && window.__geomap.getLayer('natural-water-fill') ? String(window.__geomap.getLayoutProperty('natural-water-fill','visibility')) : 'NO-LAYER'")"
+if [[ "$RIVER_OFF" == "none" && "$WATERFILL_OFF" == "none" ]]; then ok "E5 水系开关隐藏河流线划 + 水面"; else bad "E5 water off river=$RIVER_OFF fill=$WATERFILL_OFF"; fi
+agent-browser eval "(() => { const labels=[...document.querySelectorAll('.geo-layerpanel-opt')]; const row=labels.find(l => l.textContent.includes('水系')); const cb=row?.querySelector('input[type=checkbox]'); cb?.click(); return 'restored'; })()" >/dev/null
 agent-browser wait 400 >/dev/null
 
 # —— G. 相机独立性（#12：2D/3D 解锁）——
@@ -224,5 +292,5 @@ PERR="$(agent-browser errors 2>/dev/null | grep -cv '^$' || true)"
 if [[ "$PERR" == "0" ]]; then ok "F1 页面错误 0"; else bad "F1 页面错误 $PERR 条：$(agent-browser errors 2>/dev/null | head -3)"; fi
 
 echo
-echo "[4/4] 结果：$PASS PASS / $FAIL FAIL（截图：tmp/w17-2d-clusters.png、tmp/w17-3d-terrain.png）"
+echo "[4/4] 结果：$PASS PASS / $FAIL FAIL（截图：tmp/w17-2d-clusters.png、tmp/w17-2d-natural.png、tmp/w17-3d-terrain.png）"
 [[ "$FAIL" -eq 0 ]] && exit 0 || exit 1

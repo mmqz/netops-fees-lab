@@ -1,15 +1,21 @@
 /**
- * geoBasemap —— 底图多模式注册表 + 离线叠加图层 + GCJ-02 坐标转换（W16）。
+ * geoBasemap —— 底图多模式注册表 + 离线叠加图层 + 自然地表覆盖 + GCJ-02 坐标转换。
  *
- * issue #11：底图从硬编码单一 ESRI 极简改为四种可切换模式：
- * - amap        高德街道图（栅格，中文标注/行政区划/交通，GCJ-02 坐标系）
- * - amap-satellite 高德卫星影像（style=6 + style=8 路网标注透明叠加）
- * - esri        ESRI World_Dark_Gray 极简（WGS84，原 v0.6.0 底图，保留）
- * - offline     离线极简（无外网瓦片：画布底色 + 黑龙江本地 GeoJSON 叠加，
- *               数据源 © OpenStreetMap contributors，Release mapdata-hlj）
+ * v0.6.4（#15）：
+ * - offline 底图升级为**离线简洁底图**（浅色，类标准地图观感）：画布底色 +
+ *   森林（绿）/草地农田/湿地 + 河流溪流湖泊（蓝）+ 地名 + 交通区划叠加，
+ *   无任何商铺/POI 标注（用户明确要求"干净的 2D"）；设为默认底图——
+ *   内网/离线环境开箱即用，不再依赖高德瓦片可达性；
+ * - 自然要素/地名来自 scripts/gen_natural.py（PBF 提取 + RDP 简化 +
+ *   坐标量化），双坐标变体（WGS84 / GCJ-02 预投影）→ 任意底图可用，
+ *   高德底图上不偏移（与等高线同策略）；
+ * - 高德街道/卫星、ESRI 极简保留为可选底图（高德瓦片实测可达，
+ *   REST key 有效；但栅格自带大量 POI 标注，不再作为默认）。
  *
- * 离线叠加图层（行政区划/铁路/公路）只在 WGS84 底图（esri|offline）下可用：
- * 高德为 GCJ-02，叠加 WGS84 数据会偏移 ~500m，且其栅格已含同类信息。
+ * 历史（W16/#11）：底图从硬编码单一 ESRI 极简改为可切换模式注册表。
+ * 离线交通/区划叠加（行政区划/铁路/公路）只在 WGS84 底图（esri|offline）
+ * 下可用：高德为 GCJ-02，叠加 WGS84 数据会偏移 ~500m，且其栅格已含同类
+ * 信息；自然要素与地名不受此限（GCJ 变体预投影）。
  *
  * 坐标系契约：业务数据（设备/链路）按 WGS84 存储；高德底图渲染前逐点
  * WGS84→GCJ-02（wgs84ToGcj02，国界外原样返回）。fitBounds/地标/塔体全走
@@ -24,7 +30,8 @@ import type { StyleSpecification } from 'maplibre-gl';
 
 // —— 高德（AMap）——
 // 栅格瓦片端点免鉴权；key 按维护者要求嵌入（预留 Web 服务 REST API 扩展，
-// 如地理编码/逆地理编码 restapi.amap.com）。子域 01-04 负载均衡。
+// 如地理编码/逆地理编码 restapi.amap.com——实测该 key 为有效 Web 服务 key）。
+// 子域 01-04 负载均衡。栅格自带 POI/商铺标注（无法去除），故不作默认底图。
 export const AMAP_KEY = 'd10b7a30c80f410b171e140aee4bf676';
 const AMAP_SUBDOMAINS = ['01', '02', '03', '04'];
 const AMAP_STREET_ATTRIBUTION = '<a href="https://www.amap.com/" target="_blank" rel="noreferrer">© 高德地图</a>';
@@ -45,7 +52,7 @@ function amapSatOverlayTiles(): string[] {
   return AMAP_SUBDOMAINS.map((s) => `https://webst0${s}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}`);
 }
 
-// —— ESRI（原 v0.6.0 底图，保留为「极简」模式）——
+// —— ESRI（保留为「极简」模式，深色主题）——
 const ESRI_DARK_BASE_TILES =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const ESRI_DARK_REF_TILES =
@@ -59,6 +66,14 @@ const MAPDATA_ADMIN = '/mapdata/hlj-admin-areas.geojson.gz';
 const MAPDATA_RAIL = '/mapdata/hlj-railways.geojson.gz';
 const MAPDATA_ROADS_MAIN = '/mapdata/hlj-roads-main.geojson.gz';
 const MAPDATA_ROADS_DXA = '/mapdata/hlj-roads-daxinganling-full.geojson.gz';
+
+// —— 自然地表覆盖 + 地名（v0.6.4/#15，scripts/gen_natural.py 产出）——
+// 29,449 条要素（森林 12,955 / 水域面 4,961 / 河流 3,591 / 溪流 2,309 /
+// 渠 1,113 / 草地农田 4,557）+ 17,615 个地名点；双坐标变体按底图选源。
+const MAPDATA_NATURAL = '/mapdata/hlj-natural.geojson.gz';
+const MAPDATA_NATURAL_GCJ = '/mapdata/hlj-natural-gcj.geojson.gz';
+const MAPDATA_PLACES = '/mapdata/hlj-places.geojson.gz';
+const MAPDATA_PLACES_GCJ = '/mapdata/hlj-places-gcj.geojson.gz';
 
 // —— 离线地形高程（W17：3D 视图的真实起伏支撑）——
 // AWS Terrain Tiles（Mapzen 数据管线，SRTM/GMTED 融合，terrarium 编码，
@@ -100,12 +115,14 @@ export const DEVICE_UP_STROKE = '#8fa6ce';
 export const DEVICE_DOWN_FILL = '#f2554a';
 export const DEVICE_DOWN_STROKE = '#ff9d95';
 
-/** 画布底色（加载期不闪白；offline 模式即最终底色）。 */
+/** 画布底色（加载期不闪白；深色主题底图即最终底色）。 */
 export const GEO_BG = '#0e1626';
+/** 浅色主题底色（离线简洁底图，类标准地图的暖白）。 */
+export const GEO_BG_LIGHT = '#f5f3f0';
 
 // —— 底图注册表 ——
 
-export type BasemapId = 'amap' | 'amap-satellite' | 'esri' | 'offline';
+export type BasemapId = 'offline' | 'amap' | 'amap-satellite' | 'esri';
 
 export interface BasemapDef {
   /** 瓦片 URL 列表（null = 无栅格，纯离线）。 */
@@ -117,9 +134,21 @@ export interface BasemapDef {
   overlayTiles: string[] | null;
   overlayOpacity: number;
   maxzoom: number;
+  /** 配色主题：决定叠加图层/自然要素/等高线/山体阴影用浅色还是深色系。 */
+  theme: 'light' | 'dark';
 }
 
 export const BASEMAPS: Record<BasemapId, BasemapDef> = {
+  // v0.6.4：离线简洁底图为默认（#15：用户要求 2D 干净、无 POI、内网可用）。
+  offline: {
+    tiles: null,
+    attribution: OSM_ATTRIBUTION,
+    isGCJ: false,
+    overlayTiles: null,
+    overlayOpacity: 1,
+    maxzoom: 16,
+    theme: 'light',
+  },
   amap: {
     tiles: amapStreetTiles(),
     attribution: AMAP_STREET_ATTRIBUTION,
@@ -127,6 +156,7 @@ export const BASEMAPS: Record<BasemapId, BasemapDef> = {
     overlayTiles: null,
     overlayOpacity: 1,
     maxzoom: 18,
+    theme: 'light',
   },
   'amap-satellite': {
     tiles: amapSatelliteTiles(),
@@ -135,6 +165,7 @@ export const BASEMAPS: Record<BasemapId, BasemapDef> = {
     overlayTiles: amapSatOverlayTiles(),
     overlayOpacity: 1,
     maxzoom: 18,
+    theme: 'dark',
   },
   esri: {
     tiles: [ESRI_DARK_BASE_TILES],
@@ -143,14 +174,7 @@ export const BASEMAPS: Record<BasemapId, BasemapDef> = {
     overlayTiles: [ESRI_DARK_REF_TILES],
     overlayOpacity: 0.85,
     maxzoom: 16,
-  },
-  offline: {
-    tiles: null,
-    attribution: OSM_ATTRIBUTION,
-    isGCJ: false,
-    overlayTiles: null,
-    overlayOpacity: 1,
-    maxzoom: 16,
+    theme: 'dark',
   },
 };
 
@@ -158,17 +182,29 @@ export const BASEMAP_SOURCE_ID = 'basemap';
 export const BASEMAP_REF_SOURCE_ID = 'basemap-ref';
 /** 底图瓦片连续失败切换离线时，仍保留叠加图层的坐标系。 */
 export const basemapIsGCJ = (id: BasemapId): boolean => BASEMAPS[id].isGCJ;
-/** 离线叠加图层仅在 WGS84 底图下可用（GCJ 底图上叠加会偏移且信息重复）。 */
+/** 离线交通/区划叠加图层仅在 WGS84 底图下可用（GCJ 底图上叠加会偏移且信息重复）。 */
 export const overlaysAvailable = (id: BasemapId): boolean => !BASEMAPS[id].isGCJ;
+/** 底图浅色/深色主题。 */
+export const basemapIsLight = (id: BasemapId): boolean => BASEMAPS[id].theme === 'light';
+/** 底图底色（GeoCanvas 加载期防闪白用）。 */
+export const basemapBg = (id: BasemapId): string => (BASEMAPS[id].theme === 'light' ? GEO_BG_LIGHT : GEO_BG);
 
 // —— 图层偏好（localStorage 持久化，隐私模式 try/catch 静默降级）——
+// v0.6.4：存储键升级 v2——新增自然要素/地名开关且默认底图换为离线简洁，
+// 旧 v1 偏好（basemap=amap、road 默认关）不再沿用，保证升级即见新观感。
 
-export type OverlayId = 'admin' | 'railway' | 'road';
+export type OverlayId = 'admin' | 'railway' | 'road' | 'forest' | 'water' | 'green' | 'places';
+
+/** 仅 WGS84 底图可用的叠加（区划/交通：GCJ 底图栅格已含且会偏移）。 */
+export const WGS84_ONLY_OVERLAYS: OverlayId[] = ['admin', 'railway', 'road'];
+/** 任意底图可用的叠加（双坐标变体：自然要素/地名）。 */
+export const ANY_BASEMAP_OVERLAYS: OverlayId[] = ['forest', 'water', 'green', 'places'];
 
 export interface GeoLayerPrefs {
   basemap: BasemapId;
-  /** 离线叠加：行政区划默认开（运维需要知道设备属于哪个区县）；铁路默认关
-   *  （用户要求铁路不得干扰主观看，可一键开）；公路默认关。 */
+  /** 离线叠加：地名/区划/森林/水系/草地农田默认开（#15「干净 2D」的地表
+   *  感）；公路默认开（用户要"河流交通这些"）；铁路默认关（用户要求铁路
+   *  不得干扰主观看，可一键开）。 */
   overlays: Record<OverlayId, boolean>;
   /** 业务链路图层可见性。 */
   links: boolean;
@@ -181,23 +217,38 @@ export interface GeoLayerPrefs {
 }
 
 export const DEFAULT_PREFS: GeoLayerPrefs = {
-  basemap: 'amap',
-  overlays: { admin: true, railway: false, road: false },
+  basemap: 'offline',
+  overlays: {
+    admin: true,
+    railway: false,
+    road: true,
+    forest: true,
+    water: true,
+    green: true,
+    places: true,
+  },
   links: true,
   devices: true,
   terrain: true,
   contours: true,
 };
 
-const PREFS_KEY = 'netops-lab.geo.layers';
+const PREFS_KEY = 'netops-lab.geo.layers.v2';
+
+const overlayBool = (
+  ovRaw: Record<string, unknown>,
+  key: OverlayId,
+  fallback: boolean,
+): boolean => (typeof ovRaw[key] === 'boolean' ? (ovRaw[key] as boolean) : fallback);
 
 export function loadGeoLayerPrefs(): GeoLayerPrefs {
-  if (typeof localStorage === 'undefined') return { ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } };
+  const fresh = (): GeoLayerPrefs => ({ ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } });
+  if (typeof localStorage === 'undefined') return fresh();
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (raw === null) return { ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } };
+    if (raw === null) return fresh();
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } };
+    if (typeof parsed !== 'object' || parsed === null) return fresh();
     const p = parsed as Record<string, unknown>;
     const base: BasemapId =
       typeof p['basemap'] === 'string' && p['basemap'] in BASEMAPS ? (p['basemap'] as BasemapId) : DEFAULT_PREFS.basemap;
@@ -205,9 +256,13 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
     return {
       basemap: base,
       overlays: {
-        admin: typeof ovRaw['admin'] === 'boolean' ? ovRaw['admin'] : DEFAULT_PREFS.overlays.admin,
-        railway: typeof ovRaw['railway'] === 'boolean' ? ovRaw['railway'] : DEFAULT_PREFS.overlays.railway,
-        road: typeof ovRaw['road'] === 'boolean' ? ovRaw['road'] : DEFAULT_PREFS.overlays.road,
+        admin: overlayBool(ovRaw, 'admin', DEFAULT_PREFS.overlays.admin),
+        railway: overlayBool(ovRaw, 'railway', DEFAULT_PREFS.overlays.railway),
+        road: overlayBool(ovRaw, 'road', DEFAULT_PREFS.overlays.road),
+        forest: overlayBool(ovRaw, 'forest', DEFAULT_PREFS.overlays.forest),
+        water: overlayBool(ovRaw, 'water', DEFAULT_PREFS.overlays.water),
+        green: overlayBool(ovRaw, 'green', DEFAULT_PREFS.overlays.green),
+        places: overlayBool(ovRaw, 'places', DEFAULT_PREFS.overlays.places),
       },
       links: typeof p['links'] === 'boolean' ? p['links'] : DEFAULT_PREFS.links,
       devices: typeof p['devices'] === 'boolean' ? p['devices'] : DEFAULT_PREFS.devices,
@@ -215,7 +270,7 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
       contours: typeof p['contours'] === 'boolean' ? p['contours'] : DEFAULT_PREFS.contours,
     };
   } catch {
-    return { ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } };
+    return fresh();
   }
 }
 
@@ -283,7 +338,23 @@ export const OVERLAY_LAYERS: Record<OverlayId, string[]> = {
     'offline-admin-label-l6',
   ],
   railway: ['offline-rail-line', 'offline-rail-label'],
-  road: ['offline-roads-main-line', 'offline-roads-dxa-line', 'offline-roads-label'],
+  road: [
+    'offline-roads-main-casing',
+    'offline-roads-main-line',
+    'offline-roads-dxa-casing',
+    'offline-roads-dxa-line',
+    'offline-roads-label',
+  ],
+  forest: ['natural-forest-fill'],
+  water: [
+    'natural-water-fill',
+    'natural-river-line',
+    'natural-stream-line',
+    'natural-water-label',
+    'natural-river-label',
+  ],
+  green: ['natural-green-fill'],
+  places: ['places-city', 'places-county', 'places-town', 'places-village'],
 };
 
 /** 业务链路开关控制的图层 id（links-up/down/selected 同进退）。 */
@@ -292,26 +363,152 @@ export const LINK_LAYERS = ['links-up', 'links-down', 'links-selected'];
 const statusMatch = (down: string, up: string): ExpressionSpecification =>
   ['match', ['get', 'status'], 'down', down, up] as unknown as ExpressionSpecification;
 
-/** 行政边界线色（按 level：4=省界亮 / 5=地市 / 6=区县更淡）。 */
-const ADMIN_LINE_COLOR: ExpressionSpecification = [
-  'match',
-  ['get', 'level'],
-  '4',
-  '#7e9bd0',
-  '5',
-  '#55688f',
-  '#3d4c6b',
-] as unknown as ExpressionSpecification;
+/** 可见性字面量（MapLibre layout.visibility）。 */
+const visOf = (on: boolean): 'visible' | 'none' => (on ? 'visible' : 'none');
 
-const ADMIN_LINE_WIDTH: ExpressionSpecification = [
-  'match',
-  ['get', 'level'],
-  '4',
-  1.6,
-  '5',
-  1.1,
-  0.7,
-] as unknown as ExpressionSpecification;
+/** 类别多选 filter：match 多标签形式（MapLibre in 不支持多候选变参）。 */
+const inClasses = (...classes: string[]): ExpressionSpecification =>
+  ['match', ['get', 'c'], classes.length === 1 ? classes[0] : classes, true, false] as unknown as ExpressionSpecification;
+
+// —— 主题化配色（浅色 = 离线简洁底图/高德街道；深色 = ESRI/卫星影像）——
+
+interface ThemePalette {
+  /** 行政边界线色（按 level：4=省界 / 5=地市 / 6=区县）。 */
+  adminLine: ExpressionSpecification;
+  adminFill: string;
+  adminFillOpacity: number;
+  adminLabel: string;
+  adminHalo: string;
+  rail: string;
+  railLabel: string;
+  /** 公路主线色（浅色按等级：高速橙 → 干道黄 → 次要白；深色纯色）。 */
+  roadMain: ExpressionSpecification | string;
+  roadDxa: ExpressionSpecification | string;
+  roadCasing: string | null;
+  roadLabel: string;
+  /** 自然要素。 */
+  forest: string;
+  forestOpacity: number;
+  grass: string;
+  farm: string;
+  wetland: string;
+  scrub: string;
+  greenOpacity: number;
+  waterFill: string;
+  waterOpacity: number;
+  river: string;
+  stream: string;
+  waterLabel: string;
+  /** 地名。 */
+  placeCity: string;
+  placeCounty: string;
+  placeTown: string;
+  placeVillage: string;
+  placeHalo: string;
+  /** 等高线（浅色 = 地形图棕系；深色 = 原蓝系）。 */
+  contourMajor: string;
+  contourMinor: string;
+  contourLabel: string;
+  contourHalo: string;
+}
+
+const LIGHT: ThemePalette = {
+  adminLine: [
+    'match',
+    ['get', 'level'],
+    '4',
+    '#a996b3',
+    '5',
+    '#bcaec4',
+    '#ccc0d2',
+  ] as unknown as ExpressionSpecification,
+  adminFill: '#99a8c4',
+  adminFillOpacity: 0.05,
+  adminLabel: '#6b6b80',
+  adminHalo: '#ffffff',
+  rail: '#b4adb3',
+  railLabel: '#7a7480',
+  roadMain: [
+    'match',
+    ['get', 'highway'],
+    'motorway',
+    '#f7bc6f',
+    'trunk',
+    '#f9d297',
+    'primary',
+    '#fceece',
+    'secondary',
+    '#ffffff',
+    '#ffffff',
+  ] as unknown as ExpressionSpecification,
+  roadDxa: '#ffffff',
+  roadCasing: '#e3dcd0',
+  roadLabel: '#8a8578',
+  forest: '#c6e2be',
+  forestOpacity: 0.9,
+  grass: '#dceed3',
+  farm: '#efe9cd',
+  wetland: '#c6e1dc',
+  scrub: '#d2e7cf',
+  greenOpacity: 0.85,
+  waterFill: '#a9cff0',
+  waterOpacity: 0.95,
+  river: '#8fb8e8',
+  stream: '#b0d4f0',
+  waterLabel: '#5f88b5',
+  placeCity: '#2e3038',
+  placeCounty: '#484b55',
+  placeTown: '#5a5d66',
+  placeVillage: '#767982',
+  placeHalo: '#ffffff',
+  contourMajor: '#b28a62',
+  contourMinor: '#c9ac8c',
+  contourLabel: '#a67c52',
+  contourHalo: '#ffffff',
+};
+
+const DARK: ThemePalette = {
+  adminLine: [
+    'match',
+    ['get', 'level'],
+    '4',
+    '#7e9bd0',
+    '5',
+    '#55688f',
+    '#3d4c6b',
+  ] as unknown as ExpressionSpecification,
+  adminFill: '#4a6699',
+  adminFillOpacity: 0.1,
+  adminLabel: '#9fb4d8',
+  adminHalo: '#0e1626',
+  rail: '#9b8ac2',
+  railLabel: '#a99bc7',
+  roadMain: '#46587a',
+  roadDxa: '#35415c',
+  roadCasing: null,
+  roadLabel: '#7487a8',
+  forest: '#2e5a3f',
+  forestOpacity: 0.55,
+  grass: '#3c5c47',
+  farm: '#5c5a40',
+  wetland: '#2f5d5c',
+  scrub: '#3a5442',
+  greenOpacity: 0.5,
+  waterFill: '#1e4470',
+  waterOpacity: 0.75,
+  river: '#4a7ec2',
+  stream: '#3c6aa8',
+  waterLabel: '#8fa9d0',
+  placeCity: '#e6ecf5',
+  placeCounty: '#c6d2e6',
+  placeTown: '#aebcd6',
+  placeVillage: '#93a3c2',
+  placeHalo: '#0e1626',
+  contourMajor: '#7fa3d4',
+  contourMinor: '#4d6390',
+  contourLabel: '#8fa9d0',
+  contourHalo: '#0e1626',
+};
 
 /** 公路主线宽（按 highway 等级；link 类减半）。 */
 const ROAD_WIDTH: ExpressionSpecification = [
@@ -336,10 +533,32 @@ const ROAD_WIDTH: ExpressionSpecification = [
   0.6,
 ] as unknown as ExpressionSpecification;
 
-/** 可见性字面量（MapLibre layout.visibility）。 */
-const visOf = (on: boolean): 'visible' | 'none' => (on ? 'visible' : 'none');
+/** 大兴安岭地方道路宽（等级更细）。 */
+const ROAD_DXA_WIDTH: ExpressionSpecification = [
+  'match',
+  ['get', 'highway'],
+  'trunk',
+  1.5,
+  'primary',
+  1.2,
+  'secondary',
+  1.0,
+  'tertiary',
+  0.8,
+  0.55,
+] as unknown as ExpressionSpecification;
 
-function adminLabelLayer(level: string, minzoom: number, size: number, visible: boolean): LayerSpecification {
+/** 线宽 + 外扩（casing 用；表达式加法）。 */
+const widthPlus = (w: ExpressionSpecification, extra: number): ExpressionSpecification =>
+  ['+', w, extra] as unknown as ExpressionSpecification;
+
+function adminLabelLayer(
+  level: string,
+  minzoom: number,
+  size: number,
+  visible: boolean,
+  t: ThemePalette,
+): LayerSpecification {
   return {
     id: `offline-admin-label-l${level}`,
     type: 'symbol',
@@ -355,42 +574,44 @@ function adminLabelLayer(level: string, minzoom: number, size: number, visible: 
       visibility: visOf(visible),
     },
     paint: {
-      'text-color': '#9fb4d8',
-      'text-halo-color': '#0e1626',
+      'text-color': t.adminLabel,
+      'text-halo-color': t.adminHalo,
       'text-halo-width': 1.4,
     },
   } as unknown as LayerSpecification;
 }
 
 /**
- * 离线叠加图层（初始可见性由调用方烘焙；GeoCanvas 切换时 setLayoutProperty）。
+ * 离线交通/区划叠加（初始可见性由调用方烘焙；GeoCanvas 切换时 setLayoutProperty）。
+ * 浅色主题下公路加 casing（白路在暖白底上需要描边才可见）。
  */
-function overlayLayers(on: Record<OverlayId, boolean>): LayerSpecification[] {
-  return [
+function overlayLayers(on: Record<OverlayId, boolean>, t: ThemePalette): LayerSpecification[] {
+  const roadVis = visOf(on.road);
+  const layers: LayerSpecification[] = [
     {
       id: 'offline-admin-fill',
       type: 'fill',
       source: 'offline-admin',
       layout: { visibility: visOf(on.admin) },
-      paint: { 'fill-color': '#4a6699', 'fill-opacity': 0.1 },
+      paint: { 'fill-color': t.adminFill, 'fill-opacity': t.adminFillOpacity },
     },
     {
       id: 'offline-admin-line',
       type: 'line',
       source: 'offline-admin',
       layout: { visibility: visOf(on.admin) },
-      paint: { 'line-color': ADMIN_LINE_COLOR, 'line-width': ADMIN_LINE_WIDTH, 'line-opacity': 0.9 },
+      paint: { 'line-color': t.adminLine, 'line-width': ADMIN_LINE_WIDTH, 'line-opacity': 0.9 },
     },
-    adminLabelLayer('4', 3, 12, on.admin),
-    adminLabelLayer('5', 5.5, 11, on.admin),
-    adminLabelLayer('6', 7, 10, on.admin),
+    adminLabelLayer('4', 3, 12, on.admin, t),
+    adminLabelLayer('5', 5.5, 11, on.admin, t),
+    adminLabelLayer('6', 7, 10, on.admin, t),
     {
       id: 'offline-rail-line',
       type: 'line',
       source: 'offline-rail',
       layout: { visibility: visOf(on.railway), 'line-cap': 'round' },
       paint: {
-        'line-color': '#9b8ac2',
+        'line-color': t.rail,
         'line-width': ['match', ['get', 'railway'], 'rail', 1.3, 0.8] as unknown as ExpressionSpecification,
         'line-opacity': 0.85,
         'line-dasharray': [3, 2],
@@ -409,54 +630,231 @@ function overlayLayers(on: Record<OverlayId, boolean>): LayerSpecification[] {
         'text-padding': 3,
         visibility: visOf(on.railway),
       },
-      paint: { 'text-color': '#a99bc7', 'text-halo-color': '#0e1626', 'text-halo-width': 1.2 },
-    },
-    {
-      id: 'offline-roads-main-line',
-      type: 'line',
-      source: 'offline-roads-main',
-      layout: { visibility: visOf(on.road) },
-      paint: { 'line-color': '#46587a', 'line-width': ROAD_WIDTH, 'line-opacity': 0.85 },
-    },
-    {
-      id: 'offline-roads-dxa-line',
-      type: 'line',
-      source: 'offline-roads-dxa',
-      layout: { visibility: visOf(on.road) },
-      paint: {
-        'line-color': '#35415c',
-        'line-width': [
-          'match',
-          ['get', 'highway'],
-          'trunk',
-          1.5,
-          'primary',
-          1.2,
-          'secondary',
-          1.0,
-          'tertiary',
-          0.8,
-          0.55,
-        ] as unknown as ExpressionSpecification,
-        'line-opacity': 0.8,
-      },
-    },
-    {
-      id: 'offline-roads-label',
-      type: 'symbol',
-      source: 'offline-roads-main',
-      minzoom: 10.5,
-      layout: {
-        'text-field': ['coalesce', ['get', 'ref'], ['get', 'name']] as unknown as ExpressionSpecification,
-        'text-font': FONT,
-        'text-size': 10,
-        'symbol-placement': 'line',
-        'text-padding': 3,
-        visibility: visOf(on.road),
-      },
-      paint: { 'text-color': '#7487a8', 'text-halo-color': '#0e1626', 'text-halo-width': 1.2 },
+      paint: { 'text-color': t.railLabel, 'text-halo-color': t.adminHalo, 'text-halo-width': 1.2 },
     },
   ];
+  if (t.roadCasing !== null) {
+    layers.push({
+      id: 'offline-roads-main-casing',
+      type: 'line',
+      source: 'offline-roads-main',
+      layout: { visibility: roadVis, 'line-cap': 'round' },
+      paint: {
+        'line-color': t.roadCasing,
+        'line-width': widthPlus(ROAD_WIDTH, 1.6),
+        'line-opacity': 0.9,
+      },
+    });
+  }
+  layers.push({
+    id: 'offline-roads-main-line',
+    type: 'line',
+    source: 'offline-roads-main',
+    layout: { visibility: roadVis, 'line-cap': 'round' },
+    paint: { 'line-color': t.roadMain, 'line-width': ROAD_WIDTH, 'line-opacity': 0.95 },
+  });
+  if (t.roadCasing !== null) {
+    layers.push({
+      id: 'offline-roads-dxa-casing',
+      type: 'line',
+      source: 'offline-roads-dxa',
+      layout: { visibility: roadVis, 'line-cap': 'round' },
+      paint: {
+        'line-color': t.roadCasing,
+        'line-width': widthPlus(ROAD_DXA_WIDTH, 1.2),
+        'line-opacity': 0.85,
+      },
+    });
+  }
+  layers.push({
+    id: 'offline-roads-dxa-line',
+    type: 'line',
+    source: 'offline-roads-dxa',
+    layout: { visibility: roadVis, 'line-cap': 'round' },
+    paint: { 'line-color': t.roadDxa, 'line-width': ROAD_DXA_WIDTH, 'line-opacity': 0.9 },
+  });
+  layers.push({
+    id: 'offline-roads-label',
+    type: 'symbol',
+    source: 'offline-roads-main',
+    minzoom: 10.5,
+    layout: {
+      'text-field': ['coalesce', ['get', 'ref'], ['get', 'name']] as unknown as ExpressionSpecification,
+      'text-font': FONT,
+      'text-size': 10,
+      'symbol-placement': 'line',
+      'text-padding': 3,
+      visibility: roadVis,
+    },
+    paint: { 'text-color': t.roadLabel, 'text-halo-color': t.adminHalo, 'text-halo-width': 1.2 },
+  });
+  return layers;
+}
+
+/** 行政边界线宽（按 level：4=省界 1.6 / 5=地市 1.1 / 6=区县 0.7）。 */
+const ADMIN_LINE_WIDTH: ExpressionSpecification = [
+  'match',
+  ['get', 'level'],
+  '4',
+  1.6,
+  '5',
+  1.1,
+  0.7,
+] as unknown as ExpressionSpecification;
+
+/**
+ * 自然要素图层（v0.6.4/#15）：森林/绿地/水面（fill）+ 河流/溪流（line）+
+ * 水域/河流名称标注。源为单一天然要素 FC（面 + 线混合，fill 只渲染面、
+ * line 只渲染线，filter 按类别 c 分流）。双坐标变体 → 任意底图可用。
+ */
+function naturalLayers(on: Record<OverlayId, boolean>, t: ThemePalette): LayerSpecification[] {
+  return [
+    {
+      id: 'natural-forest-fill',
+      type: 'fill',
+      source: 'natural',
+      minzoom: 4.5,
+      filter: inClasses('wood', 'forest'),
+      layout: { visibility: visOf(on.forest) },
+      paint: { 'fill-color': t.forest, 'fill-opacity': t.forestOpacity },
+    },
+    {
+      id: 'natural-green-fill',
+      type: 'fill',
+      source: 'natural',
+      minzoom: 6,
+      filter: inClasses('grass', 'scrub', 'farm', 'wetland'),
+      layout: { visibility: visOf(on.green) },
+      paint: {
+        'fill-color': [
+          'match',
+          ['get', 'c'],
+          'farm',
+          t.farm,
+          'wetland',
+          t.wetland,
+          'scrub',
+          t.scrub,
+          t.grass,
+        ] as unknown as ExpressionSpecification,
+        'fill-opacity': t.greenOpacity,
+      },
+    },
+    {
+      id: 'natural-water-fill',
+      type: 'fill',
+      source: 'natural',
+      minzoom: 4,
+      filter: inClasses('water', 'riverbank'),
+      layout: { visibility: visOf(on.water) },
+      paint: { 'fill-color': t.waterFill, 'fill-opacity': t.waterOpacity },
+    },
+    {
+      id: 'natural-river-line',
+      type: 'line',
+      source: 'natural',
+      minzoom: 5,
+      filter: ['==', ['get', 'c'], 'river'],
+      layout: { visibility: visOf(on.water), 'line-cap': 'round' },
+      paint: {
+        'line-color': t.river,
+        'line-width': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          5,
+          0.7,
+          9,
+          1.6,
+          12.5,
+          2.6,
+        ] as unknown as ExpressionSpecification,
+        'line-opacity': 0.9,
+      },
+    },
+    {
+      id: 'natural-stream-line',
+      type: 'line',
+      source: 'natural',
+      minzoom: 7,
+      filter: inClasses('stream', 'canal'),
+      layout: { visibility: visOf(on.water), 'line-cap': 'round' },
+      paint: {
+        'line-color': t.stream,
+        'line-width': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          7,
+          0.5,
+          12.5,
+          1.6,
+        ] as unknown as ExpressionSpecification,
+        'line-opacity': 0.85,
+      },
+    },
+    {
+      id: 'natural-water-label',
+      type: 'symbol',
+      source: 'natural',
+      minzoom: 8,
+      filter: ['all', inClasses('water', 'riverbank'), ['has', 'n']],
+      layout: {
+        'text-field': ['get', 'n'],
+        'text-font': FONT,
+        'text-size': 9.5,
+        'text-letter-spacing': 0.1,
+        'text-padding': 6,
+        visibility: visOf(on.water),
+      },
+      paint: { 'text-color': t.waterLabel, 'text-halo-color': t.placeHalo, 'text-halo-width': 1.3 },
+    },
+    {
+      id: 'natural-river-label',
+      type: 'symbol',
+      source: 'natural',
+      minzoom: 9.5,
+      filter: ['all', inClasses('river', 'stream'), ['has', 'n']],
+      layout: {
+        'text-field': ['get', 'n'],
+        'text-font': FONT,
+        'text-size': 9,
+        'symbol-placement': 'line',
+        'symbol-spacing': 620,
+        'text-padding': 3,
+        visibility: visOf(on.water),
+      },
+      paint: { 'text-color': t.waterLabel, 'text-halo-color': t.placeHalo, 'text-halo-width': 1.2 },
+    } as unknown as LayerSpecification,
+  ];
+}
+
+/** 地名标注（v0.6.4/#15）：城市/区县/乡镇/村庄分层 minzoom。 */
+function placesLayers(on: Record<OverlayId, boolean>, t: ThemePalette): LayerSpecification[] {
+  const defs: Array<{ cls: string[]; id: string; minzoom: number; size: number; color: string }> = [
+    { cls: ['province', 'city'], id: 'places-city', minzoom: 4.2, size: 12.5, color: t.placeCity },
+    { cls: ['county', 'district'], id: 'places-county', minzoom: 6.5, size: 11, color: t.placeCounty },
+    { cls: ['town'], id: 'places-town', minzoom: 8.8, size: 10.2, color: t.placeTown },
+    { cls: ['village', 'hamlet'], id: 'places-village', minzoom: 11, size: 9.4, color: t.placeVillage },
+  ];
+  return defs.map(
+    (d): LayerSpecification =>
+      ({
+        id: d.id,
+        type: 'symbol',
+        source: 'places',
+        minzoom: d.minzoom,
+        filter: inClasses(...d.cls),
+        layout: {
+          'text-field': ['get', 'n'],
+          'text-font': FONT,
+          'text-size': d.size,
+          'text-padding': 4,
+          visibility: visOf(on.places),
+        },
+        paint: { 'text-color': d.color, 'text-halo-color': t.placeHalo, 'text-halo-width': 1.8 },
+      }) as unknown as LayerSpecification,
+  );
 }
 
 // —— 样式构建（GeoCanvas 在底图切换/离线降级时重建整个 style）——
@@ -469,7 +867,7 @@ export const TOWER_MAX_M = 4000;
 export interface StyleOptions {
   /** 栅格是否纳入（false = 离线降级/离线模式：无外网瓦片）。 */
   withRaster: boolean;
-  /** 叠加图层初始可见性（GCJ 底图恒 false，由调用方保证）。 */
+  /** 叠加图层初始可见性（admin/railway/road 恒 false when GCJ，由调用方保证）。 */
   overlayVisibility: Record<OverlayId, boolean>;
   /** 业务链路可见性。 */
   linksVisible: boolean;
@@ -483,7 +881,10 @@ export interface StyleOptions {
 export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSpecification {
   const def = BASEMAPS[basemapId];
   const withRaster = opts.withRaster && def.tiles !== null;
+  const t = def.theme === 'light' ? LIGHT : DARK;
   const contourData = def.isGCJ ? CONTOURS_GCJ_URL : CONTOURS_URL;
+  const naturalData = def.isGCJ ? MAPDATA_NATURAL_GCJ : MAPDATA_NATURAL;
+  const placesData = def.isGCJ ? MAPDATA_PLACES_GCJ : MAPDATA_PLACES;
   const sources: StyleSpecification['sources'] = {
     devices: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     links: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
@@ -492,6 +893,9 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
     'offline-rail': { type: 'geojson', data: MAPDATA_RAIL, attribution: OSM_ATTRIBUTION },
     'offline-roads-main': { type: 'geojson', data: MAPDATA_ROADS_MAIN, attribution: OSM_ATTRIBUTION },
     'offline-roads-dxa': { type: 'geojson', data: MAPDATA_ROADS_DXA, attribution: OSM_ATTRIBUTION },
+    // 自然要素 + 地名（v0.6.4/#15）：双坐标变体按底图选源（高德 = GCJ 预投影）
+    natural: { type: 'geojson', data: naturalData, attribution: OSM_ATTRIBUTION },
+    places: { type: 'geojson', data: placesData, attribution: OSM_ATTRIBUTION },
     // 等高线（W17/#13）：按底图坐标系选变体，高程派生数据同 DEM 署名
     contours: { type: 'geojson', data: contourData, attribution: DEM_ATTRIBUTION },
     // 离线 DEM（恒在：本地瓦片不依赖外网；terrain 起伏与 hillshade 都从它取）
@@ -522,7 +926,9 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
       };
     }
   }
-  const layers: LayerSpecification[] = [{ id: 'geo-bg', type: 'background', paint: { 'background-color': GEO_BG } }];
+  const layers: LayerSpecification[] = [
+    { id: 'geo-bg', type: 'background', paint: { 'background-color': def.theme === 'light' ? GEO_BG_LIGHT : GEO_BG } },
+  ];
   if (withRaster && def.tiles !== null) {
     layers.push({ id: BASEMAP_SOURCE_ID, type: 'raster', source: BASEMAP_SOURCE_ID, paint: {} });
     if (def.overlayTiles !== null) {
@@ -536,21 +942,33 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
   }
 
   // 山体阴影（W17，底图之上/业务图层之下）：terrain 偏好开时可见，
-  // 与 3D 起伏共用同一离线 DEM 源。深色主题下的柔和参数。
+  // 与 3D 起伏共用同一离线 DEM 源。浅色主题 = 柔和暖灰（纸质地感），
+  // 深色主题 = 原夜蓝色系。
   layers.push({
     id: HILLSHADE_LAYER_ID,
     type: 'hillshade',
     source: DEM_SOURCE_ID,
     layout: { visibility: visOf(opts.terrainVisible) },
-    paint: {
-      'hillshade-exaggeration': 0.45,
-      'hillshade-shadow-color': '#0b101d',
-      'hillshade-highlight-color': '#7d90b8',
-      'hillshade-accent-color': '#243049',
-    },
+    paint: def.theme === 'light'
+      ? {
+          'hillshade-exaggeration': 0.5,
+          'hillshade-shadow-color': '#dcd4c8',
+          'hillshade-highlight-color': '#fffef9',
+          'hillshade-accent-color': '#d0c7b8',
+        }
+      : {
+          'hillshade-exaggeration': 0.45,
+          'hillshade-shadow-color': '#0b101d',
+          'hillshade-highlight-color': '#7d90b8',
+          'hillshade-accent-color': '#243049',
+        },
   } as unknown as LayerSpecification);
 
-  // 等高线（W17/#13，hillshade 之上、本地叠加之下）：计曲线（500m 整倍）
+  // 自然要素面（v0.6.4/#15）：森林/绿地/水面铺在 hillshade 之上（地表
+  // 覆盖给地形上色），交通线划/等高线在其上保持可读。
+  layers.push(...naturalLayers(opts.overlayVisibility, t));
+
+  // 等高线（W17/#13，自然面之上、交通线划之下）：计曲线（500m 整倍）
   // 低 zoom 即可见、首曲线（200m）z≥9.5；高程标注仅计曲线、沿线稀疏。
   const contourVis = visOf(opts.contoursVisible);
   layers.push(
@@ -561,7 +979,7 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
       minzoom: 4.5,
       filter: ['==', ['get', 'major'], true],
       layout: { visibility: contourVis },
-      paint: { 'line-color': '#7fa3d4', 'line-width': 1.1, 'line-opacity': 0.6 },
+      paint: { 'line-color': t.contourMajor, 'line-width': 1.1, 'line-opacity': 0.55 },
     },
     {
       id: 'contours-minor',
@@ -570,7 +988,7 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
       minzoom: 9.5,
       filter: ['==', ['get', 'major'], false],
       layout: { visibility: contourVis },
-      paint: { 'line-color': '#4d6390', 'line-width': 0.7, 'line-opacity': 0.42 },
+      paint: { 'line-color': t.contourMinor, 'line-width': 0.7, 'line-opacity': 0.4 },
     },
     {
       id: 'contours-label',
@@ -587,12 +1005,15 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
         'text-padding': 2,
         visibility: contourVis,
       },
-      paint: { 'text-color': '#8fa9d0', 'text-halo-color': '#0e1626', 'text-halo-width': 1.3 },
+      paint: { 'text-color': t.contourLabel, 'text-halo-color': t.contourHalo, 'text-halo-width': 1.3 },
     } as unknown as LayerSpecification,
   );
 
-  // 离线叠加（在业务图层之下：运维主观看的是设备，地理要素做背景参照）
-  layers.push(...overlayLayers(opts.overlayVisibility));
+  // 离线交通/区划叠加（自然面之上：路网河流与行政界压住地表色）
+  layers.push(...overlayLayers(opts.overlayVisibility, t));
+
+  // 地名标注（在交通线划之上、业务图层之下——干净的"标准地图"层级观感）
+  layers.push(...placesLayers(opts.overlayVisibility, t));
 
   const linkVis = visOf(opts.linksVisible);
   layers.push(
