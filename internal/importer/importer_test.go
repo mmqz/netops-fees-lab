@@ -1146,10 +1146,16 @@ func TestImportPortCompositeKeyAndHeaderRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	// The real sheet name carries no type hint: the suggested mapping skips
-	// it and the user confirms the port mapping manually.
-	if a.SuggestedMapping.Sheets[0].Action != mapping.ActionSkip {
-		t.Fatalf("suggested action for Sheet1 = %q, want skip (no type hint)", a.SuggestedMapping.Sheets[0].Action)
+	// The sheet name carries no type hint, but since issue #4 the header
+	// ROW infers the type: Sheet1 with the port headers (设备名称+端口名称
+	// natural key, required columns recognizable) now suggests import with
+	// the port mapping prefilled — the user confirms (or adjusts) instead of
+	// discovering a silent 0-row import.
+	if a.SuggestedMapping.Sheets[0].Action != mapping.ActionImport {
+		t.Fatalf("suggested action for Sheet1 = %q, want import (header-inferred port)", a.SuggestedMapping.Sheets[0].Action)
+	}
+	if a.SuggestedMapping.Sheets[0].ResourceType != domain.ResourceTypePort {
+		t.Fatalf("suggested type for Sheet1 = %q, want port", a.SuggestedMapping.Sheets[0].ResourceType)
 	}
 	sum, err := svc.Execute(ctx, a.BatchID, portMapping("Sheet1"))
 	if err != nil {

@@ -2870,6 +2870,73 @@ body.lab-split-dragging {
   border-radius: 6px;
 }
 
+/* —— 聚簇气泡（W17：屏幕碰撞聚合，修复「2D 图锁在一起」）——
+   被簇吞并的设备地标整体隐藏（dot + 编码牌都收进簇里）。 */
+.geo-marker--clustered {
+  display: none;
+}
+
+.geo-cluster {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  left: calc(50% - 16px);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #8fa6ce;
+  background: rgba(30, 44, 74, 0.92);
+  color: #e8eefb;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0;
+  cursor: zoom-in;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.geo-cluster:hover {
+  transform: scale(1.12);
+  border-color: #7da2ff;
+}
+
+/* 含故障设备的簇：红边警示（与 .geo-marker--down 语义一致） */
+.geo-cluster--down {
+  border-color: #ff9d95;
+  background: rgba(74, 26, 22, 0.94);
+}
+
+/* 簇内有选中设备：强调蓝外圈 */
+.geo-cluster--selected {
+  box-shadow: 0 0 0 3px #2f9dff, 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.geo-cluster:focus-visible {
+  outline: 2px solid #7da2ff;
+  outline-offset: 2px;
+}
+
+/* 故障计数角标（右上小徽） */
+.geo-cluster-down {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #ff5252;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
 /* maplibre 原生控件深色化（NavigationControl / ScaleControl / Attribution） */
 .geo-canvas .maplibregl-ctrl-group {
   background: rgba(14, 22, 38, 0.88);

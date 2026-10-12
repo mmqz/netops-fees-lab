@@ -28,15 +28,21 @@ type ColumnSuggestion struct {
 
 // Suggest returns one suggestion per header, in header order.
 //
-// When sheetName identifies a resource type (SuggestType), only that type's
-// fields are candidates — a column of an ip_pool sheet is never suggested
-// as a device field, so suggestions are always valid targets for the sheet.
-// For sheets without a type hint the candidates are all fields of all types
-// (in Specs order). The best confidence wins; ties resolve to the earlier
+// When sheetName identifies a resource type (SuggestType), or the sheet
+// name carries no hint but the header ROW does (SuggestTypeFromHeaders,
+// issue #4: Sheet1/导出结果-style exports), only that type's fields are
+// candidates — a column of an ip_pool sheet is never suggested as a device
+// field, so suggestions are always valid targets for the sheet. For sheets
+// with no type signal at all the candidates are all fields of all types (in
+// Specs order). The best confidence wins; ties resolve to the earlier
 // candidate, so suggestions are deterministic.
 func Suggest(sheetName string, headers []string) []ColumnSuggestion {
+	t, ok := SuggestType(sheetName)
+	if !ok {
+		t, ok = SuggestTypeFromHeaders(headers)
+	}
 	var candidates []FieldSpec
-	if t, ok := SuggestType(sheetName); ok {
+	if ok {
 		if spec, found := SpecByType(t); found {
 			candidates = spec.Fields
 		}
@@ -94,6 +100,86 @@ func SuggestType(sheetName string) (domain.ResourceType, bool) {
 	return "", false
 }
 
+// SuggestTypeFromHeaders infers the resource type from the header ROW when
+// the sheet name carries no hint (issue #4: system exports name their sheets
+// Sheet1 / 导出结果 / 查询结果, and SuggestMapping used to silently skip
+// them — "imported 0 rows" with no warning).
+//
+// Ladder: for every spec, count the spec fields whose Name or synonyms
+// appear among the headers (same match ladder as bestMatch, synonym or
+// better). A type QUALIFIES only when its complete natural key is present
+// (identity without the key is unusable) AND at least half of its required
+// fields are matched. The highest qualifying field count wins; ties resolve
+// in Specs order so the result is deterministic. No qualifying type →
+// ("", false): skip stays the safe default for genuinely unknown sheets.
+//
+// Worked example (the issue's repro): a Sheet1 with headers 设备名称/
+// 端口名称/设备IP/带宽Mbps scores port 4+ (natural key 设备名称+端口名称
+// complete) while device's natural key 设备编码 is absent → device is
+// disqualified, port wins.
+func SuggestTypeFromHeaders(headers []string) (domain.ResourceType, bool) {
+	if len(headers) == 0 {
+		return "", false
+	}
+	normHeaders := normalizeHeaders(headers)
+
+	best := domain.ResourceType("")
+	bestScore := 0
+	for _, spec := range Specs {
+		matched, keyMissing, required := 0, false, 0
+		for _, f := range spec.Fields {
+			if f.Required {
+				required++
+			}
+			if anyHeaderMatches(normHeaders, f) {
+				matched++
+			} else if f.NaturalKey {
+				keyMissing = true
+			}
+		}
+		// Qualification: full natural key + majority of required fields.
+		if keyMissing || matched < (required+1)/2 {
+			continue
+		}
+		if matched > bestScore {
+			best, bestScore = spec.Type, matched
+		}
+	}
+	if best == "" || bestScore < 3 {
+		return "", false
+	}
+	return best, true
+}
+
+// headerNorm is a header precomputed for the exact/normalized/synonym
+// ladder (same forms as bestMatch).
+type headerNorm struct{ trimmed, lower string }
+
+func normalizeHeaders(headers []string) []headerNorm {
+	out := make([]headerNorm, len(headers))
+	for i, h := range headers {
+		t := strings.TrimSpace(h)
+		out[i] = headerNorm{trimmed: t, lower: strings.ToLower(t)}
+	}
+	return out
+}
+
+// anyHeaderMatches reports whether any header matches field f on the
+// exact/normalized/synonym ladder.
+func anyHeaderMatches(headers []headerNorm, f FieldSpec) bool {
+	for _, h := range headers {
+		if h.trimmed == f.Name || h.lower == strings.ToLower(strings.TrimSpace(f.Name)) {
+			return true
+		}
+		for _, syn := range f.Synonyms {
+			if h.trimmed == syn || h.lower == strings.ToLower(syn) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // SheetInfo names one sheet and its headers; the input of SuggestMapping.
 type SheetInfo struct {
 	Name    string
@@ -101,15 +187,20 @@ type SheetInfo struct {
 }
 
 // SuggestMapping builds a full suggested mapping: every sheet whose name
-// suggests a resource type gets action import with every suggested column
-// mapped and the natural key as keyColumns; all other sheets get action
-// skip. The UI prefills from this model and still requires explicit user
-// confirmation (unmapped required fields block import — see Validate).
+// OR HEADERS suggest a resource type (issue #4: Sheet1 with a recognizable
+// header row is no longer skipped) gets action import with every suggested
+// column mapped and the natural key as keyColumns; all other sheets get
+// action skip. The UI prefills from this model and still requires explicit
+// user confirmation (unmapped required fields block import — see
+// Validate).
 func SuggestMapping(sheets []SheetInfo) Mapping {
 	m := Mapping{}
 	for _, sh := range sheets {
 		sm := SheetMapping{Sheet: sh.Name}
 		t, ok := SuggestType(sh.Name)
+		if !ok {
+			t, ok = SuggestTypeFromHeaders(sh.Headers)
+		}
 		if !ok {
 			sm.Action = ActionSkip
 			m.Sheets = append(m.Sheets, sm)

@@ -362,29 +362,76 @@ func (s *Server) respondErrorFor(w http.ResponseWriter, r *http.Request, err err
 	respondError(w, status, code, message)
 }
 
-// parsePagination reads the page (1-based) and pageSize (default 20, max
-// 100) query parameters. Non-numeric or non-positive values answer a 400
-// bad_request envelope and return false.
+// parsePagination reads the pagination query parameters. Two equivalent
+// interfaces are accepted (issue #7):
+//
+//   - page (1-based) + pageSize (default 20, clamped to MaxPageSize 100)
+//   - limit (1..100, clamped like pageSize) + offset (0-based row offset;
+//     the derived page is offset/pageSize + 1)
+//
+// Non-numeric, negative or zero page/pageSize/limit and negative offset
+// answer a 400 bad_request envelope with the accepted range (previously
+// limit/offset were unknown names and silently ignored — a negative value
+// was indistinguishable from "applied"). Mixing the two interfaces
+// (page+offset or pageSize+limit) is also a 400: an explicit conflict beats
+// a silent precedence rule.
 func parsePagination(w http.ResponseWriter, r *http.Request) (page, pageSize int, ok bool) {
+	q := r.URL.Query()
+	hasPage := q.Get("page") != ""
+	hasPageSize := q.Get("pageSize") != ""
+	hasLimit := q.Get("limit") != ""
+	hasOffset := q.Get("offset") != ""
+	if hasPage && hasOffset {
+		respondErrorf(w, http.StatusBadRequest, "bad_request", "page 与 offset 不能同时使用（两种分页接口）")
+		return 0, 0, false
+	}
+	if hasPageSize && hasLimit {
+		respondErrorf(w, http.StatusBadRequest, "bad_request", "pageSize 与 limit 不能同时使用（两种分页接口）")
+		return 0, 0, false
+	}
+
 	page, pageSize = 1, query.DefaultPageSize
-	if raw := r.URL.Query().Get("page"); raw != "" {
+	if hasPage {
+		raw := q.Get("page")
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 1 {
-			respondErrorf(w, http.StatusBadRequest, "bad_request", "page 参数 %q 不是正整数", raw)
+			respondErrorf(w, http.StatusBadRequest, "bad_request", "page 参数 %q 不是正整数（1 起）", raw)
 			return 0, 0, false
 		}
 		page = v
 	}
-	if raw := r.URL.Query().Get("pageSize"); raw != "" {
+	if hasPageSize {
+		raw := q.Get("pageSize")
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 1 {
-			respondErrorf(w, http.StatusBadRequest, "bad_request", "pageSize 参数 %q 不是正整数", raw)
+			respondErrorf(w, http.StatusBadRequest, "bad_request", "pageSize 参数 %q 不是正整数（1–100）", raw)
 			return 0, 0, false
 		}
 		if v > query.MaxPageSize {
 			v = query.MaxPageSize // clamp, never fail (§9: max 100)
 		}
 		pageSize = v
+	}
+	if hasLimit {
+		raw := q.Get("limit")
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 {
+			respondErrorf(w, http.StatusBadRequest, "bad_request", "limit 参数 %q 不是正整数（1–100，超出部分钳制为 100）", raw)
+			return 0, 0, false
+		}
+		if v > query.MaxPageSize {
+			v = query.MaxPageSize
+		}
+		pageSize = v
+	}
+	if hasOffset {
+		raw := q.Get("offset")
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 {
+			respondErrorf(w, http.StatusBadRequest, "bad_request", "offset 参数 %q 不是非负整数（0 起）", raw)
+			return 0, 0, false
+		}
+		page = v/pageSize + 1
 	}
 	return page, pageSize, true
 }

@@ -2,6 +2,42 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.6.2] — 2026-10-12
+
+**运维加固轮**（W17 单轮：剩余 6 个 open issue 全部处置 + 用户反馈的两条地图体验问题）。核心：把 v0.6.1 之后剩余的跨平台/契约类缺陷（#3–#8）一次收口——Windows 测试可跑、无名 sheet 不再静默零行导入、report --out 不再静默无输出、负数分页不再静默忽略、跨库错配一步可辨；地图侧响应现场反馈完成两件事——2D 设备**聚簇**（修「锁在一起/默认比例不合适」）与 3D 视图**真实离线 DEM 地形**（修「2.5D 无地理高度支撑」）。issue #10（能力差距）以 ADR-0011 设计决策记录处置。
+
+### 修复 — issue #3：Windows e2e 测试构建的临时二进制缺 `.exe` 后缀（11 个测试失败）
+- `internal/app/e2e_test.go` 增加 `exeSuffix()`（`runtime.GOOS=="windows"` → `.exe`），TestMain 构建产物在 Windows 可被 `exec.Command` 执行；`Makefile` 的 `build`/`build-testdatagen` 同步追加 `BIN_EXT`（`go env GOOS` 探测），`make build` 在 Windows 产出可运行的 `bin/netopslab.exe`。Linux 行为零变化。
+
+### 修复 — issue #4：类型识别仅依赖 sheet 名 → 标准导出（Sheet1）整表静默跳过
+- 新增 `mapping.SuggestTypeFromHeaders`：sheet 名无 SheetHint 时按**表头行**推断类型——逐 spec 统计字段命中数（exact/normalized/synonym 同 bestMatch 阶梯），**完整自然键在场 + 必填字段过半**才合格（无身份键不导入，宁跳勿错），分最高者胜、同分取 Specs 序（确定论）。`Suggest` 与 `SuggestMapping` 均接入：issue 复现的 `Sheet1` + 设备名称/端口名称/设备IP/带宽表头 → 建议 port import（此前 action=skip →「导入成功但 0 行」的静默失败）。新增 `suggest_headers_test.go` 六测（含无自然键守卫、port 优先于 device 的判别、Sheet1 端到端不再跳过、列建议限定候选集）；`importer` 钉住旧行为的测试改钉新契约。
+
+### 修复 — issue #5：Windows TempDir 清理失败（3 测试）与非法文件名（1 测试）
+- modernc.org/sqlite 在 Windows 上释放文件句柄滞后于 `Close()` 返回，t.TempDir 的 RemoveAll 报「directory is not empty」→ 测试被记失败。修复：repo/sim 两包各置 `tempDirT`（MkdirTemp + 清理重试 ~1s、残余失败记日志不判败；POSIX 首试即成、永不 sleep）。`TestOpenPathWithSpecialCharacters` 的 `?` 路径在 Windows 非法 → 平台分支改用合法但同样考验 DSN 编码的字符（空格/`#`/`%`）。
+
+### 修复 — issue #6：`report --format json --out` 退出码 0 但 stdout 空
+- §10 契约（每命令 stdout 恰好一个 JSON 对象）此前对 `--out` 路径失守：文件写完、stdout 沉默，脚本无法区分成功与失败。修复：`--out` 时 stdout 输出 `reportResponse` 摘要（file/format/scope/totalResources/qualityScore/issuesBySeverity——对齐 export 命令的模式），json/html 两格式一致；无 `--out` 行为不变。新增 `TestCLIReportOutStdoutSummary` 双格式断言。
+
+### 修复 — issue #7：API 分页负数参数静默忽略
+- `limit`/`offset` 此前是**未知名**，任何值都被忽略（负值与「已生效」不可区分）。修复：`parsePagination` 支持 REST 风格双接口——`limit`（1–100，>100 钳制 100）+ `offset`（0 起，页号 = offset/limit+1）；非数值/负数/零 → 400 `bad_request`（消息说明取值范围，与枚举参数的严格性对齐）；两接口混用（page+offset、pageSize+limit）→ 400（显式冲突优于隐式优先级）。全部列表端点（resources/issues/batches/workspaces 三处）经共享 helper 一体获得。新增 `pagination_issue7_test.go`（校验 8 例 + 语义 3 例 + 既有 page/pageSize 行为回归）。
+
+### 修复 — issue #8：CLI 与 serve 使用不同 DB 时无提示（易误判数据丢失）
+- 三处可见性：① `GET /api/health` 新增 `dbPath`（服务端绑定库的**绝对**路径）；② 工作区类 404 信封追加「this server is bound to database <abs>——cross-database mismatch (serve --db vs CLI --db) is the usual cause」；③ `lab workspace create` 输出嵌入 `MaterializeResult` 并新增顶层 `db` 字段（绝对路径），与 serve 启动日志的绝对路径一行比对即分辨「连错库」与「数据丢失」。serve 启动日志同步升级为绝对路径（相对路径按工作目录解析会误导）。新增 health/404/create 三组回归测试。
+
+### 新增 — 2D 设备聚簇（用户反馈：「2D 图锁在一起，默认没有按合适的比例缩放」）
+- 根因：初始 fitBounds 是全省视野（数据跨 7° 纬度），同城设备屏幕间距仅 1–2px，编码牌堆叠成黑块。修复：`geoCluster.ts` 贪心 leader 聚簇（纯函数）——任意两个可见项（簇心/单例）屏幕距离 ≥56px，成员吸附最近 leader；`GeoCanvas` 在 move/zoom（rAF 节流）与数据/选中变化时重算，簇渲染为计数气泡（32px 圆徽 + 故障红边 + 故障角标 + 选中蓝圈，键盘可聚焦），被吞并设备的独立地标隐藏；**点击簇 fitBounds 成员 bbox 放大展开**（maxZoom +2.2），簇随缩放拆分。演示数据下：10 设备 → 2 簇（哈尔滨 3 + 大兴安岭 2）+ 4 个可读单例。GCJ 底图下投影与 Marker 同源，坐标系无关。
+
+### 新增 — 3D 真实离线 DEM 地形（用户反馈：「2.4D 地图没有地理高度地图支撑」）
+- **数据**：AWS Terrain Tiles（Mapzen 数据管线，SRTM/GMTED 融合，terrarium 编码，公开免密钥）——黑龙江 bbox（121.6–128.2E / 45–53.6N）z4–z8 共 **97 瓦片 ≈6.4MB** 随二进制内嵌（`web/public/mapdata/dem/`，`scripts/download_dem_tiles.py` 可重跑扩展）；z8 原生 ~300m/px，更高 zoom 由 MapLibre 父级上采样。
+- **渲染**：`geoBasemap` 注册 `dem` raster-dem 源（encoding=terrarium，minzoom 4/maxzoom 8）+ hillshade 图层（底图之上、业务图层之下，深色主题柔和参数）；`GeoCanvas` 在 3D 视图按 `map.setTerrain({source:'dem', exaggeration:1.2})` 挂起伏、回 2D/关偏好显式卸载（2D 无视觉贡献但占渲染开销）；**图层面板新增「地形高程」开关**（默认开，localStorage 持久化；任何底图可用——DEM 是本地栅格，不受 GCJ/WGS84 底图限制）。setStyle 重建后 terrain 自动重挂（reapply 路径）。webui 对 `/mapdata/dem/**` 统一 1h 缓存（新增 PNG MIME + 磁头测试）。
+- 浏览器级回归 `scripts/w17_browser_regression.sh`：**11/11 PASS**（初始聚簇 ≥2、点击展开 zoom 4.60→6.80、3D terrain=dem、hillshade 可见、页面实际拉取 76+ 张 DEM 瓦片、开关卸载/隐藏、零页面错误）。
+
+### 设计 — issue #10：能力差距 ADR（数据异常检测/设备告警/趋势预测）
+- `docs/adr/0011-ops-capabilities.md`：四个能力的优先级与数据模型设计（时序指标表、检测规则引擎与 E/W/I 规则目录的关系、告警状态机、预测算法选型），以及 MCP 工具面的红线决策（保持「恰好 5 个只读工具」冻结，分析类能力走 HTTP + Web 面板）。按 issue 建议以设计记录形式处置（不实现）。
+
+### 门禁与事实源
+- Go 21 包全绿（含新增：suggest_headers ×6、pagination/health/404 ×4、e2e report-summary + lab-create-db ×2、webui DEM ×1）；`gofmt`/`go vet` 干净；`tsc -b` 零错；`vite build` 过（dist 含 97 张 DEM 瓦片）；浏览器回归 11/11。版本矩阵四处对齐 v0.6.2（domain.AppVersion / i18n.APP_VERSION / README MCP version / api.md 基线），`TestAppVersionMatchesChangelogHead` 钉死 CHANGELOG 头。
+
 ## [0.6.1] — 2026-10-12
 
 **地图修复轮**（W16-D 单轮开发 + W16-Q 独立核验；需求驱动为 v0.6.0 发布后的四条地图缺陷 issue——#1 画布高度塌陷、#2 Windows `.mjs` MIME、#9 3D 巨型光柱、#11 底图单一不可切换）。核心：把「能看地图」修成「能用于运维的地图」——画布塌陷与 Windows Worker 加载两处功能级失效归零；底图从硬编码 ESRI 极简变为四种可切换模式（高德街道/高德卫星/ESRI 极简/离线极简），黑龙江本地 OSM 行政区划/铁路/公路叠加数据随二进制内嵌分发（内网可用）；3D 柱体高度获得物理钳制与正确像素换算；新增图层面板让画布自己决定显示什么（铁路默认关闭，不干扰主观看）。

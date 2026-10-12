@@ -84,3 +84,12 @@ osmium export water.osm.pbf -o water.geojson
 本目录描述的 Release 原始数据经 RDP 简化（admin 0.0006° / rail 0.0005° / roads 0.0005° / dxa 0.0003°）+
 属性精简 + 5 位小数圆整后共 ~1.7MB（.geojson.gz），随 vite 构建进 `internal/webui/dist` 并
 `go:embed` 进二进制——内网部署无需回 Release 下载。原始 40MB PBF 仍只在 Release（不入库）。
+
+## DEM 地形瓦片（v0.6.2 新增）
+
+`web/public/mapdata/dem/{z}/{x}/{y}.png`：黑龙江 bbox（121.6–128.2E / 45.0–53.6N）
+z4–z8 共 97 张 terrarium 编码高程瓦片（≈6.4MB），源为 AWS Terrain Tiles
+（Mapzen 数据管线，SRTM/GMTED 融合，公开免密钥，© Mapzen / AWS Open Data）。
+随二进制 go:embed 分发，3D 视图地形起伏与 2D 山体阴影共用；重跑/扩 bbox：
+`python3 /home/z/my-project/scripts/download_dem_tiles.py`（校验 PNG 256×256
+与高程解码范围后落盘，幂等）。

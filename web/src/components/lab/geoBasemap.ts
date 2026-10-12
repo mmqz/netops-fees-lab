@@ -60,6 +60,20 @@ const MAPDATA_RAIL = '/mapdata/hlj-railways.geojson.gz';
 const MAPDATA_ROADS_MAIN = '/mapdata/hlj-roads-main.geojson.gz';
 const MAPDATA_ROADS_DXA = '/mapdata/hlj-roads-daxinganling-full.geojson.gz';
 
+// —— 离线地形高程（W17：3D 视图的真实起伏支撑）——
+// AWS Terrain Tiles（Mapzen 数据管线，SRTM/GMTED 融合，terrarium 编码，
+// 公开免密钥），黑龙江 bbox z4–z8 共 97 瓦片 ≈6.4MB，随二进制内嵌离线可用。
+// 高于 z8 由 MapLibre 对 z8 父级瓦片上采样（300m/px 原生分辨率对省级
+// 地形展示已足够）。scripts/download_dem_tiles.py 可重跑/扩展。
+export const DEM_SOURCE_ID = 'dem';
+const DEM_TILES_URL = '/mapdata/dem/{z}/{x}/{y}.png';
+const DEM_ATTRIBUTION =
+  '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Terrain: Mapzen · AWS Open Data</a>';
+/** 地形夸张系数（1.2：平原不雀跃、大兴安岭有形）。 */
+export const TERRAIN_EXAGGERATION = 1.2;
+/** hillshade 图层 id（可见性随 terrain 偏好）。 */
+export const HILLSHADE_LAYER_ID = 'hillshade';
+
 /** 中文标注字形（免密钥；完全离线时静默降级——MapLibre 容忍字形拉取失败）。 */
 const GLYPHS_URL = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 const FONT = ['Noto Sans Regular'];
@@ -147,6 +161,8 @@ export interface GeoLayerPrefs {
   links: boolean;
   /** 设备地标（HTML Marker）可见性。 */
   devices: boolean;
+  /** 地形高程（W17）：3D 视图起伏 + 2D 山体阴影（离线 DEM，默认开）。 */
+  terrain: boolean;
 }
 
 export const DEFAULT_PREFS: GeoLayerPrefs = {
@@ -154,6 +170,7 @@ export const DEFAULT_PREFS: GeoLayerPrefs = {
   overlays: { admin: true, railway: false, road: false },
   links: true,
   devices: true,
+  terrain: true,
 };
 
 const PREFS_KEY = 'netops-lab.geo.layers';
@@ -178,6 +195,7 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
       },
       links: typeof p['links'] === 'boolean' ? p['links'] : DEFAULT_PREFS.links,
       devices: typeof p['devices'] === 'boolean' ? p['devices'] : DEFAULT_PREFS.devices,
+      terrain: typeof p['terrain'] === 'boolean' ? p['terrain'] : DEFAULT_PREFS.terrain,
     };
   } catch {
     return { ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } };
@@ -438,6 +456,9 @@ export interface StyleOptions {
   overlayVisibility: Record<OverlayId, boolean>;
   /** 业务链路可见性。 */
   linksVisible: boolean;
+  /** 地形高程可见性（W17）：hillshade 图层烘焙进样式；terrain 3D 起伏由
+   *  GeoCanvas 按视图模式命令式 setTerrain（2D 关、3D 开）。 */
+  terrainVisible: boolean;
 }
 
 export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSpecification {
@@ -451,6 +472,16 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
     'offline-rail': { type: 'geojson', data: MAPDATA_RAIL, attribution: OSM_ATTRIBUTION },
     'offline-roads-main': { type: 'geojson', data: MAPDATA_ROADS_MAIN, attribution: OSM_ATTRIBUTION },
     'offline-roads-dxa': { type: 'geojson', data: MAPDATA_ROADS_DXA, attribution: OSM_ATTRIBUTION },
+    // 离线 DEM（恒在：本地瓦片不依赖外网；terrain 起伏与 hillshade 都从它取）
+    [DEM_SOURCE_ID]: {
+      type: 'raster-dem',
+      tiles: [DEM_TILES_URL],
+      encoding: 'terrarium',
+      minzoom: 4,
+      maxzoom: 8,
+      tileSize: 256,
+      attribution: DEM_ATTRIBUTION,
+    } as StyleSpecification['sources'][string],
   };
   if (withRaster && def.tiles !== null) {
     sources[BASEMAP_SOURCE_ID] = {
@@ -481,6 +512,21 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
       });
     }
   }
+
+  // 山体阴影（W17，底图之上/业务图层之下）：terrain 偏好开时可见，
+  // 与 3D 起伏共用同一离线 DEM 源。深色主题下的柔和参数。
+  layers.push({
+    id: HILLSHADE_LAYER_ID,
+    type: 'hillshade',
+    source: DEM_SOURCE_ID,
+    layout: { visibility: visOf(opts.terrainVisible) },
+    paint: {
+      'hillshade-exaggeration': 0.45,
+      'hillshade-shadow-color': '#0b101d',
+      'hillshade-highlight-color': '#7d90b8',
+      'hillshade-accent-color': '#243049',
+    },
+  } as unknown as LayerSpecification);
 
   // 离线叠加（在业务图层之下：运维主观看的是设备，地理要素做背景参照）
   layers.push(...overlayLayers(opts.overlayVisibility));

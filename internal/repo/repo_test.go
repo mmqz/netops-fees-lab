@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,10 +11,34 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 )
 
-// newTestDB opens a fresh database in a per-test temporary directory.
+// tempDirT is t.TempDir with a Windows-tolerant cleanup (issue #5):
+// modernc.org/sqlite may release the database file handle a few milliseconds
+// after Close returns, so on Windows the RemoveAll of t.TempDir can fail with
+// "directory is not empty" even though db.Close ran first (cleanups run
+// LIFO). The remove is retried briefly; a residual failure is logged, never
+// failed — POSIX removes on the first try and never sleeps.
+func tempDirT(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "netops-repo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() {
+		var last error
+		for i := 0; i < 25; i++ {
+			if last = os.RemoveAll(dir); last == nil {
+				return
+			}
+			time.Sleep(40 * time.Millisecond)
+		}
+		t.Logf("tempdir cleanup: RemoveAll(%s) failed after ~1s of retries: %v (Windows 句柄释放延迟，忽略)", dir, last)
+	})
+	return dir
+}
+
 func newTestDB(t *testing.T) *DB {
 	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := Open(filepath.Join(tempDirT(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

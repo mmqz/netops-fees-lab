@@ -18,16 +18,29 @@ import (
 	"github.com/mmqz/netops-lab/internal/repo"
 )
 
-// handleHealth implements GET /api/health.
+// handleHealth implements GET /api/health. dbPath is the ABSOLUTE path of
+// the database this server is bound to (issue #8: a workspace that exists
+// in the CLI's database but 404s here is almost always a cross-database
+// mismatch — surfacing the binding makes "连错库 vs 数据丢失" a one-curl
+// check: `curl /api/health` vs the CLI's --db).
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	dbPath := ""
+	if s.db != nil {
+		dbPath = s.db.Path()
+		if abs, err := filepath.Abs(dbPath); err == nil {
+			dbPath = abs
+		}
+	}
 	respondJSON(w, http.StatusOK, struct {
 		Status      string `json:"status"`
 		Version     string `json:"version"`
 		RuleVersion string `json:"ruleVersion"`
+		DBPath      string `json:"dbPath"`
 	}{
 		Status:      "ok",
 		Version:     domain.AppVersion,
 		RuleVersion: domain.RuleVersion,
+		DBPath:      dbPath,
 	})
 }
 

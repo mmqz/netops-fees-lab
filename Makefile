@@ -3,45 +3,48 @@
 .PHONY: fmt vet test testdata build build-testdatagen web demo demo-lab all clean
 
 fmt:
-	gofmt -l -w .
+        gofmt -l -w .
 
 vet:
-	go vet ./...
+        go vet ./...
 
 test:
-	go test -count=1 -timeout 15m ./...
+        go test -count=1 -timeout 15m ./...
 
 testdata:
-	go run ./cmd/testdatagen -out testdata
+        go run ./cmd/testdatagen -out testdata
 
 # The single NetOps Lab binary (serve/import/analyze/validate/report/query/mcp/testdata).
 # Embeds whatever is currently in internal/webui/dist — run `make web` first
 # (or `make all`) to bundle the real frontend; without it the SPA is a stub.
+# BIN_EXT appends ".exe" on Windows (issue #3: the e2e tests and `make build`
+# must produce a runnable name on every platform).
+BIN_EXT := $(shell go env GOOS | grep -s windows && echo .exe || echo)
 build:
-	go build -o bin/netopslab ./cmd/netopslab
+        go build -o bin/netopslab$(BIN_EXT) ./cmd/netopslab
 
 build-testdatagen:
-	go build -o bin/testdatagen ./cmd/testdatagen
+        go build -o bin/testdatagen$(BIN_EXT) ./cmd/testdatagen
 
 # Frontend build: installs web/ dependencies and builds the React SPA into
 # internal/webui/dist (the embedded assets served by the Go binary).
 # Node 24 / npm 11 required; the Go build embeds whatever is in dist/.
 web:
-	cd web && npm ci && npm run build
+        cd web && npm ci && npm run build
 
 # Repeatable demo: fresh temp DB → import×3 → validate → HTML report → stats.
 # Uses bin/netopslab (builds it first if missing). See scripts/demo.sh.
 demo:
-	bash scripts/demo.sh
+        bash scripts/demo.sh
 
 # Repeatable simulation-workbench demo: fresh temp DB → import×3 →
 # materialize workspace → fault injection (CHK-001 + link down) → path/diff
 # → undo → checkpoint create/break/restore. See scripts/demo-lab.sh.
 demo-lab:
-	bash scripts/demo-lab.sh
+        bash scripts/demo-lab.sh
 
 # Full production artifact: frontend first, then the binary that embeds it.
 all: web build
 
 clean:
-	rm -rf bin
+        rm -rf bin

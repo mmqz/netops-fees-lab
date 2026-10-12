@@ -14,10 +14,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// exeSuffix is "" on POSIX and ".exe" on Windows: the e2e binary must
+// carry the platform suffix or exec.Command cannot run it on Windows
+// (issue #3: `executable file not found in %PATH%`).
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
 
 // e2eBin is the netopslab binary TestMain builds; empty when the build is
 // skipped (only when the go tool is unavailable).
@@ -43,7 +54,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "mkdir temp: %v\n", err)
 		os.Exit(1)
 	}
-	bin := filepath.Join(tmp, "netopslab")
+	bin := filepath.Join(tmp, "netopslab"+exeSuffix())
 
 	// Build the real binary once for all CLI e2e tests.
 	build := exec.Command("go", "build", "-o", bin, "./cmd/netopslab")

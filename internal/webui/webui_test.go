@@ -144,3 +144,38 @@ func TestHandlerRealDistSmoke(t *testing.T) {
 		t.Skip("no .mjs asset in embedded dist (frontend not built with map worker)")
 	}
 }
+
+// TestHandlerRealDistDEMTiles verifies the embedded offline terrain tiles
+// (W17: web/public/mapdata/dem, 97 terrarium PNGs) serve with the PNG MIME
+// type and the immutable mapdata caching — the contract the maplibre
+// raster-dem source depends on.
+func TestHandlerRealDistDEMTiles(t *testing.T) {
+	h := Handler()
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// A real z5 tile inside the Heilongjiang bbox (see
+	// scripts/download_dem_tiles.py for the ranges).
+	resp, err := http.Get(ts.URL + "/mapdata/dem/5/27/10.png")
+	if err != nil {
+		t.Fatalf("GET dem tile: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET dem tile: status = %d, want 200 (tile missing from dist?)", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/png" {
+		t.Errorf("dem tile Content-Type = %q, want image/png", got)
+	}
+	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+		t.Errorf("dem tile Cache-Control = %q, want max-age caching for mapdata", cc)
+	}
+	// PNG magic bytes (a valid terrarium tile, not an error page).
+	var magic [4]byte
+	if _, err := resp.Body.Read(magic[:]); err != nil {
+		t.Fatalf("read dem tile magic: %v", err)
+	}
+	if magic != [4]byte{0x89, 'P', 'N', 'G'} {
+		t.Errorf("dem tile magic = %v, want PNG signature", magic)
+	}
+}

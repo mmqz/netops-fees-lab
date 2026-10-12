@@ -49,8 +49,11 @@ import type { SelectedEntity } from './selection';
 import {
   BASEMAP_REF_SOURCE_ID,
   BASEMAP_SOURCE_ID,
+  DEM_SOURCE_ID,
+  HILLSHADE_LAYER_ID,
   LINK_LAYERS,
   OVERLAY_LAYERS,
+  TERRAIN_EXAGGERATION,
   TOWER_MAX_M,
   TOWER_MIN_M,
   basemapIsGCJ,
@@ -61,6 +64,8 @@ import {
   saveGeoLayerPrefs,
 } from './geoBasemap';
 import type { BasemapId, GeoLayerPrefs, OverlayId, StyleOptions } from './geoBasemap';
+import { clusterBounds, clusterDevices } from './geoCluster';
+import type { ClusterPoint } from './geoCluster';
 import {
   LAB_CANVAS_LEGEND_LABEL,
   LAB_GEO_BIZ_DEVICES,
@@ -88,12 +93,16 @@ import {
   LAB_GEO_NOGEO_BACK,
   LAB_GEO_OFFLINE,
   LAB_GEO_OFFLINE_TITLE,
+  LAB_GEO_CLUSTER_ARIA,
+  LAB_GEO_CLUSTER_TITLE,
   LAB_GEO_OV_ADMIN,
   LAB_GEO_OV_ADMIN_TITLE,
   LAB_GEO_OV_RAIL,
   LAB_GEO_OV_RAIL_TITLE,
   LAB_GEO_OV_ROAD,
   LAB_GEO_OV_ROAD_TITLE,
+  LAB_GEO_OV_TERRAIN,
+  LAB_GEO_OV_TERRAIN_TITLE,
   LAB_GEO_OV_UNAVAILABLE,
   LAB_GEO_PARTIAL,
   LAB_GEO_PARTIAL_TITLE,
@@ -133,6 +142,13 @@ const ZOOM_3D_STEP_BACK = 1.3;
 /** 初始相机（数据到达前）：中国中心，等待 fitBounds。 */
 const DEFAULT_CENTER: [number, number] = [105, 36];
 const DEFAULT_ZOOM = 3.2;
+
+/** 地标聚簇阈值（W17）：可见项（簇心/单例）之间的最小屏幕间距。设备牌
+ * 宽 ~85px、高 ~18px，56px 内必重叠；全省初始视野下同城设备 1–2px 间距
+ * → 聚成计数簇（点「锁在一起」的直接修复），点击/放大后展开。 */
+const CLUSTER_PX = 56;
+/** 点击聚簇后的目标 zoom 增量（成员 bbox fit + 领头设备的适度近观）。 */
+const CLUSTER_ZOOM_STEP = 2.2;
 
 /** 底图瓦片连续失败阈值 → 离线降级看门狗触发条件之一。 */
 const TILE_FAIL_LIMIT = 3;
@@ -419,6 +435,17 @@ function applyTowerVisibility(map: MLMap, view: 'geo2d' | 'geo3d'): void {
   }
 }
 
+/** 地形（W17）：3D 视图 + 偏好开 → setTerrain（离线 DEM 源）；否则显式
+ *  卸载（null）。try/catch：DEM 源尚未就绪等瞬时态不致命（下次 effect 重试）。 */
+function applyTerrainFor(map: MLMap, view: 'geo2d' | 'geo3d', terrain: boolean): void {
+  const target = view === 'geo3d' && terrain ? { source: DEM_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION } : null;
+  try {
+    map.setTerrain(target);
+  } catch {
+    // 样式重建在途：忽略（reapply/effect 会重挂）
+  }
+}
+
 /** 叠加/业务图层可见性批量应用（叠加仅在 WGS84 底图下放行）。 */
 function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: BasemapId): void {
   const overlaysOn = overlaysAvailable(effective);
@@ -440,6 +467,9 @@ function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: Bas
   const linkVis = prefs.links ? 'visible' : 'none';
   for (const id of LINK_LAYERS) {
     if (map.getLayer(id) !== undefined) map.setLayoutProperty(id, 'visibility', linkVis);
+  }
+  if (map.getLayer(HILLSHADE_LAYER_ID) !== undefined) {
+    map.setLayoutProperty(HILLSHADE_LAYER_ID, 'visibility', prefs.terrain ? 'visible' : 'none');
   }
 }
 
@@ -550,6 +580,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const mapRef = useRef<MLMap | null>(null);
   const libRef = useRef<MapLibreModule | null>(null);
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
+  /** 聚簇 marker 持有项（W17）：key = 成员 id 升序 join，重建时全量置换。 */
+  const clusterMarkersRef = useRef<Map<string, { marker: MLMarker; el: HTMLButtonElement }>>(new Map());
+  const updateClustersRef = useRef<(() => void) | null>(null);
   const geoDataRef = useRef<GeoData | null>(null);
   const topoRef = useRef<SimTopology | null>(topology);
   const didFitRef = useRef(false);
@@ -655,6 +688,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           road: prefsRef.current.overlays.road && overlaysAvailable(id),
         },
         linksVisible: prefsRef.current.links,
+        terrainVisible: prefsRef.current.terrain,
       });
       const map = new maplibregl.Map({
         container: div,
@@ -702,6 +736,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           if (topo !== null && tsrc !== undefined) tsrc.setData(buildTowerCollection(topo, map.getZoom(), gcjRef.current));
           applyTowerVisibility(map, viewRef.current);
           applyLayerVisibilities(map, prefsRef.current, effectiveRef.current);
+          // setStyle 会清掉 terrain：按当前视图/偏好重挂（W17）。
+          applyTerrainFor(map, viewRef.current, prefsRef.current.terrain);
+          updateClustersRef.current?.();
         };
         map.on('styledata', reapply);
         cleanups.push(() => map.off('styledata', reapply));
@@ -782,6 +819,24 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         scheduleTowerRebuildRef.current = null;
       });
 
+      // —— 聚簇重算（W17）：move/zoom 期间 rAF 节流（与塔同帧但独立计数）。
+      // 平移也会改变屏幕间距，挂 move 而非仅 zoom。 ——
+      let clusterRaf = 0;
+      const scheduleClusterUpdate = (): void => {
+        if (disposed || clusterRaf !== 0) return;
+        clusterRaf = requestAnimationFrame(() => {
+          clusterRaf = 0;
+          updateClustersRef.current?.();
+        });
+      };
+      map.on('move', scheduleClusterUpdate);
+      map.on('moveend', scheduleClusterUpdate);
+      cleanups.push(() => {
+        map.off('move', scheduleClusterUpdate);
+        map.off('moveend', scheduleClusterUpdate);
+        if (clusterRaf !== 0) cancelAnimationFrame(clusterRaf);
+      });
+
       // 容器尺寸变化 → map.resize（zen / 分栏 / 视口变化；拖拽中由父级挂起）
       if (typeof ResizeObserver !== 'undefined') {
         observer = new ResizeObserver(() => {
@@ -800,6 +855,11 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         entry.marker.remove();
       });
       markersRef.current.clear();
+      clusterMarkersRef.current.forEach((entry) => {
+        entry.marker.remove();
+      });
+      clusterMarkersRef.current.clear();
+      updateClustersRef.current = null;
       localMap?.remove();
       mapRef.current = null;
       libRef.current = null;
@@ -858,6 +918,92 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     if (map === null || !sourcesReady) return;
     scheduleTowerRebuildRef.current?.();
   }, [gcj, sourcesReady]);
+
+  // —— 聚簇（W17）：屏幕碰撞 → 计数簇 + 单例地标，点击簇放大展开 ——
+  // 依赖全部走 ref（挂载 effect 的 move rAF 与各 effect 直接调度，无重建问题）。
+  const updateClusters = useCallback((): void => {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (map === null || lib === null) return;
+    // 全量置换簇 marker（数据/相机任一变化都重算；典型规模 ≤几百设备，
+    // O(n·k) 屏幕距离计算可忽略不计）。
+    clusterMarkersRef.current.forEach((entry) => entry.marker.remove());
+    clusterMarkersRef.current.clear();
+
+    const topo = topoRef.current;
+    if (topo === null || !prefsRef.current.devices) return; // 设备层关：无簇无单例
+
+    // 屏幕投影（含 GCJ 投影后的坐标——投影与 Marker.setLngLat 同源）。
+    const pts: ClusterPoint[] = [];
+    for (const node of topo.nodes) {
+      const lat = node.geoLat;
+      const lng = node.geoLng;
+      if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const [plng, plat] = projLngLat(lng, lat, gcjRef.current);
+      const p = map.project([plng, plat]);
+      pts.push({ id: node.id, code: node.code, name: node.name, status: node.status, lng: plng, lat: plat, x: p.x, y: p.y });
+    }
+    if (pts.length === 0) return;
+
+    const { clusters, singletons } = clusterDevices(pts, CLUSTER_PX);
+
+    // 单例 → 显示独立地标；被簇吞并 → 隐藏（CSS .geo-marker--clustered）。
+    const singletonIds = new Set(singletons.map((p) => p.id));
+    markersRef.current.forEach((entry, id) => {
+      entry.btn.classList.toggle('geo-marker--clustered', !singletonIds.has(id));
+    });
+
+    const selectedId = selectedRef.current?.kind === 'device' ? selectedRef.current.id : null;
+    for (const c of clusters) {
+      const down = c.members.filter((m) => m.status === 'down').length;
+      const selected = c.members.some((m) => m.id === selectedId);
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.tabIndex = 0;
+      el.className = 'geo-cluster';
+      if (down > 0) el.classList.add('geo-cluster--down');
+      if (selected) el.classList.add('geo-cluster--selected');
+      const count = document.createElement('span');
+      count.className = 'geo-cluster-count';
+      count.textContent = String(c.members.length);
+      el.appendChild(count);
+      if (down > 0) {
+        const downBadge = document.createElement('span');
+        downBadge.className = 'geo-cluster-down';
+        downBadge.textContent = String(down);
+        downBadge.setAttribute('aria-hidden', 'true');
+        el.appendChild(downBadge);
+      }
+      const codes = c.members.map((m) => m.code).slice(0, 6).join('、');
+      const title = format(LAB_GEO_CLUSTER_TITLE, { n: c.members.length, down, codes });
+      el.title = title;
+      el.setAttribute('aria-label', format(LAB_GEO_CLUSTER_ARIA, { n: c.members.length, down }));
+      const hoverIn = (): void => {
+        onHoverInfoRef.current?.({ code: `${c.members.length} 台`, name: codes, status: down > 0 ? 'down' : 'up' });
+      };
+      const hoverOut = (): void => {
+        onHoverInfoRef.current?.(null);
+      };
+      el.addEventListener('click', () => {
+        // 放大展开：成员 bbox fit + 领头适度近观（保留当前 pitch/bearing）。
+        const bounds = clusterBounds(c.members);
+        map.fitBounds(bounds, {
+          padding: 120,
+          maxZoom: map.getZoom() + CLUSTER_ZOOM_STEP,
+          duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS,
+        });
+      });
+      el.addEventListener('mouseenter', hoverIn);
+      el.addEventListener('mouseleave', hoverOut);
+      el.addEventListener('focus', hoverIn);
+      el.addEventListener('blur', hoverOut);
+      const marker = new lib.Marker({ element: el, anchor: 'center' })
+        .setLngLat([c.center.lng, c.center.lat])
+        .addTo(map);
+      clusterMarkersRef.current.set(c.members.map((m) => m.id).sort().join('|'), { marker, el });
+    }
+  }, []);
+  updateClustersRef.current = updateClusters;
 
   // —— 地标（HTML Marker）：设备增删/状态/坐标系变化重建；选中与标签走类切换 ——
   const rebuildMarkers = useCallback((): void => {
@@ -924,6 +1070,8 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   useEffect(() => {
     if (!sourcesReady) return;
     rebuildMarkers();
+    // 重建后立即重算聚簇（设备增删/坐标系切换改变屏幕间距）。
+    updateClustersRef.current?.();
   }, [topology, sourcesReady, rebuildMarkers, gcj]);
 
   // 选中 / 标签开关 / 设备可见性 → 地标类与显隐切换
@@ -935,6 +1083,8 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       const el = entry.marker.getElement();
       el.style.display = prefs.devices ? '' : 'none';
     });
+    // 选中态也影响簇高亮：重算（选中设备可能刚被并入簇）。
+    updateClustersRef.current?.();
   }, [selected, labels, prefs.devices, topology]);
 
   // —— 2D↔3D：pitch 0|58 + 3D 斜视 bearing -30（easeTo 700ms；reduced-motion 0）——
@@ -950,6 +1100,16 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     const zoom = Math.min(15, Math.max(1, map.getZoom() + (view === 'geo3d' ? -ZOOM_3D_STEP_BACK : ZOOM_3D_STEP_BACK)));
     map.easeTo({ pitch, bearing, zoom, duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS });
   }, [view, sourcesReady]);
+
+  // —— 地形（W17）：3D 视图 + 偏好开 → 离线 DEM 起伏；回 2D / 关偏好卸载。
+  // 2D 下地形无视觉贡献但占渲染开销，故按视图显式开关；hillshade（2D 也有
+  //  山体阴影）走 applyLayerVisibilities。effective 入依赖：底图切换重建样式
+  //  会清 terrain，此 effect 负责重挂。 ——
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === null || !sourcesReady) return;
+    applyTerrainFor(map, view, prefs.terrain);
+  }, [view, prefs.terrain, sourcesReady, effective]);
 
   // —— 故障链路虚线动画（marching-ants）：仅存在 down 链路且未偏好减少动效时运行 ——
   useEffect(() => {
@@ -1022,6 +1182,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     },
     [],
   );
+  const toggleTerrain = useCallback((): void => {
+    setPrefs((p) => ({ ...p, terrain: !p.terrain }));
+  }, []);
 
   const overlaysUsable = overlaysAvailable(effective);
   const basemapChoices: Array<{ id: BasemapId; label: string; title: string }> = [
@@ -1109,6 +1272,12 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
                 </label>
               ))}
               {!overlaysUsable && <p className="geo-layerpanel-hint">{LAB_GEO_OV_UNAVAILABLE}</p>}
+              {/* 地形高程（W17）：叠加区末尾独立一行——不随 GCJ 底图禁用
+                  （DEM 是本地栅格，与任何底图叠加都自洽）。 */}
+              <label className="geo-layerpanel-opt" title={LAB_GEO_OV_TERRAIN_TITLE}>
+                <input type="checkbox" checked={prefs.terrain} onChange={toggleTerrain} />
+                {LAB_GEO_OV_TERRAIN}
+              </label>
             </div>
             <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_BUSINESS}</div>
             <div className="geo-layerpanel-options">

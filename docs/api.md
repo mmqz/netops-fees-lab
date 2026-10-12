@@ -5,23 +5,24 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 **通用约定**
 
 - 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）与 `ref_target_missing`（409，v0.6.0 W13-D，apply 的 ref 字段新值解析不到被引用类型资源——目标被删除或提案外漂入，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已不存在而提案仍在——标准批次回滚会先删本批提案、apply 将得 404，此 409 多为新资源被其它路径直接删除，见 §POST /api/renames/{id}/apply）。
-- 分页参数：`page`（1 起，非法值 400）、`pageSize`（默认 20，>100 截断为 100）；列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
+- 分页参数（v0.6.2 起双接口，issue #7）：`page`（1 起）+ `pageSize`（默认 20，>100 截断为 100），或 REST 风格 `limit`（1–100，>100 截断为 100）+ `offset`（0 起，页号按 offset/limit 推导）。非数值/负数/零的 page/pageSize/limit 与负数 offset → 400 `bad_request`（消息说明取值范围；此前 limit/offset 是未知名被静默忽略，负值与「已生效」不可区分）。两接口混用（page+offset 或 pageSize+limit）→ 400。列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.6.1（2026-10-12）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.6.2（2026-10-12）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.6.1",
-  "ruleVersion": "1.0.0"
+  "version": "v0.6.2",
+  "ruleVersion": "1.0.0",
+  "dbPath": "/abs/path/to/netops.db"
 }
 ```
 
-（`version` = `domain.AppVersion` 单一事实源，v0.3.2 起由 `TestAppVersionMatchesChangelogHead` 锚定与 CHANGELOG 头版本一致，不再手抄漂移。）
+（`version` = `domain.AppVersion` 单一事实源，v0.3.2 起由 `TestAppVersionMatchesChangelogHead` 锚定与 CHANGELOG 头版本一致，不再手抄漂移。`dbPath` 为 v0.6.2 新增（issue #8）：服务端实际绑定的数据库绝对路径——CLI 建的工作台在 Web 端 404 时，先比对这个字段与 CLI `--db`/输出的 `db` 字段，一步区分「连错库」与「数据丢失」。）
 
 ## GET /api/schema — 资源 schema 动态发现（v0.4.0）
 

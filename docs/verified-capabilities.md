@@ -1,7 +1,7 @@
 # NetOps Lab — 已验证 / 未验证能力清单
 
 > 诚实为本：每一条"已验证"都可追溯到具体的验证方式与日期；未验证事项显式列出，不粉饰。
-> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版 · v0.6.0 治理三部曲终章与数据双向闭环版）。
+> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版 · v0.6.0 治理三部曲终章与数据双向闭环版）· 2026-10-12（v0.6.1 地图修复版 · v0.6.2 运维加固版）。
 
 ## ✅ 已验证（2026-10-09，linux/amd64）
 
@@ -72,6 +72,36 @@
 | **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
+
+## v0.6.2（2026-10-12）运维加固版
+
+单轮 W17：剩余 6 个 open issue（#3–#8）全部修复 + 用户反馈两条地图体验（2D 聚簇 / 离线 DEM 地形）+ issue #10 以 ADR-0011 设计记录处置。零子代理（全部主代理实现）。
+
+### ✅ 已验证（2026-10-12，linux/amd64 · 2 核沙箱）
+
+| 能力 | 验证方式 | 备注 |
+| --- | --- | --- |
+| **347 个顶层测试全绿**（= v0.6.1 基线 335 + 12 新增） | `gofmt -l .` 空；`go vet ./...` 0 告警；`go test -count=1 ./...` 21 包全部 ok；`npx tsc -b` 0 错误；`npm run build` ✓ | 新增分项：mapping suggest_headers ×6（issue #4）/ api pagination+health+404 ×4（#7/#8）/ app e2e report-summary + lab-create-db ×2（#6/#8）/ webui DEM ×1；importer 1 个钉旧行为测试改钉新契约（#4 行为变更，唯一断言适配点） |
+| Windows 平台修复静态验证（#3/#5） | 代码路径审查 + `runtime.GOOS` 分支编译验证（linux 全绿）；`.exe` 后缀 / tempDirT 宽容清理 / 非法文件名平台分支 | Windows 实机测试不可得（沙箱 linux-only）——三项修复均按 issue 复现的最小根因（exec 后缀 / 句柄释放滞后 / 文件名非法字符）逐一对症，待 Windows 用户复验 |
+| report --out stdout 契约（#6） | `TestCLIReportOutStdoutSummary`：json/html 双格式，stdout 解析为单 JSON 对象（file/format/scope/totalResources/qualityScore/issuesBySeverity），产物文件非空 | 真实子进程 e2e（TestMain 构建的二进制） |
+| 分页双接口 + 负值校验（#7） | `TestPaginationLimitOffsetValidation` 8 例（负/零/非数值/混用 → 400 带范围说明）+ `TestPaginationLimitOffsetSemantics` 3 例（limit+offset=page3 同 page/pageSize 逐行 id 相等、99999 钳 100） | 全部列表端点共享 parsePagination 一体获得 |
+| 跨库错配可见性（#8） | `TestHealthCarriesDBPath`（dbPath 绝对路径）+ `TestWorkspace404HintsCrossDB`（404 信封含 cross-database 提示与绑定库路径）+ `TestCLILabCreateCarriesDB`（create 输出 db = 绝对路径）+ serve 启动日志绝对路径 | 「连错库 vs 数据丢失」一步可辨 |
+| **2D 聚簇（用户反馈）** | 浏览器级：`scripts/w17_browser_regression.sh` A1/A2/B1/B2 PASS——初始全省视野 2 簇（哈尔滨 3 + 大兴安岭 2）+ 4 单例；点击簇 zoom 4.60→6.80、簇 2→1 拆分；VLM 复核截图确认标签黑块消失 | 贪心 leader 聚簇纯函数（geoCluster.ts）+ move/zoom rAF 节流重算 |
+| **离线 DEM 地形（用户反馈）** | 同脚本 C/D/E PASS——3D `getTerrain().source='dem'`、hillshade 可见、页面实际拉取 76+ 张 `/mapdata/dem/*.png`（同源不受外网封禁）、图层面板开关 → terrain null / hillshade none；VLM 复核 3D 截图确认地形起伏与山体阴影可见；webui 瓦片 MIME/缓存/PNG 磁头测试 | 数据：AWS Terrain Tiles（Mapzen，terrarium）黑龙江 z4–z8 共 97 瓦片 6.4MB go:embed 内嵌；z8 ≈300m/px，更高 zoom 父级上采样 |
+| 浏览器级回归 | w17 脚本 11/11 PASS、页面错误 0、console 干净 | 截图存 repo `tmp/`（用户要求：截屏不作为交付物发送） |
+| 版本事实源 | `domain.AppVersion = v0.6.2`；CHANGELOG 头 0.6.2；`TestAppVersionMatchesChangelogHead` 实跑 PASS；i18n APP_VERSION / README MCP version / api.md 基线三触点同步 v0.6.2 | 版本矩阵四处齐（W16-Q P2 教训延续） |
+| issue 处置 | #3 #4 #5 #6 #7 #8 修复关闭（评论附验收证据）；#10 以 ADR-0011 设计记录关闭 | 全部 11 个 open issue 清零 |
+
+### ⚠️ 未验证（v0.6.2 诚实声明）
+
+- **Windows 实机**：#3/#5 的修复在 linux 沙箱只能做编译与路径静态验证，Windows 实机 `go test ./...` 待用户环境复验（issue 评论已注明）。
+- **高德在线瓦片**：沿用 v0.6.1 已知限制——沙箱页面世界封禁 autonavi，真实浏览器不受影响（W16 已多路取证）。
+- **DEM 地形与 fill-extrusion 叠加的极端场景**（俯仰 80°+ 山区近观）：MapLibre 6.13 组合渲染本轮以 pitch 58 + 省级/城市级视野验证；更深俯仰未纳入断言。
+- issue #10 的四个能力（时序/检测/告警/预测）**未实现**——ADR-0011 仅设计记录，验收标准（明确优先级与数据模型）以此满足。
+
+## v0.6.1（2026-10-12）地图修复版
+
+单轮 W16-D + W16-Q 独立核验（PASS-with-findings，P2×1 已修复）：issue #1/#2/#9/#11 四条地图缺陷。335 个顶层测试全绿（= 331 + webui 4）；tsc/build 过；浏览器回归 15/15；画布 756×544 实测；版本矩阵四处齐。详见 CHANGELOG 0.6.1 段与 worklog W16-D/W16-Q 小节。
 
 ## v0.6.0（2026-10-11）治理三部曲终章与数据双向闭环版
 

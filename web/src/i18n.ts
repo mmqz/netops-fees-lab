@@ -28,7 +28,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.6.1';
+export const APP_VERSION = 'v0.6.2';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -766,7 +766,7 @@ export const LAB_VIEW_GEO2D = '2D 地图';
 export const LAB_VIEW_GEO3D = '3D 地图';
 export const LAB_VIEW_TOPO_TITLE = '拓扑图视图（关系拓扑 · 布局 / 路径 / 聚焦 / PNG 导出）';
 export const LAB_VIEW_GEO2D_TITLE = '2D 地图（俯视 · 设备按真实经纬度落位）';
-export const LAB_VIEW_GEO3D_TITLE = '3D 地图（斜视 58° · 柱体高度示意连接数，非地形高程 · 右键拖拽旋转）';
+export const LAB_VIEW_GEO3D_TITLE = '3D 地图（斜视 58° · 离线 DEM 地形起伏 + 柱体高度示意连接数 · 右键拖拽旋转）';
 
 /** 地图视图：适配视图（快捷键 F，与拓扑视图一致）。 */
 export const LAB_GEO_FIT = '适配视图（快捷键 F · 缩放至全部设备可见）';
@@ -828,6 +828,13 @@ export const LAB_GEO_OV_RAIL = '铁路';
 export const LAB_GEO_OV_RAIL_TITLE = '铁路线（滨洲线等，含名称标注 · 默认关闭避免干扰主观看）';
 export const LAB_GEO_OV_ROAD = '公路';
 export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（黑龙江本地数据 · 默认关闭）';
+/** 地形高程开关（W17：离线 DEM，任何底图下可用）。 */
+export const LAB_GEO_OV_TERRAIN = '地形高程';
+export const LAB_GEO_OV_TERRAIN_TITLE =
+  '离线高程数据（Mapzen · AWS Open Data，SRTM/GMTED）：3D 视图真实地形起伏，2D 视图山体阴影';
+/** 聚簇气泡（W17：屏幕碰撞聚合，点击放大展开）。 */
+export const LAB_GEO_CLUSTER_ARIA = '{n} 台设备聚簇（含 {down} 台故障），点击放大查看';
+export const LAB_GEO_CLUSTER_TITLE = '{n} 台设备（{down} 台故障）：{codes} —— 点击放大展开';
 /** GCJ 底图下叠加不可用提示。 */
 export const LAB_GEO_OV_UNAVAILABLE = '高德底图自带交通与区划，本地叠加仅在极简/离线底图下可用';
 /** 业务图层名。 */

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"runtime/debug"
 	"time"
 
@@ -53,7 +54,10 @@ var simErrorMessages = map[string]string{
 // error and stack, exactly like respondErrorFor. invalid_request and
 // op_failed carry the engine's own (dynamic) message — the static map only
 // provides the fallback — so apply-time validation 400s and semantic 422s
-// never answer an empty message (AUD2-3).
+// never answer an empty message (AUD2-3). not_found messages carry the
+// server's database binding (issue #8): a workspace that exists in the
+// CLI's database but 404s here is a cross-database mismatch, and the hint
+// turns "连错库 or 数据丢失？" into a one-look answer.
 func (s *Server) respondSimError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code := mapSimError(err)
 	if status >= 500 && s.log != nil {
@@ -77,8 +81,22 @@ func (s *Server) respondSimError(w http.ResponseWriter, r *http.Request, err err
 			// fallback should a new path surface.
 			message = "operation failed: " + err.Error()
 		}
+	case "not_found":
+		message = fmt.Sprintf("%s; this server is bound to database %s — a cross-database mismatch (serve --db vs CLI --db) is the usual cause", message, s.absDBPath())
 	}
 	respondError(w, status, code, message)
+}
+
+// absDBPath is the absolute path of the bound database ("" when unknown).
+func (s *Server) absDBPath() string {
+	if s.db == nil {
+		return ""
+	}
+	p := s.db.Path()
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return p
 }
 
 // mapSimError converts a sim/repo error into the §7 (status, code) pair.
