@@ -22,17 +22,18 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.6.2 is
-// the ops-hardening round: issues #3-#8 (Windows e2e/.exe, header-based type
-// inference for name-less sheets, Windows tempdir tolerance, report stdout
-// contract, negative pagination validation, cross-database mismatch
-// visibility) are fixed, and the map gains screen-space device clustering
-// (the 2D "everything clumps together" repair) plus real offline DEM terrain
-// (97 embedded terrarium tiles, AWS Terrain Tiles / Mapzen data) behind a
-// layer-panel toggle. TestAppVersionP2 pins this constant and
+// the health endpoint, the MCP server implementation and the CLI. v0.6.3 is
+// the user-feedback map round (issues #12/#13/#14): 2D/3D independent
+// cameras (the "locked together" repair), a re-calibrated default fit
+// (adaptive padding, 2D maxZoom 9→12.5, one-click cluster expansion), and
+// geographic-elevation support that is actually visible — adaptive terrain
+// exaggeration, offline contour lines (200m/500m, GCJ variant pre-projected
+// for AMap basemaps) and a live cursor elevation readout. It also ships the
+// release-pipeline repair: v0.4.0–v0.6.2 existed only as tags, so users were
+// still running v0.3.0. TestAppVersionP2 pins this constant and
 // TestAppVersionMatchesChangelogHead enforces the CHANGELOG single fact
 // source, so the three-way hand-copied versions cannot drift again.
-const AppVersion = "v0.6.2"
+const AppVersion = "v0.6.3"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

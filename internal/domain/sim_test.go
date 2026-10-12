@@ -192,10 +192,10 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-        // Release-bump adaptation (W17, v0.6.2): this assertion intentionally
+        // Release-bump adaptation (W18, v0.6.3): this assertion intentionally
         // tracks AppVersion — it is the version pin, not a relaxed behavior test.
-        if AppVersion != "v0.6.2" {
-                t.Errorf("AppVersion = %q, want v0.6.2 (v0.6.2 ops-hardening round: issues #3-#8 + 2D declutter clustering + offline DEM terrain)", AppVersion)
+        if AppVersion != "v0.6.3" {
+                t.Errorf("AppVersion = %q, want v0.6.3 (v0.6.3 user-feedback map round: issues #12-#14 — camera independence, visible elevation, release-pipeline repair)", AppVersion)
         }
 }
 

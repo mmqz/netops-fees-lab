@@ -10,12 +10,12 @@
 package webui
 
 import (
-        "io/fs"
-        "net/http"
-        "path"
-        "strings"
+	"io/fs"
+	"net/http"
+	"path"
+	"strings"
 
-        "embed"
+	"embed"
 )
 
 // distFS is the embedded frontend build output. `all:` includes files that
@@ -31,12 +31,12 @@ var distFS embed.FS
 // table covers .mjs, so this is a cross-platform no-op there — the explicit
 // map keeps every platform identical.
 var mimeOverrides = map[string]string{
-        ".mjs":     "text/javascript; charset=utf-8",
-        ".js":      "text/javascript; charset=utf-8",
-        ".geojson": "application/geo+json",
-        ".wasm":    "application/wasm",
-        ".webp":    "image/webp",
-        ".avif":    "image/avif",
+	".mjs":     "text/javascript; charset=utf-8",
+	".js":      "text/javascript; charset=utf-8",
+	".geojson": "application/geo+json",
+	".wasm":    "application/wasm",
+	".webp":    "image/webp",
+	".avif":    "image/avif",
 }
 
 // Handler returns the SPA file server over the embedded dist tree: existing
@@ -45,12 +45,12 @@ var mimeOverrides = map[string]string{
 // frontend has not been built yet (no index.html in dist), unknown paths
 // answer 404 instead of looping.
 func Handler() http.Handler {
-        sub, err := fs.Sub(distFS, "dist")
-        if err != nil {
-                // Cannot happen: the embed directive guarantees the subtree exists.
-                panic("webui: embedded dist tree is missing: " + err.Error())
-        }
-        return serveTree(sub)
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		// Cannot happen: the embed directive guarantees the subtree exists.
+		panic("webui: embedded dist tree is missing: " + err.Error())
+	}
+	return serveTree(sub)
 }
 
 // serveTree serves the dist tree with three cross-platform behaviors that
@@ -62,51 +62,51 @@ func Handler() http.Handler {
 //   - modest caching for the immutable mapdata/ assets (hash-less filenames,
 //     refreshed per release) — no-store stays an /api-only contract (ADR-0006).
 func serveTree(sub fs.FS) http.Handler {
-        fileServer := http.FileServerFS(sub)
-        index, errIndex := fs.ReadFile(sub, "index.html")
-        hasIndex := errIndex == nil
+	fileServer := http.FileServerFS(sub)
+	index, errIndex := fs.ReadFile(sub, "index.html")
+	hasIndex := errIndex == nil
 
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-                reqPath := strings.TrimPrefix(r.URL.Path, "/")
-                if reqPath == "" {
-                        reqPath = "index.html"
-                }
-                if info, err := fs.Stat(sub, path.Clean(reqPath)); err != nil || info.IsDir() {
-                        // Unknown path (or a directory — including a trailing-slash
-                        // request to an asset directory): SPA fallback to index.html.
-                        // This also keeps FileServerFS from ever emitting a directory
-                        // listing for /assets/ or /mapdata/.
-                        if !hasIndex {
-                                http.NotFound(w, r)
-                                return
-                        }
-                        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-                        w.Header().Set("Cache-Control", "no-cache")
-                        _, _ = w.Write(index)
-                        return
-                }
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqPath := strings.TrimPrefix(r.URL.Path, "/")
+		if reqPath == "" {
+			reqPath = "index.html"
+		}
+		if info, err := fs.Stat(sub, path.Clean(reqPath)); err != nil || info.IsDir() {
+			// Unknown path (or a directory — including a trailing-slash
+			// request to an asset directory): SPA fallback to index.html.
+			// This also keeps FileServerFS from ever emitting a directory
+			// listing for /assets/ or /mapdata/.
+			if !hasIndex {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			_, _ = w.Write(index)
+			return
+		}
 
-                // Pre-compressed GeoJSON (web/public/mapdata → dist/mapdata): the
-                // .gz suffix must be hidden from the client — declare the payload
-                // inside the archive and let the browser transparently gunzip.
-                // The pre-set Content-Type/Content-Encoding win over whatever the
-                // .gz extension would otherwise make ServeContent guess.
-                if strings.HasPrefix(reqPath, "mapdata/") {
-                        // Immutable, hash-less mapdata assets (GeoJSON overlays
-                        // and the W17 offline DEM tiles): modest shared caching,
-                        // refreshed per release — no-store stays /api-only.
-                        w.Header().Set("Cache-Control", "public, max-age=3600")
-                }
-                if strings.HasSuffix(reqPath, ".geojson.gz") {
-                        w.Header().Set("Content-Type", "application/geo+json")
-                        w.Header().Set("Content-Encoding", "gzip")
-                        fileServer.ServeHTTP(w, r)
-                        return
-                }
+		// Pre-compressed GeoJSON (web/public/mapdata → dist/mapdata): the
+		// .gz suffix must be hidden from the client — declare the payload
+		// inside the archive and let the browser transparently gunzip.
+		// The pre-set Content-Type/Content-Encoding win over whatever the
+		// .gz extension would otherwise make ServeContent guess.
+		if strings.HasPrefix(reqPath, "mapdata/") {
+			// Immutable, hash-less mapdata assets (GeoJSON overlays
+			// and the W17 offline DEM tiles): modest shared caching,
+			// refreshed per release — no-store stays /api-only.
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
+		if strings.HasSuffix(reqPath, ".geojson.gz") {
+			w.Header().Set("Content-Type", "application/geo+json")
+			w.Header().Set("Content-Encoding", "gzip")
+			fileServer.ServeHTTP(w, r)
+			return
+		}
 
-                if ctype, ok := mimeOverrides[strings.ToLower(path.Ext(reqPath))]; ok {
-                        w.Header().Set("Content-Type", ctype)
-                }
-                fileServer.ServeHTTP(w, r)
-        })
+		if ctype, ok := mimeOverrides[strings.ToLower(path.Ext(reqPath))]; ok {
+			w.Header().Set("Content-Type", ctype)
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }

@@ -28,7 +28,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.6.2';
+export const APP_VERSION = 'v0.6.3';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -832,6 +832,14 @@ export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（黑龙江本
 export const LAB_GEO_OV_TERRAIN = '地形高程';
 export const LAB_GEO_OV_TERRAIN_TITLE =
   '离线高程数据（Mapzen · AWS Open Data，SRTM/GMTED）：3D 视图真实地形起伏，2D 视图山体阴影';
+/** 等高线开关（W17/#13：离线 DEM 派生，任意底图可用）。 */
+export const LAB_GEO_OV_CONTOUR = '等高线';
+export const LAB_GEO_OV_CONTOUR_TITLE =
+  '等高线（离线 DEM 派生：200m 首曲线 / 500m 计曲线 + 高程标注，任意底图可用）';
+/** 光标海拔读数（W17/#13）。 */
+export const LAB_GEO_ELEV_VALUE = '海拔 {n} m';
+export const LAB_GEO_ELEV_OUT = '海拔 —（超出高程覆盖）';
+export const LAB_GEO_ELEV_TITLE = '光标处实时海拔（离线 DEM 采样，覆盖黑龙江省）';
 /** 聚簇气泡（W17：屏幕碰撞聚合，点击放大展开）。 */
 export const LAB_GEO_CLUSTER_ARIA = '{n} 台设备聚簇（含 {down} 台故障），点击放大查看';
 export const LAB_GEO_CLUSTER_TITLE = '{n} 台设备（{down} 台故障）：{codes} —— 点击放大展开';

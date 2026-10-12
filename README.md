@@ -240,7 +240,7 @@ netopslab gc       --db ./data/netops.db --data ./data       # 手动清理孤�
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.6.2`），注册**恰好 5 个工具**：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.6.3`），注册**恰好 5 个工具**：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |

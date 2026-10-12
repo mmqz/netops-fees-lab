@@ -2725,6 +2725,15 @@ body.lab-split-dragging {
   bottom: 76px;
 }
 
+/* 光标海拔读数（W17/#13）：左下角 ScaleControl（高 ~26px + 10px 边距）之上；
+   tabular-nums 已由 .geo-chip 提供，连续跟随光标不跳动。 */
+.geo-elev {
+  left: 10px;
+  bottom: 46px;
+  color: #9fd3ff;
+  border-color: rgba(159, 211, 255, 0.3);
+}
+
 /* 加载 / 空态 */
 .geo-state {
   inset: 0;

@@ -16,6 +16,21 @@
 | `hlj-roads-daxinganling-full.geojson.gz` | 大兴安岭全量路网（5,012 条） | 0.55 MB |
 | `hlj-railways.geojson.gz` | 铁路（17,257 条） | 1.03 MB |
 
+### 高程衍生（随二进制内嵌，无需下载）
+
+`web/public/mapdata/dem/`（97 块 z4–z8 terrarium 瓦片，AWS Terrain Tiles /
+Mapzen，SRTM/GMTED 融合，公开免密钥）与由它派生的等高线（v0.6.3，issue #13）：
+
+| 文件 | 内容 | 大小 |
+| --- | --- | --- |
+| `web/public/mapdata/dem/{z}/{x}/{y}.png` | terrarium DEM 瓦片（z8 原生 ~610m/px） | ≈6.4 MB |
+| `web/public/mapdata/hlj-contours.geojson.gz` | 等高线 WGS84（200m 首曲线 / 500m 计曲线 + 高程标注，18,604 条折线） | 1.40 MB |
+| `web/public/mapdata/hlj-contours-gcj.geojson.gz` | 等高线 GCJ-02 预投影变体（高德底图用，逐顶点已偏移） | 1.43 MB |
+
+等高线由 `scripts/gen_contours.py` 从同一批 DEM 瓦片生成（matplotlib
+marching squares + RDP 简化），可重跑/扩展；数据署名与 DEM 相同
+（Terrain: Mapzen · AWS Open Data）。
+
 ### 直链下载
 
 ```bash

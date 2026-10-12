@@ -69,10 +69,23 @@ export const DEM_SOURCE_ID = 'dem';
 const DEM_TILES_URL = '/mapdata/dem/{z}/{x}/{y}.png';
 const DEM_ATTRIBUTION =
   '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Terrain: Mapzen · AWS Open Data</a>';
-/** 地形夸张系数（1.2：平原不雀跃、大兴安岭有形）。 */
-export const TERRAIN_EXAGGERATION = 1.2;
+/** 地形夸张（zoom 分档自适应，#13：远观强到可见、近观回到真实比例）。 */
+export function terrainExaggerationFor(zoom: number): number {
+  if (zoom < 6.5) return 4;
+  if (zoom < 8) return 2.5;
+  return 1.3;
+}
 /** hillshade 图层 id（可见性随 terrain 偏好）。 */
 export const HILLSHADE_LAYER_ID = 'hillshade';
+
+// —— 等高线（W17/#13：离线 DEM 派生，任意底图可用）——
+// scripts/gen_contours.py 从同一批 z8 terrarium 瓦片 marching squares 生成；
+// 双变体：WGS84（esri/离线底图）与 GCJ-02 预投影（高德底图，逐顶点已偏移，
+// 不受 ~500m 火星坐标偏移影响）。200m 首曲线 / 500m 计曲线 + 高程标注。
+const CONTOURS_URL = '/mapdata/hlj-contours.geojson.gz';
+const CONTOURS_GCJ_URL = '/mapdata/hlj-contours-gcj.geojson.gz';
+/** 等高线图层 id（可见性随 contours 偏好，不随底图坐标系禁用）。 */
+export const CONTOUR_LAYERS = ['contours-major', 'contours-minor', 'contours-label'];
 
 /** 中文标注字形（免密钥；完全离线时静默降级——MapLibre 容忍字形拉取失败）。 */
 const GLYPHS_URL = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
@@ -163,6 +176,8 @@ export interface GeoLayerPrefs {
   devices: boolean;
   /** 地形高程（W17）：3D 视图起伏 + 2D 山体阴影（离线 DEM，默认开）。 */
   terrain: boolean;
+  /** 等高线（W17/#13）：任意底图可用（GCJ 变体预投影），默认开。 */
+  contours: boolean;
 }
 
 export const DEFAULT_PREFS: GeoLayerPrefs = {
@@ -171,6 +186,7 @@ export const DEFAULT_PREFS: GeoLayerPrefs = {
   links: true,
   devices: true,
   terrain: true,
+  contours: true,
 };
 
 const PREFS_KEY = 'netops-lab.geo.layers';
@@ -196,6 +212,7 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
       links: typeof p['links'] === 'boolean' ? p['links'] : DEFAULT_PREFS.links,
       devices: typeof p['devices'] === 'boolean' ? p['devices'] : DEFAULT_PREFS.devices,
       terrain: typeof p['terrain'] === 'boolean' ? p['terrain'] : DEFAULT_PREFS.terrain,
+      contours: typeof p['contours'] === 'boolean' ? p['contours'] : DEFAULT_PREFS.contours,
     };
   } catch {
     return { ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } };
@@ -459,11 +476,14 @@ export interface StyleOptions {
   /** 地形高程可见性（W17）：hillshade 图层烘焙进样式；terrain 3D 起伏由
    *  GeoCanvas 按视图模式命令式 setTerrain（2D 关、3D 开）。 */
   terrainVisible: boolean;
+  /** 等高线可见性（W17/#13）：任意底图可用（GCJ 变体预投影）。 */
+  contoursVisible: boolean;
 }
 
 export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSpecification {
   const def = BASEMAPS[basemapId];
   const withRaster = opts.withRaster && def.tiles !== null;
+  const contourData = def.isGCJ ? CONTOURS_GCJ_URL : CONTOURS_URL;
   const sources: StyleSpecification['sources'] = {
     devices: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     links: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
@@ -472,6 +492,8 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
     'offline-rail': { type: 'geojson', data: MAPDATA_RAIL, attribution: OSM_ATTRIBUTION },
     'offline-roads-main': { type: 'geojson', data: MAPDATA_ROADS_MAIN, attribution: OSM_ATTRIBUTION },
     'offline-roads-dxa': { type: 'geojson', data: MAPDATA_ROADS_DXA, attribution: OSM_ATTRIBUTION },
+    // 等高线（W17/#13）：按底图坐标系选变体，高程派生数据同 DEM 署名
+    contours: { type: 'geojson', data: contourData, attribution: DEM_ATTRIBUTION },
     // 离线 DEM（恒在：本地瓦片不依赖外网；terrain 起伏与 hillshade 都从它取）
     [DEM_SOURCE_ID]: {
       type: 'raster-dem',
@@ -527,6 +549,47 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
       'hillshade-accent-color': '#243049',
     },
   } as unknown as LayerSpecification);
+
+  // 等高线（W17/#13，hillshade 之上、本地叠加之下）：计曲线（500m 整倍）
+  // 低 zoom 即可见、首曲线（200m）z≥9.5；高程标注仅计曲线、沿线稀疏。
+  const contourVis = visOf(opts.contoursVisible);
+  layers.push(
+    {
+      id: 'contours-major',
+      type: 'line',
+      source: 'contours',
+      minzoom: 4.5,
+      filter: ['==', ['get', 'major'], true],
+      layout: { visibility: contourVis },
+      paint: { 'line-color': '#7fa3d4', 'line-width': 1.1, 'line-opacity': 0.6 },
+    },
+    {
+      id: 'contours-minor',
+      type: 'line',
+      source: 'contours',
+      minzoom: 9.5,
+      filter: ['==', ['get', 'major'], false],
+      layout: { visibility: contourVis },
+      paint: { 'line-color': '#4d6390', 'line-width': 0.7, 'line-opacity': 0.42 },
+    },
+    {
+      id: 'contours-label',
+      type: 'symbol',
+      source: 'contours',
+      minzoom: 8,
+      filter: ['==', ['get', 'major'], true],
+      layout: {
+        'text-field': ['concat', ['to-string', ['get', 'level']], ' m'] as unknown as ExpressionSpecification,
+        'text-font': FONT,
+        'text-size': 9.5,
+        'symbol-placement': 'line',
+        'symbol-spacing': 380,
+        'text-padding': 2,
+        visibility: contourVis,
+      },
+      paint: { 'text-color': '#8fa9d0', 'text-halo-color': '#0e1626', 'text-halo-width': 1.3 },
+    } as unknown as LayerSpecification,
+  );
 
   // 离线叠加（在业务图层之下：运维主观看的是设备，地理要素做背景参照）
   layers.push(...overlayLayers(opts.overlayVisibility));

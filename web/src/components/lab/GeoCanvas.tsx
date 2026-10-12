@@ -12,8 +12,12 @@
  *   折算米高并钳制 [TOWER_MIN_M, TOWER_MAX_M]（#9：杜绝数十公里光柱；
  *   footprint 恒定 7px 屏宽——metersPerPixel 按 MapLibre 512px 世界坐标
  *   修正，zoom 期间 rAF 节流同帧重建高度与底面）；
- *   2D↔3D 切换 easeTo pitch 0|58（3D 为倾斜相机示意，非地形高程，见
- *   LAB_VIEW_GEO3D_TITLE 与 README「3D 视图定位」）；
+ *   2D↔3D 切换各自独立相机（#12 解锁：离开某视图存相机，进入时恢复；
+ *   首次进入按该视图 fitBounds；经拓扑图中转 = 重新适配，可预期）；
+ * - 地理高程支撑（#13）：离线 DEM 三重呈现——3D setTerrain 起伏（夸张
+ *   随 zoom 分档自适应：远观强到可见、近观回真实）、2D hillshade 山体
+ *   阴影、等高线图层（200m/500m，GCJ 变体预投影任意底图可用）+ 光标处
+ *   实时海拔读数（terrarium 瓦片客户端解码采样）；
  * - 底图四模式可切换（#11，geoBasemap.ts 注册表）：高德街道 / 高德卫星 /
  *   ESRI 极简 / 离线极简；离线叠加图层（行政区划/铁路/公路，黑龙江本地
  *   OSM 数据 © OpenStreetMap contributors，go:embed 随二进制分发）仅在
@@ -37,6 +41,7 @@ import type { Ref } from 'react';
 import type {
   ErrorEvent as MLErrorEvent,
   Map as MLMap,
+  MapMouseEvent,
   MapSourceDataEvent,
   MapStyleDataEvent,
   Marker as MLMarker,
@@ -49,11 +54,11 @@ import type { SelectedEntity } from './selection';
 import {
   BASEMAP_REF_SOURCE_ID,
   BASEMAP_SOURCE_ID,
+  CONTOUR_LAYERS,
   DEM_SOURCE_ID,
   HILLSHADE_LAYER_ID,
   LINK_LAYERS,
   OVERLAY_LAYERS,
-  TERRAIN_EXAGGERATION,
   TOWER_MAX_M,
   TOWER_MIN_M,
   basemapIsGCJ,
@@ -62,10 +67,12 @@ import {
   overlaysAvailable,
   projLngLat,
   saveGeoLayerPrefs,
+  terrainExaggerationFor,
 } from './geoBasemap';
 import type { BasemapId, GeoLayerPrefs, OverlayId, StyleOptions } from './geoBasemap';
 import { clusterBounds, clusterDevices } from './geoCluster';
 import type { ClusterPoint } from './geoCluster';
+import { clearElevationCache, sampleElevation } from './geoElevation';
 import {
   LAB_CANVAS_LEGEND_LABEL,
   LAB_GEO_BIZ_DEVICES,
@@ -80,6 +87,9 @@ import {
   LAB_GEO_BM_ESRI_TITLE,
   LAB_GEO_BM_OFFLINE,
   LAB_GEO_BM_OFFLINE_TITLE,
+  LAB_GEO_ELEV_OUT,
+  LAB_GEO_ELEV_TITLE,
+  LAB_GEO_ELEV_VALUE,
   LAB_GEO_LEGEND_TOWER,
   LAB_GEO_LAYERS_BASEMAP,
   LAB_GEO_LAYERS_BUSINESS,
@@ -97,6 +107,8 @@ import {
   LAB_GEO_CLUSTER_TITLE,
   LAB_GEO_OV_ADMIN,
   LAB_GEO_OV_ADMIN_TITLE,
+  LAB_GEO_OV_CONTOUR,
+  LAB_GEO_OV_CONTOUR_TITLE,
   LAB_GEO_OV_RAIL,
   LAB_GEO_OV_RAIL_TITLE,
   LAB_GEO_OV_ROAD,
@@ -130,14 +142,16 @@ const PITCH_3D = 58;
 const BEARING_3D = -30;
 const CAMERA_TRANSITION_MS = 700;
 
-/** fitBounds 留白与缩放上限（首个数据批次与「适配视图」共用）。 */
-const FIT_PADDING_PX = 80;
-const FIT_MAX_ZOOM = 9;
-/** 3D 斜视的 zoom 上限（单点场景 / 相机解的近端夹紧）。 */
-const FIT3D_MAX_ZOOM = 7.2;
-/** 3D 斜视补偿级数：俯视解 zoom − 1.3 = 斜视等效覆盖（58° 倾角垂直压缩 +
- *  底部地面余量）；也用于 2D↔3D 切换时的 zoom 补偿。 */
-const ZOOM_3D_STEP_BACK = 1.3;
+/** fitBounds 留白：随容器尺寸自适应（短边 8%，夹在 [24, 80]px；#12——
+ *  小画布（分栏/半屏）上固定 80px 会吞掉 1/3 视野，默认比例显小）。 */
+const FIT_PADDING_MIN_PX = 24;
+const FIT_PADDING_MAX_PX = 80;
+/** 2D 适配 zoom 上限（#12：9 → 12.5——城市尺度数据不再被压远，
+ *  同城近距设备初始视野即可分开，而非全部并入一个聚簇）。 */
+const FIT_MAX_ZOOM = 12.5;
+/** 3D 斜视的 zoom 上限（单点场景 / 相机解的近端夹紧；7.2 → 8.6：
+ *  城市尺度 3D 近观塔体与地形）。 */
+const FIT3D_MAX_ZOOM = 8.6;
 
 /** 初始相机（数据到达前）：中国中心，等待 fitBounds。 */
 const DEFAULT_CENTER: [number, number] = [105, 36];
@@ -253,6 +267,14 @@ export interface GeoHoverInfo {
   code: string;
   name: string;
   status: SimEntityStatus;
+}
+
+/** 视图相机快照（#12：2D/3D 各自独立，切换时存/恢复）。 */
+interface ViewCamera {
+  center: { lng: number; lat: number };
+  zoom: number;
+  bearing: number;
+  pitch: number;
 }
 
 function towerPolygon(lng: number, lat: number, halfLng: number, halfLat: number): Position[][] {
@@ -435,10 +457,15 @@ function applyTowerVisibility(map: MLMap, view: 'geo2d' | 'geo3d'): void {
   }
 }
 
-/** 地形（W17）：3D 视图 + 偏好开 → setTerrain（离线 DEM 源）；否则显式
- *  卸载（null）。try/catch：DEM 源尚未就绪等瞬时态不致命（下次 effect 重试）。 */
+/** 地形（W17/#13）：3D 视图 + 偏好开 → setTerrain（离线 DEM 源，夸张随
+ *  zoom 分档自适应——整省远观时 1500m 起伏占屏 <1%，恒定 1.2 视觉全平，
+ *  远观加强到 4，近观回 1.3）；否则显式卸载（null）。try/catch：
+ *  DEM 源尚未就绪等瞬时态不致命（下次 effect/zoomend 重试）。 */
 function applyTerrainFor(map: MLMap, view: 'geo2d' | 'geo3d', terrain: boolean): void {
-  const target = view === 'geo3d' && terrain ? { source: DEM_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION } : null;
+  const target =
+    view === 'geo3d' && terrain
+      ? { source: DEM_SOURCE_ID, exaggeration: terrainExaggerationFor(map.getZoom()) }
+      : null;
   try {
     map.setTerrain(target);
   } catch {
@@ -446,7 +473,8 @@ function applyTerrainFor(map: MLMap, view: 'geo2d' | 'geo3d', terrain: boolean):
   }
 }
 
-/** 叠加/业务图层可见性批量应用（叠加仅在 WGS84 底图下放行）。 */
+/** 叠加/业务图层可见性批量应用（叠加仅在 WGS84 底图下放行；等高线与
+ *  terrain 同源 DEM，GCJ 变体预投影，任意底图可用）。 */
 function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: BasemapId): void {
   const overlaysOn = overlaysAvailable(effective);
   for (const id of OVERLAY_LAYERS.admin) {
@@ -464,6 +492,10 @@ function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: Bas
       map.setLayoutProperty(id, 'visibility', prefs.overlays.road && overlaysOn ? 'visible' : 'none');
     }
   }
+  const contourVis = prefs.contours ? 'visible' : 'none';
+  for (const id of CONTOUR_LAYERS) {
+    if (map.getLayer(id) !== undefined) map.setLayoutProperty(id, 'visibility', contourVis);
+  }
   const linkVis = prefs.links ? 'visible' : 'none';
   for (const id of LINK_LAYERS) {
     if (map.getLayer(id) !== undefined) map.setLayoutProperty(id, 'visibility', linkVis);
@@ -474,9 +506,9 @@ function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: Bas
 }
 
 /**
- * fitGeoBounds：按**目标视图**适配相机（v0.3.1）。
+ * fitGeoBounds：按**目标视图**适配相机（#12 重校：留白自适应 + 上限提升）。
  *
- * 2D：沿用 v0.3.0 的 fitBounds（平视假设正确，行为已验收）。
+ * 2D：fitBounds（留白 = 容器短边 8% 夹 [24,80]px，maxZoom 12.5）。
  *
  * 3D：不用 MapLibre 的 fitBounds/cameraForBounds——它们的「恰好容纳」解在
  * 大倾角下过于保守，而 2D 假设的解在斜视下又怼脸。正解是墨卡托几何直解
@@ -489,12 +521,16 @@ function fitGeoBounds(map: MLMap, data: GeoData, view: 'geo2d' | 'geo3d'): void 
     (data.bbox[0][0] + data.bbox[1][0]) / 2,
     (data.bbox[0][1] + data.bbox[1][1]) / 2,
   ];
+  const rect = map.getContainer().getBoundingClientRect();
+  const padding = Math.max(
+    FIT_PADDING_MIN_PX,
+    Math.min(FIT_PADDING_MAX_PX, Math.round(Math.min(rect.width, rect.height) * 0.08) || FIT_PADDING_MAX_PX),
+  );
   if (view === 'geo3d') {
     if (data.deviceCount === 1) {
       map.easeTo({ center, zoom: FIT3D_MAX_ZOOM, pitch: PITCH_3D, bearing: BEARING_3D, duration });
       return;
     }
-    const rect = map.getContainer().getBoundingClientRect();
     const zoom = zoomForBBox3D(data.bbox, rect.width, rect.height);
     const latSpan = data.bbox[1][1] - data.bbox[0][1];
     map.easeTo({
@@ -507,7 +543,7 @@ function fitGeoBounds(map: MLMap, data: GeoData, view: 'geo2d' | 'geo3d'): void 
     map.easeTo({ center, zoom: FIT_MAX_ZOOM, duration });
     return;
   }
-  map.fitBounds(data.bbox, { padding: FIT_PADDING_PX, maxZoom: FIT_MAX_ZOOM, duration });
+  map.fitBounds(data.bbox, { padding, maxZoom: FIT_MAX_ZOOM, duration });
 }
 
 const TOWER_FIT_W3D = 0.55;
@@ -593,6 +629,16 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const viewRef = useRef(view);
   topoRef.current = topology;
   const resizeSuspendedRef = useRef(resizeSuspended);
+  /** #12：每视图相机快照（切换时存旧取新；卸载丢弃）。 */
+  const viewCamerasRef = useRef<{ geo2d: ViewCamera | null; geo3d: ViewCamera | null }>({
+    geo2d: null,
+    geo3d: null,
+  });
+  /** #12：上一次生效的视图（相机存/取的分界；挂载值 = 初始视图）。 */
+  const prevViewRef = useRef<'geo2d' | 'geo3d'>(view);
+  /** 光标海拔读数（#13）：null = 光标不在地图上；value null = 超出覆盖。 */
+  const [elevReadout, setElevReadout] = useState<{ value: number | null } | null>(null);
+  const elevSeqRef = useRef(0);
 
   // —— W16：底图/图层偏好（localStorage 持久化）与瓦片降级态 ——
   const [prefs, setPrefs] = useState<GeoLayerPrefs>(() => loadGeoLayerPrefs());
@@ -689,6 +735,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         },
         linksVisible: prefsRef.current.links,
         terrainVisible: prefsRef.current.terrain,
+        contoursVisible: prefsRef.current.contours,
       });
       const map = new maplibregl.Map({
         container: div,
@@ -837,6 +884,40 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         if (clusterRaf !== 0) cancelAnimationFrame(clusterRaf);
       });
 
+      // —— 光标海拔读数（W17/#13）：mousemove rAF 节流 → 采样离线 DEM ——
+      // GCJ 底图下 lngLat 为火星坐标，采样前逆偏移（geoElevation 内处理）。
+      let elevRaf = 0;
+      const onElevMove = (ev: MapMouseEvent): void => {
+        if (disposed || elevRaf !== 0) return;
+        elevRaf = requestAnimationFrame(() => {
+          elevRaf = 0;
+          const seq = (elevSeqRef.current += 1);
+          const { lng, lat } = ev.lngLat;
+          void sampleElevation(lng, lat, gcjRef.current).then((value) => {
+            if (seq === elevSeqRef.current && !disposed) setElevReadout({ value });
+          });
+        });
+      };
+      const onElevOut = (): void => {
+        elevSeqRef.current += 1;
+        setElevReadout(null);
+      };
+      map.on('mousemove', onElevMove);
+      map.on('mouseout', onElevOut);
+      cleanups.push(() => {
+        map.off('mousemove', onElevMove);
+        map.off('mouseout', onElevOut);
+        if (elevRaf !== 0) cancelAnimationFrame(elevRaf);
+      });
+
+      // —— 地形夸张随 zoom 分档重标（#13）：zoom 结束后按当前档位重挂 ——
+      const onTerrainZoomEnd = (): void => {
+        if (disposed) return;
+        applyTerrainFor(map, viewRef.current, prefsRef.current.terrain);
+      };
+      map.on('zoomend', onTerrainZoomEnd);
+      cleanups.push(() => map.off('zoomend', onTerrainZoomEnd));
+
       // 容器尺寸变化 → map.resize（zen / 分栏 / 视口变化；拖拽中由父级挂起）
       if (typeof ResizeObserver !== 'undefined') {
         observer = new ResizeObserver(() => {
@@ -868,6 +949,11 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       tileFallbackRef.current = false;
       tileFailStreakRef.current = 0;
       didFitRef.current = false;
+      viewCamerasRef.current = { geo2d: null, geo3d: null };
+      prevViewRef.current = viewRef.current;
+      elevSeqRef.current += 1;
+      setElevReadout(null);
+      clearElevationCache();
       if ((window as unknown as Record<string, unknown>).__geomap === localMap) {
         delete (window as unknown as Record<string, unknown>).__geomap;
       }
@@ -985,11 +1071,21 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         onHoverInfoRef.current?.(null);
       };
       el.addEventListener('click', () => {
-        // 放大展开：成员 bbox fit + 领头适度近观（保留当前 pitch/bearing）。
+        // 放大展开：目标 zoom = max(当前 + CLUSTER_ZOOM_STEP, 成员 bbox 的
+        // cameraForBounds 解)——保证同城近距设备一次点击即拆簇（旧版仅
+        // +2.2 级，哈尔滨 3 台在 z7.8 仍同簇，需点两次）。
         const bounds = clusterBounds(c.members);
+        let fitZoom = 0;
+        try {
+          const cam = map.cameraForBounds(bounds, { padding: 120 });
+          const z = cam?.zoom;
+          if (typeof z === 'number' && Number.isFinite(z)) fitZoom = z;
+        } catch {
+          // 容器尺寸异常时退回固定步进
+        }
         map.fitBounds(bounds, {
           padding: 120,
-          maxZoom: map.getZoom() + CLUSTER_ZOOM_STEP,
+          maxZoom: Math.max(map.getZoom() + CLUSTER_ZOOM_STEP, fitZoom),
           duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS,
         });
       });
@@ -1087,18 +1183,41 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     updateClustersRef.current?.();
   }, [selected, labels, prefs.devices, topology]);
 
-  // —— 2D↔3D：pitch 0|58 + 3D 斜视 bearing -30（easeTo 700ms；reduced-motion 0）——
+  // —— 2D↔3D 独立相机（#12 解锁）——
+  // 离开旧视图：存相机快照（center/zoom/bearing/pitch）；进入新视图：
+  // 有快照 → 恢复；无（首次进入）→ 按该视图 fitBounds（3D 墨卡托直解）；
+  // 数据未到 → 仅纠正 pitch/bearing。旧 ±1.3 zoom 补偿 hack 移除：
+  // 两个视图各自记忆，不再共享相机（用户反馈「2D 图锁在一起」）。
+  // 经拓扑图中转 = GeoCanvas 卸载重挂，快照丢弃 → 重新适配（可预期）。
   useEffect(() => {
     const map = mapRef.current;
     if (map === null || !sourcesReady) return;
     applyTowerVisibility(map, view);
-    const pitch = view === 'geo3d' ? PITCH_3D : PITCH_2D;
-    const bearing = view === 'geo3d' ? BEARING_3D : 0;
-    if (Math.abs(map.getPitch() - pitch) < 0.01 && Math.abs(map.getBearing() - bearing) < 0.01) return;
-    // zoom 补偿（v0.3.1）：58° 斜视放大近景、等效覆盖缩小——进 3D 后退
-    // ZOOM_3D_STEP_BACK 级、回 2D 还原，让切换前后「看到的范围」保持一致。
-    const zoom = Math.min(15, Math.max(1, map.getZoom() + (view === 'geo3d' ? -ZOOM_3D_STEP_BACK : ZOOM_3D_STEP_BACK)));
-    map.easeTo({ pitch, bearing, zoom, duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS });
+    const prev = prevViewRef.current;
+    if (prev === view) return;
+    prevViewRef.current = view;
+    const c = map.getCenter();
+    viewCamerasRef.current[prev] = {
+      center: { lng: c.lng, lat: c.lat },
+      zoom: map.getZoom(),
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
+    };
+    const saved = viewCamerasRef.current[view];
+    if (saved !== null) {
+      map.easeTo({ ...saved, duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS });
+      return;
+    }
+    const data = geoDataRef.current;
+    if (data !== null && data.deviceCount > 0) {
+      fitGeoBounds(map, data, view);
+      return;
+    }
+    map.easeTo({
+      pitch: view === 'geo3d' ? PITCH_3D : PITCH_2D,
+      bearing: view === 'geo3d' ? BEARING_3D : 0,
+      duration: prefersReducedMotion() ? 0 : CAMERA_TRANSITION_MS,
+    });
   }, [view, sourcesReady]);
 
   // —— 地形（W17）：3D 视图 + 偏好开 → 离线 DEM 起伏；回 2D / 关偏好卸载。
@@ -1185,6 +1304,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const toggleTerrain = useCallback((): void => {
     setPrefs((p) => ({ ...p, terrain: !p.terrain }));
   }, []);
+  const toggleContours = useCallback((): void => {
+    setPrefs((p) => ({ ...p, contours: !p.contours }));
+  }, []);
 
   const overlaysUsable = overlaysAvailable(effective);
   const basemapChoices: Array<{ id: BasemapId; label: string; title: string }> = [
@@ -1221,6 +1343,20 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       {geoData.missingCount > 0 && geoData.deviceCount > 0 && (
         <div className="geo-overlay geo-chip geo-chip--partial" role="status" title={LAB_GEO_PARTIAL_TITLE}>
           {format(LAB_GEO_PARTIAL, { n: geoData.missingCount })}
+        </div>
+      )}
+      {/* 光标海拔读数（W17/#13）：左下角 ScaleControl 之上，连续跟随光标
+          （aria-live off：防屏幕阅读器连读）。超出黑龙江覆盖显示 —。 */}
+      {elevReadout !== null && (
+        <div
+          className="geo-overlay geo-chip geo-elev"
+          role="status"
+          aria-live="off"
+          title={LAB_GEO_ELEV_TITLE}
+        >
+          {elevReadout.value !== null
+            ? format(LAB_GEO_ELEV_VALUE, { n: Math.round(elevReadout.value) })
+            : LAB_GEO_ELEV_OUT}
         </div>
       )}
       {/* W16 图层面板：底图模式 + 叠加图层 + 业务图层（画布决定显示什么）。
@@ -1277,6 +1413,11 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
               <label className="geo-layerpanel-opt" title={LAB_GEO_OV_TERRAIN_TITLE}>
                 <input type="checkbox" checked={prefs.terrain} onChange={toggleTerrain} />
                 {LAB_GEO_OV_TERRAIN}
+              </label>
+              {/* 等高线（W17/#13）：GCJ 变体预投影，同样不随底图禁用。 */}
+              <label className="geo-layerpanel-opt" title={LAB_GEO_OV_CONTOUR_TITLE}>
+                <input type="checkbox" checked={prefs.contours} onChange={toggleContours} />
+                {LAB_GEO_OV_CONTOUR}
               </label>
             </div>
             <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_BUSINESS}</div>

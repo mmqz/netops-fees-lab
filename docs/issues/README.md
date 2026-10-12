@@ -1,6 +1,6 @@
 # 测试发现的问题清单
 
-> 来源：2026-10-12 全面测试（Windows + Linux/Docker，v0.6.0 @ 2033de8）
+> 来源：2026-10-12 全面测试（Windows + Linux/Docker，v0.6.0 @ 2033de8）；#12–#14 为 2026-10-12 用户现场反馈（v0.6.2 验收后）
 > 完整报告：[test-report-windows-2026-10-12.md](../test-report-windows-2026-10-12.md)
 
 ## 按优先级
@@ -18,6 +18,9 @@
 | [07](issue-07-api-negative-pagination.md) | P3 | 分页参数负数未校验 | 所有平台 | API 契约不一致 |
 | [08](issue-08-cross-db-silent-mismatch.md) | P3 | CLI 与 serve 用不同 DB 无提示 | 所有平台 | 排查成本高 |
 | [10](issue-10-missing-ops-capabilities.md) | 设计 | 异常检测/告警/预测均不存在 | — | 能力差距记录 |
+| [12](issue-12-camera-lock-and-fit.md) | **P0** | 2D/3D 相机锁联 + 初始比例不合适（用户反馈） | 所有平台 | 双视角工作流失效 |
+| [13](issue-13-elevation-visibility.md) | **P0** | 地理高程支撑不可见（用户反馈） | 所有平台 | 高程数据形同虚设 |
+| [14](issue-14-release-pipeline-gap.md) | **P0** | v0.4.0–v0.6.2 发布断档，用户仍在 v0.3.0 | 流程 | 修复从未送达 |
 
 ## 地图相关的三个缺陷（叠加关系）
 
