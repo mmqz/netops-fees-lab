@@ -29,8 +29,21 @@
      浮层（对话框/抽屉）保留 --shadow-lg 提供层级 */
   --shadow-lg: 0 8px 24px rgba(23, 35, 58, 0.16);
   --sidebar-bg: #101828;
-  --sidebar-width: 220px;
-  --topbar-height: 56px;
+  /* 侧栏 220 → 184px：目录项最长 5 个汉字（「仿真工作台」）+ 图标 + 内边距
+     在 184px 下仍单行不折行，回收的 36px 全部给画布。 */
+  --sidebar-width: 184px;
+  --topbar-height: 52px;
+  /* 控件尺寸梯度（三档，替代此前 26/28/30/35/36 五种高度并存）：
+     sm = 密集工具带内的图标按钮与表格行内按钮
+     md = 页头 / 表单等常规操作按钮
+     lg = 主行动号召（保留给少量强调场景） */
+  --btn-h-sm: 28px;
+  --btn-h-md: 32px;
+  --btn-h-lg: 36px;
+  --btn-fs-sm: 12px;
+  --btn-fs-md: 13px;
+  /* 密集图标按钮的方形边长（工具带内恒定，与 sm 档同高） */
+  --icon-btn-size: 28px;
   --font: "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
 
@@ -120,11 +133,21 @@ button {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+  /* min-height: 0 让本容器在纵向 flex 链（app-main: column）里可以被压缩，
+     子级的 height:100% / flex 拉伸才有确定的解析基准；否则内容超出时
+     会把 app-main 顶高、触发整页滚动而非内部布局自适应。 */
+  min-height: 0;
 }
 
-/* 全出血变体（W1）：仅拓扑工作台 /lab/:id 使用——阅读型页面保持 1200px 居中 */
+/* 全出血变体（W1）：仅拓扑工作台 /lab/:id 使用——阅读型页面保持 1200px 居中。
+   改为纵向 flex 列：.lab-split（工作区分栏）作为 flex 子项即可用 flex:1 撑满
+   剩余高度。此前它是 block 容器，子级的 height:100% 在 block 下按 auto 解析
+   （父高来自 flex 计算值而非显式值），导致折叠成单列后 .lab-split 退化为
+   内容高度 400px、画布下半留白。 */
 .app-content--full {
   max-width: none;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ------------------------------------------------------------------ 侧栏 */
@@ -1874,13 +1897,27 @@ a.btn:hover {
    变量不阻碍层叠。两侧 gap 5px + 把手 6px = 16px（与旧 2 列 16px 视觉等宽）。 */
 .lab-split {
   display: grid;
-  grid-template-columns: minmax(0, var(--split-a, 60fr)) 6px minmax(0, var(--split-b, 40fr));
+  /* 分栏比例 68:32（原 60:40）：右侧数据面板是「查询/核对」用途，
+     常年停在 40% 宽会持续挤压画布；68:32 下 1600px 视口画布多出约 100px。
+     用户拖拽手柄的 inline style 仍优先（--split-a/--split-b 变量）。 */
+  grid-template-columns: minmax(0, var(--split-a, 68fr)) 6px minmax(0, var(--split-b, 32fr));
+  /* 显式单行 + 1fr 行高：行轨道拉伸到容器高度，卡片再 height:100% 撑满。
+     此前只写 height:100% 而不声明行高，折叠成单列时（面板 display:none）
+     行高退化为内容高度，卡片塌到 400px、画布高度从 682 掉到 319——
+     「折叠后下半是空的」即由此而来。 */
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
   column-gap: 5px;
   align-items: stretch;
+  /* 高度来源：.app-content--full 是纵向 flex 容器，本元素用 flex:1 吃掉
+     除页头外的剩余高度（比 height:100% 可靠——百分比高度要求父级有显式
+     高度值，而 flex 容器的高度是计算值，% 会被解析成 auto）。 */
+  flex: 1;
+  min-height: 0;
 }
 
-/* 折叠：单列，画布占满工作区宽（面板 display:none 保持挂载，恢复不丢状态） */
+/* 折叠：单列，画布占满工作区宽（面板 display:none 保持挂载，恢复不丢状态）。
+   行高仍由上面的 grid-template-rows: minmax(0,1fr) 拉伸，卡片与画布填满整高。 */
 .lab-split--collapsed {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1942,11 +1979,15 @@ body.lab-split-dragging {
 .lab-canvas-card {
   display: flex;
   flex-direction: column;
-  min-height: 520px;
-  /* FX-5 高度优化：扣除 237px = 顶栏 56 + app-content 上 padding 24 + 页头 97 +
-     间距 12 + 下 padding 24 + 滚动缓冲 24（1080p 卡片 843px，画布渲染区 761px
-     ≥760 目标；配合页头紧凑化 + split 内取消卡片下边距）。 */
-  height: calc(100vh - 237px);
+  /* 定位上下文：工具带内的悬浮提示（.lab-canvas-toolbar-hint）以本卡片为参照 */
+  position: relative;
+  min-height: 400px;
+  /* 高度自适应：不再硬编码 calc(100vh - 237px)。
+     那个魔数在 v0.6.x 之前是按「顶栏 56 + padding 24 + 页头 97 + 间距 12 +
+     padding 24 + 滚动缓冲 24」估的，页头/工具带任何一处增删都会让画布高度错位
+     （页头压缩后画布反而留白、加高后画布溢出滚动）。改由 .lab-split 行高驱动：
+     卡片撑满格线剩余空间，画布即 .lab-canvas-wrap flex:1 的自然结果。 */
+  height: 100%;
 }
 
 /* zen 全屏工作模式（FX-5）：盖住侧栏/顶栏/页头/右侧面板；Toast(z100)/对话框
@@ -2134,12 +2175,17 @@ body.lab-split-dragging {
   color: #8da0bf;
 }
 
+/* 工具带紧凑化：单行排布，不再换行。
+   原实现 flex-wrap: wrap + 三个文字标签（视图/布局/模式，共 ~72px）+ 常驻提示文字
+   （~216px）把画布宽度 756px 挤爆，提示文字被挤到第二行，工具带高度 85px
+   （两行），画布纵向净高度被吃掉约 35px。现改为：标签去掉（图标带 title/aria-label
+   自解释）、提示文字不再占位（见下方 hint 规则），工具带恒定单行。 */
 .lab-canvas-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 8px 12px;
+  gap: 8px;
+  flex-wrap: nowrap;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2151,15 +2197,30 @@ body.lab-split-dragging {
 
 .lab-canvas-toolbar-sep {
   width: 1px;
-  height: 20px;
+  height: 18px;
   background: var(--border);
   flex-shrink: 0;
 }
 
+/* 提示文字：不再常驻占位（原 margin-left:auto 抢占整行剩余宽度，窄画布下
+   触发 flex-wrap 换行）。改为绝对定位的悬浮提示——视觉上仍在右下角可见，
+   但不参与布局、不占高度；tooltip 语义保留在 title 上（见 .lab-canvas-wrap）。 */
 .lab-canvas-toolbar-hint {
-  margin-left: auto;
-  font-size: 12px;
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 4;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--muted);
+  background: rgba(255, 255, 255, 0.82);
+  pointer-events: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* v0.2.2 图标化分段控件（Grafana/Kiali 式工具带）：
@@ -2177,13 +2238,14 @@ body.lab-split-dragging {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 26px;
+  width: var(--icon-btn-size);
+  height: var(--btn-h-sm);
   border: none;
   border-radius: 5px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  flex-shrink: 0;
   transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 
@@ -3060,25 +3122,31 @@ body.lab-split-dragging {
 
 /* 页头信息条（FX-5 紧凑化：只压 padding/间距，不动按钮/信息，1080p 画布高度优化） */
 .lab-pagehead {
-  padding: 12px 16px 12px;
-  margin-bottom: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
 }
 
 .lab-head-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .lab-head-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   margin: 0;
 }
 
+/* 工作区哈希：完整 64 位十六进制在页头是一串无信息量的乱码，却占 ~220px 宽、
+   在窄视口下还会把后面的计数 chip 挤到第二行。改为等宽小字号 + 窄上限，
+   完整值仍可经 title 悬浮查看、也可从 URL 复制。 */
 .lab-hash-chip {
-  max-width: 220px;
+  max-width: 96px;
+  font-size: 11px;
+  letter-spacing: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -3101,13 +3169,23 @@ body.lab-split-dragging {
 
 .lab-head-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  margin-top: 12px;
+  row-gap: 6px;
+  margin-top: 8px;
+  align-items: center;
 }
 
 .lab-pagehead .lab-head-actions {
-  margin-top: 8px;
+  margin-top: 6px;
+}
+
+/* 页头按钮降一档：36px 对「工具栏性质」的操作条偏高，与画布工具带的 28px
+   图标按钮差距过大。页头按钮统一 32px（--btn-h-md），保留 14px 字号保证可读。 */
+.lab-head-actions .btn {
+  height: var(--btn-h-md);
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .lab-desc {

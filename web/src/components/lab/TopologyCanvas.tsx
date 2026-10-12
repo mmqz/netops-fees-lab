@@ -255,9 +255,18 @@ const TRACE_ROUTE_COLOR = '#3fd8c7';
 const TRACE_END_BORDER = '#3fd8c7';
 
 /** FX-4：节点 = 代码徽章（64×44 圆角矩形，内部短代码）。 */
-const NODE_W = 64;
-const NODE_H = 44;
-const NODE_CORNER_RADIUS = 6;
+/**
+ * 节点盒尺寸（canvas 模型单位，与缩放无关）。
+ *
+ * 原 64×44 的宽高比是按「两行文字」时代定的；FX-4 之后节点内只渲染短编码
+ * （DEV-001，7 字符 × 12px 等宽 ≈ 50px），64×44 的盒子留下大量空白，
+ * 同时把包围盒撑大 → fit 缩放更小 → 标签等效字号更小（用户反馈的
+ * 「节点框糊」链条起点）。压到 56×30：文本仍单行放得下（50px < 56px 内含 6px
+ * 内边距余量），包围盒高度降 32%，同等画布下 fit 缩放更大、标签更清晰。
+ */
+const NODE_W = 56;
+const NODE_H = 30;
+const NODE_CORNER_RADIUS = 5;
 const NODE_CODE_FONT =
   'ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, monospace';
 /** FX-4：bezier 控制点步长（换掉 haystack，曲线更顺、连线更有存在感）。 */
@@ -266,8 +275,24 @@ const EDGE_CONTROL_STEP = 60;
 /** FX-4：悬浮信息条的节点间切换去抖（ms）——避免 node→node 一帧闪空。 */
 const HOVER_CLEAR_DELAY_MS = 60;
 
-/** fit 后的缩放下限：保证默认视图下节点/标签可读（P0 标签可见性修复）。 */
-const MIN_ZOOM = 0.55;
+/**
+ * 用户手动缩放的绝对下限（滚轮 / +- 按钮的底板）。
+ *
+ * 语义边界（重要）：本常量**只约束用户交互**，不参与 fit 适配。
+ * 「初次打开看到全局最佳尺寸」与「用户能缩多小」是两件事，此前的实现把
+ * 两者混在 minZoom 一个值上，导致 fit 结果被强行抬到下限、拓扑装不进画布。
+ *
+ * 0.3 的取值：再小则 12px 标签等效不足 4px，画布退化为无信息的色块；
+ * 用户想「看全貌」有「适配视图（F）」一键回到 fit 结果。
+ */
+const MIN_ZOOM = 0.3;
+
+/**
+ * fit 阶段的缩放下限：只防止极端情况（如单节点 + 大留白）把视图缩到荒谬比例，
+ * 不是用户下限，取值为用户下限的一半——让它几乎不干预正常适配，
+ * 真正决定初次视图的是 cy.fit() 对包围盒的精确计算。
+ */
+const FIT_MIN_ZOOM = 0.15;
 
 /** 布局动画时长（ms）。 */
 const LAYOUT_ANIMATION_MS = 300;
@@ -588,12 +613,23 @@ function placeNewNodesSpiral(cy: Core, addedIds: Set<string>): void {
   });
 }
 
-/** 布局完成后再 fit（cose 为异步仿真、grid/circle 有 300ms 动画，立即 fit 抓到的是布局前包围盒）。 */
+/**
+ * 布局完成后再 fit（cose 为异步仿真、grid/circle 有 300ms 动画，
+ * 立即 fit 抓到的是布局前包围盒）。
+ *
+ * 语义：这是「初次打开的全局最佳尺寸」——由包围盒与画布尺寸精确决定。
+ * 曾经的实现会在 fit 之后把缩放强行抬到 MIN_ZOOM（当时 0.55），
+ * 结果是「装不满也装不下」：拓扑比画布大（贴边节点被裁），而用户以为
+ * 55% 就是系统允许的最大值。现在 fit 的结果不被抬升，只在低于
+ * FIT_MIN_ZOOM（防荒谬值）时才兜底，且**不动用户的下限**——
+ * cy.fit() 自身已受 minZoom 约束，无需二次钳制。
+ *
+ * 用户若想回到这个尺寸，随时按 F（适配视图）。
+ */
 function fitToView(cy: Core): void {
   cy.fit(undefined, FIT_PADDING);
-  // minZoom 在构造时已设为 0.55；fit 受其约束，这里再显式钳一次作保险
-  if (cy.zoom() < MIN_ZOOM) {
-    cy.zoom(MIN_ZOOM);
+  if (cy.zoom() < FIT_MIN_ZOOM) {
+    cy.zoom(FIT_MIN_ZOOM);
     cy.center();
   }
 }
@@ -632,8 +668,12 @@ const CY_STYLE: Array<{ selector: string; style: Record<string, string | number 
       'text-halign': 'center',
       width: NODE_W,
       height: NODE_H,
-      // 0 = 不因缩小而隐藏标签
-      'min-zoomed-font-size': 0,
+      // 等效字号低于 6px 时才隐藏标签。
+      // 取值依据：节点基字号 12px，默认 fit 后缩放约 0.4–0.5 → 等效 5–6px，
+      // 这个区间里文字确实不可辨认，但整块隐藏会让画布变成「一堆空方块」，
+      // 反而丢失全部可读性。6px 是「还能看出是字样」的下沿：低于它才隐藏，
+      // 高于它保留（轻微发虚但看得出 DEV-00x 编码）。
+      'min-zoomed-font-size': 6,
       // v0.2.2 微交互：hover 描边提亮 120ms 过渡（无动画偏好时不影响布局动画）
       'transition-property': 'border-width border-color',
       'transition-duration': 120,
@@ -700,7 +740,9 @@ const CY_STYLE: Array<{ selector: string; style: Record<string, string | number 
       'text-background-opacity': 0.85,
       'text-background-padding': 2,
       'text-rotation': 'autorotate',
-      'min-zoomed-font-size': 0,
+      // 链路标签基字号 8px（比节点小），默认 fit 缩放下几乎不可读，
+      // 阈值设 5 让它在小比例下自然隐去（避免叠成一团），放大后正常显示。
+      'min-zoomed-font-size': 5,
     },
   },
   // 链路标签开关（v0.2.2）：类规则放在带属性选择器的标签规则之后，
@@ -1397,7 +1439,9 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
       // FX-6：不再设置 wheelSensitivity（v0.2.x 曾用 0.2 调低滚轮灵敏度）——
       // Cytoscape 对任何自定义值都会打印建议性 console warning，工业控制台
       // 要求零警告；默认 1 即主流 Cytoscape 应用（Grafana/Kiali 同源）手感。
-      // 缩放下限：fit/滚轮都不会低于该值，保证 27 节点拓扑的默认视图下标签可读
+      // minZoom 是 Cytoscape 的硬地板（fit 与滚轮都受它约束）：
+      // 取用户手动的下限 0.3。初次视图的实际尺寸由 fitToView() 决定，
+      // 通常远高于此值；用户可自由縮放到 0.3 或放大到 maxZoom。
       minZoom: MIN_ZOOM,
     });
     cy.on('tap', 'node', (event) => {
@@ -2029,7 +2073,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           标签开关（地图视图=设备标签）+ 地图专属控件（适配/指北）+ PNG + zen。
           拓扑专属工具在地图视图禁用（带说明 tooltip，保持工具带结构稳定）。 */}
       <div className="lab-canvas-toolbar" role="toolbar" aria-label={LAB_CANVAS_LABEL}>
-        <span className="lab-canvas-toolbar-label">{LAB_VIEW}</span>
+        {/* 分段控件不再带「视图/布局/模式」文字前缀：每个图标按钮本就有
+            title + aria-label（屏幕阅读器可读），前缀文字在窄画布下要占
+            ~72px 宽，是工具带换行、逃逸到第二行的主因之一。分组语义改由
+            role="group" + aria-label 承载（不占视觉宽度）。 */}
         <div className="canvas-seg" role="group" aria-label={LAB_VIEW}>
           {VIEW_BUTTONS.map((btn) => (
             <button
@@ -2046,7 +2093,6 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           ))}
         </div>
         <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
-        <span className="lab-canvas-toolbar-label">{LAB_LAYOUT}</span>
         <div className="canvas-seg" role="group" aria-label={LAB_LAYOUT}>
           {LAYOUT_BUTTONS.map((btn) => (
             <button
@@ -2064,7 +2110,6 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           ))}
         </div>
         <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
-        <span className="lab-canvas-toolbar-label">{LAB_MODE}</span>
         <div className="canvas-seg" role="group" aria-label={LAB_MODE}>
           {MODE_BUTTONS.map((btn) => (
             <button
