@@ -4,7 +4,7 @@
 > **读者**：开发实施方（人 / AI 编码代理）
 > **状态**：设计稿，未实现
 > **关联**：issue #16（数据模型缺层）、ADR-0011（时序/检测/告警/预测）
-> **日期**：2026-10-12
+> **日期**：2026-10-12（v2：补 §10 图查询语义与防环设计）
 
 ---
 
@@ -868,7 +868,403 @@ netopslab synthdata --out ./testdata/synth \
 
 ---
 
-## 10. 开放问题（需裁决）
+## 10. 图查询语义与防环设计（关键补充）
+
+### 10.1 为什么这一章是必需的
+
+§3/§4 只定义了「有什么类型的关系」，**没有定义「怎么查」**。
+
+实践中的失败模式（用户已指出）：**AI 拿到一张大图却反复试探、兜圈子，
+始终定位不到真实故障根因**。
+
+根因有三：
+
+1. **查不到**——深度上限 2，跨层链路（业务→物理共 6 层）走不通
+2. **分不清**——遍历无向，AI 不知上下游，只能来回试
+3. **查得乱**——全图松弛 + 环网边全收，返回大量无关内容污染上下文
+
+**本章定义查询语义：同层横向可达 + 跨层纵向可穿，且必须收敛。**
+
+### 10.2 核心概念：两种边、两个方向
+
+#### 边的两种性质
+
+| 性质 | 含义 | 例子 |
+| --- | --- | --- |
+| **同层边（lateral）** | 两端资源属同一层次 | `a_end`（电路↔设备）、`connects_onu`（ONU↔PON口） |
+| **跨层边（vertical）** | 两端资源属不同层次 | `carried_by`（电路↕波道）、`uses_fiber`（波道↕纤芯） |
+
+**同层边用于「横向找同类」（还有哪些设备受影响）**，
+**跨层边用于「纵向找根因」（这条业务经过哪段光缆）**。
+
+#### 层次定义（用于判定同层/跨层）
+
+```
+L5 业务层    customer / service / leased_line
+L4 逻辑层    ring / igp_domain / vpn_instance / protection_group
+L3 传输层    circuit / otn_och / sdh_timeslot
+L2 物理层（光）  optical_cable / cable_segment / fiber / odf / odf_terminal / splice_box
+L1 物理层（设备） device / board / port / ptp_port
+L0 空间层    site / machine_room / rack / duct / manhole / pole
+```
+
+> **注意**：L2 与 L1 都是「物理」，但光缆网与设备网是两套并行的物理资源，
+> 二者之间的跳转（`fiber_terminates` 纤芯→ODF端子）**算跨层**。
+
+#### 每个关系的方向语义（必须有向）
+
+**规则**：`from` 是「依赖方 / 上层 / 被承载方」，`to` 是「被依赖方 / 下层 / 承载方」。
+
+即：**沿 `from → to` 走 = 向下追溯（找根因）；反向走 = 向上汇总（找影响面）**。
+
+| relation | from（上层） | to（下层） | 层差 | 方向语义 |
+| --- | --- | --- | --- | --- |
+| `subscribed_by` | service | customer | 同层 | 业务属于客户 |
+| `provided_by` | service | circuit | 跨层 | 业务由电路提供 |
+| `depends_on` | service | device | 跨层 | 业务依赖设备 |
+| `carried_by` | circuit | otn_och | 跨层 | 电路由波道承载 |
+| `routed_over` | otn_och | optical_cable | 跨层 | 波道路径经光缆 |
+| `uses_fiber` | otn_och | fiber | 跨层 | 波道占用纤芯 |
+| `carries_fiber` | optical_cable | fiber | 同层 | 光缆含纤芯 |
+| `fiber_terminates` | fiber | odf_terminal | 跨层 | 纤芯成端于ODF |
+| `cable_a_end` | optical_cable | site | 跨层 | 光缆 A 端落局站 |
+| `housed_in` | device | machine_room | 跨层 | 设备在机房 |
+| `installed_in` | board | device | 同层 | 板卡在设备 |
+| `mounted_on` | port | board | 同层 | 端口在板卡 |
+| `uplink_to` | base_station | device | 跨层 | 基站上联设备 |
+| `home_bbu` | rru | bbu | 同层 | RRU 归属 BBU |
+| `serves` | device | customer | 跨层 | 设备服务客户 |
+| `member_of_ring` | device | ring | 跨层 | 设备属某环 |
+| `a_end` / `z_end` | circuit | device | 跨层 | 电路端接设备 |
+| `assigned_to` | ip_pool | device | 跨层 | 地址池分配设备 |
+| `belongs_to` | machine_room | site | 跨层 | 机房属局站 |
+
+**这张表是实施的关键交付物**——每个关系类型都必须在此登记方向语义，
+未登记方向的关系不得使用（缺乏语义的边只会让查询兜圈子）。
+
+
+### 10.3 查询 API 设计
+
+#### 现有端点的问题
+
+```
+GET /api/resources/{id}/relations?depth=1|2
+```
+
+| 问题 | 说明 |
+| --- | --- |
+| 深度上限 2 | 跨层链路需 6 层，**穿不透** |
+| 无方向参数 | 上下游混在一起，AI **分不清流向** |
+| 无关系过滤 | 返回全部边，**上下文被无关内容污染** |
+| 无类型过滤 | 无法「只看传输层」 |
+
+**现有实现（`internal/topology/topology.go:224`）的算法缺陷**：
+
+```go
+// 0/1-weighted BFS (fixpoint relaxation)
+cost := map[string]int{id: 0}
+for changed := true; changed; {          // 固定点迭代，无早期终止
+    for cur, curCost := range cost {     // 每轮遍历整个已访问集
+        for _, nb := range g.adj[cur] {  // 无向邻接表，不区分方向
+```
+
+- **无早期终止**：`depth` 只做过滤，不做剪枝 → 最坏 O(V×E)
+- **无向遍历**：上下游不可区分
+- **边收集方式**：遍历**全图所有边**检查两端是否在访问集（268-274 行），
+  环网场景下会收集大量与查询无关的边
+
+#### 新端点设计（替代而非扩展）
+
+```
+GET /api/resources/{id}/traverse
+
+参数：
+  direction = down | up | both      默认 down（追溯根因）
+  layers    = 1,2,3,4,5            只走指定层（可空 = 全部）
+  relations = carried_by,uses_fiber 只走指定关系（可空 = 全部已登记方向的关系）
+  maxDepth  = 1..8                  默认 6（覆盖业务→物理完整链）
+  maxNodes  = 1..500                默认 200（防上下文爆炸）
+  pathOnly  = true | false          默认 false；true 时只返回最短路径
+
+返回：
+  {
+    "root": {id, type, name},
+    "nodes": [{id, type, name, layer, depth, status}],   // 按 depth 升序，同层按类型+键
+    "edges": [{from, to, relation, isCrossLayer}],        // 去重后
+    "paths": [[id, id, ...]],        // pathOnly=true 时给最短路径
+    "truncated": false,              // 超出 maxNodes 时为 true
+    "stats": {visitedEdges, elapsedMs}
+  }
+```
+
+### 10.4 防环与去重规则（收敛保证）
+
+**这是「不兜圈子」的技术保证。**
+
+#### 规则 1：节点按 ID 去重，首次访问即定型
+
+```
+visited: Map<resourceId, {depth, layer, parentEdge}>
+// 同一节点只展开一次；再次遇到只作为边端点，不重新入队
+```
+
+#### 规则 2：边按 (from, to, relation) 三元组去重
+
+```
+emittedEdges: Set<"from|to|relation">
+// 环网中同一条边可能被多次遇到 → 只发一次
+```
+
+**这修正了现实现的问题**：现在按「两端是否在访问集」收集边，
+会把环网里所有边都收进来（包括与本次查询路径无关的）。
+
+#### 规则 3：BFS 用队列，不用固定点迭代
+
+```
+// 正确做法：层序 BFS，depth 单调递增，天然终止
+queue = [{id: root, depth: 0}]
+while queue not empty:
+    cur = queue.shift()
+    if cur.depth >= maxDepth: continue        // ← 剪枝，而非过滤
+    for edge in outgoingEdges(cur.id, direction, relations):
+        if visited.has(edge.to): 
+            emitEdgeOnce(edge)                 // 只记边，不展开
+            continue
+        visited.set(edge.to, {depth: cur.depth+1})
+        queue.push({id: edge.to, depth: cur.depth+1})
+        emitEdgeOnce(edge)
+```
+
+**复杂度**：O(V + E)，与深度无关的固定开销，
+且 `maxDepth` 是**剪枝条件**（达到即不入队），不是事后过滤。
+
+#### 规则 4：环网特判（`ring` 场景）
+
+环网中 A→B→C→A 是物理存在，查询时：
+
+- 节点不重复（规则 1 已保证）
+- 边不重复（规则 2 已保证）
+- **额外**：`member_of_ring` 边只在**首次进入该环**时展开，
+  避免「环内每个设备都展开一次环」
+
+#### 规则 5：无向遍历必须显式声明
+
+`direction=both` 是**可选**行为，默认 `down`。
+且即使在 `both` 模式下，**边仍携带 `relation` 与方向信息**，
+AI 可据此判断流向（不会拿到一堆无方向的边）。
+
+
+### 10.5 故障根因追溯（本设计的核心场景）
+
+#### 场景定义
+
+用户诉求原文：**「通过表象找到真实故障来源」**。
+
+```
+表象：客户投诉「XX 局专线不通」
+根因：某段光缆的某根纤芯衰减过大
+```
+
+两者之间隔着 6 层，**必须靠关系链穿透**。
+
+#### 追溯算法（自下而上定位）
+
+```
+输入：一个异常信号（如「客户 A 的专线中断」或「设备 D 上报光功率异常」）
+
+步骤 1  确定起点层
+        业务侧异常 → 从 service/leased_line 出发
+        设备侧异常 → 从 device/port 出发
+
+步骤 2  向上游做影响面收集（direction=up）
+        GET /traverse?direction=up&maxDepth=8
+        得到：受影响的所有客户、业务
+
+步骤 3  向下游做根因追溯（direction=down）
+        GET /traverse?direction=down&maxDepth=8
+        得到：该业务经过的全部物理资源
+
+步骤 4  与告警/性能数据交叉
+        对步骤 3 的物理资源集合，查各自的状态与指标
+        GET /api/resources/{id}/context?metrics=latest
+        找出「状态异常」或「指标越限」的那些
+
+步骤 5  收敛到根因
+        在最深层（L2 光缆层 / L1 设备层）找异常点
+        该点即根因；其上层资源都是「受影响」而非「根因」
+```
+
+#### 关键设计：区分「根因」与「受影响」
+
+**这是 AI 不兜圈子的核心**——必须能区分两种节点：
+
+| 类型 | 特征 | 判据 |
+| --- | --- | --- |
+| **根因节点** | 自身异常 | 资源 `status` 为故障 **且** 其下游无异常 |
+| **受影响节点** | 自身正常，上游有异常 | 资源 `status` 正常 **且** 其上游链上有异常节点 |
+
+**算法**：
+
+```
+对步骤 3 得到的物理资源集合，按 depth 从大到小（最深优先）扫描：
+    若某节点自身异常，且它的下游（更深层）全无异常：
+        → 标记为根因候选
+    若某节点自身异常，但下游也有异常：
+        → 它是「中间传导点」，继续往深处找
+    若某节点自身正常，但下游有异常：
+        → 它是「受影响点」
+```
+
+**没有这个区分，AI 会看到整条链上多个异常，无法判断谁是真凶** → 兜圈子。
+
+#### API 支持：返回影响链而非平铺列表
+
+```
+GET /api/resources/{id}/impact?direction=up|down&maxDepth=8
+
+返回：
+{
+  "root": {...},
+  "impacted": [                        // 受影响（自身正常）
+    {"node": {...}, "distance": 2, "viaPath": [id1, id2]}
+  ],
+  "candidates": [                      // 根因候选（自身异常且下游无异常）
+    {"node": {...}, "distance": 4, "reason": "status=down, 下游无异常"}
+  ],
+  "truncated": false
+}
+```
+
+**`candidates` 就是 AI 要找的答案**——它不需要自己再遍历推理。
+
+### 10.6 每日巡检场景的查询（对应 §7.4）
+
+```
+① 扫描指标异常（不涉及图查询，纯时序）
+   GET /api/metrics/anomalies?metricKey=optical_power_rx_dbm&threshold=-1.0
+   → 返回：DEV-015 光功率 30 天降 3.2dB
+
+② 对每个异常资源，取影响面（向上）
+   GET /api/resources/{dev015}/impact?direction=up&maxDepth=8
+   → 返回：受影响客户 3 个、业务 3 条
+
+③ 对每个异常资源，取根因候选（向下）
+   GET /api/resources/{dev015}/impact?direction=down&maxDepth=8
+   → 返回：根因候选 = {DEV-015 自身}（因为它是设备层，下游是端口）
+
+④ AI 输出
+   「DEV-015 接收光功率持续劣化 3.2dB，
+     影响 3 个客户的 3 条专线，
+     根因为该设备光模块劣化，建议更换。」
+```
+
+**整个流程 3 次 HTTP 调用**，无兜圈子。
+
+
+### 10.7 索引与存储优化（性能保证）
+
+图查询性能取决于**边的检索效率**，现有 `relations` 表需要补索引：
+
+```sql
+-- 既有索引（UNIQUE 约束隐含）
+-- UNIQUE (from_resource_id, to_resource_id, relation_type)
+
+-- 新增：反向查询（direction=up 时用）
+CREATE INDEX idx_relations_to ON relations(to_resource_id, relation_type);
+
+-- 新增：按关系类型过滤（relations= 参数）
+CREATE INDEX idx_relations_type ON relations(relation_type, from_resource_id);
+```
+
+**时序侧**（§5.3 已定义）补充：
+
+```sql
+-- 已有 PRIMARY KEY (series_id, ts)，覆盖「某序列的时间范围查询」
+-- 补：跨序列按时间扫描（每日巡检）
+CREATE INDEX idx_metrics_ts_key ON metrics(ts, series_id);
+```
+
+### 10.8 实施约束（给开发方的硬性要求）
+
+**以下为不可协商的设计约束**：
+
+| # | 约束 | 理由 |
+| --- | --- | --- |
+| 1 | 每条关系**必须**在 §10.2 表中登记方向语义 | 无方向的边导致查询兜圈子 |
+| 2 | 遍历**必须**用层序 BFS + 剪枝，**禁止**固定点迭代 | 现实现 O(V×E)，大图会崩 |
+| 3 | 边去重**必须**按三元组，**禁止**按「两端在访问集」 | 环网场景会收无关边 |
+| 4 | `direction` **默认 down**（追溯根因），`both` 需显式指定 | 默认行为应服务于主用例 |
+| 5 | 必须返回 `truncated` 标记 | AI 需知道结果是否完整 |
+| 6 | 必须区分 `impacted` 与 `candidates` | 否则 AI 无法定位真凶 |
+| 7 | 单次查询必须有 `maxNodes` 上限 | 防 AI 上下文爆炸 |
+
+### 10.9 验收测试（必须可复现）
+
+**测试 1：跨层穿透完整性**
+
+```
+给定：一条专线业务，其下依次有 circuit → otn_och → fiber → optical_cable
+执行：GET /traverse?direction=down&maxDepth=8
+断言：返回的 nodes 覆盖全部 5 层，且 edges 关系语义正确
+```
+
+**测试 2：防环收敛**
+
+```
+给定：一个环形拓扑（A→B→C→A，且都属同一 ring）
+执行：GET /traverse?direction=down&maxDepth=8
+断言：A/B/C 各出现一次；环内边各出现一次；查询在 100ms 内返回
+```
+
+**测试 3：方向语义正确**
+
+```
+给定：device D 承载 circuit C，C 服务 customer X
+执行：GET /resources/{D}/traverse?direction=down
+断言：返回 C 与 X（下游 = 被承载方）
+执行：GET /resources/{X}/traverse?direction=down
+断言：返回 C 与 D（下游 = 承担方）
+```
+
+**测试 4：根因候选识别**
+
+```
+给定：光缆段 A 故障，导致其上电路中断，进而影响客户 X
+执行：GET /resources/{X}/impact?direction=down
+断言：candidates 恰为 [光缆段 A]，impacted 包含电路与设备
+```
+
+**测试 5：确定性**
+
+```
+执行：同参数查询两次
+断言：返回结果逐字段相等（节点序、边序稳定）
+```
+
+**测试 6：截断标记**
+
+```
+给定：大图（>200 节点可达）
+执行：GET /traverse?maxNodes=50
+断言：truncated=true，且返回节点数 <= 50
+```
+
+### 10.10 与既有实现的迁移
+
+| 现有 | 处置 |
+| --- | --- |
+| `GET /resources/{id}/relations?depth=1\|2` | **保留**（向后兼容），标为 deprecated |
+| `MaxRelationDepth = 2` | 新端点不受此限；旧端点保持不变 |
+| `Graph.Neighbors()` | **重写**为层序 BFS；旧调用点走新实现 |
+| 现有测试 | 保持不变（旧端点行为不变），新增 §10.9 六项测试 |
+
+**迁移原则**：新端点并行提供，旧端点保留，
+待所有调用点切换后再决定是否废弃旧端点——
+**不做破坏性变更**（与项目既有迁移哲学一致）。
+
+---
+
+## 11. 开放问题（需裁决）
 
 实施前必须明确的问题，**不预设答案**：
 
@@ -898,4 +1294,7 @@ netopslab synthdata --out ./testdata/synth \
 | 穿透 | 沿关系链跨层查询（业务 → 物理） |
 | 占位数据 | 开发期替代真实数据的合成/公开数据 |
 | 时序点 | 某序列在某一时刻的一次测量 |
+
+
+---
 
