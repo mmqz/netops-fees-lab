@@ -1,0 +1,23 @@
+# 构建上下文裁剪：Dockerfile 内的多阶段构建自带依赖安装，
+# 排除本地构建产物与运行时数据，减小上下文并避免污染镜像。
+
+.git
+.github
+bin/
+data/
+docs/
+testdata/
+samples/
+
+# 前端依赖与产物（镜像内重新构建）
+web/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+
+# 本地杂项
+*.log
+*.db
+*.db-shm
+*.db-wal
+tmp/
+_notes/

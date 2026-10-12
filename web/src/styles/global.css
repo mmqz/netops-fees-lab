@@ -2584,7 +2584,13 @@ body.lab-split-dragging {
   background: #0e1626;
 }
 
-.geo-map {
+/* 特异性必须高于 maplibre 自带的 .maplibregl-map { position: relative }：
+   MapLibre 给地图容器同时挂上 .geo-map 与 .maplibregl-map 两个 class，
+   二者特异性相同（0,1,0），而 vendor-maplibre.css 在 index.css 之后加载，
+   于是 relative 胜出 —— 容器失去绝对定位后高度塌陷为 0，
+   MapLibre 读到 0 高度便把 canvas 退回默认 300px，地图区域一片空白。
+   以 .geo-canvas 作前导把特异性提到 (0,2,0)，稳定压过 vendor 规则。 */
+.geo-canvas .geo-map {
   position: absolute;
   inset: 0;
 }
