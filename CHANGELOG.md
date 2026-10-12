@@ -18,6 +18,7 @@
 
 ### 修复 — issue #14：发布断档——v0.4.0–v0.6.2 从未送达用户
 - 事实核查：远端 tag 已至 v0.6.0、main 已至 v0.6.2，但 GitHub Releases 最新只有 **v0.3.0**——用户拿到的一直是旧二进制，其对「聚簇/地形/比例」的抱怨在 v0.3.0 上**全部字面成立**（v0.3.0 无聚簇、无 DEM、fit 更粗）。修复：v0.6.3 一站式发布（linux-amd64 二进制 + source tar.gz，含 DEM/等高线全量内嵌），发布后核对 `/api/health` 实报 v0.6.3 与资产清单；流程约定固化为**截屏仅存 repo `tmp/` 作回归证据，永不进入 download/ 与 release 资产**（用户明确要求）。
+- **连带挖出 Makefile 配方回归**：v0.6.2 给 `build`/`build-testdatagen` 加 `BIN_EXT`（issue #3）时配方被写成 8 空格而非 TAB——`make build` 自 v0.6.2 起 `missing separator` 静默失败（门禁都直跑 go test/tsc 未经过 make，bin/ 里躺着 v0.6.1 旧二进制，打出的包自然是旧货）。修复：配方行统一转 TAB；发布产物验证改为「解包→serve→`/api/health` 版本 + 资产字节数」实测（本次就拦下了旧二进制假包）。
 
 ### 门禁与事实源
 - Go 21 包全绿（347 顶层测试）；`gofmt`（含 6 文件空白规范化）/`go vet` 干净；`tsc -b` 零错；`vite build` 过（dist 14MB，含 97 DEM 瓦片 + 等高线双变体）；浏览器回归扩展至 **21/21 PASS**（新增：等高线默认可见/源加载、远观/近观夸张分档、等高线开关、相机独立性 G1/G2、海拔读数 H1/H2）。版本矩阵四处对齐 v0.6.3（domain.AppVersion / i18n.APP_VERSION / README MCP version / api.md 基线），`TestAppVersionMatchesChangelogHead` 钉死 CHANGELOG 头。

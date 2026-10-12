@@ -12,6 +12,12 @@
 workflow——账户 Actions 配额受限，见 v0.6.0 CI 记录）。「代码已合并」
 被误当成「修复已交付」。
 
+**连带发现（v0.6.3 打包时拦下）**：v0.6.2 给 Makefile `build`/`build-testdatagen`
+加 `BIN_EXT`（issue #3 修复）时配方行被写成 8 空格而非 TAB——`make build`
+自 v0.6.2 起 `missing separator` 失败；因门禁直跑 go test/tsc 不经过 make，
+`bin/` 一直是 v0.6.1 旧二进制。即便有人手工打 release，产物也会是旧货。
+已修复（配方转 TAB），并把发布验证固化为解包实测 `/api/health` 版本与资产字节数。
+
 ## 修复（v0.6.3）
 - 一站式发布：tag v0.6.3 + GitHub Release（`netops-lab-v0.6.3-linux-amd64.tar.gz`
   二进制 + `netops-lab-v0.6.3-source.tar.gz` 源码包，内嵌 DEM/等高线全量
