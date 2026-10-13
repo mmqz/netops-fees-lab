@@ -818,6 +818,48 @@ HTTP/1.1 409 Conflict
 
 > **AI 通道边界（同上）**：改名确认是 HTTP/CLI 的人类通道——MCP 工具面冻结为 5 个只读工具，AI 不得经 MCP 合并身份或改写自然键。
 
+## 时序指标端点（v0.7.0 W20 — 数据模型 v1.0 §5/§7.3）
+
+时序存储三表族（migration v14：`metric_keys` 指标目录 / `metric_series` 序列元数据 / `metrics` 窄表测量点，`(series_id, ts)` 主键 + `INSERT OR REPLACE`——**值语义**：同 (series, ts) 重导覆盖，与资源的 skip 语义并存见 ADR-0014）。**MCP 工具面不扩容**（恒 5 个）：AI 经 HTTP 消费时序；写入通道独立于资源导入（`metric_batches` 独立批次表，ADR-0011 D1）。
+
+### GET /api/metrics/keys — 指标目录
+
+封闭注册的指标目录（迁移 v14 从代码注册表 `internal/metrics` 播种，目录表与注册表由测试钉死一致）。**AI 先查此端点知道有哪些指标可分析**。`items[]`：`metricKey`（snake_case 键，查询参数用它）、`label`（中文名）、`unit`（dBm/%/Mbps/count/℃/V/mA）、`valueKind`（gauge|counter|ratio）、`minValue`/`maxValue`（合理界，advisory——越限值入库存 `quality=suspect` 而非拒绝）、`direction`（higher_is_better|lower_is_better|neutral——判断劣化方向）。目录含 14 键：光功率收/发均值、谷值、丢包率收/发、带宽利用率收/发、速率收/发、错误包数收/发、光模块温度、供电电压、偏置电流。
+
+### POST /api/metrics/analyze — 指标工作簿分析（无状态）
+
+multipart 字段 `file`（.xlsx ≤10MB）→ 200 `{workbookName, sha256, sheet, rowCount, columns[], suggestedMapping, warnings[]}`。同义词引擎把列头匹配到目录指标（接收光功率均值 → `optical_power_rx_avg_dbm`）；`suggestedMapping`：`{tsField, resourceType:"port", resolveBy:["device_name","port_name"]|["device_ip","port_name"], metrics:{目标指标键: 源列头}}`。**不建批次**（指标导入是一次性的：映射与文件同行）。错误：非 xlsx → 422 `not_xlsx`。
+
+### POST /api/metrics/imports — 执行指标导入（upsert）
+
+multipart 字段 `file` + `mapping`（analyze 的 suggestedMapping JSON 原样确认）→ 202 `{batchId, status:"completed", rowsTotal, rowsImported, rowsFailed, pointsWritten, seriesTouched}`。
+
+- **资源解析**（A3 裁决=挂 port 资源）：路径 a 设备名称+端口名 → port 自然键直查；路径 b 设备IP+端口名 → 按 `mgmt_ip` 精确匹配设备再拼 port 键。**均为精确值匹配**（名称相似度推断是项目红线，不存在于此）。解析失败 → 该行 `rowsFailed`（行级失败不致命）。
+- **ts 来自数据**（D2）：日期列接受 excel 序列日期 / `YYYY-MM-DD` / `YYYY/M/D`，规范化 RFC3339 UTC。数据路径零服务器时钟（确定性）。
+- **幂等**（A2/ADR-0014 验收）：同文件连导 3 次 `COUNT(*) FROM metrics` 不变；同 (series, ts) 异值 → 末次胜出。
+- 越限值 → `quality='suspect'`（advisory 界不拒绝）；空指标单元格 → 跳过该点。
+- 错误：缺 `mapping` 字段 → 400；未知指标键/非法 resolveBy → 400；未知表头列 → 400（不静默错映）。
+
+### GET /api/resources/{id}/metrics — 资源时序（AI 趋势查询）
+
+`?keys=a,b&from=&to=&agg=raw|daily_avg|daily_min|daily_max`（from/to RFC3339 可选；keys 可选=全部序列；agg 默认 raw）。200 `{resourceId, series[]}`，每序列 `{seriesId, metricKey, unit, points:[{ts,value,quality}]}`，序确定（metricKey, ts 升序）；日聚合在 SQL 内 `GROUP BY date(ts)`。错误：未知资源 404；未知指标键 400；非法 agg 400。
+
+### GET /api/metrics/anomalies — 异常扫描（每日巡检核心调用）
+
+`?metricKey=&from=&to=&threshold=&direction=`（threshold 默认 1.0 正数；direction=declining|rising|any 默认 any；metricKey 可选=全指标扫描）。对窗口内每序列计算首末点与 `delta`，`|delta| >= threshold` 的序列返回，按资源分组：`items[]:{resourceId, resourceName, resourceType, metricKey, unit, n, first{ts,value}, last{ts,value}, delta, degrading}`。**degrading 方向感知**：higher_is_better 且 delta<0、或 lower_is_better 且 delta>0 → true（neutral 指标趋势不判劣化）。确定性排序（resource, metricKey）。设计 §5.5 Q2 的落地——「哪些设备的指标在持续下降」一次调用。
+
+### GET /api/metrics/batches — 指标批次列表
+
+`?page=&pageSize=`（同既有列表契约）→ `{items[], total}`，倒序，含 id/workbookName/sha256/status/行计数/时间戳。
+
+### POST /api/metrics/batches/{id}/rollback — 回滚指标批次
+
+删除该批次写入的测量点（`metrics.batch_id` 锚定）+ 清理因此变空的序列（仍有其他批次点的序列保留）。仅 completed 可回滚 → 200 `{deleted:{points, series}}`；非 completed → 409；未知 id → 404。回滚目前为 HTTP 端点（CLI 侧后续随 W24 无人值守轮次一并收口）。
+
+### CLI 通道（与 HTTP 同引擎）
+
+`netopslab ingest --file perf.xlsx --map m.json --db …`（执行）；`--suggest` 只打印建议映射 JSON；`netopslab synthdata --out DIR --devices N --ports N --days D --scenario normal|degrade|outage --seed S`（确定性合成数据：同 seed 字节级相同；resources.xlsx 走既有资源导入通道，perf-day-*.xlsx 走指标通道）。
+
 ## 静态资源与 SPA
 
 - `GET /` 与一切非 `/api` 路径 → 嵌入式 React SPA（`go:embed`）；未知子路径回退 `index.html`（客户端路由）。

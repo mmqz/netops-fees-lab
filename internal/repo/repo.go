@@ -72,6 +72,11 @@ type DB struct {
 	ChangeSets     *ChangeSetRepo
 	CheckRuns      *CheckRunRepo
 	Checkpoints    *CheckpointRepo
+
+	// Timeseries metric channel (migration v14, W20): the separate
+	// metric batch family and the three metric tables.
+	MetricBatches *MetricBatchRepo
+	Metrics       *MetricRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies all pending
@@ -124,6 +129,8 @@ func wire(db *DB, q DBTX) {
 	db.ChangeSets = &ChangeSetRepo{q: q}
 	db.CheckRuns = &CheckRunRepo{q: q}
 	db.Checkpoints = &CheckpointRepo{q: q}
+	db.MetricBatches = &MetricBatchRepo{q: q}
+	db.Metrics = &MetricRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -160,6 +167,10 @@ type Tx struct {
 	ChangeSets     *ChangeSetRepo
 	CheckRuns      *CheckRunRepo
 	Checkpoints    *CheckpointRepo
+
+	// Timeseries metric channel (migration v14, W20).
+	MetricBatches *MetricBatchRepo
+	Metrics       *MetricRepo
 }
 
 // dsnOf builds the SQLite DSN of path: a file: URI with the path component
@@ -238,6 +249,8 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		ChangeSets:       &ChangeSetRepo{q: sqlTx},
 		CheckRuns:        &CheckRunRepo{q: sqlTx},
 		Checkpoints:      &CheckpointRepo{q: sqlTx},
+		MetricBatches:    &MetricBatchRepo{q: sqlTx},
+		Metrics:          &MetricRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

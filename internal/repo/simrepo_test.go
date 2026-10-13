@@ -217,8 +217,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 		t.Fatalf("max version: %v", err)
 	}
 	// Necessary adaptation for v13 (W8-D ptp_port): MAX 12 → 13.
-	if maxV != 13 {
-		t.Errorf("max schema version after upgrade = %d, want 13", maxV)
+	if maxV != 14 {
+		t.Errorf("max schema version after upgrade = %d, want 14", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -274,8 +274,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 		t.Fatalf("max version: %v", err)
 	}
 	// Necessary adaptation for v13 (W8-D ptp_port): MAX 12 → 13.
-	if maxV != 13 {
-		t.Errorf("max schema version after reopen = %d, want 13", maxV)
+	if maxV != 14 {
+		t.Errorf("max schema version after reopen = %d, want 14", maxV)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/mcpserver"
+	"github.com/mmqz/netops-lab/internal/metrics"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
@@ -46,7 +47,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, export, validate, report, query, changes, renames, lab, mcp, gc, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, export, validate, report, query, changes, renames, lab, mcp, gc, testdata")
 		return exitUsage
 	}
 
@@ -58,6 +59,10 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdAnalyze(args[1:], stdout, stderr)
 	case "import":
 		err = cmdImport(args[1:], stdout, stderr)
+	case "ingest":
+		err = cmdIngest(args[1:], stdout, stderr)
+	case "synthdata":
+		err = cmdSynthdata(args[1:], stdout, stderr)
 	case "export":
 		err = cmdExport(args[1:], stdout, stderr)
 	case "validate":
@@ -79,7 +84,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, export, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, export, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -351,6 +356,105 @@ type exportResponse struct {
 	File      string         `json:"file"`
 	Types     map[string]int `json:"types"`
 	TotalRows int            `json:"totalRows"`
+}
+
+// cmdIngest implements `netopslab ingest --file x.xlsx [--map m.json]
+// [--db d] [--suggest]` — the timeseries metric channel (W20, migration
+// v14): with --suggest it prints the offline analysis (suggested mapping
+// JSON + column stats + warnings) and exits WITHOUT touching the database;
+// with --map it runs the one-shot ingest (analyze + execute in one batch
+// transaction) and prints the metric batch result envelope.
+func cmdIngest(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("ingest")
+	file := fs.String("file", "", "性能工作簿路径（.xlsx），必填")
+	mapFile := fs.String("map", "", "指标映射 JSON 文件路径（{tsField,resourceType,resolveBy,metrics}），与 --suggest 二选一")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	suggest := fs.Bool("suggest", false, "只解析并输出建议映射与列统计（不写数据库）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *file == "" {
+		return &usageError{msg: "缺少 --file 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "ingest 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	if *suggest {
+		// Offline: no database, no batch — parse + suggest only.
+		a, err := metrics.AnalyzeOffline(*file, filepath.Base(*file))
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, a)
+	}
+	if *mapFile == "" {
+		return &usageError{msg: "缺少 --map 或 --suggest 参数（二者必选其一）", usage: usage.String()}
+	}
+	raw, err := os.ReadFile(*mapFile)
+	if err != nil {
+		return fmt.Errorf("读取映射文件 %s: %w", *mapFile, err)
+	}
+	m, err := metrics.ParseMapping(raw)
+	if err != nil {
+		return fmt.Errorf("映射文件 %s 不是合法 JSON: %w", *mapFile, err)
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+	sum, err := a.Metrics.Ingest(ctx, *file, m, filepath.Base(*file))
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, sum)
+}
+
+// cmdSynthdata implements `netopslab synthdata --out DIR --devices N
+// --ports P --days D --scenario normal|degrade|outage --seed S
+// [--metrics N]`: the deterministic synthetic dataset generator (W20).
+// Defaults are demo scale (20 devices × 2 ports, 30 days, normal, seed 42,
+// all 14 metric columns); the same seed yields byte-identical files.
+// The output directory is whatever the caller passes (--out) — the demo
+// placeholder later points at testdata/placeholder/ (§12-A5).
+func cmdSynthdata(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("synthdata")
+	out := fs.String("out", "", "输出目录（不存在则创建），必填")
+	devices := fs.Int("devices", 20, "设备数量")
+	ports := fs.Int("ports", 2, "每设备端口数（压测用 20）")
+	days := fs.Int("days", 30, "性能数据天数（每天一个 perf-day-NN.xlsx）")
+	scenario := fs.String("scenario", "normal", "故障场景：normal | degrade | outage")
+	seed := fs.Int64("seed", 42, "确定性种子（同种子同输出）")
+	metricCols := fs.Int("metrics", 0, "指标列数（注册表顺序取前 N，0=全部 14 列）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *out == "" {
+		return &usageError{msg: "缺少 --out 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "synthdata 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if !metrics.ValidScenario(*scenario) {
+		return &usageError{msg: fmt.Sprintf("未知 scenario %q（normal|degrade|outage）", *scenario), usage: usage.String()}
+	}
+
+	sum, err := metrics.WriteSynthData(metrics.SynthOptions{
+		Out:      *out,
+		Devices:  *devices,
+		Ports:    *ports,
+		Days:     *days,
+		Scenario: *scenario,
+		Seed:     *seed,
+		Metrics:  *metricCols,
+	})
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, sum)
 }
 
 // cmdExport implements `netopslab export --db <path> --out <file.xlsx>

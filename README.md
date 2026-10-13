@@ -228,6 +228,9 @@ netops-lab/
 ```bash
 netopslab analyze  --file devices.xlsx                      # 离线解析 + 映射建议（不写库）
 netopslab import   --file devices.xlsx --map map.json --db ./data/netops.db
+netopslab ingest   --file perf.xlsx --map metric-map.json --db ./data/netops.db   # 时序指标导入（v0.7 W20，upsert 幂等）
+netopslab ingest   --file perf.xlsx --suggest               # 只输出建议指标映射 JSON（不写库）
+netopslab synthdata --out ./synth --devices 20 --days 30 --scenario degrade --seed 42   # 确定性合成数据（同 seed 字节级相同）
 netopslab export   --db ./data/netops.db --out resources.xlsx [--types device,ip_pool]  # 导出当前资源清单（xlsx，可回源导入）
 netopslab validate --db ./data/netops.db [--batch <id>]
 netopslab report   --db ./data/netops.db --format html|json [--out 文件]  # --out 时 stdout 输出单 JSON 摘要（v0.6.2）

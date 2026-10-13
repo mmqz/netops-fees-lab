@@ -22,6 +22,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
+	"github.com/mmqz/netops-lab/internal/metrics"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
@@ -87,6 +88,8 @@ type App struct {
 	Lab *sim.Service
 	// Report is the quality report generator.
 	Report *report.Generator
+	// Metrics is the timeseries metric ingest/query service (W20).
+	Metrics *metrics.Service
 	// API is the HTTP API server.
 	API *api.Server
 }
@@ -135,6 +138,7 @@ func New(cfg Config) (*App, error) {
 		Governance: svc.Governance,
 		Lab:        svc.Lab,
 		Report:     svc.Report,
+		Metrics:    svc.Metrics,
 	}
 	a.API = api.New(log, svc, cfg.DataDir)
 	return a, nil

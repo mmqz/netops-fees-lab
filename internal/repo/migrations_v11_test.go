@@ -169,10 +169,11 @@ VALUES ('chg_v11_bad','res_v11_dev','bat_v11','mgmt_ip','a','b','bogus','s',3,?)
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	// Necessary adaptation for v13 (W8-D ptp_port): the reopened registry
-	// also applies v13, advancing MAX(version) from 12 to 13.
-	if maxV != 13 {
-		t.Errorf("max schema version after upgrade = %d, want 13", maxV)
+	// Necessary adaptation for v13→v14 (W8-D ptp_port, then W20 metrics):
+	// the reopened registry applies every registered migration, advancing
+	// MAX(version) with the registry head.
+	if maxV != 14 {
+		t.Errorf("max schema version after upgrade = %d, want 14", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

@@ -34,6 +34,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-lab/internal/metrics"
 	"github.com/mmqz/netops-lab/internal/ptpconfig"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
@@ -62,6 +63,7 @@ type Server struct {
 	dataDir    string
 	svc        *services.Services
 	importer   *importer.Service
+	metrics    *metrics.Service
 	validation *validation.Engine
 	query      *query.Service
 	report     *report.Generator
@@ -89,6 +91,7 @@ func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 		dataDir:    dataDir,
 		svc:        svc,
 		importer:   svc.Importer,
+		metrics:    svc.Metrics,
 		validation: svc.Validation,
 		query:      svc.Query,
 		report:     svc.Report,
@@ -188,6 +191,18 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/workspaces/{id}/checkpoints", s.handleCheckpointsList)
 	mux.HandleFunc("POST /api/workspaces/{id}/checkpoints/{cpId}/restore", s.handleCheckpointRestore)
 	mux.HandleFunc("GET /api/lab/report", s.handleLabReport)
+
+	// Timeseries metric channel (W20, migration v14 — design §7.3 first
+	// three query endpoints + the ADR-0011 D1 ingest channel). The MCP
+	// tool surface stays frozen at the five read-only tools: metric data
+	// is exposed over HTTP only (ADR-0011 D5).
+	mux.HandleFunc("GET /api/metrics/keys", s.handleMetricKeys)
+	mux.HandleFunc("GET /api/metrics/anomalies", s.handleMetricAnomalies)
+	mux.HandleFunc("GET /api/resources/{id}/metrics", s.handleResourceMetrics)
+	mux.HandleFunc("POST /api/metrics/analyze", s.handleMetricsAnalyze)
+	mux.HandleFunc("POST /api/metrics/imports", s.handleMetricsImport)
+	mux.HandleFunc("GET /api/metrics/batches", s.handleMetricBatchesList)
+	mux.HandleFunc("POST /api/metrics/batches/{id}/rollback", s.handleMetricBatchRollback)
 
 	// Unknown /api/ paths: JSON 404 envelope (never the SPA fallback).
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

@@ -219,8 +219,8 @@ func TestMigrationV10AddsSiteMachineRoom(t *testing.T) {
 	// v11 (and now v13) also applies on this Open (the registry holds it),
 	// so the max version advances with the schema; the v10 assertions of
 	// THIS test were 10 before v11 existed and 12 before v13 (W8-D).
-	if maxV != 13 {
-		t.Errorf("max schema version after upgrade = %d, want 13", maxV)
+	if maxV != 14 {
+		t.Errorf("max schema version after upgrade = %d, want 14", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.
@@ -232,8 +232,8 @@ func TestMigrationV10AddsSiteMachineRoom(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 13 {
-		t.Errorf("max schema version after reopen = %d, want 13", maxV)
+	if maxV != 14 {
+		t.Errorf("max schema version after reopen = %d, want 14", maxV)
 	}
 	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeMachineRoom, "23100120000018049"); err != nil {
 		t.Errorf("GetByTypeKey(machine_room) after reopen: %v", err)

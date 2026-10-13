@@ -24,6 +24,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
+	"github.com/mmqz/netops-lab/internal/metrics"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
@@ -59,6 +60,9 @@ type Services struct {
 	Lab *sim.Service
 	// Report is the quality report generator.
 	Report *report.Generator
+	// Metrics is the timeseries metric ingest/query service (W20,
+	// migration v14 — ADR-0011 D1's separate channel).
+	Metrics *metrics.Service
 	// LabReport is the lab report generator, wired to the SAME Lab engine
 	// instance as the field above (report.NewLab(db, Lab) — the api server's
 	// lab report handlers consume it).
@@ -109,6 +113,7 @@ func New(db *repo.DB, opts ...Option) *Services {
 		Governance: governance.New(db),
 		Lab:        lab,
 		Report:     report.New(db),
+		Metrics:    metrics.New(db),
 		LabReport:  report.NewLab(db, lab),
 	}
 	s.applyClock(o.clock)
