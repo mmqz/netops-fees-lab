@@ -1,0 +1,24 @@
+{
+  "tsField": "日期",
+  "resourceType": "port",
+  "resolveBy": [
+    "device_name",
+    "port_name"
+  ],
+  "metrics": {
+    "optical_power_rx_avg_dbm": "接收光功率均值",
+    "optical_power_tx_avg_dbm": "发送光功率均值",
+    "packet_loss_rx_pct": "接收丢包率",
+    "packet_loss_tx_pct": "发送丢包率",
+    "bandwidth_util_rx_pct": "接收带宽利用率",
+    "bandwidth_util_tx_pct": "发送带宽利用率",
+    "rx_rate_mbps": "接收速率",
+    "tx_rate_mbps": "发送速率",
+    "errors_rx_count": "接收错误包数",
+    "errors_tx_count": "发送错误包数",
+    "module_temp_avg_c": "光模块温度均值",
+    "supply_voltage_v": "供电电压",
+    "bias_current_ma": "偏置电流",
+    "optical_power_rx_min_dbm": "接收光功率谷值"
+  }
+}

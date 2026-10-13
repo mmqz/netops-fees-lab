@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,5 +179,63 @@ func TestHandlerRealDistDEMTiles(t *testing.T) {
 	}
 	if magic != [4]byte{0x89, 'P', 'N', 'G'} {
 		t.Errorf("dem tile magic = %v, want PNG signature", magic)
+	}
+}
+
+// TestHandlerRealDistRealNetworkLayers pins the v0.8.0 real-public-data map
+// layers into the served dist: hlj-cables / hlj-basestations (WGS84 + GCJ
+// variants, scripts/realdata/extract.py outputs) must be served with the
+// geo+json contract and parse into non-empty FeatureCollections (the http
+// client transparently decompresses the Content-Encoding: gzip payload —
+// asserting the parsed content is the stronger check). A red test here
+// means `make web` was not re-run after regenerating the layers.
+func TestHandlerRealDistRealNetworkLayers(t *testing.T) {
+	h := Handler()
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	wantFeatures := map[string]int{
+		"/mapdata/hlj-cables.geojson.gz":           10, // 7 road + up to 7 rail trunks
+		"/mapdata/hlj-cables-gcj.geojson.gz":       10,
+		"/mapdata/hlj-basestations.geojson.gz":     1000, // 1,198 real stations
+		"/mapdata/hlj-basestations-gcj.geojson.gz": 1000,
+	}
+	for path, minFeats := range wantFeatures {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s: status = %d, want 200 (dist stale? run make web)", path, resp.StatusCode)
+			continue
+		}
+		if got := resp.Header.Get("Content-Type"); got != "application/geo+json" {
+			t.Errorf("GET %s: Content-Type = %q, want application/geo+json", path, got)
+		}
+		if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+			t.Errorf("GET %s: Cache-Control = %q, want max-age caching for mapdata", path, cc)
+		}
+		var fc struct {
+			Type     string `json:"type"`
+			Features []struct {
+				Type     string `json:"type"`
+				Geometry struct {
+					Type string `json:"type"`
+				} `json:"geometry"`
+				Properties map[string]any `json:"properties"`
+			} `json:"features"`
+		}
+		if err := json.Unmarshal(body, &fc); err != nil {
+			t.Errorf("GET %s: body is not the transparently-gunzipped GeoJSON: %v (head %q)", path, err, string(body[:min(len(body), 40)]))
+			continue
+		}
+		if fc.Type != "FeatureCollection" {
+			t.Errorf("GET %s: type = %q, want FeatureCollection", path, fc.Type)
+		}
+		if len(fc.Features) < minFeats {
+			t.Errorf("GET %s: features = %d, want >= %d (layer regenerated?)", path, len(fc.Features), minFeats)
+		}
 	}
 }

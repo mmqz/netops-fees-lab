@@ -73,6 +73,35 @@
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
 
+## v0.8.0（2026-10-13）真实公开数据里程碑
+
+> 验证环境同前（linux/amd64，Go 1.27.2，Node 24.21.0）。轮次 W26-W28；
+> 数据许可与逐类口径见 [data-sources.md](data-sources.md)，裁决见
+> [adr/0015-real-public-data.md](adr/0015-real-public-data.md)。
+> （诚实补记：v0.7.0 的逐节验证段在先前会话基础设施切断中未落盘——其
+> 验收证据以 14 个已关闭 issue 回帖 + 门禁测试为准；v0.8.0 起恢复本清单纪律。）
+
+| 能力 | 验证方式 | 结果 |
+| --- | --- | --- |
+| 提取管线确定性 | `scripts/realdata/extract.py` 连续两次运行 md5 三文件一致（cables/basestations/core） | 字节级一致（gzip mtime=0 + 坐标 5 位量化 + 全序） |
+| 31 工作簿导入链 | `demo-real.sh` + `internal/app/e2e_realdata_test.go`（门禁） | 1,965 行 imported / **0 failed**；计数逐簿钉死（防数据集漂移） |
+| 真实基站数据 | OpenCelliD 快照过滤 → 1,198 站/1,851 小区（含 844 NR）；站编码=主小区 CGI；MNC→运营商映射入 manifest | 哈尔滨系 672/大庆 520/黑河 6（众源覆盖偏差如实披露） |
+| 干线走廊 | 7 条走廊真实几何（滨洲线 231 段/绥满高速 285 段等）；锚点链里程（哈大齐 273.6km 等真实测地值） | 地图图层 + 光缆台账双口径（并集长度另记、不混用） |
+| 劣化→告警旅程 | 7 日性能摄入 → `detect` → 4 条 firing 告警（packet_loss_rx_pct 连续越限） | run_state 联动真实触发 |
+| 跨层影响分析 | OC-HDQ 置 down → impact up = 80 节点 | circuit/customer/service/leased_line 全可达（e2e 钉死） |
+| 新地图图层（浏览器级） | `scripts/w28_browser_regression.sh`（agent-browser 1600×900） | **14/14**：图层存在/源加载/渲染要素 14 条/面板新分组/开关初始态/切换 visibility=none/3D 保持/console 零错误；截图 tmp/w28-2d/3d-realdata.png |
+| mapdata 资产契约 | `internal/webui` TestHandlerRealDistRealNetworkLayers（门禁） | 200 + application/geo+json + max-age + FeatureCollection 内容级断言 |
+| 全量门禁 | gofmt 空 / vet 0 / `go test -count=1 ./...` 23 包全绿 / tsc 0 错误 / `npm run build` 5.2s / `make build` | 429 顶层测试（427 基线 + e2e_realdata + webui 资产，`go test -list` 口径） |
+| 演示三脚本回归 | demo.sh（27/0/3、16/0/4、21/0/4、E13W3I1、64 资源）/ demo-lab.sh（哈希 aea27501fa59 一致）/ demo-real.sh（本文档上行） | 三脚本零修改、零回归 |
+
+## ⚠️ 未验证（v0.8.0 诚实声明）
+
+| 事项 | 现状 | 计划 |
+| --- | --- | --- |
+| 1,198 基站点在大屏的视觉密度 | 1600×900 无头断言渲染要素与开关切换；未在 4K/投影实测观感 | 现场演示前抽查（默认关，风险可控） |
+| 光缆走廊与导入资源的视觉对齐（逐段） | 走廊=公开几何，光缆台账=锚点链里程，两者口径已在文档分列；逐米对齐不存在 | 不适用（口径已声明） |
+| perf-day 摄入的 macOS/Windows 路径 | 与 v0.7.0 相同：仅 linux/amd64 验证 | 跨平台矩阵后补 |
+
 ## v0.6.4（2026-10-12）地表覆盖轮
 
 用户现场反馈「2D/3D 全是陆地、没有水、没有森林」（issue #15，v0.6.3 验收后）：离线数据此前只提取道路/铁路/行政边界，`natural`/`landuse`/`place` 整体缺席。本轮重提全量自然要素 + 离线简洁底图设默认（用户要「干净 2D、无商铺标注；3D 有真实高度与河流」）。

@@ -192,10 +192,10 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	// Release-bump adaptation (v0.7.0): this assertion intentionally
-	// tracks AppVersion — it is the version pin, not a relaxed behavior test.
-	if AppVersion != "v0.7.0" {
-		t.Errorf("AppVersion = %q, want v0.7.0 (v0.7.0 data-model v1.0 milestone: issues #16-#29 — 33 types / 29 relations across the seven-layer model, metrics + run-state + traverse/impact/context + detection/alerts + unattended import)", AppVersion)
+	// P2: the version constant is a single pinned fact (the changelog-head
+	// cross-check below guards the other copy).
+	if AppVersion != "v0.8.0" {
+		t.Errorf("AppVersion = %q, want v0.8.0 (v0.8.0 real-public-data milestone: OSM sites/corridors + OpenCelliD 1,198 real base stations with disclosed-simulated inventory details — docs/data-sources.md)", AppVersion)
 	}
 }
 

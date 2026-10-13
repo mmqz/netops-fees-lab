@@ -101,6 +101,11 @@ import {
   LAB_GEO_LAYERS_LABEL,
   LAB_GEO_LAYERS_NATURAL,
   LAB_GEO_LAYERS_OVERLAY,
+  LAB_GEO_LAYERS_REALDATA,
+  LAB_GEO_OV_CABLE,
+  LAB_GEO_OV_CABLE_TITLE,
+  LAB_GEO_OV_BASESTATION,
+  LAB_GEO_OV_BASESTATION_TITLE,
   LAB_GEO_LAYERS_TOGGLE,
   LAB_GEO_LAYERS_TOGGLE_TITLE,
   LAB_GEO_MAP_LABEL,
@@ -753,6 +758,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           water: prefsRef.current.overlays.water,
           green: prefsRef.current.overlays.green,
           places: prefsRef.current.overlays.places,
+          // 真实网络数据（v0.8.0）：双坐标变体，任意底图
+          cable: prefsRef.current.overlays.cable,
+          basestation: prefsRef.current.overlays.basestation,
         },
         linksVisible: prefsRef.current.links,
         terrainVisible: prefsRef.current.terrain,
@@ -1343,6 +1351,11 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     { id: 'water', label: LAB_GEO_OV_WATER, title: LAB_GEO_OV_WATER_TITLE },
     { id: 'green', label: LAB_GEO_OV_GREEN, title: LAB_GEO_OV_GREEN_TITLE },
   ];
+  /** 真实网络数据（v0.8.0：任意底图可用，双坐标变体）。 */
+  const realdataChoices: Array<{ id: OverlayId; label: string; title: string }> = [
+    { id: 'cable', label: LAB_GEO_OV_CABLE, title: LAB_GEO_OV_CABLE_TITLE },
+    { id: 'basestation', label: LAB_GEO_OV_BASESTATION, title: LAB_GEO_OV_BASESTATION_TITLE },
+  ];
   /** 交通/区划（仅 WGS84 底图可用）。 */
   const overlayChoices: Array<{ id: OverlayId; label: string; title: string }> = [
     { id: 'admin', label: LAB_GEO_OV_ADMIN, title: LAB_GEO_OV_ADMIN_TITLE },
@@ -1423,6 +1436,15 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
             <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_NATURAL}</div>
             <div className="geo-layerpanel-options">
               {naturalChoices.map((o) => (
+                <label key={o.id} className="geo-layerpanel-opt" title={o.title}>
+                  <input type="checkbox" checked={prefs.overlays[o.id]} onChange={() => toggleOverlay(o.id)} />
+                  {o.label}
+                </label>
+              ))}
+            </div>
+            <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_REALDATA}</div>
+            <div className="geo-layerpanel-options">
+              {realdataChoices.map((o) => (
                 <label key={o.id} className="geo-layerpanel-opt" title={o.title}>
                   <input type="checkbox" checked={prefs.overlays[o.id]} onChange={() => toggleOverlay(o.id)} />
                   {o.label}

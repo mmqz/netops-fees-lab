@@ -75,6 +75,25 @@ const MAPDATA_NATURAL_GCJ = '/mapdata/hlj-natural-gcj.geojson.gz';
 const MAPDATA_PLACES = '/mapdata/hlj-places.geojson.gz';
 const MAPDATA_PLACES_GCJ = '/mapdata/hlj-places-gcj.geojson.gz';
 
+// —— 真实网络数据（v0.8.0，scripts/realdata/extract.py 产出）——
+// 光缆干线走廊：OSM 道路/铁路真实几何按线路名选取（绥满高速/滨洲线/嫩林线/
+// 京漠线等，7 条干线，RDP 简化 ~150m）；属性 {code, n(名称), km(锚点链里程),
+// k(road|rail)}。无线基站：OpenCelliD 2026-10-06 快照黑龙江 1,198 站
+// (1,851 小区，~110m 网格聚类)；属性 {o(运营商), r(制式), c(小区数), s(样本)}。
+const MAPDATA_CABLES = '/mapdata/hlj-cables.geojson.gz';
+const MAPDATA_CABLES_GCJ = '/mapdata/hlj-cables-gcj.geojson.gz';
+const MAPDATA_BS = '/mapdata/hlj-basestations.geojson.gz';
+const MAPDATA_BS_GCJ = '/mapdata/hlj-basestations-gcj.geojson.gz';
+const OCID_ATTRIBUTION =
+  '<a href="https://opencellid.org" target="_blank" rel="noreferrer">基站: OpenCelliD (CC BY-SA 4.0)</a>';
+/** 基站运营商配色（移动蓝/联通红/电信绿/其它紫，图例见图层标题提示）。 */
+export const BS_OPERATOR_COLORS: Record<string, string> = {
+  '中国移动': '#3d7ee0',
+  '中国联通': '#e05252',
+  '中国电信': '#1fa06b',
+  '中国广电': '#a376f0',
+};
+
 // —— 离线地形高程（W17：3D 视图的真实起伏支撑）——
 // AWS Terrain Tiles（Mapzen 数据管线，SRTM/GMTED 融合，terrarium 编码，
 // 公开免密钥），黑龙江 bbox z4–z8 共 97 瓦片 ≈6.4MB，随二进制内嵌离线可用。
@@ -193,12 +212,12 @@ export const basemapBg = (id: BasemapId): string => (BASEMAPS[id].theme === 'lig
 // v0.6.4：存储键升级 v2——新增自然要素/地名开关且默认底图换为离线简洁，
 // 旧 v1 偏好（basemap=amap、road 默认关）不再沿用，保证升级即见新观感。
 
-export type OverlayId = 'admin' | 'railway' | 'road' | 'forest' | 'water' | 'green' | 'places';
+export type OverlayId = 'admin' | 'railway' | 'road' | 'forest' | 'water' | 'green' | 'places' | 'cable' | 'basestation';
 
 /** 仅 WGS84 底图可用的叠加（区划/交通：GCJ 底图栅格已含且会偏移）。 */
 export const WGS84_ONLY_OVERLAYS: OverlayId[] = ['admin', 'railway', 'road'];
 /** 任意底图可用的叠加（双坐标变体：自然要素/地名）。 */
-export const ANY_BASEMAP_OVERLAYS: OverlayId[] = ['forest', 'water', 'green', 'places'];
+export const ANY_BASEMAP_OVERLAYS: OverlayId[] = ['forest', 'water', 'green', 'places', 'cable', 'basestation'];
 
 export interface GeoLayerPrefs {
   basemap: BasemapId;
@@ -226,6 +245,10 @@ export const DEFAULT_PREFS: GeoLayerPrefs = {
     water: true,
     green: true,
     places: true,
+    // v0.8.0 真实网络数据：光缆干线默认开（7 条走廊是主叙事）；基站默认关
+    // （1,198 站点密集，一键开——图层标题带运营商图例说明）。
+    cable: true,
+    basestation: false,
   },
   links: true,
   devices: true,
@@ -263,6 +286,8 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
         water: overlayBool(ovRaw, 'water', DEFAULT_PREFS.overlays.water),
         green: overlayBool(ovRaw, 'green', DEFAULT_PREFS.overlays.green),
         places: overlayBool(ovRaw, 'places', DEFAULT_PREFS.overlays.places),
+        cable: overlayBool(ovRaw, 'cable', DEFAULT_PREFS.overlays.cable),
+        basestation: overlayBool(ovRaw, 'basestation', DEFAULT_PREFS.overlays.basestation),
       },
       links: typeof p['links'] === 'boolean' ? p['links'] : DEFAULT_PREFS.links,
       devices: typeof p['devices'] === 'boolean' ? p['devices'] : DEFAULT_PREFS.devices,
@@ -355,6 +380,8 @@ export const OVERLAY_LAYERS: Record<OverlayId, string[]> = {
   ],
   green: ['natural-green-fill'],
   places: ['places-city', 'places-county', 'places-town', 'places-village'],
+  cable: ['cable-casing', 'cable-line', 'cable-line-rail', 'cable-label'],
+  basestation: ['basestation-pts'],
 };
 
 /** 业务链路开关控制的图层 id（links-up/down/selected 同进退）。 */
@@ -410,6 +437,10 @@ interface ThemePalette {
   contourMinor: string;
   contourLabel: string;
   contourHalo: string;
+  /** 光缆干线走廊（v0.8.0）：琥珀主线 + 描边 + 标注。 */
+  cableLine: string;
+  cableCasing: string;
+  cableLabel: string;
 }
 
 const LIGHT: ThemePalette = {
@@ -465,7 +496,11 @@ const LIGHT: ThemePalette = {
   contourMinor: '#c9ac8c',
   contourLabel: '#a67c52',
   contourHalo: '#ffffff',
+  cableLine: '#d97706',
+  cableCasing: '#7c4a03',
+  cableLabel: '#7c4a03',
 };
+
 
 const DARK: ThemePalette = {
   adminLine: [
@@ -508,7 +543,11 @@ const DARK: ThemePalette = {
   contourMinor: '#4d6390',
   contourLabel: '#8fa9d0',
   contourHalo: '#0e1626',
+  cableLine: '#f6b83c',
+  cableCasing: '#3a2b0a',
+  cableLabel: '#f6c96b',
 };
+
 
 /** 公路主线宽（按 highway 等级；link 类减半）。 */
 const ROAD_WIDTH: ExpressionSpecification = [
@@ -830,6 +869,91 @@ function naturalLayers(on: Record<OverlayId, boolean>, t: ThemePalette): LayerSp
 }
 
 /** 地名标注（v0.6.4/#15）：城市/区县/乡镇/村庄分层 minzoom。 */
+/**
+ * 真实网络数据图层（v0.8.0）：光缆干线走廊（琥珀色双描边 + 名称标注，
+ * 铁路走廊细虚线）+ 无线基站（运营商配色圆点，半径随小区数）。
+ * 数据源署名与许可见文件头部注释；任何底图可用（GCJ 变体预投影）。
+ */
+function realNetworkLayers(on: Record<OverlayId, boolean>, t: ThemePalette): LayerSpecification[] {
+  const cableVis = visOf(on.cable);
+  const bsVis = visOf(on.basestation);
+  const operatorColor = (fallback: string): ExpressionSpecification =>
+    // match 表达式的 标签/值 必须平铺（label1,value1,label2,value2,...,fallback）——
+    // 嵌套数组会被解析为子表达式而使整个样式校验失败（W28 实测教训）。
+    (['match', ['get', 'o'], ...Object.entries(BS_OPERATOR_COLORS).flat(), fallback] as unknown as ExpressionSpecification);
+  return [
+    {
+      id: 'cable-casing',
+      type: 'line',
+      source: 'cables',
+      layout: { visibility: cableVis, 'line-cap': 'round' },
+      paint: {
+        'line-color': t.cableCasing,
+        'line-width': ['match', ['get', 'k'], 'road', 4.2, 2.6] as unknown as ExpressionSpecification,
+        'line-opacity': 0.55,
+      },
+    },
+    {
+      id: 'cable-line',
+      type: 'line',
+      source: 'cables',
+      filter: ['==', ['get', 'k'], 'road'],
+      layout: { visibility: cableVis, 'line-cap': 'round' },
+      paint: {
+        'line-color': t.cableLine,
+        'line-width': 2.2,
+        'line-opacity': 0.92,
+      },
+    },
+    {
+      // 铁路走廊：细虚线（line-dasharray 不支持数据驱动表达式 → filter 分层，
+      // 静态 dasharray —— maplibre 6.x 样式校验安全）
+      id: 'cable-line-rail',
+      type: 'line',
+      source: 'cables',
+      filter: ['==', ['get', 'k'], 'rail'],
+      layout: { visibility: cableVis, 'line-cap': 'round' },
+      paint: {
+        'line-color': t.cableLine,
+        'line-width': 1.1,
+        'line-opacity': 0.78,
+        'line-dasharray': [4, 2],
+      },
+    },
+    {
+      id: 'cable-label',
+      type: 'symbol',
+      source: 'cables',
+      minzoom: 7,
+      layout: {
+        'text-field': ['concat', ['get', 'n'], ' ', ['to-string', ['get', 'km']], 'km'] as unknown as ExpressionSpecification,
+        'text-font': FONT,
+        'text-size': 10.5,
+        'symbol-placement': 'line',
+        'symbol-spacing': 420,
+        'text-padding': 4,
+        visibility: cableVis,
+      },
+      paint: { 'text-color': t.cableLabel, 'text-halo-color': t.adminHalo, 'text-halo-width': 1.4 },
+    },
+    {
+      id: 'basestation-pts',
+      type: 'circle',
+      source: 'basestations',
+      minzoom: 5.5,
+      layout: { visibility: bsVis },
+      paint: {
+        'circle-radius': ['match', ['get', 'c'], 3, 5, 2, 3.6, 2.6] as unknown as ExpressionSpecification,
+        'circle-color': operatorColor('#8d8d8d'),
+        'circle-opacity': 0.8,
+        'circle-stroke-width': 0.8,
+        'circle-stroke-color': t.adminHalo,
+        'circle-stroke-opacity': 0.9,
+      },
+    },
+  ];
+}
+
 function placesLayers(on: Record<OverlayId, boolean>, t: ThemePalette): LayerSpecification[] {
   const defs: Array<{ cls: string[]; id: string; minzoom: number; size: number; color: string }> = [
     { cls: ['province', 'city'], id: 'places-city', minzoom: 4.2, size: 12.5, color: t.placeCity },
@@ -896,6 +1020,10 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
     // 自然要素 + 地名（v0.6.4/#15）：双坐标变体按底图选源（高德 = GCJ 预投影）
     natural: { type: 'geojson', data: naturalData, attribution: OSM_ATTRIBUTION },
     places: { type: 'geojson', data: placesData, attribution: OSM_ATTRIBUTION },
+    // 真实网络数据（v0.8.0）：光缆走廊（OSM 几何）+ 无线基站（OpenCelliD
+    // CC BY-SA 4.0，署名单列）；双坐标变体按底图选源（高德 = GCJ 预投影）。
+    cables: { type: 'geojson', data: def.isGCJ ? MAPDATA_CABLES_GCJ : MAPDATA_CABLES, attribution: OSM_ATTRIBUTION },
+    basestations: { type: 'geojson', data: def.isGCJ ? MAPDATA_BS_GCJ : MAPDATA_BS, attribution: OCID_ATTRIBUTION },
     // 等高线（W17/#13）：按底图坐标系选变体，高程派生数据同 DEM 署名
     contours: { type: 'geojson', data: contourData, attribution: DEM_ATTRIBUTION },
     // 离线 DEM（恒在：本地瓦片不依赖外网；terrain 起伏与 hillshade 都从它取）
@@ -1014,6 +1142,9 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
 
   // 地名标注（在交通线划之上、业务图层之下——干净的"标准地图"层级观感）
   layers.push(...placesLayers(opts.overlayVisibility, t));
+
+  // 真实网络数据（v0.8.0）：光缆走廊 + 基站点（地名之上、业务图层之下）
+  layers.push(...realNetworkLayers(opts.overlayVisibility, t));
 
   const linkVis = visOf(opts.linksVisible);
   layers.push(

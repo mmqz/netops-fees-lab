@@ -28,7 +28,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.6.4';
+export const APP_VERSION = 'v0.8.0';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -965,6 +965,13 @@ export const LAB_GEO_LAYERS_TOGGLE_TITLE = '选择底图模式与叠加图层（
 export const LAB_GEO_LAYERS_BASEMAP = '底图';
 export const LAB_GEO_LAYERS_NATURAL = '自然要素';
 export const LAB_GEO_LAYERS_OVERLAY = '交通与区划';
+export const LAB_GEO_LAYERS_REALDATA = '真实网络数据（v0.8）';
+export const LAB_GEO_OV_CABLE = '光缆干线';
+export const LAB_GEO_OV_CABLE_TITLE =
+  '七条干线走廊：哈大齐/哈牡/哈佳/佳牡/齐加/加漠/哈伊——OSM 公路/铁路真实几何（绥满高速·滨洲线·嫩林线·京漠线等），标注锚点链里程 · © OpenStreetMap contributors';
+export const LAB_GEO_OV_BASESTATION = '无线基站';
+export const LAB_GEO_OV_BASESTATION_TITLE =
+  'OpenCelliD 真实小区 1,198 站（1,851 小区）：蓝=移动 红=联通 绿=电信 紫=广电，点径随小区数 · 数据 © OpenCelliD（CC BY-SA 4.0）';
 export const LAB_GEO_LAYERS_BUSINESS = '业务图层';
 /** 底图模式名（与 geoBasemap.ts BASEMAPS 一一对应）。 */
 export const LAB_GEO_BM_AMAP = '高德街道';

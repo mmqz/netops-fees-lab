@@ -22,19 +22,17 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.7.0 is
-// the data-model v1.0 milestone (issues #16-#29, rounds W19-W25): the
-// resource graph expands from 8 types / 4 relations to 33 types / 29
-// relations across the seven-layer model (L0 space .. L6 business), with
-// the layer/domain registry as executable code, metrics storage + ingest
-// + synthdata + anomaly scan, run-state history, the layered BFS traverse
-// / impact / context endpoints, configurable detection rules + the alert
-// state machine, and the header-fingerprint unattended import (mapping
-// templates — the「每天导入即可」enabler). TestAppVersionP2 pins this
-// constant and TestAppVersionMatchesChangelogHead enforces the CHANGELOG
-// single fact source, so the three-way hand-copied versions cannot drift
-// again.
-const AppVersion = "v0.7.0"
+// the health endpoint, the MCP server implementation and the CLI. v0.8.0 is
+// the real-public-data milestone: the demo dataset is anchored on internet
+// public data (OSM places/road-rail corridor geometry + OpenCelliD's 1,198
+// real Heilongjiang base stations) with disclosed-simulated inventory
+// details (provenance in docs/data-sources.md + manifest.json), two new
+// offline map layers (cable trunk corridors / wireless base stations, dual
+// coordinate variants), the demo-real.sh one-click chain and the e2e
+// realdata guard test. TestAppVersionP2 pins this constant and
+// TestAppVersionMatchesChangelogHead enforces the CHANGELOG single fact
+// source, so the three-way hand-copied versions cannot drift again.
+const AppVersion = "v0.8.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.
