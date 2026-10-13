@@ -136,6 +136,23 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/resources/{id}", s.handleResourceDetail)
 	mux.HandleFunc("GET /api/resources/{id}/relations", s.handleResourceRelations)
 
+	// W22 run-state model (§12-B1 方案 C, issue #22): the MANUAL observation
+	// channel of the operational state + the flap-analysis history. The MCP
+	// tool surface stays frozen at the five read-only tools — run-state
+	// writes are HTTP/CLI-side human (W22) / engine (W23, source=alert)
+	// bookkeeping, never an AI-controlled channel.
+	mux.HandleFunc("POST /api/resources/{id}/run-state", s.handleRunStateSet)
+	mux.HandleFunc("GET /api/resources/{id}/run-state/history", s.handleRunStateHistory)
+
+	// W22 graph query endpoints (§7.3 后两个 + §10): the layer-delta vertical
+	// traverse, the impact (root-cause candidates / impacted surface) and the
+	// one-shot AI context assembly. The legacy /relations endpoint above
+	// stays untouched (deprecated in docs — §10.10 并行提供). MCP stays
+	// frozen at five tools: the engines are exposed over HTTP only.
+	mux.HandleFunc("GET /api/resources/{id}/traverse", s.handleResourceTraverse)
+	mux.HandleFunc("GET /api/resources/{id}/impact", s.handleResourceImpact)
+	mux.HandleFunc("GET /api/resources/{id}/context", s.handleResourceContext)
+
 	// Resource export channel (W12-D, v0.6.0): GET the current resource
 	// inventory as an import-isomorphic xlsx download. HTTP + CLI + web
 	// button only — the MCP tool surface stays frozen at the five

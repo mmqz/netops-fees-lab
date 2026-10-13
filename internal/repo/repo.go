@@ -77,6 +77,10 @@ type DB struct {
 	// metric batch family and the three metric tables.
 	MetricBatches *MetricBatchRepo
 	Metrics       *MetricRepo
+
+	// Run-state model (migration v17, W22 — §12-B1 方案 C): the
+	// resource_status history + the resources snapshot columns.
+	ResourceStatus *ResourceStatusRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies all pending
@@ -131,6 +135,7 @@ func wire(db *DB, q DBTX) {
 	db.Checkpoints = &CheckpointRepo{q: q}
 	db.MetricBatches = &MetricBatchRepo{q: q}
 	db.Metrics = &MetricRepo{q: q}
+	db.ResourceStatus = &ResourceStatusRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -171,6 +176,9 @@ type Tx struct {
 	// Timeseries metric channel (migration v14, W20).
 	MetricBatches *MetricBatchRepo
 	Metrics       *MetricRepo
+
+	// Run-state model (migration v17, W22).
+	ResourceStatus *ResourceStatusRepo
 }
 
 // dsnOf builds the SQLite DSN of path: a file: URI with the path component
@@ -251,6 +259,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		Checkpoints:      &CheckpointRepo{q: sqlTx},
 		MetricBatches:    &MetricBatchRepo{q: sqlTx},
 		Metrics:          &MetricRepo{q: sqlTx},
+		ResourceStatus:   &ResourceStatusRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

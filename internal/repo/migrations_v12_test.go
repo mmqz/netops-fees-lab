@@ -113,10 +113,12 @@ func TestMigrationV12AddsRenameProposals(t *testing.T) {
 		t.Errorf("proposal round-trip = %+v (err %v), want pending 动力机房2→动力机房2新 with one matched field", got, err)
 	}
 
-	// The pre-v12 data survived untouched.
-	old, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypeBaseStation, "动力机房2")
-	if err != nil || old.Name != "动力机房2" || !old.UpdatedAt.Equal(simTS) {
-		t.Errorf("base_station row after v12 = %v (err %v), want byte-identical survival", old, err)
+	// The pre-v12 data survived untouched. W22 adaptation: the database is
+	// held at v12 (< v17) so the repo read path (whose SELECT now carries
+	// the run-state columns) cannot prepare — raw SQL pins the stored row.
+	oKey, oName, _, _, oUpdated, err := preV17Resource(ctx, db2, "res_v12_old")
+	if err != nil || oKey != "动力机房2" || oName != "动力机房2" || oUpdated != formatTime(simTS) {
+		t.Errorf("base_station row after v12 = %q/%q@%q (err %v), want byte-identical survival", oKey, oName, oUpdated, err)
 	}
 
 	// The status CHECK rejects bogus values (raw SQL: Insert's own Go-side

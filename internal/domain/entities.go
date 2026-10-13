@@ -6,6 +6,14 @@ import "time"
 // imported from a workbook row. Attributes holds the normalized schema
 // fields of PROJECT_BRIEF §6 as strings (empty values are omitted by the
 // importer). The (Type, NaturalKey) pair is unique.
+//
+// RunState / RunStateAt are the W22 operational-state SNAPSHOT columns
+// (migration v17, §12-B1 方案 C): the projection of the newest
+// resource_status observation. They are READ on every scan and written ONLY
+// by ResourceStatusRepo.UpsertStatus — the importer never sets them (Insert
+// does not include the columns; new resources are NULL = unknown), and the
+// ledger fields (Status/Attributes/UpdatedAt) never move on a run-state
+// write: 台账状态与运行状态彻底分立.
 type Resource struct {
 	ID           string
 	Type         ResourceType
@@ -16,6 +24,14 @@ type Resource struct {
 	FirstBatchID string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+
+	// RunState is the snapshot of the newest run-state observation; empty
+	// means NULL = no observation at all (distinct from "unknown", which is
+	// an explicitly recorded state).
+	RunState string
+	// RunStateAt is the ts of the observation the snapshot projects; the
+	// zero time means no observation.
+	RunStateAt time.Time
 }
 
 // Relation is a typed edge between two resources. Current closed set:

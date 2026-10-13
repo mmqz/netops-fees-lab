@@ -494,6 +494,8 @@ HTTP/1.1 409 Conflict
 
 ## GET /api/resources/{id}/relations?depth=1|2 — 关系子图（BFS）
 
+> **Deprecated（v0.7.0 W22 起，§10.10）**：本端点保留供向后兼容（行为不变）；新消费者请用 [`GET /api/resources/{id}/traverse`](#get-apiresourcesidtraverse--纵向穿透1073)（层差驱动 BFS、深度至 8、层/关系过滤、防环与截断语义）。本端点的 depth 上限 2 与无向遍历限制是已知设计债，不再演进。
+
 `depth` 默认 1，最大 2。返回以该资源为中心的邻域子图（`nodes` 不含 center；`edges` 全部落在 visited 集合内）。示例 `?depth=2`（CKT-001 中心）：
 
 ```json
@@ -859,6 +861,44 @@ multipart 字段 `file` + `mapping`（analyze 的 suggestedMapping JSON 原样�
 ### CLI 通道（与 HTTP 同引擎）
 
 `netopslab ingest --file perf.xlsx --map m.json --db …`（执行）；`--suggest` 只打印建议映射 JSON；`netopslab synthdata --out DIR --devices N --ports N --days D --scenario normal|degrade|outage --seed S`（确定性合成数据：同 seed 字节级相同；resources.xlsx 走既有资源导入通道，perf-day-*.xlsx 走指标通道）。
+
+## 运行状态与图查询端点（v0.7.0 W22 — 数据模型 v1.0 §6/§10/§12-B1）
+
+W22 落地**运行状态模型**（migration v17：`resource_status` 历史表 + `resources.run_state/run_state_at` 快照列——台账 status 与运行 run_state 彻底分立，W005/lab 零触碰）与**纵向穿透三端点**（traverse/impact/context，§10.3-§10.5）。遍历语义 = **层差驱动**（§12 W22 处置）：`direction=down` 只向低层或同层走、`up` 只向高层或同层走、`both` 不限——边携带的存储方向（成员→容器/上层→下层）保留在响应中供 AI 推理，但**可达性由层差决定**。旧端点 `GET /resources/{id}/relations?depth=1|2` 保留（deprecated，行为不变——§10.10 不做破坏性变更）。
+
+### POST /api/resources/{id}/run-state — 记录运行状态观测
+
+body `{runState: "up|down|degraded|maintenance|unknown", source?: "manual", ts?: RFC3339}`。历史表 + 快照列**同事务**双写（`PRIMARY KEY (resource_id, ts)` 值语义 upsert——状态也是一种时序量，§12-B1 方案 C）。ts 缺省用服务器时钟（人工操作是 bookkeeping，非数据路径——与 D2 确定性原则的边界已在文档声明）。**W22 仅开放 manual 来源**；`alert` 为 W23 告警引擎保留、`poll` 为未来轮询通道保留（请求即 400，错误信息如实说明）。200 返回快照 `{runState, runStateAt, source}`；404 未知资源；400 非法枚举/非法 ts。
+
+### GET /api/resources/{id}/run-state/history?from=&to= — 状态历史
+
+`{items:[{ts, runState, source}], total}`，ts 升序（「过去 7 天是否抖动」的分析数据源）。
+
+### GET /api/resources/{id}/traverse — 纵向穿透（§10.3）
+
+`?direction=down|up|both（默认 down）&layers=0..6 逗号列表（只走指定层）&relations=关系类型列表（只走指定关系，未登记类型 400）&maxDepth=1..8（默认 6，剪枝非过滤）&maxNodes=1..500（默认 200）&pathOnly=true|false`。
+
+- 引擎：层序 BFS（FIFO 队列）+ 节点首访定型 + 边按 (from,to,relation) 三元组去重 + O(V+E) 逐节点增量加载（UNIQUE 前缀 + idx_relations_to 双向索引，EXPLAIN QUERY PLAN 验证）——修正旧实现的固定点迭代全图扫描（§10.4 批判的全部三条）。
+- 响应：`{root:{id,type,name,layer}, nodes:[{id,type,name,layer,depth,status,runState}]（序 = depth,layer,type,id，root 恒在列）, edges:[{from,to,relation,crossLayer}]（去重，序确定）, paths（仅 pathOnly：root→最深节点的一条 BFS 最短路）, truncated, stats:{visitedEdges, elapsedMs}}`。
+- 确定性：同库同参两次调用逐字节相等（stats.elapsedMs 为唯一墙钟字段豁免）。404 未知 root；400 参数族。
+
+### GET /api/resources/{id}/impact — 影响面/根因候选（§10.5）
+
+`?direction=up|down（默认 up=影响面收集）&maxDepth=1..8（默认 8）`。判据（§12-B1 落地后可执行）：`run_state ∈ {down, degraded}` = 异常；**缺失 run_state ≠ 异常**（无数据不判罚）。响应：
+
+- `candidates[]`：异常节点（**含 root 自身**——§10.6 ③：设备自身劣化时它就是根因）且其遍历方向下游无其他异常——**这就是 AI 要找的根因**，每项带 `reason`（如 "run_state=down, 下游无异常"）；
+- `impacted[]`：正常节点但从任一异常节点可达（沿上升方向闭包）——受影响面，每项带 `distance` 与 `viaPath[]`（root→该节点的 BFS 路径）；
+- `truncated`。序确定（layer,type,key）。
+
+**§10.6 三次调用巡检闭环**：`/api/metrics/anomalies` 找异常设备 → `impact?direction=up` 拿受影响客户/业务 → `impact?direction=down` 拿根因候选——无兜圈子。
+
+### GET /api/resources/{id}/context — AI 上下文一次拿够（§7.3）
+
+`?depth=1（邻居深度，默认 1 上限 2，走旧 relations BFS）&metrics=latest`。**扁平文档**：资源详情字段（id/type/naturalKey/name/status/runState/attributes/sourceRefs/relationCount）+ `neighbors`（depth-1 子图：nodes+edges）+ `metrics`（该资源各序列最新点：metricKey/unit/ts/value/quality）+ `recentAnomalies`（该资源的异常扫描结果；W23 起告警将并入此块）。404 未知资源。
+
+### GET /api/stats 扩展
+
+新增 `byRunState{up,down,degraded,maintenance,unknown,null}`（null = 无观测资源数——NULL 与显式 unknown 的区分在聚合层保持）。
 
 ## 静态资源与 SPA
 

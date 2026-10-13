@@ -104,16 +104,18 @@ func TestMigrationV13AddsPTPPort(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed ptp_port after v13: %v", err)
 	}
-	got, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypePTPPort, "6150|gei-1/1/0/7")
-	if err != nil || got.Name != "gei-1/1/0/7" ||
-		got.Attributes["portnum"] != "6" || got.Attributes["port_state"] != "master" {
-		t.Errorf("ptp_port after v13 = %v (err %v), want round-trip with attrs", got, err)
+	// W22 adaptation: the database is held at v13 (< v17) so the repo
+	// read path (whose SELECT now carries the run-state columns) cannot
+	// prepare — raw SQL pins the stored rows directly.
+	tKey, tName, tAttrs, _, _, err := preV17Resource(ctx, db2, "res_v13_ptp")
+	if err != nil || tName != "gei-1/1/0/7" ||
+		!strings.Contains(tAttrs, "\"portnum\":\"6\"") || !strings.Contains(tAttrs, "\"port_state\":\"master\"") {
+		t.Errorf("ptp_port after v13 = %q/%q/%q (err %v), want round-trip with attrs", tKey, tName, tAttrs, err)
 	}
 	// The machine_room row survived the rebuild untouched.
-	room, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypeMachineRoom, "23100120000018049")
-	if err != nil || room.Name != "源" || room.Attributes["machine_room_name"] != "源" ||
-		!room.UpdatedAt.Equal(simTS) {
-		t.Errorf("machine_room row after v13 rebuild = %v (err %v), want byte-identical survival", room, err)
+	rKey, rName, rAttrs, _, rUpdated, err := preV17Resource(ctx, db2, "res_v13_room")
+	if err != nil || rName != "源" || !strings.Contains(rAttrs, "machine_room_name") || rUpdated != formatTime(simTS) {
+		t.Errorf("machine_room row after v13 rebuild = %q/%q/%q@%q (err %v), want byte-identical survival", rKey, rName, rAttrs, rUpdated, err)
 	}
 	// The rebuild preserved the FK graph: an unknown first_batch is rejected.
 	if err := db2.Do(ctx, func(tx *Tx) error {
@@ -145,7 +147,8 @@ func TestMigrationV13AddsPTPPort(t *testing.T) {
 	if maxV != 13 {
 		t.Errorf("max schema version after reopen = %d, want 13", maxV)
 	}
-	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypePTPPort, "6150|gei-1/1/0/7"); err != nil {
-		t.Errorf("GetByTypeKey(ptp_port) after reopen: %v", err)
+	// W22 adaptation: raw read (repo read path needs >= v17).
+	if _, _, _, _, _, err := preV17Resource(ctx, db3, "res_v13_ptp"); err != nil {
+		t.Errorf("ptp_port row after reopen: %v", err)
 	}
 }

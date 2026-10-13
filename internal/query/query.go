@@ -34,13 +34,15 @@ func New(db *repo.DB) *Service {
 
 // ResourceItem is the JSON shape of one resource in list/detail responses
 // (§9: {id, type, naturalKey, name, status, attributes, firstBatchId,
-// updatedAt}).
+// updatedAt}). RunState is the W22 operational-state snapshot ("" = no
+// observation — NULL; the explicit "unknown" is a recorded state).
 type ResourceItem struct {
 	ID           string            `json:"id"`
 	Type         string            `json:"type"`
 	NaturalKey   string            `json:"naturalKey"`
 	Name         string            `json:"name"`
 	Status       string            `json:"status"`
+	RunState     string            `json:"runState"`
 	Attributes   map[string]string `json:"attributes"`
 	FirstBatchID string            `json:"firstBatchId"`
 	UpdatedAt    time.Time         `json:"updatedAt"`
@@ -59,6 +61,7 @@ func newResourceItem(r domain.Resource) ResourceItem {
 		NaturalKey:   r.NaturalKey,
 		Name:         r.Name,
 		Status:       r.Status,
+		RunState:     r.RunState,
 		Attributes:   attrs,
 		FirstBatchID: r.FirstBatchID,
 		UpdatedAt:    r.UpdatedAt,
@@ -349,17 +352,20 @@ func (s *Service) AllByTypes(ctx context.Context, types []domain.ResourceType) (
 }
 
 // Stats is the /api/stats aggregate (§9): resource counts by type and
-// status, relation counts by type, issue counts by severity and the newest
-// batch id. The three legacy resource types, the four known relation types
-// and the severities are always present (0 when absent) so UI charts render
-// stable axes; newer resource types (port, base_station, site, machine_room)
-// and byStatus list only the values actually present. LatestBatchID is ""
-// when no batch exists.
+// status, relation counts by type, issue counts by severity, the W22
+// run-state snapshot counts and the newest batch id. The three legacy
+// resource types, the four known relation types, the severities and the six
+// run-state buckets (up/down/degraded/maintenance/unknown + "null" for
+// resources with NO observation) are always present (0 when absent) so UI
+// charts render stable axes; newer resource types (port, base_station,
+// site, machine_room) and byStatus list only the values actually present.
+// LatestBatchID is "" when no batch exists.
 type Stats struct {
 	TotalResources   int            `json:"totalResources"`
 	ByType           map[string]int `json:"byType"`
 	ByStatus         map[string]int `json:"byStatus"`
 	ByRelationType   map[string]int `json:"byRelationType"`
+	ByRunState       map[string]int `json:"byRunState"`
 	IssuesBySeverity map[string]int `json:"issuesBySeverity"`
 	LatestBatchID    string         `json:"latestBatchId"`
 }
@@ -404,6 +410,23 @@ func (s *Service) Stats(ctx context.Context) (Stats, error) {
 		byRelationJSON[t.String()] = n
 	}
 
+	byRunState, nulls, err := s.db.ResourceStatus.CountByRunState(ctx)
+	if err != nil {
+		return Stats{}, fmt.Errorf("query: count resources by run_state: %w", err)
+	}
+	runStateJSON := map[string]int{
+		string(domain.RunStateUp):          0,
+		string(domain.RunStateDown):        0,
+		string(domain.RunStateDegraded):    0,
+		string(domain.RunStateMaintenance): 0,
+		string(domain.RunStateUnknown):     0,
+		"null":                             0,
+	}
+	for st, n := range byRunState {
+		runStateJSON[st.String()] = n
+	}
+	runStateJSON["null"] = nulls
+
 	issuesBySeverity, err := s.db.Issues.CountBySeverity(ctx, nil)
 	if err != nil {
 		return Stats{}, fmt.Errorf("query: count issues by severity: %w", err)
@@ -431,6 +454,7 @@ func (s *Service) Stats(ctx context.Context) (Stats, error) {
 		ByType:           byTypeJSON,
 		ByStatus:         byStatusJSON,
 		ByRelationType:   byRelationJSON,
+		ByRunState:       runStateJSON,
 		IssuesBySeverity: issuesJSON,
 		LatestBatchID:    latest,
 	}, nil

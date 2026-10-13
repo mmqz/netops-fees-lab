@@ -17,8 +17,11 @@ import (
 // skip, which is what makes re-import idempotent.
 type ResourceRepo struct{ q DBTX }
 
-// resourceColumns is the canonical SELECT column list of resources.
-const resourceColumns = `id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at`
+// resourceColumns is the canonical SELECT column list of resources. The
+// W22 run-state snapshot columns (run_state/run_state_at, migration v17)
+// are READ here; the INSERT column list below deliberately omits them —
+// imports never write run state (§12-B1: 台账与运行状态分立).
+const resourceColumns = `id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, run_state, run_state_at`
 
 // scanResource scans one resources row into a domain.Resource.
 func scanResource(s scanner) (domain.Resource, error) {
@@ -29,9 +32,11 @@ func scanResource(s scanner) (domain.Resource, error) {
 		status    sql.NullString
 		createdAt string
 		updatedAt string
+		runState  sql.NullString
+		runAt     sql.NullString
 	)
 	err := s.Scan(&res.ID, &rtype, &res.NaturalKey, &res.Name, &attrsJSON, &status,
-		&res.FirstBatchID, &createdAt, &updatedAt)
+		&res.FirstBatchID, &createdAt, &updatedAt, &runState, &runAt)
 	if err != nil {
 		return domain.Resource{}, err
 	}
@@ -47,11 +52,26 @@ func scanResource(s scanner) (domain.Resource, error) {
 	if res.UpdatedAt, err = parseTime(updatedAt); err != nil {
 		return domain.Resource{}, err
 	}
+	// Run-state snapshot: NULL (no observation) scans to ""/zero time.
+	if runState.Valid {
+		if _, err := parseRunStateStrict(runState.String); err != nil {
+			return domain.Resource{}, err
+		}
+		res.RunState = runState.String
+	}
+	if runAt.Valid {
+		if res.RunStateAt, err = parseTime(runAt.String); err != nil {
+			return domain.Resource{}, err
+		}
+	}
 	return res, nil
 }
 
 // Insert adds a new resource. A conflicting (resource_type, natural_key)
-// returns an error wrapping domain.ErrConflict.
+// returns an error wrapping domain.ErrConflict. The run-state snapshot
+// columns are NOT written (they default to NULL = no observation): run
+// state enters only through ResourceStatusRepo.UpsertStatus — the
+// importer's identity semantics stay byte-identical to pre-W22.
 func (r *ResourceRepo) Insert(ctx context.Context, res domain.Resource) error {
 	attrs, err := mapJSON(res.Attributes)
 	if err != nil {

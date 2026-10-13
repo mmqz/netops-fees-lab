@@ -1434,6 +1434,23 @@ CREATE INDEX idx_metrics_ts_key ON metrics(ts, series_id);
    投影 ↔ web `schema.ts` 镜像（测试直读 TS 源码提取 TYPE_SPECS/TYPE_META 键）
    四点集合相等。
 
+
+### W22 落地处置（v0.7.0 W22）
+
+1. **遍历方向 = 层差驱动**（§10.2「from→to=向下」简化与 serves 等业务边自相矛盾的
+   解决）：可达性由层差决定（down=向低层/同层、up=向高层/同层、both=不限；同层边
+   任何模式都走）；存储方向（成员→容器/上层→下层依赖语义）保留在响应边中供 AI
+   推理。这使 §10.5/§10.6 的全部场景自洽（设备 up-walk 经 a_end 反向到电路再到
+   业务到客户；客户 down-walk 经 provided_by 到电路到波道到纤芯到光缆到局站）。
+2. **candidates 含 root**（§10.6 ③）：设备自身劣化且下游无异常时，root 即根因。
+3. **缺失 run_state ≠ 异常**：无数据不判罚（unknown 显式记录才算状态）。
+4. **manual 来源先行**：W22 只开放人工通道；alert 来源为 W23 检测引擎保留
+   （请求 alert 即 400 + 如实说明）；poll 为未来轮询通道保留。
+5. **run-state 的 ts 缺省用服务器时钟**：人工操作是 bookkeeping 而非数据路径
+   （与 D2「ts 来自数据」的边界：导入/检测的 ts 恒来自数据）。
+6. 引擎加固：TraverseParams 零值 = 默认预算（6/200），与 HTTP 层同值同源
+   （topology 包导出常量）。
+
 ### 处置完成度
 
 - A1-A5、B1-B8：**13/13 已裁决**，零悬空（原则兑现）。

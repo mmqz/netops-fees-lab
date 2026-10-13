@@ -267,10 +267,12 @@ VALUES ('ser_raw_dup','res_v14_dev','optical_power_rx_avg_dbm',NULL,'x','x')`); 
 		t.Fatalf("identity dedupe check: %v", err)
 	}
 
-	// The pre-v14 data survived untouched.
-	dev, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, "DEV-v14_dev")
-	if err != nil || dev.Name != "dev" || !dev.UpdatedAt.Equal(simTS) {
-		t.Errorf("device row after v14 = %v (err %v), want byte-identical survival", dev, err)
+	// The pre-v14 data survived untouched. W22 adaptation: the database is
+	// held at v14 (< v17) so the repo read path (whose SELECT now carries
+	// the run-state columns) cannot prepare — raw SQL pins the stored row.
+	dKey, dName, _, _, dUpdated, err := preV17Resource(ctx, db2, "res_v14_dev")
+	if err != nil || dKey != "DEV-v14_dev" || dName != "dev" || dUpdated != formatTime(simTS) {
+		t.Errorf("device row after v14 = %q/%q@%q (err %v), want byte-identical survival", dKey, dName, dUpdated, err)
 	}
 
 	// The re-applied seed is idempotent: INSERT OR IGNORE of an existing

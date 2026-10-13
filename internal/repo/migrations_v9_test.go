@@ -115,16 +115,19 @@ func TestMigrationV9AddsBaseStation(t *testing.T) {
 
 	seedBaseStation(t, db2, "bat_v9_bs", "res_v9_bs", "动力机房2",
 		map[string]string{"base_station_ip": "172.7.10.125/30"})
-	got, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypeBaseStation, "动力机房2")
-	if err != nil || got.NaturalKey != "动力机房2" || got.Name != "bs-res_v9_bs" ||
-		got.Attributes["base_station_ip"] != "172.7.10.125/30" {
-		t.Errorf("base_station after v9 = %v (err %v), want round-trip with attrs", got, err)
+	// W22 adaptation: the database is held at v9 (< v17) so the repo read
+	// path (whose SELECT now carries the run-state columns) cannot
+	// prepare — raw SQL pins the stored row directly.
+	bsKey, bsName, bsAttrs, _, _, err := preV17Resource(ctx, db2, "res_v9_bs")
+	if err != nil || bsKey != "动力机房2" || bsName != "bs-res_v9_bs" ||
+		!strings.Contains(bsAttrs, "172.7.10.125/30") {
+		t.Errorf("base_station after v9 = %q/%q/%q (err %v), want round-trip with attrs", bsKey, bsName, bsAttrs, err)
 	}
 	// The port row survived the rebuild untouched.
-	port, err := db2.Resources.GetByTypeKey(ctx, domain.ResourceTypePort, "B2|bvi2.1008")
-	if err != nil || port.Name != "bvi2.1008" || port.Attributes["device_ip"] != "12.1.53.24" ||
-		!port.UpdatedAt.Equal(simTS) {
-		t.Errorf("port row after v9 rebuild = %v (err %v), want byte-identical survival", port, err)
+	pKey, pName, pAttrs, _, pUpdated, err := preV17Resource(ctx, db2, "res_v9_port")
+	if err != nil || pKey != "B2|bvi2.1008" || pName != "bvi2.1008" ||
+		!strings.Contains(pAttrs, "12.1.53.24") || pUpdated != formatTime(simTS) {
+		t.Errorf("port row after v9 rebuild = %q/%q/%q@%q (err %v), want byte-identical survival", pKey, pName, pAttrs, pUpdated, err)
 	}
 	// The rebuild preserved the FK graph: an unknown first_batch is rejected.
 	if err := db2.Do(ctx, func(tx *Tx) error {
@@ -156,7 +159,8 @@ func TestMigrationV9AddsBaseStation(t *testing.T) {
 	if maxV != 9 {
 		t.Errorf("max schema version after reopen = %d, want 9", maxV)
 	}
-	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeBaseStation, "动力机房2"); err != nil {
-		t.Errorf("GetByTypeKey(base_station) after reopen: %v", err)
+	// W22 adaptation: raw read (repo read path needs >= v17).
+	if _, _, _, _, _, err := preV17Resource(ctx, db3, "res_v9_bs"); err != nil {
+		t.Errorf("base_station row after reopen: %v", err)
 	}
 }
