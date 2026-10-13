@@ -78,6 +78,35 @@ var sheetNames = map[domain.ResourceType]string{
 	domain.ResourceTypeSite:        "局站资源表",
 	domain.ResourceTypeMachineRoom: "机房资源表",
 	domain.ResourceTypePTPPort:     "PTP配置",
+	// W21 (v0.7.0): the 25 new types. Pinned names contain the type's own
+	// SheetHint and, thanks to the w21Specs ordering (specific hint before
+	// generic prefix), SuggestType(name) == the type for every entry —
+	// the round-trip test walks all 33.
+	domain.ResourceTypeRack:            "机架资源表",
+	domain.ResourceTypeDuct:            "管道资源表",
+	domain.ResourceTypeManhole:         "人井资源表",
+	domain.ResourceTypePole:            "杆路资源表",
+	domain.ResourceTypeBoard:           "板卡资源表",
+	domain.ResourceTypeCableSegment:    "光缆段资源表",
+	domain.ResourceTypeOpticalCable:    "光缆资源表",
+	domain.ResourceTypeFiber:           "纤芯资源表",
+	domain.ResourceTypeODFTerminal:     "ODF端子表",
+	domain.ResourceTypeODF:             "ODF资源表",
+	domain.ResourceTypeSpliceBox:       "接头盒资源表",
+	domain.ResourceTypeOTNOch:          "波道资源表",
+	domain.ResourceTypeSDHTimeslot:     "时隙资源表",
+	domain.ResourceTypeProtectionGroup: "保护组资源表",
+	domain.ResourceTypeRing:            "环网资源表",
+	domain.ResourceTypeIGPDomain:       "IGP域资源表",
+	domain.ResourceTypeVPNInstance:     "VPN实例表",
+	domain.ResourceTypeCustomer:        "客户资源表",
+	domain.ResourceTypeService:         "业务实例表",
+	domain.ResourceTypeLeasedLine:      "专线资源表",
+	domain.ResourceTypeBBU:             "BBU资源表",
+	domain.ResourceTypeRRU:             "RRU资源表",
+	domain.ResourceTypeOLT:             "OLT资源表",
+	domain.ResourceTypeONU:             "ONU资源表",
+	domain.ResourceTypePONPort:         "PON口资源表",
 }
 
 // emptySheetName is the placeholder sheet of an empty export (a database

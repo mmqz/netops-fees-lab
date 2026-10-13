@@ -1400,6 +1400,40 @@ CREATE INDEX idx_metrics_ts_key ON metrics(ts, series_id);
 | B7 | 映射无人值守（#28） | **方案 A（映射模板持久化）**：`mapping_templates(template_id, source_name, header_fingerprint, mapping_json, confirmed_at)`，指纹=规范化表头序列的 sha256；导入时指纹命中→自动应用已确认映射（无人值守），未命中→回落既有确认流（表头变更天然可感知，不静默错映）；与 import_batches.mapping 衔接（首次确认后一键存模板） | W24 |
 | B8 | CRS 与编码规范（#29） | **CRS：统一 WGS84**（与 geo_lat/lng 一致，GCJ-02 仅渲染期转换——反向有损不作存储）；**编码：逐类型规范化** trim + 全角→半角 + 统一大写（前导零**保留**——ID 类编码的前导零是身份的一部分，与既有 KindString ID 键语义一致）；无编码→名称兜底 + W004（复用 base_station 条件键机制）；fiber 纤芯号等数值型段统一去空白不补零（1 与 01 不同键——防同一资源双身份；导则写入 natural-keys.md） | W21（新类型 Specs 落地时同步） |
 
+
+### W21 落地勘误与处置（v0.7.0 W21，实施时发现并修正）
+
+实施 M2/M3（migration v15/v16，25 新资源类型 + 25 新关系）时发现并处置：
+
+1. **`carries_fiber` 方向勘误 → 注册为 `fiber_of`（fiber → optical_cable）**：
+   原表 `carries_fiber | optical_cable → fiber | 光缆含纤芯` 与 §10.2 自身的
+   成员→容器模式矛盾（belongs_to 机房→局站、segment_of 段→缆、member_of_ring
+   设备→环全是从属方在前）；且按「from→to=向下找根因」的直觉，纤芯故障的物理
+   根因在光缆（外破伤缆），应从纤芯向下走到缆。注册表以 `fiber_of`
+   （纤芯属光缆）落地，方向 fiber→optical_cable，同层（L2）成员→容器边；
+   导入派生自 fiber.cable_code 引用列。`fiber_terminates` 不受影响。
+2. **多目标关系的注册表表达**：`carried_by`（circuit → otn_och | sdh_timeslot）与
+   `depends_on`（service → device | circuit）的 to 侧不止一种类型——
+   `RelationSpec.ToType` 扩展为 `ToTypes []ResourceType`（W19 单值版的超集），
+   一致性测试要求 to 侧各类型同层（与 from 侧规则对称）。
+3. **B8 键规范化**：`TypeSpec.KeyNormalize`（仅 25 新类型为 true，既有 8 类零变化）
+   → 导入器 trim + 全角→半角 + 大写；前导零永不增删（`1` ≠ `01`，反坍缩）；
+   ref 解析同规范化。详见 natural-keys.md §9。
+4. **B4 保守迁移守卫已落地**：migration v15/v16 为纯 CHECK 扩容（ForeignKeysOff
+   安全重建，v7/v9/v10 模式），带数据保留测试——既有资源/关系行逐字节不变、
+   计数不变、零自动派生（环/链保持属性、归属A 保持文本、OLT/BBU 的机房/基站列
+   为纯文本不派生关系）。既有 devices.xlsx 基线行为不变（回归实测）。
+5. **SuggestType 前缀冲突与注册序**：`光缆段` 含 `光缆`、`ODF端子表` 含 `ODF`——
+   注册表序将**特定 hint 排在其泛化前缀之前**（cable_segment 先于
+   optical_cable、odf_terminal 先于 odf），`TestSheetNameSuggestTypeRoundTrip`
+   钉死 33 类导出 sheet 名回环。
+6. **封闭集触点自动化**：MCP `resource_search` 与 CLI `--type` 的错误文案改为
+   `domain.AllResourceTypes()` 派生（不再手抄 8 类清单——#26 防漂移纪律的落地）。
+7. **四点一致性测试**（#26 验收）：`TestTypeRegistryFourPointConsistency` 断言
+   domain 枚举 ↔ SQL CHECK（v15/v16 后 sqlite_master 实抓）↔ `/api/schema`
+   投影 ↔ web `schema.ts` 镜像（测试直读 TS 源码提取 TYPE_SPECS/TYPE_META 键）
+   四点集合相等。
+
 ### 处置完成度
 
 - A1-A5、B1-B8：**13/13 已裁决**，零悬空（原则兑现）。

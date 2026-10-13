@@ -216,9 +216,10 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	// Necessary adaptation for v13 (W8-D ptp_port): MAX 12 → 13.
-	if maxV != 14 {
-		t.Errorf("max schema version after upgrade = %d, want 14", maxV)
+	// Necessary adaptation for v13→v14→v16 (W8-D, W20, W21): MAX follows
+	// the registry head.
+	if maxV != 16 {
+		t.Errorf("max schema version after upgrade = %d, want 16", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -274,8 +275,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 		t.Fatalf("max version: %v", err)
 	}
 	// Necessary adaptation for v13 (W8-D ptp_port): MAX 12 → 13.
-	if maxV != 14 {
-		t.Errorf("max schema version after reopen = %d, want 14", maxV)
+	if maxV != 16 {
+		t.Errorf("max schema version after reopen = %d, want 16", maxV)
 	}
 }
 

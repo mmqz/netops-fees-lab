@@ -993,10 +993,18 @@ func TestBaseStationSpec(t *testing.T) {
 			t.Errorf("%s kind = %q, want %q", tc.field, f.Kind, tc.want)
 		}
 	}
-	// No ref fields: the station sheet is a self-contained export, like port.
+	// Ref fields: W21 adds exactly the two OPTIONAL new-import-only columns
+	// (serve_customer → serves, uplink_device → uplink_to). The REAL station
+	// sheets stay self-contained — these columns never appear in
+	// samples/telecom-base-station.xlsx, so its imports derive nothing (B4:
+	// 归属A 文本匹配零派生). Any additional ref field needs a §4.2 contract
+	// change, not a silent spec edit.
 	for _, f := range spec.Fields {
-		if f.Kind == KindRef {
-			t.Errorf("base_station must not carry ref fields (found %s)", f.Name)
+		if f.Kind == KindRef && f.Name != "serve_customer" && f.Name != "uplink_device" {
+			t.Errorf("base_station carries unexpected ref field %s (only serve_customer/uplink_device are contracted)", f.Name)
+		}
+		if f.Required && f.Kind == KindRef {
+			t.Errorf("base_station ref field %s must stay optional (real sheets never map it)", f.Name)
 		}
 	}
 	// Registry-wide KeyFallbackFields validation: every referenced field

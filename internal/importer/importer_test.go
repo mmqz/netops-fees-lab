@@ -2027,29 +2027,26 @@ func TestImportMachineRoomAndSite(t *testing.T) {
 		t.Fatalf("Execute D (no site ref mapping): %v", err)
 	}
 	// Rows 2/3/4 import (row 4 has no E003 to fail on — the ref column is
-	// unmapped); rows 5/6 keep their E002/E004. Zero relations; one W001
-	// orphan warning per imported room (the ip_pool.assigned_device semantics).
+	// unmapped); rows 5/6 keep their E002/E004. Zero relations; ZERO W001 —
+	// the W21 refinement: an unmapped optional ref column is an absent
+	// column, not an empty reference (mapped-but-empty still warns, see the
+	// ip_pool orphan row). This is what lets W21 add optional ref columns to
+	// the existing specs without firing warnings on every pre-W21 workbook
+	// (B4 byte-identical imports).
 	if sumD.RowsImported != 3 || sumD.RowsFailed != 2 {
 		t.Fatalf("no-ref summary = %+v, want 3 imported / 2 failed", sumD)
 	}
 	if n, _ := dbC.Relations.CountByType(ctx); len(n) != 0 {
 		t.Errorf("relations after no-ref import = %v, want none", n)
 	}
-	if sumD.IssuesBySeverity[domain.SeverityWarning] != 3 {
-		t.Fatalf("no-ref warnings = %d, want 3 (W001 per imported row)", sumD.IssuesBySeverity[domain.SeverityWarning])
+	if sumD.IssuesBySeverity[domain.SeverityWarning] != 0 {
+		t.Fatalf("no-ref warnings = %d, want 0 (unmapped optional ref: W21 no longer fires W001)", sumD.IssuesBySeverity[domain.SeverityWarning])
 	}
 	issuesD := batchIssues(t, dbC, aD.BatchID)
-	w001 := 0
 	for _, iss := range issuesD {
 		if iss.RuleCode == domain.RuleOrphanRecord {
-			w001++
-			if iss.Evidence["field"] != "site_id" || iss.EntityID == "" || iss.SourceRefID == nil {
-				t.Errorf("W001 issue = %+v, want field site_id with entity and source ref", iss)
-			}
+			t.Errorf("W001 issue = %+v, want none (site_id column unmapped in phase D)", iss)
 		}
-	}
-	if w001 != 3 {
-		t.Errorf("W001 count = %d, want 3", w001)
 	}
 
 	// ---- Phase E: idempotency of the belongs_to derivation ----

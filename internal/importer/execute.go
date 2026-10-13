@@ -302,6 +302,18 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 			keyVals = append(keyVals, vals[f.Name])
 		}
 	}
+	// B8 key normalization (W21, §12-B8): KeyNormalize types (the 25 W21
+	// code-keyed types) normalize EVERY key component before the join —
+	// trim (already done by mappedValues, idempotent), fullwidth→halfwidth
+	// and upper. Leading zeros are preserved (nothing pads or strips), so
+	// "1" and "01" stay distinct identities while " gy-001" / "gy-001" /
+	// "ＧＹ-００１" collapse to one. Pre-W21 types keep the raw keys
+	// (KeyNormalize false → zero behavior change, B4).
+	if st.spec.KeyNormalize {
+		for i, v := range keyVals {
+			keyVals[i] = mapping.NormalizeNaturalKeyComponent(v)
+		}
+	}
 	// Composite natural key (v0.3.1): key values joined by "|" in spec
 	// field order. A single-key type joins one element — the joined key is
 	// exactly the historic single-field key, so device/ip_pool/circuit
@@ -402,7 +414,16 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	}
 
 	// Refs: E003 when a non-empty ref cannot be resolved (batch-local map ∪
-	// database); W001 when an optional ref is empty.
+	// database); W001 when an optional ref column is MAPPED but this row's
+	// value is empty. W21 refinement: an UNMAPPED optional ref no longer
+	// fires W001 — an absent column is not an empty reference, and the W21
+	// optional ref columns added to the EXISTING specs (device.machine_
+	// room_id/ring_code/igp_domain/serve_customer, port.board_id/
+	// vpn_instance, circuit.carried_och/carried_timeslot, base_station.
+	// serve_customer/uplink_device) would otherwise fire one warning per
+	// row on every pre-W21 workbook, breaking the B4 byte-identical import
+	// guarantee. A mapped-but-empty cell still warns (the ip_pool.
+	// assigned_device orphan semantics, unchanged).
 	var refs []resolvedRef
 	for _, f := range st.spec.Fields {
 		if f.Kind != mapping.KindRef {
@@ -411,11 +432,13 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 		v := vals[f.Name]
 		if v == "" {
 			if !f.Required {
-				warns = append(warns, pendingWarning{
-					code:     domain.RuleOrphanRecord,
-					msg:      fmt.Sprintf("可选引用为空：%s.%s", rt, f.Name),
-					evidence: map[string]string{"type": rt, "field": f.Name},
-				})
+				if _, mapped := st.sm.ColumnMapping[f.Name]; mapped {
+					warns = append(warns, pendingWarning{
+						code:     domain.RuleOrphanRecord,
+						msg:      fmt.Sprintf("可选引用为空：%s.%s", rt, f.Name),
+						evidence: map[string]string{"type": rt, "field": f.Name},
+					})
+				}
 			}
 			continue
 		}
@@ -835,8 +858,16 @@ func (st *sheetState) recordAttributeDiff(ctx context.Context, existing domain.R
 }
 
 // resolveRef resolves a ref value against the batch-local imported map ∪
-// the database (via the current transaction).
+// the database (via the current transaction). When the TARGET type is a
+// B8 KeyNormalize type the value is normalized first (§12-B8: the target's
+// keys are stored normalized, so " gy-001" / "ＧＹ-００１" resolve to the
+// same resource as "GY-001"; the failure message keeps the RAW value —
+// E003 evidence shows what the sheet actually said). Targets of pre-W21
+// types match raw, exactly as before.
 func (st *sheetState) resolveRef(ctx context.Context, f mapping.FieldSpec, v string) (string, bool, error) {
+	if spec, ok := mapping.SpecByType(f.RefType); ok && spec.KeyNormalize {
+		v = mapping.NormalizeNaturalKeyComponent(v)
+	}
 	if m := st.local[f.RefType]; m != nil {
 		if id, ok := m[v]; ok {
 			return id, true, nil

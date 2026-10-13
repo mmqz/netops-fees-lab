@@ -22,6 +22,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -153,7 +154,14 @@ func resourceSearch(ctx context.Context, svc *query.Service, in searchInput) (se
 	if in.Type != "" {
 		t, err := domain.ParseResourceType(in.Type)
 		if err != nil {
-			return searchOutput{}, fmt.Errorf("type 必须是 device、ip_pool、circuit、port、base_station、site、machine_room 或 ptp_port，收到 %q", in.Type)
+			// W21 (v0.7.0, design §7.6): the type list auto-extends with the
+			// registry (33 types now) — derived from domain.AllResourceTypes,
+			// never hand-copied, so this error can't drift from the closed set.
+			types := make([]string, 0, len(domain.AllResourceTypes()))
+			for _, rt := range domain.AllResourceTypes() {
+				types = append(types, rt.String())
+			}
+			return searchOutput{}, fmt.Errorf("type 必须是注册资源类型之一（%s），收到 %q", strings.Join(types, "、"), in.Type)
 		}
 		filter.Type = t
 	}

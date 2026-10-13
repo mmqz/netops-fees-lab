@@ -845,7 +845,13 @@ func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stder
 	if *typ != "" {
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
-			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station/site/machine_room/ptp_port，收到 %q", *typ), usage: usage.String()}
+			// W21 (v0.7.0): the closed set extends with the registry (33
+			// types) — derived, never hand-copied (issue #26 discipline).
+			types := make([]string, 0, len(domain.AllResourceTypes()))
+			for _, rt := range domain.AllResourceTypes() {
+				types = append(types, rt.String())
+			}
+			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(types, "/"), *typ), usage: usage.String()}
 		}
 		filter.Type = t
 	}
@@ -1564,7 +1570,13 @@ func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr i
 	if *typ != "" {
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
-			return &usageError{msg: fmt.Sprintf("--type 必须是 device/ip_pool/circuit/port/base_station/site/machine_room/ptp_port，收到 %q", *typ), usage: usage.String()}
+			// W21 (v0.7.0): the closed set extends with the registry (33
+			// types) — derived, never hand-copied (issue #26 discipline).
+			types := make([]string, 0, len(domain.AllResourceTypes()))
+			for _, rt := range domain.AllResourceTypes() {
+				types = append(types, rt.String())
+			}
+			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(types, "/"), *typ), usage: usage.String()}
 		}
 		filter.ResourceType = t
 	}

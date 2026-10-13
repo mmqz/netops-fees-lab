@@ -32,7 +32,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 - `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界）、`intMax`（int 字段上界，缺省=无界；v0.5 W9-D 起投影——此前 vlan 上界 4094 对端点消费者不可见）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
 - `rules[]`（规则目录，按码序 E001→E006 / W001→W006 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
 
-以下为真实输出截断（完整响应含 8 类共 89 字段与 13 条规则）：
+以下为真实输出截断（完整响应含 **33 类共 218 字段**与 13 条规则——v0.7.0 W21 扩容后；layer/layerName/domain 覆盖全部 33 类，七层模型 L0 空间/L1 设备/L2 光缆/L3 传输/L4 接入/L5 逻辑/L6 业务）：
 
 ```json
 {

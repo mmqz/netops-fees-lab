@@ -9,15 +9,20 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 )
 
-// withoutV14 temporarily removes migration v14 from the registry so the
-// next Open builds a GENUINE v13 database (migrations v1–v13 applied, no
-// metric tables). Restored via t.Cleanup — the withoutV11 precedent.
+// withoutV14 temporarily removes migration v14 AND every later migration
+// (v15, v16, …) from the registry so the next Open builds a GENUINE v13
+// database. W21 adaptation: v14 used to be the registry HEAD, so removing
+// "v14 and later" and "v14 only" were the same thing; with v15/v16
+// registered the tail form is the one that keeps this test's phase-1
+// database at v13 (removing only v14 would run the W21 rebuilds first and
+// v14's idx_relations_to creation would then collide with v16's — the
+// withoutV13 pattern).
 func withoutV14(t *testing.T) {
 	t.Helper()
 	restored := append([]Migration(nil), migrations...)
 	filtered := make([]Migration, 0, len(migrations))
 	for _, m := range migrations {
-		if m.Version != 14 {
+		if m.Version <= 13 {
 			filtered = append(filtered, m)
 		}
 	}

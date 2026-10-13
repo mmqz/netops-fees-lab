@@ -18,7 +18,39 @@ export type ResourceType =
   | 'base_station'
   | 'site'
   | 'machine_room'
-  | 'ptp_port';
+  | 'ptp_port'
+  // W21 扩容（data-model v1.0 §3，migration v15）——L0 空间层
+  | 'rack'
+  | 'duct'
+  | 'manhole'
+  | 'pole'
+  // L1 物理层（设备）
+  | 'board'
+  // L2 物理层（光缆）
+  | 'optical_cable'
+  | 'cable_segment'
+  | 'fiber'
+  | 'odf'
+  | 'odf_terminal'
+  | 'splice_box'
+  // L3 传输层
+  | 'otn_och'
+  | 'sdh_timeslot'
+  | 'protection_group'
+  // L5 逻辑层
+  | 'ring'
+  | 'igp_domain'
+  | 'vpn_instance'
+  // L6 业务层
+  | 'customer'
+  | 'service'
+  | 'leased_line'
+  // L4 接入层
+  | 'bbu'
+  | 'rru'
+  | 'olt'
+  | 'onu'
+  | 'pon_port';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -47,7 +79,42 @@ export type RuleCode =
   | 'W006'
   | 'I001';
 
-export type RelationType = 'assigned_to' | 'a_end' | 'z_end' | 'belongs_to';
+export type RelationType =
+  | 'assigned_to'
+  | 'a_end'
+  | 'z_end'
+  | 'belongs_to'
+  // W21 扩容（data-model v1.0 §4.2，migration v16）——空间归属
+  | 'located_in'
+  | 'housed_in'
+  | 'installed_in'
+  | 'mounted_on'
+  // 物理连接（fiber_of 为 §4.2 carries_fiber 的 W21 方向勘误：成员→容器）
+  | 'cable_a_end'
+  | 'cable_z_end'
+  | 'fiber_of'
+  | 'fiber_terminates'
+  | 'segment_of'
+  | 'connects_device'
+  // 传输承载
+  | 'carried_by'
+  | 'routed_over'
+  | 'uses_fiber'
+  // 逻辑归属
+  | 'member_of_ring'
+  | 'protects'
+  | 'in_domain'
+  | 'in_vpn'
+  // 业务服务
+  | 'serves'
+  | 'subscribed_by'
+  | 'provided_by'
+  | 'depends_on'
+  // 接入关联
+  | 'uplink_to'
+  | 'home_bbu'
+  | 'covers'
+  | 'connects_onu';
 
 export type MappingAction = 'import' | 'skip';
 

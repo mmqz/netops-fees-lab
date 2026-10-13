@@ -91,3 +91,22 @@
 - [docs/data-model.md](data-model.md) —— `resources` DDL（`id TEXT PRIMARY KEY` + `UNIQUE (resource_type, natural_key)`）与 v7/v8 迁移；
 - [docs/import-and-validation.md](import-and-validation.md) —— 幂等 / skip-duplicate / E001 的行为细节，及 §17 来源引用版本化（本节 #4 的落地语义）；
 - [samples/README.md](../samples/README.md) —— 真实样例的授权与披露（本规范的数据依据之一）。
+
+## 9. W21 新类型键规范化（B8，v0.7.0 起）
+
+v0.7.0 W21 扩容的 25 个新类型（migration v15/v16）在 spec 上带 `KeyNormalize: true`
+（既有 8 类为 false——**零行为变化**，B4 保守迁移）。导入器对带标记类型的
+**每个自然键字段值**在拼键前做规范化（`mapping.NormalizeNaturalKeyComponent`）：
+
+1. **trim**（含全角空格 U+3000）；
+2. **全角→半角**折叠（U+FF01..FF5E → ASCII，含全角 `｜`/`：` 分隔符落到键的 `|`）；
+3. **统一大写**（`ToUpper`，中文不受影响）。
+
+**前导零永不处理**——既不补零也不剥零：`1` 与 `01` 是**两个不同身份**（防同一资源
+双身份的反坍缩规则；ID 类编码的前导零是身份的一部分，与机房ID `000123` 先例一致）。
+引用列（`KindRef`）指向 KeyNormalize 类型时，解析值做同样规范化再匹配
+（execute.go 的 ref 解析路径）——两侧同规范化，键不会因格式变体而失配。
+
+**验收**（`TestW21CrossLayerChainFixture`）：`" cable-01 "`（小写+空白包裹）与
+`CABLE-01` 在同一批内 → E001 批内重复（规范化坍缩到同一身份）；fiber_no `1` vs `01`
+保持两个独立纤芯。设计依据：data-model-v1.md §12-B8（issue #29 处置）。

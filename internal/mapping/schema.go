@@ -315,6 +315,15 @@ type TypeSpec struct {
 	// key. Every referenced field must exist in Fields (pinned by
 	// TestBaseStationSpec validation of all Specs).
 	KeyFallbackFields []string
+	// KeyNormalize enables the B8 natural-key normalization (W21, §12-B8)
+	// for this type: the importer normalizes EVERY natural-key FIELD value
+	// before joining the key — trim + fullwidth→halfwidth + upper
+	// (NormalizeNaturalKeyComponent). Leading zeros are preserved (never
+	// padded or stripped): "1" and "01" stay two distinct identities, while
+	// " gy-001", "gy-001" and "ＧＹ-００１" collapse to one. Default false —
+	// the 8 pre-W21 types keep the raw-value keys (byte-identical imports,
+	// B4 conservative migration); the 25 W21 code-keyed types set it true.
+	KeyNormalize bool
 	// RenameDetection enables the importer's suspected-rename detection
 	// (W006, v0.5 W6-D) for this type. It is set ONLY for types whose
 	// natural key carries a NAME component — ip_pool (pool_name),
@@ -418,6 +427,19 @@ var deviceSpec = TypeSpec{
 		{Name: "mgmt_ip", Label: "管理IP", Kind: KindIPv4, Synonyms: []string{"管理IP", "管理地址", "IP地址", "IP"}},
 		{Name: "status", Label: "状态", Kind: KindEnum, Enum: StatusEnum,
 			Synonyms: []string{"状态", "设备状态", "运行状态"}},
+		// W21 optional ref columns (data-model v1.0 §3): each derives its
+		// relation on import (mapping.RelationTypeFor) but ONLY when the
+		// sheet actually maps the column — the classic devices.xlsx (no
+		// 机房/环/IGP域/客户 columns) imports byte-identically (B4: zero
+		// auto-derivation from existing data; new-import-only columns).
+		{Name: "machine_room_id", Label: "所属机房", Kind: KindRef, RefType: domain.ResourceTypeMachineRoom,
+			Synonyms: []string{"所属机房", "机房ID", "机房编号", "所在机房"}},
+		{Name: "ring_code", Label: "所属环", Kind: KindRef, RefType: domain.ResourceTypeRing,
+			Synonyms: []string{"所属环", "环编码", "环编号", "环ID"}},
+		{Name: "igp_domain", Label: "所属IGP域", Kind: KindRef, RefType: domain.ResourceTypeIGPDomain,
+			Synonyms: []string{"所属IGP域", "IGP域", "IGP域编码", "域编码"}},
+		{Name: "serve_customer", Label: "服务客户", Kind: KindRef, RefType: domain.ResourceTypeCustomer,
+			Synonyms: []string{"服务客户", "服务客户编码", "所属客户"}},
 		// Geographic position (optional, presentation metadata —
 		// deliberately NOT part of the simulation state hash).
 		// geo_lat/geo_lng are the canonical split columns; geo is
@@ -471,6 +493,14 @@ var circuitSpec = TypeSpec{
 			Synonyms: []string{"Z端设备", "Z端", "对端设备"}},
 		{Name: "bandwidth_mbps", Label: "带宽Mbps", Kind: KindInt, IntMin: 1,
 			Synonyms: []string{"带宽Mbps", "带宽(Mbps)", "带宽", "速率"}},
+		// W21 optional ref columns: the 层次穿透 (carried_by) carriers —
+		// circuit.carried_och → otn_och, circuit.carried_timeslot →
+		// sdh_timeslot (both derive carried_by). Unmapped → the classic
+		// circuit sheets import byte-identically (B4).
+		{Name: "carried_och", Label: "承载波道", Kind: KindRef, RefType: domain.ResourceTypeOTNOch,
+			Synonyms: []string{"承载波道", "波道编码", "OTN波道", "波道"}},
+		{Name: "carried_timeslot", Label: "承载时隙", Kind: KindRef, RefType: domain.ResourceTypeSDHTimeslot,
+			Synonyms: []string{"承载时隙", "时隙编码", "SDH时隙", "时隙"}},
 		{Name: "status", Label: "状态", Kind: KindEnum, Enum: StatusEnum,
 			Synonyms: []string{"状态", "设备状态", "运行状态"}},
 	},
@@ -516,6 +546,14 @@ var portSpec = TypeSpec{
 		{Name: "vendor", Label: "厂家", Kind: KindString, Synonyms: []string{"厂家", "厂商"}},
 		{Name: "model", Label: "型号", Kind: KindString, Synonyms: []string{"型号", "设备型号"}},
 		{Name: "record_date", Label: "日期", Kind: KindString, Synonyms: []string{"日期", "采集日期"}},
+		// W21 optional ref columns: board_id derives mounted_on (port →
+		// board) when mapped; vpn_instance derives in_vpn (port →
+		// vpn_instance). Unmapped → no W001, no relation (B4: existing
+		// port imports byte-identical).
+		{Name: "board_id", Label: "所属板卡", Kind: KindRef, RefType: domain.ResourceTypeBoard,
+			Synonyms: []string{"所属板卡", "板卡ID", "板卡编号"}},
+		{Name: "vpn_instance", Label: "所属VPN实例", Kind: KindRef, RefType: domain.ResourceTypeVPNInstance,
+			Synonyms: []string{"所属VPN实例", "VPN实例", "VPN编码", "所属VPN"}},
 		// Geographic position (optional): same columns/kinds as device, so a
 		// base-station port sheet can carry 经纬度 the same way.
 		{Name: "geo_lat", Label: "纬度", Kind: KindLat,
@@ -581,6 +619,17 @@ var baseStationSpec = TypeSpec{
 			Synonyms: []string{"网关IP", "网关ip", "网关地址"}},
 		{Name: "base_station_ip", Label: "基站IP", Kind: KindString,
 			Synonyms: []string{"基站IP", "基站ip", "基站IP地址"}},
+		// W21 optional ref columns: serve_customer derives serves
+		// (base_station → customer); uplink_device derives uplink_to
+		// (base_station → device) — the explicit replacement of the
+		// 归属A TEXT columns, which derive NOTHING (§12-B4: no
+		// name/IP inference; uplink_device is a NEW column only new
+		// imports carry). Unmapped → the real station sheets import
+		// byte-identically.
+		{Name: "serve_customer", Label: "服务客户", Kind: KindRef, RefType: domain.ResourceTypeCustomer,
+			Synonyms: []string{"服务客户", "服务客户编码", "所属客户"}},
+		{Name: "uplink_device", Label: "上联设备", Kind: KindRef, RefType: domain.ResourceTypeDevice,
+			Synonyms: []string{"上联设备", "上联设备编码", "上联网元"}},
 		{Name: "description", Label: "描述", Kind: KindString, Synonyms: []string{"描述"}},
 		{Name: "work_order", Label: "工单号", Kind: KindString,
 			Synonyms: []string{"工单号", "工单编号", "工单"}},
@@ -732,19 +781,22 @@ var ptpPortSpec = TypeSpec{
 	},
 }
 
-// Specs lists the resource type schemas in canonical order (device,
-// ip_pool, circuit, port, base_station, site, machine_room, ptp_port). The
-// order is the deterministic tie-breaker of SuggestType and of the
-// suggestion fallback for untyped sheets. site is registered BEFORE
-// machine_room (container first, mirroring the import story 先局站后机房): a
-// sheet named 机房局站表 matches BOTH SheetHints (机房 and 局站) and
-// SuggestType therefore suggests site — the suggestion is only a prefill,
-// the mapping confirmation page lets the user switch to machine_room for
-// the second pass. ptp_port's SheetHint "PTP" only matters for the
-// synthesized virtual sheet ("PTP配置"); an xlsx sheet whose name carries
-// 端口/机房/… suggests those types first by order. Treat the list as
-// read-only.
-var Specs = []TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec, siteSpec, machineRoomSpec, ptpPortSpec}
+// Specs lists the resource type schemas in canonical order: the 8 pre-W21
+// types (device, ip_pool, circuit, port, base_station, site, machine_room,
+// ptp_port) followed by the 25 W21 扩容 types in §3 catalog order (see
+// schema_w21.go). The order is the deterministic tie-breaker of SuggestType
+// and of the suggestion fallback for untyped sheets. site is registered
+// BEFORE machine_room (container first, mirroring the import story
+// 先局站后机房): a sheet named 机房局站表 matches BOTH SheetHints (机房 and
+// 局站) and SuggestType therefore suggests site — the suggestion is only a
+// prefill, the mapping confirmation page lets the user switch to
+// machine_room for the second pass. The same generic-before-specific rule
+// orders optical_cable BEFORE cable_segment (a sheet named 光缆段表
+// suggests optical_cable first, the user switches for the segment pass).
+// ptp_port's SheetHint "PTP" only matters for the synthesized virtual
+// sheet ("PTP配置"); an xlsx sheet whose name carries 端口/机房/… suggests
+// those types first by order. Treat the list as read-only.
+var Specs = append([]TypeSpec{deviceSpec, ipPoolSpec, circuitSpec, portSpec, baseStationSpec, siteSpec, machineRoomSpec, ptpPortSpec}, w21Specs...)
 
 // SpecByType returns the schema of t; ok is false for unknown types.
 func SpecByType(t domain.ResourceType) (TypeSpec, bool) {
@@ -783,6 +835,70 @@ func RelationTypeFor(rt domain.ResourceType, field string) domain.RelationType {
 		return domain.RelationTypeZEnd
 	case rt == domain.ResourceTypeMachineRoom && field == "site_id":
 		return domain.RelationTypeBelongsTo
+
+	// ---- W21 扩容（data-model v1.0 §4.2）：27 个新 ref 字段 → 25 种新关系 ----
+	// 空间归属.
+	case rt == domain.ResourceTypeRack && field == "machine_room_id":
+		return domain.RelationTypeLocatedIn
+	case rt == domain.ResourceTypeDevice && field == "machine_room_id":
+		return domain.RelationTypeHousedIn
+	case rt == domain.ResourceTypeBoard && field == "device_code":
+		return domain.RelationTypeInstalledIn
+	case rt == domain.ResourceTypePort && field == "board_id":
+		return domain.RelationTypeMountedOn
+	// 物理连接.
+	case rt == domain.ResourceTypeOpticalCable && field == "a_end_site":
+		return domain.RelationTypeCableAEnd
+	case rt == domain.ResourceTypeOpticalCable && field == "z_end_site":
+		return domain.RelationTypeCableZEnd
+	case rt == domain.ResourceTypeOpticalCable && field == "connect_device":
+		return domain.RelationTypeConnectsDevice
+	case rt == domain.ResourceTypeCableSegment && field == "cable_code":
+		return domain.RelationTypeSegmentOf
+	case rt == domain.ResourceTypeFiber && field == "cable_code":
+		return domain.RelationTypeFiberOf
+	case rt == domain.ResourceTypeFiber && field == "terminate_odf":
+		return domain.RelationTypeFiberTerminates
+	// 传输承载.
+	case rt == domain.ResourceTypeCircuit && field == "carried_och":
+		return domain.RelationTypeCarriedBy
+	case rt == domain.ResourceTypeCircuit && field == "carried_timeslot":
+		return domain.RelationTypeCarriedBy
+	case rt == domain.ResourceTypeOTNOch && field == "route_cable":
+		return domain.RelationTypeRoutedOver
+	case rt == domain.ResourceTypeOTNOch && field == "use_fiber":
+		return domain.RelationTypeUsesFiber
+	// 逻辑归属.
+	case rt == domain.ResourceTypeDevice && field == "ring_code":
+		return domain.RelationTypeMemberOfRing
+	case rt == domain.ResourceTypeProtectionGroup && field == "protected_circuit":
+		return domain.RelationTypeProtects
+	case rt == domain.ResourceTypeDevice && field == "igp_domain":
+		return domain.RelationTypeInDomain
+	case rt == domain.ResourceTypePort && field == "vpn_instance":
+		return domain.RelationTypeInVPN
+	// 业务服务.
+	case rt == domain.ResourceTypeBaseStation && field == "serve_customer":
+		return domain.RelationTypeServes
+	case rt == domain.ResourceTypeDevice && field == "serve_customer":
+		return domain.RelationTypeServes
+	case rt == domain.ResourceTypeService && field == "customer_code":
+		return domain.RelationTypeSubscribedBy
+	case rt == domain.ResourceTypeService && field == "provide_circuit":
+		return domain.RelationTypeProvidedBy
+	case rt == domain.ResourceTypeService && field == "depend_device":
+		return domain.RelationTypeDependsOn
+	case rt == domain.ResourceTypeService && field == "depend_circuit":
+		return domain.RelationTypeDependsOn
+	// 接入关联.
+	case rt == domain.ResourceTypeBaseStation && field == "uplink_device":
+		return domain.RelationTypeUplinkTo
+	case rt == domain.ResourceTypeRRU && field == "home_bbu":
+		return domain.RelationTypeHomeBBU
+	case rt == domain.ResourceTypeRRU && field == "cover_station":
+		return domain.RelationTypeCovers
+	case rt == domain.ResourceTypeONU && field == "connect_port":
+		return domain.RelationTypeConnectsONU
 	default:
 		return domain.RelationType("")
 	}
