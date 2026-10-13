@@ -26,6 +26,12 @@ type Analysis struct {
 	Sheets []SheetAnalysis `json:"sheets"`
 	// SuggestedMapping is the prefilled mapping model for the UI.
 	SuggestedMapping mapping.Mapping `json:"suggestedMapping"`
+	// AutoWarning carries the refusal reason of an unattended (auto=1)
+	// import attempt: the import sheets whose fingerprints found no template
+	// (code "no_matching_template"). Set only on the auto path's refusal —
+	// the batch stays awaiting_mapping and the ordinary human confirmation
+	// flow is the fallback (表头变更感知, never silent).
+	AutoWarning *AutoWarning `json:"autoWarning,omitempty"`
 }
 
 // SheetAnalysis describes one analyzed worksheet.
@@ -41,6 +47,13 @@ type SheetAnalysis struct {
 	// SuggestedType is the resource type suggested from the sheet name;
 	// "" when the name carries no hint.
 	SuggestedType domain.ResourceType `json:"suggestedType,omitempty"`
+	// TemplateMatched is non-nil when a stored mapping template's header
+	// fingerprint matches this sheet's canonical signature exactly (W24,
+	// §12-B7): the sheet was confirmed before with the same header shape,
+	// and the wizard's prefilled mapping equals the template content. null
+	// means no match — a renamed/added/removed/permuted column produces a
+	// DIFFERENT fingerprint and lands here (the human re-confirms).
+	TemplateMatched *TemplateMatch `json:"templateMatched"`
 }
 
 // ColumnAnalysis describes one workbook column.
@@ -135,6 +148,13 @@ func (s *Service) AnalyzeNamed(ctx context.Context, path, workbookName string) (
 	}
 	if err := s.db.Batches.UpdateStatus(ctx, batch.ID, domain.BatchStatusAwaitingMapping); err != nil {
 		return Analysis{}, fmt.Errorf("importer: mark batch %s awaiting mapping: %w", batch.ID, err)
+	}
+	// W24 (§12-B7): attach the per-sheet template matches of the stored
+	// mapping templates — the wizard's「已匹配映射模板」banner and the auto
+	// path's decision input. Lookup failures (other than "no template") fail
+	// the analyze honestly.
+	if err := s.attachTemplateMatches(ctx, &a); err != nil {
+		return Analysis{}, err
 	}
 	return a, nil
 }

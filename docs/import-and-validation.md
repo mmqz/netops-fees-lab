@@ -308,3 +308,41 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 **回源幂等（验收核心）**：导出 xlsx → `analyze`（建议映射即全字段映射）→ `import` 全新库——资源集合 (type, natural_key, attributes) 与原库等价、关系经 ref 列重新派生等价（sheet 按 Specs 序天然满足 E003 引用顺序：device 先于 ip_pool/circuit、site 先于 machine_room，单批次整簿回源）。同库直接回导 = 纯 skip + 零行级 issue（导出值与库内值逐字段一致，不触发 W005）。端到端契约由 `TestCLIExportRoundTrip`（八类型种子 + W005/W006 apply 后状态 → 双库资源/关系集合等价断言）与 API 测试钉死。
 
 **E003 与部分导出**：`--types`/`?types=` 只导部分类型时，导出行可能携带指向未导出类型的 ref 值（如只导 ip_pool 时「归属设备」引用未导出的 device）——回源导入该行 E003 失败（引用不存在）。**全量导出（缺省 types）默认规避**；部分导出回源前需先导出并导入被引用类型。
+
+
+## 20. 无人值守导入（v0.7.0 W24，migration v19）
+
+用户目标「**每天导入即可**」（§9.2）此前被卡在：每次导入都要人工确认映射。W24 落地 **§12-B7 方案 A（映射模板持久化）**：映射模板表 `mapping_templates`（migration v19，纯 CREATE 无重建）存储人工**一次**确认过的逐 sheet 映射，此后同形状工作簿指纹命中即自动执行——零人工字段。
+
+### 20.1 表头指纹（fingerprint 机制）
+
+指纹 = `sha256( sheet名 + "\x1f" + join(规范化表头, "\x1e") )`，规范化表头 = 每个表头 trim + 全角→半角 + 小写，**按 sheet 列序**（`internal/mapping.Fingerprint`，纯函数，单测钉死确定性）。设计取舍：
+
+- **列序敏感是刻意的**（诚实工作簿规则）：列换序是结构变更（换了导出工具/人工调列），静默用旧映射自动导入正是 B7 要防的错映——换序工作簿回落人工重确认。分离符 `\x1f`/`\x1e` 是控制字符，xlsx 单元格文本实际不可携带，无拼接伪造空间。
+- **化妆性漂移不失效**：尾部空格、`管理IP` vs `管理ip`、全角半角——同一列。执行时存储映射的列头以**同一规范化**重锚到当前 sheet 的精确表头字符串（唯一命中重写、零命中留给 Validate 诚实拒绝、歧义命中拒绝无人值守——工作簿自身有歧义）。
+- **sheet 名入指纹**：同名表头异名 sheet 是两个形状。
+
+### 20.2 无人值守通道（auto 路径）
+
+HTTP `POST /api/imports?auto=1`（或 multipart 字段 `auto=1`）/ CLI `netopslab import --file x.xlsx --db d --auto`。语义：分析后对每个**建议导入**的 sheet 计算指纹——
+
+1. **全部命中模板** → 合并各模板存储的单 sheet 映射，立即执行（跳过 `awaiting_mapping`），返回 202 + 与 mapping 端点相同的汇总信封 / CLI exit 0。执行仍走**既有 Execute 管线**（mapping.Validate 对真实表头再校验、单事务原子性、行级记账、幂等 skip）——模板是便利，不是信任边界。
+2. **任一未命中**（表头改名/增列/删列/换序 → 指纹变化）或**无可导入 sheet** → 拒绝执行：HTTP 202 + 分析 JSON 附 `autoWarning`（`code: no_matching_template`，点名未命中 sheet）；CLI exit 1 + 同码错误信封。**批次停留 `awaiting_mapping`**——人工确认流是兜底而非错误状态（拒绝不是失败，是设计行为）。
+3. **skip sheet 不阻塞 auto**：与人工流一致（建议 skip 的表无需确认映射、数据不导入）。零导入 sheet 的工作簿拒绝（无人值守「导入 0 行」不得报告成功）。
+
+### 20.3 模板捕获（一键保存）与生命周期
+
+- 捕获：`POST /api/imports/{id}/template`（体可选 `sourceName`）/ `netopslab templates --db d save --batch <id> [--name]`——把**已完成**批次的确认映射复制为逐 sheet 模板；指纹从批次记录的 `workbook_path` **重读工作簿重算**（分析 JSON 不落库，表头以工作簿为准）。同一形状（指纹+资源类型）重复确认**幂等 upsert**：更新 `mapping_json`/`confirmed_at`/`confirmed_batch`，保留原 `templateId`。
+- 清单/删除：`GET /api/mapping-templates`（分页，新确认在前）/ `DELETE /api/mapping-templates/{id}`；CLI `templates list` / `templates delete --id`。
+- **回滚不对称（双向）**：回滚创建批次**不删**模板——模板是人工确认的产物（artifact），不是批次数据，与 W005/W006 已 apply/reject 决策同理（批次行消失、人的决策存续）；删模板也不触碰批次数据。`confirmed_batch` 是纯 TEXT 审计列、**无外键**——任何 ON DELETE 语义都会要么弄坏回滚、要么静默销毁确认产物。
+- **模板与批次的关系**：`import_batches.mapping` 仍存每次执行的确认映射（含 auto 批次——存的是合并后的模板映射，审计链完整）；模板表只存「值得复用的形状级确认」。auto 批次的行级记账/幂等/回滚与人工批次完全一致（同一 Execute 管线）。
+
+### 20.4 验收（issue #28）
+
+七日无人值守测试（`TestAPIUnattendedSevenDays`）：第 1 天人工流（上传→确认→捕获模板）；第 2-8 天七本同表头不同行的**再生**工作簿经 auto 通道导入——全部完成、行记账正确（旧键 skip 无重复资源）、指纹七连命中；第 8+1 本单列改名 → auto 拒绝点名 sheet、批次 `awaiting_mapping`、零写入。确定性测试：同工作簿字节→同指纹；列换序→指纹不同（`TestFingerprint*`）。回滚不对称与捕获守卫由 `TestAPIImportTemplateLifecycle` / `TestCLITemplatesUnattended` 钉死。
+
+### 20.5 边界声明
+
+- **Web 向导仍走人工确认**：分析响应新增的逐 sheet `templateMatched` 只驱动信息横幅「已匹配映射模板（确认于 …）」，不提供自动执行勾选——无人值守是 cron/CLI/HTTP-flag 的运维通道，向导是人的通道。
+- 指标批次回滚的 CLI 收口（api.md 时序节遗留注释）不在本轮范围。
+- MCP 工具面冻结不动（恰 5）：模板生命周期不进 AI 通道。

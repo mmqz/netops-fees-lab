@@ -86,6 +86,10 @@ type DB struct {
 	// detection_rules config table and the alerts state machine.
 	DetectionRules *DetectionRuleRepo
 	Alerts         *AlertRepo
+
+	// Mapping templates (migration v19, W24 — §12-B7 方案 A): the confirmed
+	// per-sheet mapping store of the unattended import channel.
+	Templates *TemplateRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies all pending
@@ -143,6 +147,7 @@ func wire(db *DB, q DBTX) {
 	db.ResourceStatus = &ResourceStatusRepo{q: q}
 	db.DetectionRules = &DetectionRuleRepo{q: q}
 	db.Alerts = &AlertRepo{q: q}
+	db.Templates = &TemplateRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -190,6 +195,9 @@ type Tx struct {
 	// Alert detection model (migration v18, W23).
 	DetectionRules *DetectionRuleRepo
 	Alerts         *AlertRepo
+
+	// Mapping templates (migration v19, W24).
+	Templates *TemplateRepo
 }
 
 // dsnOf builds the SQLite DSN of path: a file: URI with the path component
@@ -273,6 +281,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		ResourceStatus:   &ResourceStatusRepo{q: sqlTx},
 		DetectionRules:   &DetectionRuleRepo{q: sqlTx},
 		Alerts:           &AlertRepo{q: sqlTx},
+		Templates:        &TemplateRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

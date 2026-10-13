@@ -133,6 +133,17 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/imports", s.handleImportUpload)
 	mux.HandleFunc("POST /api/imports/{id}/mapping", s.handleImportMapping)
 
+	// W24 unattended import channel (§12-B7 方案 A, issue #28): the one-click
+	// template capture of a completed batch's confirmed mapping + the
+	// template listing/deletion. POST /api/imports?auto=1 (the auto path) is
+	// the SAME upload route above with the flag — see handleImportUpload.
+	// The MCP tool surface stays frozen at the five read-only tools: the
+	// template lifecycle is an HTTP/CLI human+ops channel, never an
+	// AI-controlled one.
+	mux.HandleFunc("POST /api/imports/{id}/template", s.handleImportTemplateCapture)
+	mux.HandleFunc("GET /api/mapping-templates", s.handleMappingTemplatesList)
+	mux.HandleFunc("DELETE /api/mapping-templates/{id}", s.handleMappingTemplateDelete)
+
 	mux.HandleFunc("GET /api/batches", s.handleBatchesList)
 	mux.HandleFunc("GET /api/batches/{id}", s.handleBatchDetail)
 	mux.HandleFunc("GET /api/batches/{id}/rows", s.handleBatchRows)

@@ -37,6 +37,7 @@ import {
   ERR_NETWORK,
   FIELD_KIND_LABELS,
   format,
+  formatDateTime,
   formatFileSize,
   IMP_COL_MESSAGE,
   IMP_COL_RULE,
@@ -63,6 +64,7 @@ import {
   IMP_NATURAL_KEY_NAME_SCOPE,
   IMP_NATURAL_KEY_PORT_COMPOSITE,
   IMP_NATURAL_KEY_PTP_COMPOSITE,
+  IMP_TEMPLATE_MATCHED,
   IMP_NATURAL_KEY_TAG,
   IMP_REF_FIELD_NOTE,
   IMP_REF_FIELD_SHORT,
@@ -414,6 +416,18 @@ function SheetCard({ draft, sheet, errors, onToggle, onTypeChange, onTargetChang
           <span>{enabled ? IMP_TOGGLE_IMPORT : IMP_TOGGLE_SKIP}</span>
         </label>
       </div>
+      {enabled && sheet.templateMatched != null && (
+        // W24 无人值守导入（§12-B7）：表头指纹命中模板时的信息横幅。纯展示——
+        // 向导仍是人工确认通道（无人值守走 CLI / HTTP auto=1），不提供勾选。
+        <span className="key-note key-note--info">
+          <IconInfo size={14} />
+          <span>
+            {format(IMP_TEMPLATE_MATCHED, {
+              date: formatDateTime(sheet.templateMatched.confirmedAt),
+            })}
+          </span>
+        </span>
+      )}
       {enabled && (
         <>
           <label className="field">

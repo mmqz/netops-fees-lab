@@ -243,6 +243,88 @@ multipart/form-data，字段名 `file`，扩展名 `.xlsx` / `.txt` / `.cfg`（W
 
 （`columns` 实际含全部列；`samples` 每列至多 3 个非空值。）
 
+**W24 起每个 sheet 增带 `templateMatched`**（表头指纹命中已存映射模板时为 `{templateId, resourceType, confirmedAt}`，未命中为 `null`）——信息性字段，向导第②步据此展示「已匹配映射模板」横幅；匹配语义见下方 `auto=1`。
+
+```json
+{
+  "sheet": "设备清单",
+  "rowCount": 30,
+  "skippedEmptyRows": 0,
+  "columns": ["…"],
+  "suggestedType": "device",
+  "templateMatched": {
+    "templateId": "tpl_3a24fa12-35b6-4e90-9d7f-5351408d4b8c",
+    "resourceType": "device",
+    "confirmedAt": "2026-10-13T04:18:51Z"
+  }
+}
+```
+
+### POST /api/imports?auto=1 — 无人值守导入（v0.7.0 W24，§12-B7 方案 A）
+
+multipart 上传同上，附加无人值守标志（两种等价写法，任选其一）：
+
+- 查询参数 `?auto=1`（或 `auto=true`）；
+- multipart 表单字段 `auto=1`（与 `file` 并列，multipart 风格的原生变体）。
+
+语义：分析后对每个建议导入的 sheet 计算表头指纹（sheet 名 + 规范化表头序列的 sha256，列序敏感，见 [import-and-validation.md](import-and-validation.md) §20）——
+
+- **全部导入 sheet 命中已存模板** → 立即以模板存储的确认映射执行导入（跳过 `awaiting_mapping`），返回 **202 + 与 `/api/imports/{id}/mapping` 完全相同的汇总信封**（含导入后自动集合级校验的 `issues`）。请求只携带文件本身——零人工字段。
+- **任一导入 sheet 未命中**（表头被改名/增列/删列/换序 → 指纹变化）或**工作簿没有可导入 sheet** → **不执行、不报错**：返回 202 + 普通分析 JSON，附 `templateMatched: null` 与 `autoWarning` 块（列出未命中的 sheet，**表头变更感知，从不静默**）；批次停留在 `awaiting_mapping`，人工确认流（向导 / mapping 端点）是兜底而非错误状态：
+
+```json
+{
+  "batchId": "bat_d15eb5df-…",
+  "sheets": [{ "sheet": "设备清单", "templateMatched": null }],
+  "autoWarning": {
+    "code": "no_matching_template",
+    "unmatchedSheets": ["设备清单"],
+    "message": "以下导入工作表的表头指纹未命中任何映射模板（表头可能已变更，需人工重新确认）：设备清单"
+  }
+}
+```
+
+（`no_import_sheets` 变体：建议映射全部为 skip 时的拒绝码——无人值守「导入 0 行」不得报告成功。skip sheet 本身不阻塞 auto：与人工流一样不导入、无需确认。）
+
+## POST /api/imports/{id}/template — 一键保存映射模板（201，v0.7.0 W24）
+
+把**已完成批次**的确认映射复制为逐 sheet 的映射模板（表头指纹从该批次记录的工作簿重算）。请求体可选 `{"sourceName": "…"}`（模板人类可读标签，缺省为批次工作簿名）；空体合法。
+
+- **201** + `{items: [模板…], total}`；`mapping` 字段是单 sheet 的 §8 映射文档（JSON 对象，可直接回传 mapping 端点人工复演）；
+- 同指纹 + 同资源类型的重复确认 **幂等 upsert**：更新 `mapping_json` / `confirmed_at` / `confirmed_batch`，保留原 `templateId`，不产生第二行；
+- **404** 未知批次；**409** 批次未完成（只有已完成批次的确认映射才值得保存）；
+- **回滚不对称**：回滚创建批次**不会**删除模板（模板是人工确认的产物而非批次数据——与 W005/W006 已决策生命周期同理）。
+
+```json
+{
+  "items": [
+    {
+      "templateId": "tpl_3a24fa12-…",
+      "sourceName": "devices-day1.xlsx",
+      "headerFingerprint": "9c2f…",
+      "resourceType": "device",
+      "mapping": { "sheets": [ { "sheet": "设备清单", "action": "import", "…": "…" } ] },
+      "sheetName": "设备清单",
+      "confirmedAt": "2026-10-13T04:18:51Z",
+      "confirmedBatch": "bat_c82e6f8e-…"
+    }
+  ],
+  "total": 1
+}
+```
+
+## GET /api/mapping-templates — 模板列表（v0.7.0 W24）
+
+`?page=&pageSize=`（通用分页契约）；按 `confirmed_at` 倒序（`templateId` 决胜，确定性）。条目结构同上。
+
+## DELETE /api/mapping-templates/{id} — 删除模板（v0.7.0 W24）
+
+删除一个模板 = 无人值守通道的退出开关：该表头形状回落到人工确认流。**200** `{"deleted": true, "id": "…"}`；**404** 未知 id。删除模板不触碰任何批次数据（与回滚不对称同理，双向不联动）。
+
+### CLI 通道（与 HTTP 同引擎）
+
+`netopslab import --file x.xlsx --db d --auto`（无人值守：全部导入 sheet 命中模板 → exit 0 + 汇总信封；任一未命中 → **exit 1**，stdout 错误信封 `code: "no_matching_template"` 且消息点名未命中的 sheet——批次停留 `awaiting_mapping` 供 `--map` 人工流兜底；`--auto` 与 `--map` 互斥，同给 → exit 2）。`netopslab templates --db d save --batch <id> [--name n]`（捕获）、`templates --db d list [--page P] [--pageSize S]`（清单）、`templates --db d delete --id <tpl_id>`（删除）——与上述 HTTP 端点同引擎（同一 composition root 的 importer/repo 实例），无第二条模板路径。
+
 ## POST /api/imports/{id}/mapping — 确认映射并执行导入
 
 Body = 最终映射模型（可直接回传 `suggestedMapping`）。执行成功返回 **202**；行级失败不中止导入；导入成功后自动触发一次集合级校验，`issues` = 本批次行级问题 + 本次校验产生的集合级问题。

@@ -166,6 +166,15 @@ export interface ColumnAnalysis {
   confidence: number;
 }
 
+/** W24 无人值守导入：单个工作表的表头指纹命中已存映射模板时的信息块
+ *  （后端 importer.TemplateMatch 镜像；纯展示，向导仍走人工确认）。 */
+export interface TemplateMatchInfo {
+  templateId: string;
+  resourceType: ResourceType;
+  /** RFC3339 确认时间。 */
+  confirmedAt: string;
+}
+
 export interface SheetAnalysis {
   sheet: string;
   rowCount: number;
@@ -173,6 +182,8 @@ export interface SheetAnalysis {
   columns: ColumnAnalysis[];
   /** omitempty：无法识别类型的工作表省略该字段。 */
   suggestedType?: ResourceType;
+  /** W24：表头指纹命中模板时非 null（信息性横幅的数据源；未命中为 null）。 */
+  templateMatched?: TemplateMatchInfo | null;
 }
 
 export interface SheetMapping {

@@ -48,7 +48,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, mcp, gc, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, templates, mcp, gc, testdata")
 		return exitUsage
 	}
 
@@ -80,6 +80,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdRenames(args[1:], stdout, stderr)
 	case "lab":
 		err = cmdLab(args[1:], stdout, stderr)
+	case "templates":
+		err = cmdTemplates(args[1:], stdout, stderr)
 	case "mcp":
 		err = cmdMCP(args[1:], stdout, stderr)
 	case "gc":
@@ -87,7 +89,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, templates, mcp, gc, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -143,6 +145,14 @@ func cliErrorCode(err error) string {
 	var refMissing *changes.RefTargetMissingError
 	if errors.As(err, &refMissing) {
 		return "ref_target_missing"
+	}
+	// The W24 unattended-import refusal (§12-B7): the code the task contract
+	// pins — the error envelope names the unmatched sheets and the batch
+	// stays awaiting_mapping (HTTP answers 202 + analysis there; the CLI has
+	// no response slot for that, so the envelope IS the warning).
+	var noTemplate *importer.NoMatchingTemplateError
+	if errors.As(err, &noTemplate) {
+		return "no_matching_template"
 	}
 	switch {
 	case errors.Is(err, workbook.ErrNotXLSX):
@@ -272,31 +282,49 @@ type importResponse struct {
 	Issues map[string]int `json:"issues"`
 }
 
-// cmdImport implements `netopslab import --file --map --db`: analyze +
-// execute the confirmed mapping + automatic set-level validation; prints the
-// import summary with issue counts.
+// cmdImport implements `netopslab import --file --map --db` and the W24
+// unattended variant `netopslab import --file --db --auto`: analyze +
+// execute the confirmed mapping + automatic set-level validation; prints
+// the import summary with issue counts.
+//
+// --auto replaces --map (the two are mutually exclusive): the confirmed
+// mapping comes from the stored mapping TEMPLATES whose header
+// fingerprints match the workbook — zero human interaction. When every
+// import sheet matches, the import executes immediately and the summary is
+// printed (exit 0). ANY unmatched import sheet refuses honestly: the error
+// envelope carries code no_matching_template and names the sheets; exit 1;
+// the batch stays awaiting_mapping for the ordinary --map confirmation
+// flow (表头变更感知 — a changed workbook is re-confirmation, not an
+// error).
 func cmdImport(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("import")
 	file := fs.String("file", "", "工作簿路径（.xlsx）或 PTP 配置脚本（.txt/.cfg），必填")
-	mapFile := fs.String("map", "", "映射 JSON 文件路径（§8 结构），必填")
+	mapFile := fs.String("map", "", "映射 JSON 文件路径（§8 结构），与 --auto 互斥")
 	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	auto := fs.Bool("auto", false, "无人值守导入：以表头指纹命中的映射模板执行（全部命中才执行；未命中→exit 1 no_matching_template）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
-	if *file == "" || *mapFile == "" {
-		return &usageError{msg: "缺少 --file 或 --map 参数", usage: usage.String()}
+	if *file == "" || (*mapFile == "" && !*auto) {
+		return &usageError{msg: "缺少 --file 或 --map 参数（--auto 模式无需 --map）", usage: usage.String()}
+	}
+	if *auto && *mapFile != "" {
+		return &usageError{msg: "--auto 与 --map 互斥：无人值守导入使用已存的映射模板", usage: usage.String()}
 	}
 	if fs.NArg() > 0 {
 		return &usageError{msg: "import 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
 	}
 
-	raw, err := os.ReadFile(*mapFile)
-	if err != nil {
-		return fmt.Errorf("读取映射文件 %s: %w", *mapFile, err)
-	}
-	m, err := mapping.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("映射文件 %s 不是合法 JSON: %w", *mapFile, err)
+	var m mapping.Mapping
+	if !*auto {
+		raw, err := os.ReadFile(*mapFile)
+		if err != nil {
+			return fmt.Errorf("读取映射文件 %s: %w", *mapFile, err)
+		}
+		m, err = mapping.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("映射文件 %s 不是合法 JSON: %w", *mapFile, err)
+		}
 	}
 
 	a, err := openApp(*db)
@@ -317,13 +345,27 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 		a.Log.Info("recovered interrupted import batches", "count", n)
 	}
 
-	res, err := a.Importer.Analyze(ctx, *file)
-	if err != nil {
-		return err
-	}
-	sum, err := a.Importer.Execute(ctx, res.BatchID, m)
-	if err != nil {
-		return err
+	var sum importer.Summary
+	if *auto {
+		// W24 unattended path: analyze + fingerprint match + (on full match)
+		// execute with the stored template mappings. A refusal returns the
+		// typed *importer.NoMatchingTemplateError — the CLI error envelope
+		// code no_matching_template and exit 1; the batch stays
+		// awaiting_mapping for the ordinary --map flow.
+		res, err := a.Importer.ImportAuto(ctx, *file, filepath.Base(*file))
+		if err != nil {
+			return err
+		}
+		sum = res.Summary
+	} else {
+		res, err := a.Importer.Analyze(ctx, *file)
+		if err != nil {
+			return err
+		}
+		sum, err = a.Importer.Execute(ctx, res.BatchID, m)
+		if err != nil {
+			return err
+		}
 	}
 	vr, err := a.Validation.Run(ctx)
 	if err != nil {
@@ -350,6 +392,183 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 	out.Summary.RowsSkipped = sum.RowsSkipped
 	out.Summary.RowsFailed = sum.RowsFailed
 	return writeJSON(stdout, out)
+}
+
+// cmdTemplates implements the W24 mapping template subcommands
+// (§12-B7 方案 A, the CLI twin of the HTTP template endpoints):
+//
+//	netopslab templates --db d save --batch <id> [--name n]
+//	netopslab templates --db d list [--page P] [--pageSize S]
+//	netopslab templates --db d delete --id <tpl_id>
+//
+// save copies the CONFIRMED mapping of a COMPLETED batch into per-sheet
+// templates (fingerprints recomputed from the batch's recorded workbook) —
+// the one-click capture; re-confirmation of the same sheet shape upserts
+// (idempotent). list prints the paged, newest-first template inventory with
+// each stored single-sheet mapping. delete removes one template (the
+// unattended channel's opt-out; the template never touches the batch data
+// and a batch rollback never deletes the template).
+func cmdTemplates(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "缺少 templates 子命令；可用：save, list, delete"}
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "save":
+		return cmdTemplatesSave(rest, stdout, stderr)
+	case "list":
+		return cmdTemplatesList(rest, stdout, stderr)
+	case "delete":
+		return cmdTemplatesDelete(rest, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("templates 子命令必须是 save、list 或 delete，收到 %q", sub)}
+	}
+}
+
+// templatesItem mirrors one template of the CLI list/save responses (the
+// HTTP templateItem field names).
+type templatesItem struct {
+	TemplateID        string         `json:"templateId"`
+	SourceName        string         `json:"sourceName"`
+	HeaderFingerprint string         `json:"headerFingerprint"`
+	ResourceType      string         `json:"resourceType"`
+	Mapping           map[string]any `json:"mapping"`
+	SheetName         string         `json:"sheetName"`
+	ConfirmedAt       string         `json:"confirmedAt"`
+	ConfirmedBatch    string         `json:"confirmedBatch"`
+}
+
+// cmdTemplatesSave implements `templates save --batch <id> [--name]`:
+// 201-equivalent (CLI: one JSON object) with the captured templates; 404
+// unknown batch and 409 not-completed batch map to the error envelope via
+// cliErrorCode.
+func cmdTemplatesSave(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("templates save")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	batch := fs.String("batch", "", "已完成批次的 id（其确认映射将被保存为模板），必填")
+	name := fs.String("name", "", "模板人类可读名称（缺省为该批次的工作簿名）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *batch == "" {
+		return &usageError{msg: "缺少 --batch 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "templates save 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	captured, err := a.Importer.CaptureTemplate(context.Background(), *batch, *name)
+	if err != nil {
+		return err
+	}
+	items := make([]templatesItem, 0, len(captured))
+	for _, t := range captured {
+		items = append(items, templatesItemOf(t))
+	}
+	return writeJSON(stdout, struct {
+		Items []templatesItem `json:"items"`
+		Total int             `json:"total"`
+	}{Items: items, Total: len(items)})
+}
+
+// cmdTemplatesList implements `templates list [--page] [--pageSize]`: the
+// paged inventory, newest-confirmed first.
+func cmdTemplatesList(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("templates list")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	page := fs.Int("page", 1, "页码（1 起）")
+	pageSize := fs.Int("pageSize", 20, "每页条数（1-100，超出部分钳制为 100）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "templates list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *page < 1 {
+		return &usageError{msg: "page 必须为正整数（1 起）", usage: usage.String()}
+	}
+	if *pageSize < 1 {
+		return &usageError{msg: "pageSize 必须为正整数（1-100）", usage: usage.String()}
+	}
+	if *pageSize > 100 {
+		*pageSize = 100
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	templates, total, err := a.DB.Templates.ListTemplates(context.Background(), *pageSize, (*page-1)**pageSize)
+	if err != nil {
+		return err
+	}
+	items := make([]templatesItem, 0, len(templates))
+	for _, t := range templates {
+		items = append(items, templatesItemOf(t))
+	}
+	return writeJSON(stdout, struct {
+		Items    []templatesItem `json:"items"`
+		Total    int             `json:"total"`
+		Page     int             `json:"page"`
+		PageSize int             `json:"pageSize"`
+	}{Items: items, Total: total, Page: *page, PageSize: *pageSize})
+}
+
+// cmdTemplatesDelete implements `templates delete --id <tpl_id>`: one JSON
+// object {deleted, id}; unknown id → the error envelope (not_found), exit 1.
+func cmdTemplatesDelete(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("templates delete")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	id := fs.String("id", "", "模板 id（templateId），必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "templates delete 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	if err := a.DB.Templates.DeleteTemplate(context.Background(), *id); err != nil {
+		return err
+	}
+	return writeJSON(stdout, struct {
+		Deleted bool   `json:"deleted"`
+		ID      string `json:"id"`
+	}{Deleted: true, ID: *id})
+}
+
+// templatesItemOf projects a domain template into the CLI response item
+// (the stored mapping JSON decoded into a generic object so the output is
+// one self-describing JSON document; an invalid stored document falls back
+// to a JSON string echo — honest and visible).
+func templatesItemOf(t domain.MappingTemplate) templatesItem {
+	var mappingDoc map[string]any
+	if err := json.Unmarshal([]byte(t.MappingJSON), &mappingDoc); err != nil {
+		mappingDoc = map[string]any{"raw": t.MappingJSON}
+	}
+	return templatesItem{
+		TemplateID:        t.TemplateID,
+		SourceName:        t.SourceName,
+		HeaderFingerprint: t.HeaderFingerprint,
+		ResourceType:      string(t.ResourceType),
+		Mapping:           mappingDoc,
+		SheetName:         t.SheetName,
+		ConfirmedAt:       t.ConfirmedAt.UTC().Format(time.RFC3339),
+		ConfirmedBatch:    t.ConfirmedBatch,
+	}
 }
 
 // exportResponse is the stdout contract of `netopslab export`: the written

@@ -524,6 +524,10 @@ export const IMP_REF_FIELD_SHORT = '引用列 · 需先导入目标类型';
 /** 引用字段列的完整说明（tooltip / 无障碍名称）：E003 依赖导入顺序的正向说明。 */
 export const IMP_REF_FIELD_NOTE =
   '引用字段按被引用类型的自然键解析（机房表的 局站ID → 局站资源）：请先导入被引用类型（先局站后机房），未解析的引用将使该行失败（E003）；该列可不映射（不建立关系，行照常导入）';
+/** W24 无人值守导入：表头指纹命中已确认映射模板的信息横幅（向导第②步，
+ *  纯展示——向导仍是人工确认通道；无人值守走 CLI/HTTP auto=1）。 */
+export const IMP_TEMPLATE_MATCHED =
+  '已匹配映射模板（确认于 {date}）——向导预填的映射即模板内容';
 export const IMP_VALIDATION_TITLE = '请先完成以下必填映射：';
 export const IMP_ERR_REQUIRED_UNMAPPED = '工作表「{sheet}」：必填字段「{field}」尚未映射';
 export const IMP_ROWS_INFO = '数据行 {rows} 行，跳过空行 {empty} 行';

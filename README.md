@@ -73,6 +73,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **治理总览看板（v0.6.0 W14-D）**：`GET /api/governance/summary` / `netopslab query --db <path> governance` / 概览页「治理总览」区——把待确认队列（属性变更 / 疑似改名）、决策审计计数、问题分布（按严重级 + 按规则 Top 10）与资源/关系/批次形态汇成一屏的只读聚合；全部计数走 SQL COUNT（无全表拉取），除 generatedAt 外全字段确定性（同库两次调用逐字段相等），空库恒全零；MCP 零新增；见 [docs/api.md](docs/api.md) 治理总览节。
 - **schema 动态发现与 uploads 垃圾回收（v0.4 W5-D 发布轮）**：`GET /api/schema` 返回 `mapping.Specs` 的忠实投影（v0.7.0 W21 起 33 类资源的字段/键位/枚举/ref/同义词/层次/专业域 + 13 条规则目录，机械生成禁止手抄，仅 HTTP 不进 MCP）
 ；`serve` 启动与 CLI `netopslab gc` 清理未被任何批次引用的孤儿上传文件（任何状态的批次都算引用）；前端构建 manualChunks 分包（主 chunk 795 → 187 kB）。
+- **无人值守导入（v0.7.0 W24，migration v19）**：映射模板持久化（§12-B7 方案 A）——表头指纹（sheet 名 + 规范化表头序列 sha256，**列序敏感**）命中即以已确认映射自动执行（`POST /api/imports?auto=1` / `netopslab import --auto`），任一表头变更 → 指纹变化 → 拒绝执行并点名 sheet（**表头变更感知，从不静默**），批次回落 `awaiting_mapping` 人工兜底；模板捕获一键保存（`POST /api/imports/{id}/template` / `netopslab templates save`）、回滚不对称（模板是确认产物，批次回滚不删模板）；七日无人值守测试钉死全旅程。
 - **异常检测与告警（v0.7.0 W23，ADR-0011 D2/D3）**：检测规则配置化（`detection_rules` 表 + 5 条种子规则，不改代码新增阈值规则）；纯函数判定引擎（末尾连续 window 点越限去抖、ts 全来自数据、同数据同规则同结果）；告警状态机三边（firing→acked 人工 / firing→cleared 恢复 / acked→cleared——无自动升级无超时关闭）；firing 告警联动 run_state（error→down / warning→degraded，source=alert）；HTTP 六端点 + CLI `netopslab detect`；MCP 冻结不动（AI 经 HTTP 消费告警）。
 - **数据模型 v1.0 类型扩容（v0.7.0 W21）**：资源类型 8→33（新增光缆网/传输承载/逻辑/业务/接入层 25 类——光缆/纤芯/ODF/波道/时隙/环网/客户/业务/专线/OLT 等，migration v15+v16）；关系类型 4→29（含 `carried_by`/`uses_fiber`/`provided_by`/`serves`/`uplink_to`/`fiber_of` 等，方向语义注册表可执行门禁）；四点一致性测试（domain 枚举 ↔ SQL CHECK ↔ `/api/schema` ↔ web 镜像）防漂移；B8 键规范化（trim+全角半角+大写，前导零保留）；既有数据保守迁移零改动（B4 守卫测试）。
 - **HTTP API**：`/api/...` 全套 REST 风格接口（错误统一 `{"error":{"code","message"}}` 信封）+ 17 条 §7 仿真路由。
@@ -231,6 +232,8 @@ netops-lab/
 ```bash
 netopslab analyze  --file devices.xlsx                      # 离线解析 + 映射建议（不写库）
 netopslab import   --file devices.xlsx --map map.json --db ./data/netops.db
+netopslab import   --file devices.xlsx --db ./data/netops.db --auto     # 无人值守：表头指纹命中模板即自动执行（v0.7 W24）
+netopslab templates --db ./data/netops.db save --batch <id> [--name <n>]  # 一键保存已确认映射为模板（v0.7 W24；list/delete 同树）
 netopslab ingest   --file perf.xlsx --map metric-map.json --db ./data/netops.db   # 时序指标导入（v0.7 W20，upsert 幂等）
 netopslab ingest   --file perf.xlsx --suggest               # 只输出建议指标映射 JSON（不写库）
 netopslab synthdata --out ./synth --devices 20 --days 30 --scenario degrade --seed 42   # 确定性合成数据（同 seed 字节级相同）

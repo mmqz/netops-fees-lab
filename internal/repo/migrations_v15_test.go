@@ -209,8 +209,8 @@ func TestMigrationV15AddsW21Types(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 18 {
-		t.Errorf("max schema version after upgrade = %d, want 17 (W22: restored tail includes v17)", maxV)
+	if maxV != 19 {
+		t.Errorf("max schema version after upgrade = %d, want 19 (restored tail includes v17-v19)", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.
@@ -222,8 +222,8 @@ func TestMigrationV15AddsW21Types(t *testing.T) {
 	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeOpticalCable, "W21-optical_cable"); err != nil {
 		t.Errorf("GetByTypeKey(optical_cable) after reopen: %v", err)
 	}
-	if maxV != 18 {
-		t.Errorf("max schema version after reopen = %d, want 18", maxV)
+	if maxV != 19 {
+		t.Errorf("max schema version after reopen = %d, want 19", maxV)
 	}
 }
 
@@ -381,8 +381,8 @@ func TestMigrationV16AddsW21Relations(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 18 {
-		t.Errorf("max schema version after upgrade = %d, want 17 (W22: restored tail includes v17)", maxV)
+	if maxV != 19 {
+		t.Errorf("max schema version after upgrade = %d, want 19 (restored tail includes v17-v19)", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.
@@ -394,8 +394,8 @@ func TestMigrationV16AddsW21Relations(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 18 {
-		t.Errorf("max schema version after reopen = %d, want 18", maxV)
+	if maxV != 19 {
+		t.Errorf("max schema version after reopen = %d, want 19", maxV)
 	}
 	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeFiber, "GY-001|1"); err != nil {
 		t.Errorf("GetByTypeKey(fiber) after reopen: %v", err)

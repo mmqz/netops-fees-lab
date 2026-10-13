@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/repo"
 )
@@ -126,6 +127,29 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// W24 unattended path (auto=1, query or multipart field — see
+	// isAutoRequest): analyze + template match; when EVERY import sheet of
+	// the workbook hits a stored template the import EXECUTES immediately
+	// (202 + the summary envelope, skipping awaiting_mapping). A refusal is
+	// NOT an error: the response is the ordinary analysis JSON with the
+	// autoWarning block (unmatched import sheets named) and templateMatched:
+	// null on the changed sheets — the batch stays awaiting_mapping and the
+	// human confirmation flow is the fallback (表头变更感知, never silent).
+	if isAutoRequest(r, true) {
+		res, err := s.importer.ImportAuto(r.Context(), stored, name)
+		if err != nil {
+			var refuse *importer.NoMatchingTemplateError
+			if errors.As(err, &refuse) {
+				respondJSON(w, http.StatusAccepted, res.Analysis)
+				return
+			}
+			s.respondErrorFor(w, r, err, "")
+			return
+		}
+		s.writeImportSummaryEnvelope(w, r, res.Summary)
+		return
+	}
+
 	a, err := s.importer.AnalyzeNamed(r.Context(), stored, name)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
@@ -177,39 +201,9 @@ func (s *Server) handleImportMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto validation after a successful import (outside the import tx).
-	vr, err := s.validation.Run(r.Context())
-	if err != nil {
-		s.log.Error("post-import validation failed", "error", err.Error(), "batch", batchID)
-		respondError(w, http.StatusInternalServerError, "internal", "导入成功但校验引擎运行失败，请查看服务端日志")
-		return
-	}
-
-	issues := map[string]int{
-		domain.SeverityError.String():   0,
-		domain.SeverityWarning.String(): 0,
-		domain.SeverityInfo.String():    0,
-	}
-	for sev, n := range sum.IssuesBySeverity {
-		issues[sev.String()] += n
-	}
-	for rule, n := range vr.InsertedByRule {
-		if sev, known := domain.SeverityForCode(rule); known {
-			issues[sev.String()] += n
-		}
-	}
-
-	respondJSON(w, http.StatusAccepted, mappingResponse{
-		BatchID: sum.BatchID,
-		Status:  sum.Status.String(),
-		Summary: mappingSummary{
-			RowsTotal:    sum.RowsTotal,
-			RowsImported: sum.RowsImported,
-			RowsSkipped:  sum.RowsSkipped,
-			RowsFailed:   sum.RowsFailed,
-		},
-		Issues: issues,
-	})
+	// Auto validation + the summary envelope (shared with the auto=1
+	// executed path — templates.go writeImportSummaryEnvelope).
+	s.writeImportSummaryEnvelope(w, r, sum)
 }
 
 // validateResponse is the POST /api/validate body (§9).
