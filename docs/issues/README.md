@@ -86,7 +86,7 @@
 | --- | --- | --- | --- | --- |
 | [38](issue-38-windows-test-gate.md) | **P1** | Windows 测试门禁不可用（6 包 15 项失败） | TempDir 修复未覆盖新包 + POSIX 断言 | 实跑 go test |
 | [39](issue-39-concurrency-retry-budget.md) | P2 | 并发重试预算不足，负载下 SQLITE_BUSY 逃逸 | 负载相关（单测通过 / 全套件失败） | 隔离复测 |
-| [40](issue-40-serves-edge-and-coverage-gaps.md) | P3 | 演示数据缺 serves 边，2 类型 / 5 关系无数据 | 数据覆盖缺口 | 库直查 |
+| [40](issue-40-serves-edge-and-coverage-gaps.md) | **P2** | 演示数据质量：serves 边缺失、13 行非法枚举、2 类型 / 5 关系无数据 | 数据质量与覆盖缺口 | 库直查 + 概览页 |
 | [41](issue-41-graph-query-cli-channel.md) | P3 | 图查询无 CLI 通道 | 符合设计但离线不可用 | CLI 实测 |
 
 ### 运维提示（重要）

@@ -327,8 +327,67 @@ CLI:   netopslab query traverse ...                          ❌ 不存在
 **建议**：若希望每日巡检可在无服务场景下由脚本 / AI 执行，
 应补 CLI 通道（或确认 HTTP 是唯一预期入口）。
 
----
+### 2.6 【接口】impact 空结果返回 null 而非空数组
 
+`internal/topology/impact.go:158` 用**未初始化的 nil 切片**：
+
+```go
+var impacted []ImpactedItem          // nil，不是 []ImpactedItem{}
+result.Impacted = impacted           // 无影响面时 JSON 序列化为 null
+```
+
+实测（无故障态时查询 impact）：
+
+```json
+{"root": {...}, "impacted": null, "candidates": null, "truncated": false}
+```
+
+**为何是问题**：`null` 与 `[]` 对客户端语义不同——
+`len(resp.impacted)` / `for x in resp.impacted` 在多数语言下会抛错或需额外判空。
+**我的审计脚本就崩在这一处**（`len(None)` TypeError），只能事后补判空。
+
+**正确做法**：
+
+```go
+impacted := make([]ImpactedItem, 0)  // 保证序列化为 []
+candidates := make([]CandidateItem, 0)
+```
+
+**同理需检查**：`traverse` 的 `nodes`/`edges`（设计 §10.3 已写「无结果时为空数组」）、
+以及其余新增端点的集合字段。
+
+**严重度**：低（不影响服务端正确性），但影响 API 契约质量与客户端健壮性。
+
+### 2.7 【数据】演示数据含非法枚举值（13 行）
+
+平台自身的问题清单实测 **49 条警告**（概览页「质量评分 51/100」），归类：
+
+| 规则 | 数量 | 内容 | 判定 |
+| --- | --- | --- | --- |
+| W001 | 36 | `可选引用为空：device.ring_code` | **预期**（B4 裁决：不自动派生环关系） |
+| W002 | 13 | `状态值未知：ip_pool.status="使用中"` | **数据缺陷** |
+
+W002 的 evidence 字段：
+
+```json
+{"field":"status","type":"ip_pool","raw_value":"使用中",
+ "allowed":"在网/停用/在建/退网"}
+```
+
+即 `scripts/realdata/workbooks.py` 生成的 IP 地址池写入了**封闭枚举之外**的状态值。
+
+**值得肯定**：**校验管线正确捕获了它**——说明 W002 规则有效、
+问题清单如实反映数据质量，而非静默接受非法值。
+
+**缺陷**：演示数据本不该有非法值。13 行 `ip_pool` 命中，
+导致概览页质量评分从 100 掉到 51，**演示/评审时数据显得不干净**。
+
+**建议**：
+1. 修 `workbooks.py`：`ip_pool.status` 改用合法枚举值
+2. 或为 `ip_pool` 扩展状态词表（若「使用中」确为业务需要）
+3. W001 的 36 条建议在 `manifest.json` 说明成因（B4 裁决），避免被误读为缺陷
+
+---
 ## 3. 结论与建议
 
 ### 3.1 总评
@@ -346,19 +405,41 @@ CLI:   netopslab query traverse ...                          ❌ 不存在
 | --- | --- | --- |
 | **P1** | 共享 TempDir 辅助（覆盖 api/mcpserver） | 10 项失败，且会随新测试持续复发 |
 | **P1** | `TestHealthCarriesDBPath` 改 `filepath.IsAbs` | 1 行修复，消除平台误报 |
-| **P2** | 并发重试预算提升 | 负载下真实逃逸，影响多实例场景 |
+| **P2** | 修演示数据 `ip_pool.status="使用中"`（13 行非法枚举） | 拉低质量评分至 51/100，演示观感差 |
 | **P2** | 演示数据补 `serves` 边 | 让「设备→客户」影响链直通 |
+| **P2** | 并发重试预算提升 | 负载下真实逃逸，影响多实例场景 |
 | **P3** | CLI 补图查询通道（或明确不做） | 影响离线/脚本化巡检 |
+| **P3** | impact/traverse 空集合改返回 `[]` 非 `null` | API 契约质量，客户端需额外判空 |
 | **P3** | 确认性能值字符串解析稳健 | 面向真实网管导出 |
 
 ### 3.3 运维提示（给使用者）
 
+**`internal/webui/dist` 不入库（.gitignore），且被 `go:embed` 编进二进制。**
+因此顺序**必须**是「先建前端、再建二进制」：
+
 ```
-拉取云端更新后必须执行：
-  1. npm ci && npm run build      # 重建前端（dist 不入库）
-  2. go build -o bin/netopslab.exe ./cmd/netopslab
-否则：地图新增图层静默缺失（服务端 SPA 回退返回 200 + text/html）
+cd web && npm ci && npm run build        # ① 更新 internal/webui/dist
+cd .. && go build -o bin/netopslab.exe ./cmd/netopslab   # ② 重新嵌入 dist
 ```
+
+#### 本次审计实测到的陷阱
+
+```
+internal/webui/dist/index.html   20:06:38   ← 已重建（含新 mapdata）
+bin/netopslab.exe                19:58:59   ← 旧二进制（嵌入的是旧 dist）
+
+结果：GET /mapdata/hlj-cables.geojson.gz
+      → 200 text/html（SPA 回退返回 index.html）
+      → 地图新增图层静默缺失，控制台无报错
+重建二进制后（20:39）：
+      → 200 application/geo+json  ✅
+```
+
+**关键**：只重建前端而**不重建二进制无效**——旧二进制里嵌的是旧 dist。
+这与 `go test` 无关（测试会重新编译，故测试能通过而运行时失败）。
+
+**现象特征**（便于自查）：新增图层不显示、无报错、
+直接访问 `/mapdata/xxx.geojson.gz` 返回 HTML 而非 JSON。
 
 ---
 
