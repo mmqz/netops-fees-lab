@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/changes"
+	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/metrics"
@@ -63,6 +64,10 @@ type Services struct {
 	// Metrics is the timeseries metric ingest/query service (W20,
 	// migration v14 — ADR-0011 D1's separate channel).
 	Metrics *metrics.Service
+	// Detect is the alert detection engine (W23, migration v18 —
+	// ADR-0011 D2/D3): the rules side whose query cousin is
+	// Metrics.Anomalies. HTTP and CLI call the same instance, no bypass.
+	Detect *detect.Engine
 	// LabReport is the lab report generator, wired to the SAME Lab engine
 	// instance as the field above (report.NewLab(db, Lab) — the api server's
 	// lab report handlers consume it).
@@ -114,6 +119,7 @@ func New(db *repo.DB, opts ...Option) *Services {
 		Lab:        lab,
 		Report:     report.New(db),
 		Metrics:    metrics.New(db),
+		Detect:     detect.New(),
 		LabReport:  report.NewLab(db, lab),
 	}
 	s.applyClock(o.clock)

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/changes"
+	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/exporter"
 	"github.com/mmqz/netops-lab/internal/importer"
@@ -47,7 +48,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, export, validate, report, query, changes, renames, lab, mcp, gc, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, mcp, gc, testdata")
 		return exitUsage
 	}
 
@@ -63,6 +64,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdIngest(args[1:], stdout, stderr)
 	case "synthdata":
 		err = cmdSynthdata(args[1:], stdout, stderr)
+	case "detect":
+		err = cmdDetect(args[1:], stdout, stderr)
 	case "export":
 		err = cmdExport(args[1:], stdout, stderr)
 	case "validate":
@@ -84,7 +87,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, export, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, mcp, gc, testdata", args[0]))
 		return exitUsage
 	}
 
@@ -455,6 +458,77 @@ func cmdSynthdata(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	return writeJSON(stdout, sum)
+}
+
+// cmdDetect implements `netopslab detect --db <path> [--from F] [--to T]`
+// (one engine sweep — the CLI twin of POST /api/detection/run; the SAME
+// composition-root engine instance, no bypass) and `netopslab detect
+// --rules --db <path>` (the rules listing). NO unattended scheduling in
+// this round: cron is the operator's job — the run is explicit by design
+// (determinism doctrine: the engine runs when the operator or the daily
+// inspection calls it).
+func cmdDetect(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("detect")
+	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
+	from := fs.String("from", "", "评估窗口下界（RFC3339，可选）")
+	to := fs.String("to", "", "评估窗口上界（RFC3339，可选）")
+	rules := fs.Bool("rules", false, "只列出检测规则（不执行检测）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "detect 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	for name, raw := range map[string]string{"from": *from, "to": *to} {
+		if raw == "" {
+			continue
+		}
+		if _, err := time.Parse(time.RFC3339, raw); err != nil {
+			return &usageError{msg: fmt.Sprintf("--%s %q 不是 RFC3339 时间戳", name, raw), usage: usage.String()}
+		}
+	}
+
+	a, err := openApp(*db)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	if *rules {
+		if err := a.DB.DetectionRules.SeedDefaultDetectionRules(ctx); err != nil {
+			return err
+		}
+		list, err := a.DB.DetectionRules.ListRules(ctx, false)
+		if err != nil {
+			return err
+		}
+		items := make([]map[string]any, 0, len(list))
+		for _, r := range list {
+			items = append(items, map[string]any{
+				"ruleId":     r.RuleID,
+				"metricKey":  r.MetricKey,
+				"comparator": r.Comparator.String(),
+				"threshold":  r.Threshold,
+				"window":     r.Window,
+				"severity":   r.Severity.String(),
+				"enabled":    r.Enabled,
+				"label":      r.Label,
+				"createdAt":  r.CreatedAt,
+				"updatedAt":  r.UpdatedAt,
+			})
+		}
+		return writeJSON(stdout, struct {
+			Items []map[string]any `json:"items"`
+			Total int              `json:"total"`
+		}{Items: items, Total: len(items)})
+	}
+
+	res, err := a.Detect.Detect(ctx, a.DB, detect.Options{From: *from, To: *to})
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
 }
 
 // cmdExport implements `netopslab export --db <path> --out <file.xlsx>

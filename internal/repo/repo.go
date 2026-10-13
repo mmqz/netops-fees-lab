@@ -81,6 +81,11 @@ type DB struct {
 	// Run-state model (migration v17, W22 — §12-B1 方案 C): the
 	// resource_status history + the resources snapshot columns.
 	ResourceStatus *ResourceStatusRepo
+
+	// Alert detection model (migration v18, W23 — ADR-0011 D2/D3): the
+	// detection_rules config table and the alerts state machine.
+	DetectionRules *DetectionRuleRepo
+	Alerts         *AlertRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies all pending
@@ -136,6 +141,8 @@ func wire(db *DB, q DBTX) {
 	db.MetricBatches = &MetricBatchRepo{q: q}
 	db.Metrics = &MetricRepo{q: q}
 	db.ResourceStatus = &ResourceStatusRepo{q: q}
+	db.DetectionRules = &DetectionRuleRepo{q: q}
+	db.Alerts = &AlertRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -179,6 +186,10 @@ type Tx struct {
 
 	// Run-state model (migration v17, W22).
 	ResourceStatus *ResourceStatusRepo
+
+	// Alert detection model (migration v18, W23).
+	DetectionRules *DetectionRuleRepo
+	Alerts         *AlertRepo
 }
 
 // dsnOf builds the SQLite DSN of path: a file: URI with the path component
@@ -260,6 +271,8 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		MetricBatches:    &MetricBatchRepo{q: sqlTx},
 		Metrics:          &MetricRepo{q: sqlTx},
 		ResourceStatus:   &ResourceStatusRepo{q: sqlTx},
+		DetectionRules:   &DetectionRuleRepo{q: sqlTx},
+		Alerts:           &AlertRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

@@ -204,8 +204,8 @@ func TestMigrationV17AddsRunState(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 17 {
-		t.Errorf("max schema version after upgrade = %d, want 17", maxV)
+	if maxV != 18 {
+		t.Errorf("max schema version after upgrade = %d, want 18", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op (a second ADD COLUMN would
@@ -218,8 +218,8 @@ func TestMigrationV17AddsRunState(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 17 {
-		t.Errorf("max schema version after reopen = %d, want 17", maxV)
+	if maxV != 18 {
+		t.Errorf("max schema version after reopen = %d, want 18", maxV)
 	}
 }
 

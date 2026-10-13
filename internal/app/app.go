@@ -20,6 +20,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/api"
 	"github.com/mmqz/netops-lab/internal/changes"
+	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/metrics"
@@ -90,6 +91,9 @@ type App struct {
 	Report *report.Generator
 	// Metrics is the timeseries metric ingest/query service (W20).
 	Metrics *metrics.Service
+	// Detect is the alert detection engine (W23, migration v18 —
+	// ADR-0011 D2/D3): the same instance the HTTP API serves.
+	Detect *detect.Engine
 	// API is the HTTP API server.
 	API *api.Server
 }
@@ -139,6 +143,7 @@ func New(cfg Config) (*App, error) {
 		Lab:        svc.Lab,
 		Report:     svc.Report,
 		Metrics:    svc.Metrics,
+		Detect:     svc.Detect,
 	}
 	a.API = api.New(log, svc, cfg.DataDir)
 	return a, nil

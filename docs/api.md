@@ -900,6 +900,52 @@ body `{runState: "up|down|degraded|maintenance|unknown", source?: "manual", ts?:
 
 新增 `byRunState{up,down,degraded,maintenance,unknown,null}`（null = 无观测资源数——NULL 与显式 unknown 的区分在聚合层保持）。
 
+## 告警与检测端点（v0.7.0 W23 — ADR-0011 D2/D3，issue #23）
+
+检测规则是**配置数据**（不改代码即可新增阈值规则）；告警是**状态机数据**（触发→确认→恢复三边，无自动升级/超时关闭——本地单机系统，状态机每加一条自动边就多一个不可复现的「告警自己消失了」工单来源，ADR-0011 D3）。规则目录与 E/W/I 导入规则**同构不同表、rule_version 不跨域**（防导入回归与检测演进互相锁死）；越限方向复用 `metric_keys.direction`；判定引擎为纯函数核心（`internal/detect`，ts 全来自数据、确定性）。**MCP 工具面冻结不动（恒 5）**——AI 经 HTTP 消费告警（ADR-0011 D5）。
+
+### GET /api/detection/rules — 规则列表
+
+首批种子规则 5 条（光功率偏低/谷底、丢包率、带宽利用率、光模块温度——数据而非 schema：用户删除后不会随迁移复活）。`{items:[{ruleId, metricKey, comparator, threshold, window, severity, label, enabled, createdAt, updatedAt}], total}`。
+
+### POST /api/detection/rules — 新建规则
+
+body `{metricKey, comparator: gt|lt|gte|lte, threshold, window≥1, severity: error|warning|info, label}`（ruleId 可选，缺省生成 `dr_<uuid>`）。metricKey 必须在指标封闭目录内 → 400（含目录提示）。201 返回规则对象。
+
+### PATCH /api/detection/rules/{id} — 修改规则
+
+可改 `threshold/window/comparator/severity/label/enabled`；**metricKey 不可改**（规则身份）→ 400；未知 id → 404。
+
+### DELETE /api/detection/rules/{id} — 删除规则
+
+**有告警史的规则不可删**（审计线）→ 409 `conflict`；无告警 → 200 删除。
+
+### POST /api/detection/run — 执行检测（每日巡检）
+
+body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用规则的 metric_key 全序列扫描：**末尾连续 window 个点全部越限**才构成 finding（去抖）。同一事务内完成告警同步与运行状态联动：
+
+- finding 无在案告警 → 建 firing 告警（`first_seen` = 首个越限点 ts，确定性 ID `al_<sha256 前 16>`）
+- 恢复（窗口内不再越限）→ firing/acked → cleared
+- **acked 不重触发**（人工持有话事权）；cleared 后再越限 → 新告警（新 first_seen）
+- **run_state 联动**（§12-B2 衔接点 3）：firing error → down、firing warning → degraded（source=alert，走历史+快照双写）；全部恢复 → up。**语义**：与人工 manual 写入按 ts 后写优先共存——巡检运行之间的人工状态不会被静默覆盖，但下一次 run 会以最新数据重判。
+- 响应：`{findings, alertsCreated, alertsCleared, runStatesWritten, evaluatedAt（来自数据，非服务器钟）, alerts:[逐条 created/cleared 证据]}`。同数据同规则 → 同结果（确定性）。
+
+### GET /api/alerts — 告警列表
+
+`?state=firing|acked|cleared&severity=&resource_id=&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）。fired_at 倒序。
+
+### POST /api/alerts/{id}/ack — 确认告警
+
+body `{ackedBy: string}`（必填）。仅 firing → acked（200）；非 firing → 409；未知 → 404。
+
+### POST /api/alerts/{id}/clear — 手动恢复
+
+body 可空（可选 `{ts}`）。firing|acked → cleared（200）；已 cleared → 409；未知 → 404。**无 DELETE**（告警是审计数据）。
+
+### CLI 通道
+
+`netopslab detect --db … [--from --to]`（执行检测，输出 run 信封 JSON）；`netopslab detect --rules`（列规则）。**不做定时**——cron 是运维方的职责（确定性哲学：引擎被调用才运行）。
+
 ## 静态资源与 SPA
 
 - `GET /` 与一切非 `/api` 路径 → 嵌入式 React SPA（`go:embed`）；未知子路径回退 `index.html`（客户端路由）。

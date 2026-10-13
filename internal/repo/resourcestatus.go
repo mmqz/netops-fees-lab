@@ -158,6 +158,33 @@ func (r *ResourceStatusRepo) ListHistory(ctx context.Context, resourceID, from, 
 	return out, nil
 }
 
+// ResourceIDsBySource lists the DISTINCT resources that ever received an
+// observation from source (the W23 detection engine's recovery pass: which
+// resources have an alert-sourced run_state row — those are the up-write
+// candidates when their alerts are all cleared). Ordered by resource_id —
+// deterministic.
+func (r *ResourceStatusRepo) ResourceIDsBySource(ctx context.Context, source domain.StatusSource) ([]string, error) {
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT DISTINCT resource_id FROM resource_status WHERE source = ? ORDER BY resource_id`,
+		source.String())
+	if err != nil {
+		return nil, fmt.Errorf("repo: list resource ids of source %s: %w", source, err)
+	}
+	defer rows.Close()
+	out := make([]string, 0, 16)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("repo: scan resource id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: list resource ids of source %s: %w", source, err)
+	}
+	return out, nil
+}
+
 // CountByRunState counts the resources per SNAPSHOT run_state (the
 // whole-DB stats read — a GROUP BY over resources, no history join). The
 // second return is the count of resources with NO observation (NULL —

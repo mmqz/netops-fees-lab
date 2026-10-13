@@ -1451,6 +1451,23 @@ CREATE INDEX idx_metrics_ts_key ON metrics(ts, series_id);
 6. 引擎加固：TraverseParams 零值 = 默认预算（6/200），与 HTTP 层同值同源
    （topology 包导出常量）。
 
+
+### W23 落地处置（v0.7.0 W23）
+
+1. **种子规则是数据不是 schema**：5 条首发规则由 repo 层幂等播种
+   （表空时 INSERT OR IGNORE）——用户删除 dr_opt_rx_low 后不会被下一次
+   迁移复活（规则是用户数据）。
+2. **run_state 与人工写入的共存语义**：按 ts 后写优先——两次巡检之间的
+   人工 manual 写入不会被静默覆盖；下一次 detect run 以最新数据重判并
+   覆盖（alert 源）。HTTP 人工通道对 source=alert 的 400 守卫保留
+   （引擎经 repo 直写，无 API 豁免口）。
+3. **告警规则不可删（有告警史时）**：409 conflict——告警是审计线，
+   规则删除会使其成为悬挂引用；禁用（enabled=false）是软退出通道。
+4. **suspect 质量的点照常评估**：quality=suspect 是「记录在案的值」
+   （advisory 界不拒绝入库），检测不二判——宁可告警可解释，不可静默漏判。
+5. **window 语义**：末尾连续 window 个点全部越限（缺数 quality=missing
+   断开连续性——数据缺口不是健康也不是故障，如实中断）。
+
 ### 处置完成度
 
 - A1-A5、B1-B8：**13/13 已裁决**，零悬空（原则兑现）。

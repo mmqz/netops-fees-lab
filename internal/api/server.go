@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/changes"
+	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
@@ -72,6 +73,10 @@ type Server struct {
 	changes    *changes.Service
 	renames    *renames.Service
 	governance *governance.Service
+	// detect is the W23 alert detection engine (the SAME instance the
+	// CLI's `netopslab detect` uses — the composition root hands it to
+	// both, no bypass).
+	detect *detect.Engine
 }
 
 // New returns a Server wired from svc — the single composition root the
@@ -100,6 +105,7 @@ func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 		changes:    svc.Changes,
 		renames:    svc.Renames,
 		governance: svc.Governance,
+		detect:     svc.Detect,
 	}
 }
 
@@ -220,6 +226,21 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/metrics/imports", s.handleMetricsImport)
 	mux.HandleFunc("GET /api/metrics/batches", s.handleMetricBatchesList)
 	mux.HandleFunc("POST /api/metrics/batches/{id}/rollback", s.handleMetricBatchRollback)
+
+	// W23 alert detection endpoints (ADR-0011 D2/D3, §12-B2, issue
+	// #23): the detection rule CRUD, the engine run (the
+	// daily-inspection sweep — one call, one transaction, deterministic)
+	// and the alert lifecycle (list / ack / clear). The MCP tool surface
+	// stays frozen at the five read-only tools (ADR-0011 D5): AI reads
+	// alerts via HTTP.
+	mux.HandleFunc("GET /api/detection/rules", s.handleDetectionRulesList)
+	mux.HandleFunc("POST /api/detection/rules", s.handleDetectionRulesCreate)
+	mux.HandleFunc("PATCH /api/detection/rules/{id}", s.handleDetectionRulesPatch)
+	mux.HandleFunc("DELETE /api/detection/rules/{id}", s.handleDetectionRulesDelete)
+	mux.HandleFunc("POST /api/detection/run", s.handleDetectionRun)
+	mux.HandleFunc("GET /api/alerts", s.handleAlertsList)
+	mux.HandleFunc("POST /api/alerts/{id}/ack", s.handleAlertAck)
+	mux.HandleFunc("POST /api/alerts/{id}/clear", s.handleAlertClear)
 
 	// Unknown /api/ paths: JSON 404 envelope (never the SPA fallback).
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

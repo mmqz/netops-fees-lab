@@ -177,6 +177,36 @@ WHERE s.resource_id = ?`
 	return out, nil
 }
 
+// SeriesOfKey lists EVERY series of one metric key (the detection engine's
+// daily-inspection sweep input — all series of the rule's metric_key),
+// ordered by series_id for deterministic findings order. Each row carries
+// the resource the series hangs on.
+func (r *MetricRepo) SeriesOfKey(ctx context.Context, metricKey string) ([]domain.MetricSeries, error) {
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT series_id, resource_id, metric_key, scope, first_seen_at, last_seen_at
+FROM metric_series WHERE metric_key = ? ORDER BY series_id`, metricKey)
+	if err != nil {
+		return nil, fmt.Errorf("repo: list series of key %s: %w", metricKey, err)
+	}
+	defer rows.Close()
+	out := make([]domain.MetricSeries, 0, 16)
+	for rows.Next() {
+		var (
+			s     domain.MetricSeries
+			scope sql.NullString
+		)
+		if err := rows.Scan(&s.SeriesID, &s.ResourceID, &s.MetricKey, &scope, &s.FirstSeenAt, &s.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("repo: scan series of key: %w", err)
+		}
+		s.Scope = stringPtrFromNull(scope)
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: list series of key %s: %w", metricKey, err)
+	}
+	return out, nil
+}
+
 // PointsOfSeries returns the raw points of one series in ts order
 // (optional RFC3339 from/to bounds, inclusive — lexicographic order of the
 // normalized UTC RFC3339 strings is chronological).
