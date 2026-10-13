@@ -93,6 +93,7 @@
 | mapdata 资产契约 | `internal/webui` TestHandlerRealDistRealNetworkLayers（门禁） | 200 + application/geo+json + max-age + FeatureCollection 内容级断言 |
 | 全量门禁 | gofmt 空 / vet 0 / `go test -count=1 ./...` 23 包全绿 / tsc 0 错误 / `npm run build` 5.2s / `make build` | 429 顶层测试（427 基线 + e2e_realdata + webui 资产，`go test -list` 口径） |
 | 演示三脚本回归 | demo.sh（27/0/3、16/0/4、21/0/4、E13W3I1、64 资源）/ demo-lab.sh（哈希 aea27501fa59 一致）/ demo-real.sh（本文档上行） | 三脚本零修改、零回归 |
+| CI（GitHub Actions） | run 38373827971（2603805）**failure**——沿用 v0.6.0/v0.7.0 同况：账户 Actions-minutes 配额耗尽（job 3 秒结束、steps=0，基础设施问题非代码）；本地门禁集与 CI 同集（gofmt/vet/test/tsc/build）全绿，如实记录不伪造 | 配额恢复后 CI 自证 |
 
 ## ⚠️ 未验证（v0.8.0 诚实声明）
 
