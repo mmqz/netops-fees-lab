@@ -18,6 +18,16 @@ import (
 // virtual device (PROJECT_BRIEF_P2 §6; the Phase 1 enum lives in the
 // mapping package — sim keeps its own pinned constant to stay
 // layer-clean). Everything else (停用/在建/退网/empty/unknown) maps to down.
+//
+// BOUNDARY (issue #24 / data-model-v1.md §12-B3, ADR-0011): the lab is a
+// DEVICE-LEVEL connectivity sandbox — it materializes device + circuit
+// only, from the LEDGER status (台账 status), deliberately NOT from the
+// runtime state (run_state, W22). The unified graph (resources/relations,
+// traverse/impact endpoints) is the full resource model for analysis.
+// One-liner for AI agents: analysis (impact/root-cause/business) uses the
+// unified graph; simulation operations (disconnect/restore drills) use
+// the lab. This boundary is deliberate — do not "fix" the ledger-status
+// mapping here when run_state lands.
 const statusInNet = "在网"
 
 // MaterializeResult is the outcome of a successful Materialize.

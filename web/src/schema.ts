@@ -177,3 +177,31 @@ export function requiredFields(type: ResourceType): FieldSpec[] {
 export const KEY_FALLBACK_FIELDS: Partial<Record<ResourceType, string[]>> = {
   base_station: ['city', 'base_station_name'],
 };
+
+/**
+ * 类型层次/专业域元数据镜像（后端 TypeSpec.Layer/Domain + LayerName 的前端对照，
+ * W19/issue #26：单一事实源在后端 mapping 包，此镜像与 GET /api/schema 的
+ * layer/layerName/domain 字段同源同值——七层模型 §10.2（§12-B5 修订：接入层
+ * 插入为 L4，逻辑层 L5、业务层 L6；ip_pool 归逻辑层））。
+ * 当前 UI 尚未消费（W22 traverse 视图与 W25 域过滤将读取），先落地镜像保证
+ * 前后端可对照校验。
+ */
+export interface TypeMeta {
+  /** 七层模型层数（0-6）。 */
+  layer: number;
+  /** 层的中文名（与后端 LayerName 同词形）。 */
+  layerName: string;
+  /** 专业域（space/device/optical/transport/access/logic/service）。 */
+  domain: string;
+}
+
+export const TYPE_META: Record<ResourceType, TypeMeta> = {
+  site: { layer: 0, layerName: '空间层', domain: 'space' },
+  machine_room: { layer: 0, layerName: '空间层', domain: 'space' },
+  device: { layer: 1, layerName: '物理层（设备）', domain: 'device' },
+  port: { layer: 1, layerName: '物理层（设备）', domain: 'device' },
+  ptp_port: { layer: 1, layerName: '物理层（设备）', domain: 'device' },
+  circuit: { layer: 3, layerName: '传输层', domain: 'transport' },
+  base_station: { layer: 4, layerName: '接入层', domain: 'access' },
+  ip_pool: { layer: 5, layerName: '逻辑层', domain: 'logic' },
+};

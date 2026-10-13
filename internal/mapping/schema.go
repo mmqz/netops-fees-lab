@@ -279,6 +279,17 @@ type TypeSpec struct {
 	// schema consumers get one canonical label per type without
 	// hand-copying a second table.
 	Label string
+	// Layer is the seven-layer model position of the type (§10.2, as
+	// amended by §12-B5: access inserted as L4). Part of the single
+	// source of truth for type metadata (issue #26): the traverse
+	// endpoint's layers parameter and the §10.5 root-cause layer logic
+	// read it from here — never from a hand-copied table. LayerName
+	// gives the display name.
+	Layer int
+	// Domain is the professional-domain axis (§2.1 专业域投影: 只看传输/
+	// 无线/IP). One of the Domain* constants; projected by /api/schema
+	// so consumers can group types without a second registry.
+	Domain string
 	// SheetHint is a sheet-name substring that suggests this type
 	// (设备→device, 池→ip_pool [matches 地址池 too], 电路→circuit).
 	SheetHint string
@@ -393,6 +404,8 @@ func (t TypeSpec) NameField() string {
 var deviceSpec = TypeSpec{
 	Type:      domain.ResourceTypeDevice,
 	Label:     "网元设备",
+	Layer:     LayerDevice,
+	Domain:    DomainDevice,
 	SheetHint: "设备",
 	Fields: []FieldSpec{
 		{Name: "device_code", Label: "设备编码", Required: true, NaturalKey: true, Kind: KindString,
@@ -423,6 +436,8 @@ var deviceSpec = TypeSpec{
 var ipPoolSpec = TypeSpec{
 	Type:            domain.ResourceTypeIPPool,
 	Label:           "IP地址池",
+	Layer:           LayerLogic, // §12-B5: 地址空间属逻辑层（assigned_to 为跨层边）
+	Domain:          DomainLogic,
 	SheetHint:       "池",  // substring match covers 地址池 and a bare 池
 	RenameDetection: true, // pool_name key: a source rename splits identity (W006)
 	Fields: []FieldSpec{
@@ -444,6 +459,8 @@ var ipPoolSpec = TypeSpec{
 var circuitSpec = TypeSpec{
 	Type:      domain.ResourceTypeCircuit,
 	Label:     "传输电路",
+	Layer:     LayerTransport,
+	Domain:    DomainTransport,
 	SheetHint: "电路",
 	Fields: []FieldSpec{
 		{Name: "circuit_code", Label: "电路编号", Required: true, NaturalKey: true, Kind: KindString,
@@ -475,6 +492,8 @@ var circuitSpec = TypeSpec{
 var portSpec = TypeSpec{
 	Type:              domain.ResourceTypePort,
 	Label:             "设备端口",
+	Layer:             LayerDevice,
+	Domain:            DomainDevice,
 	SheetHint:         "端口",
 	NameFieldOverride: "port_name",
 	RenameDetection:   true, // device_name|port_name composite key: renames split identity (W006)
@@ -529,6 +548,8 @@ var portSpec = TypeSpec{
 var baseStationSpec = TypeSpec{
 	Type:              domain.ResourceTypeBaseStation,
 	Label:             "基站",
+	Layer:             LayerAccess,
+	Domain:            DomainAccess,
 	SheetHint:         "基站",
 	NameFieldOverride: "base_station_name",
 	KeyFallbackFields: []string{"city", "base_station_name"},
@@ -585,6 +606,8 @@ var baseStationSpec = TypeSpec{
 var siteSpec = TypeSpec{
 	Type:      domain.ResourceTypeSite,
 	Label:     "局站",
+	Layer:     LayerSpace,
+	Domain:    DomainSpace,
 	SheetHint: "局站",
 	Fields: []FieldSpec{
 		{Name: "site_id", Label: "局站ID", Required: true, NaturalKey: true, Kind: KindString,
@@ -623,6 +646,8 @@ var siteSpec = TypeSpec{
 var machineRoomSpec = TypeSpec{
 	Type:              domain.ResourceTypeMachineRoom,
 	Label:             "机房",
+	Layer:             LayerSpace,
+	Domain:            DomainSpace,
 	SheetHint:         "机房",
 	NameFieldOverride: "machine_room_name",
 	Fields: []FieldSpec{
@@ -664,6 +689,8 @@ var machineRoomSpec = TypeSpec{
 var ptpPortSpec = TypeSpec{
 	Type:              domain.ResourceTypePTPPort,
 	Label:             "PTP端口",
+	Layer:             LayerDevice,
+	Domain:            DomainDevice,
 	SheetHint:         "PTP", // matches the synthesized virtual sheet "PTP配置"
 	NameFieldOverride: "port_name",
 	RenameDetection:   true, // device_model|port_name composite key: renames split identity (W006)

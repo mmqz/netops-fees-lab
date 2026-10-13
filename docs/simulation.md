@@ -37,6 +37,23 @@
 
 错误：名称重复 409 `conflict`；所选批次无设备资源 422 `no_source_resources`；批次不存在 404。
 
+
+### 1.2 lab 与统一图的边界（issue #24 / data-model-v1.md §12-B3）
+
+数据模型 v1.0（45 类资源 + 32 种关系）落地后，系统内存在**两套图**，边界如下（W19 裁决，方案 A）：
+
+| | lab 仿真工作台 | 统一图（resources/relations） |
+| --- | --- | --- |
+| 定位 | **设备级连通性推演沙盘**（what-if：断这条链会怎样） | **全量资源模型**（台账 + 层次 + 时序） |
+| 表族 | `virtual_devices`/`interfaces`/`links`（独立表族，物化只处理 device + circuit a_end/z_end） | `resources`/`relations`（一切资源与关系） |
+| 状态 | 物化自**台账 status**（在网→up，其余→down）；变更集可改 | 台账 status + 运行 run_state（W22 起，来源告警/巡检/人工） |
+| 消费者 | 5 个 MCP lab 工具（仿真操作）+ Web 工作台 | traverse/impact/context HTTP 端点（AI 分析）+ Web 全部数据页 |
+
+**给 AI 的一句话**：分析（影响面 / 根因 / 业务穿透）用**统一图**；仿真操作（断连/恢复推演）用 **lab**。
+两套图不互相同步状态——lab 是快照沙盘，推演结束即弃；统一图是持久台账。§10.5 的根因
+追溯**只依赖统一图**，不依赖 lab。物化规则（`sim/materialize.go`）**不扩展**到新类型——
+这是裁决而非欠账（代码内同名边界注释为证）。
+
 ## 2. 操作目录（op catalog —— 封闭集合）
 
 外部边界（HTTP `POST /api/workspaces/{id}/ops` / MCP `lab_apply_ops` / CLI `lab apply`）只能提交以下 **10 个前向操作**。字段 camelCase，`op` 判别；**严格字段检查**（写了该操作不用的字段 → 400）。

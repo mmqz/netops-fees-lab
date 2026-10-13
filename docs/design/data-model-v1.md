@@ -289,6 +289,10 @@ PRAGMA foreign_keys = ON;
 > 说明：`housed_in` 与既有 `belongs_to` 语义不同——
 > `belongs_to` 是「资源层级容器」，`housed_in` 是「物理位置」。
 > 若认为二者可合并，实施时需显式裁决并记录 ADR。
+>
+> **[§12-A1 裁决（W19，ADR-0014）]**：**不合并**——保留两个关系。迁移成本实测：合并需重写 v10
+> 存量 `belongs_to` 行（破坏性变更，违背 §10.10）并改 6 个非测试包 + 8 个测试文件约 60 处断言；
+> 查询收益为零（BFS 层序遍历下两种表达同构，层次分离由 §10.2 层次表免费提供）。详见 ADR-0014。
 
 #### 物理连接
 
@@ -504,6 +508,12 @@ CREATE INDEX idx_metrics_ts ON metrics(ts);
 而资源是**身份语义**（同键即同资源，属性变更需人工确认）。
 **此差异需在实施时以 ADR 显式记录。**
 
+> **[§12-A2 裁决（W19，ADR-0014）]**：**接受两种语义并存**（方案 A）。
+> 边界声明：**资源 = 身份语义（同键重导 skip + 属性差异人工确认 W005）；
+> 时序点 = 值语义（同 (series, ts) 重导 INSERT OR REPLACE 覆盖）**。
+> 幂等性验收（同一数据连导 3 次 metrics 行数不变 + 不同值时末次胜出）随 W20
+> 时序表落地实测；ADR-0014 记录决策与理由。
+
 **D4. 序列元数据分离**
 
 `metric_series` 单独存 `(resource_id, metric_key, scope)`，
@@ -519,6 +529,13 @@ CREATE INDEX idx_metrics_ts ON metrics(ts);
 
 **推荐 (a)**：端口已是既有资源类型（v7 落地），
 `scope` 留给无法独立成资源的细分维度（如光模块的收发双向）。
+
+> **[§12-A3 裁决（W19）]**：**确认方案 A（挂端口资源）**。决定性判据是图查询连通性：
+> §10.5 根因追溯要求「从异常端口找到承载电路→局站」，方案 B 的 `scope` 是字符串、
+> 不是图节点，追溯在端口层断链。存储对比：窄表下 A/B 的 `metrics` 行数完全相同
+>（点数 = 端口×指标×天数，与挂载层无关），仅 `metric_series` 元数据行数差一个量级
+>（A：200 万 vs B：10 万），元数据行小、可接受。图连通性验收（端口 traverse 可达
+> 局站层）随 W22 落地实测。
 
 ### 5.5 AI 查询友好性
 
@@ -804,6 +821,12 @@ netopslab synthdata --out ./testdata/synth \
 
 **建议实施时的额外保障**：
 - 占位数据文件标注 `PLACEHOLDER` 前缀或独立目录
+
+> **[§12-A5 裁决（W19）]**：**方案 C（`testdata/placeholder/`）**。实测依据：既有测试全部
+> 按**显式文件名**引用 `testdata/`（无任何目录遍历/glob），新增子目录零污染回归基准；
+> 公开数据许可声明落 `testdata/placeholder/LICENSE-NOTICE.md`；生成器入库（`netopslab
+> synthdata --out testdata/placeholder`，W20）、生成物按方案原则不入库（合成数据无第三方
+> 许可约束，小体量演示样例可入库但须与回归基线隔离——W20 实施时按此执行）。
 - 生成器脚本入库（可重跑），生成的数据文件不入库
 
 ---
@@ -899,9 +922,17 @@ netopslab synthdata --out ./testdata/synth \
 
 #### 层次定义（用于判定同层/跨层）
 
+> **[§12-B5 修订（W19 落地）]**：原表遗漏接入层类型（基站/BBU/RRU/OLT/ONU/PON口），
+> 而 §10.2 方向表又把 `uplink_to`（基站→设备）标为跨层、`covers`（RRU→基站）标为同层——
+> 原六层表无法自洽。修订：**插入接入层为 L4**，原逻辑层/业务层顺移为 L5/L6；
+> `ip_pool`（地址空间，非网络资源）归入 L5 逻辑层（使 `assigned_to` 的「跨层」标注成立）。
+> 本表现在是**代码**（`mapping` 包 Layer 常量 + TypeSpec.Layer + 一致性测试
+> `TestLayerAssignments`/`TestRelationRegistryConsistency`），不再只是文档。
+
 ```
-L5 业务层    customer / service / leased_line
-L4 逻辑层    ring / igp_domain / vpn_instance / protection_group
+L6 业务层    customer / service / leased_line
+L5 逻辑层    ring / igp_domain / vpn_instance / protection_group / ip_pool
+L4 接入层    base_station / bbu / rru / olt / onu / pon_port
 L3 传输层    circuit / otn_och / sdh_timeslot
 L2 物理层（光）  optical_cable / cable_segment / fiber / odf / odf_terminal / splice_box
 L1 物理层（设备） device / board / port / ptp_port
@@ -937,10 +968,19 @@ L0 空间层    site / machine_room / rack / duct / manhole / pole
 | `member_of_ring` | device | ring | 跨层 | 设备属某环 |
 | `a_end` / `z_end` | circuit | device | 跨层 | 电路端接设备 |
 | `assigned_to` | ip_pool | device | 跨层 | 地址池分配设备 |
-| `belongs_to` | machine_room | site | 跨层 | 机房属局站 |
+| `belongs_to` | machine_room | site | **同层** | 机房属局站 |
+
+> **[§12 勘误（W19）]**：原表把 `belongs_to`（机房→局站）标为「跨层」，
+> 但二者同属 L0 空间层，自相矛盾。修正为**同层**（容器归属边）。
+> 代码事实源：`mapping.RelationSpecs()`（CrossLayer 标志由层次注册表计算并经
+> `TestRelationRegistryConsistency` 钉死，非手工标注）。
 
 **这张表是实施的关键交付物**——每个关系类型都必须在此登记方向语义，
 未登记方向的关系不得使用（缺乏语义的边只会让查询兜圈子）。
+**[W19 落地]** 既有 4 种关系已进 `internal/mapping/relations.go` 注册表
+（方向语义 + 同/跨层 + 允许的 from/to 类型）；W21 扩容时新关系**先登记
+注册表、再进 CHECK 约束**，注册表测试（`TestRelationRegistryCoversDomainEnums`）
+保证两边集合永远一致——「未登记方向的关系不得使用」从文档约定升级为可执行门禁。
 
 
 ### 10.3 查询 API 设计
@@ -1329,6 +1369,45 @@ CREATE INDEX idx_metrics_ts_key ON metrics(ts, series_id);
 ```
 
 ---
+
+## 12. 开放问题处置日志（§11 的闭环记录，W19 起生效）
+
+> 本章是 §11 十三项开放问题的**裁决记录**。处置原则（§11 统一指令）：可测的实测、
+> 不可测的用默认值并显式标记、结论回写对应小节、不留悬空项。每项标注落地轮次
+> （W20-W25，v0.7.0 里程碑）；实施完成前对应 GitHub issue 保持 open，完成后以
+> 验收证据关闭。A1/A2 两个架构级裁决另存 ADR-0014。
+
+### A 类：设计决策（5 项）
+
+| # | 问题 | 裁决 | 关键依据 | 落地 |
+| --- | --- | --- | --- | --- |
+| A1 | `belongs_to` 与 `housed_in` 是否合并（#17） | **不合并**（方案 A） | 合并需重写 v10 存量行（破坏性变更）+ 6 包/8 测试文件约 60 处断言；BFS 层序遍历下两表达同构，层次分离由层次注册表免费提供；ADR-0014 | 关系注册表已落地（W19）；housed_in 等 25 新关系随 M3（W21） |
+| A2 | 时序 upsert vs 资源 skip（#18） | **并存**（方案 A）+ 显式边界：资源=身份语义（skip+W005 确认）、时序=值语义（REPLACE 覆盖）；方案 B 会因每日全量重导产生海量确认项而不可用 | ADR-0014；幂等实测（3 连导行数不变/异值末次胜出）随 W20 | W20 |
+| A3 | 端口性能挂哪层（#19） | **挂 port 资源**（方案 A） | 决定性判据 = 图连通性（scope 字符串非图节点，方案 B 使 §10.5 根因追溯在端口层断链）；存储上 A/B 的 metrics 行数相同，仅序列元数据行数差一个量级（可接受） | W20 落存储；W22 落连通性验收 |
+| A4 | 新增 30+ 类型 UI 支持范围（#20） | **方案 A（只做数据层）**，通用资源表格复用；穿透视图（§6.5）与告警列表是仅有的两个新增 UI 面 | 用户目标=数据底座+AI 分析（§7.1），界面是次要目标；多数新类型无真实数据 | 通用表格对新类型的兼容验证 + 穿透视图随 W25 |
+| A5 | 占位数据目录约定（#21） | **方案 C（`testdata/placeholder/`）** | 实测：既有测试全部按显式文件名引用 testdata/，零目录遍历，新增子目录零污染回归基准；许可声明落 `LICENSE-NOTICE.md` | W20（synthdata 生成器） |
+
+### B 类：设计缺失（8 项，补齐设计）
+
+| # | 缺失 | 补齐的设计 | 落地 |
+| --- | --- | --- | --- |
+| B1 | 状态模型（#22） | **方案 C（历史+快照）**：`resource_status(resource_id, ts, run_state, source)` 时序表存历史（up 语义同 §5 值语义）+ `resources.run_state/run_state_at` 快照列（全库统计免 JOIN）；台账 status 与运行 run_state **彻底分立**——W005 台账变更流不触碰 run_state；lab 物化继续用台账 status（沙盘边界，见 B3）。run_state 枚举封闭：`up/down/degraded/maintenance/unknown`；来源枚举：`alert/poll/manual` | W22 |
+| B2 | 告警与检测规则（#23） | **按 ADR-0011 D2/D3 原样落地** + 四点衔接：① 检测规则与 E/W/I 同构不同表、rule_version 不跨域；② 越限方向复用 `metric_keys.direction`；③ 告警触发以 source='alert' 写 run_state（degraded/down）；④ candidates 高亮复用告警级别。表结构见 ADR-0011，状态机三边（firing→acked / firing→cleared / acked→cleared）无自动升级 | W23 |
+| B3 | lab 与扩容模型关系（#24） | **方案 A（lab 保持现状+明确边界）**：lab=设备级连通性推演沙盘（virtual_devices/links 独立表族，物化规则不动）；统一图=全量资源模型（resources/relations）。一句话给 AI：「**分析（影响面/根因/业务）用统一图；仿真操作（断连/恢复推演）用 lab**」。MCP 5 工具全部服务 lab 侧不变；§10.5 根因追溯只依赖统一图 | 边界声明+代码标记（W19）；lab 测试全绿持续验证 |
+| B4 | 既有 8 类数据迁移映射（#25） | **保守迁移**：既有类型/字段/关系全部不动、**零自动派生**（环/链字段保持 attributes 不提升；归属A 不派生 uplink_to——按 IP/名称自动匹配都违反「禁止名称推断」红线，新关系仅来自含显式键列的新导入数据；确需从既有字段派生的场景走人工确认流候选提示，不在本里程碑）。既有 v1-v13 迁移测试全绿为验收 | 守卫测试随 W21（断言迁移后既有行逐字节不变+零新关系） |
+| B5 | 资源类型注册表（#26） | **扩展 mapping.Specs 为唯一事实源**：TypeSpec 增 `Layer`/`Domain`（七层模型/专业域）；关系侧新增 `RelationSpecs()` 注册表（方向语义+同/跨层+允许端类型，CrossLayer 由层次计算非手工）；`/api/schema` 投影 layer/layerName/domain；web schema.ts 增 TYPE_META 镜像；一致性测试四件（注册表自洽/枚举覆盖/RelationTypeFor 契约/层次钉死）防 7 处漂移。**§10.2 层次表修订**：插入接入层 L4（原表遗漏且与方向表矛盾）、逻辑/业务顺移 L5/L6、ip_pool 归 L5；belongs_to 勘误为同层 | 地基（W19，已落地）；45 类全量 + SQL CHECK 同步测试随 W21 |
+| B6 | 时序量级与保留（#27） | **方案 A 分层保留、阶段实施**：阶段 1 只存原始点 + **用 synthdata 实测量级**（导入 P95 / 巡检扫描 P95 / DB 体积三指标）；实测超阈值（导入>30s 或扫描>5s）才启动阶段 2（日聚合 + 90 天原始保留）。阈值与触发条件先写入文档，不预实现聚合 | W20 实测出数 |
+| B7 | 映射无人值守（#28） | **方案 A（映射模板持久化）**：`mapping_templates(template_id, source_name, header_fingerprint, mapping_json, confirmed_at)`，指纹=规范化表头序列的 sha256；导入时指纹命中→自动应用已确认映射（无人值守），未命中→回落既有确认流（表头变更天然可感知，不静默错映）；与 import_batches.mapping 衔接（首次确认后一键存模板） | W24 |
+| B8 | CRS 与编码规范（#29） | **CRS：统一 WGS84**（与 geo_lat/lng 一致，GCJ-02 仅渲染期转换——反向有损不作存储）；**编码：逐类型规范化** trim + 全角→半角 + 统一大写（前导零**保留**——ID 类编码的前导零是身份的一部分，与既有 KindString ID 键语义一致）；无编码→名称兜底 + W004（复用 base_station 条件键机制）；fiber 纤芯号等数值型段统一去空白不补零（1 与 01 不同键——防同一资源双身份；导则写入 natural-keys.md） | W21（新类型 Specs 落地时同步） |
+
+### 处置完成度
+
+- A1-A5、B1-B8：**13/13 已裁决**，零悬空（原则兑现）。
+- 回写触点：§4.2（A1）、§5.4 D3（A2）、§5.4 D5（A3）、§8（A5）、§10.2（B5 修订+勘误）、本章（全部）。
+- 代码触点（W19 已落地）：`internal/mapping/relations.go`（关系注册表+层次常量）、
+  `TypeSpec.Layer/Domain`、`/api/schema` 投影扩展、web `TYPE_META` 镜像、
+  ADR-0014、`internal/sim/materialize.go` 边界标记（B3）。
+- 后续轮次（W20-W25）按落地列推进；每项落地后在对应 GitHub issue 回帖验收证据并关闭。
 
 ## 附录 A：与既有文档的关系
 

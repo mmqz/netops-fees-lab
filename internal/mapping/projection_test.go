@@ -24,6 +24,15 @@ func TestSchemaProjectionMirrorsSpecs(t *testing.T) {
 		if got.Label != spec.Label {
 			t.Errorf("%s: label = %q, want %q", spec.Type, got.Label, spec.Label)
 		}
+		if got.Layer != spec.Layer {
+			t.Errorf("%s: layer = %d, want %d (spec.Layer)", spec.Type, got.Layer, spec.Layer)
+		}
+		if got.LayerName != LayerName(spec.Layer) {
+			t.Errorf("%s: layerName = %q, want %q (LayerName of %d)", spec.Type, got.LayerName, LayerName(spec.Layer), spec.Layer)
+		}
+		if got.Domain != spec.Domain {
+			t.Errorf("%s: domain = %q, want %q (spec.Domain)", spec.Type, got.Domain, spec.Domain)
+		}
 		if got.SheetHint != spec.SheetHint {
 			t.Errorf("%s: sheetHint = %q, want %q", spec.Type, got.SheetHint, spec.SheetHint)
 		}

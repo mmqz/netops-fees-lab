@@ -27,6 +27,15 @@ type SchemaType struct {
 	Type domain.ResourceType `json:"type"`
 	// Label is the human-readable (Chinese) type name.
 	Label string `json:"label"`
+	// Layer is the seven-layer model position (§10.2 as amended by
+	// §12-B5; W19/issue #26). Exposed so schema consumers (AI included)
+	// can reason about same-layer/cross-layer without a second table.
+	Layer int `json:"layer"`
+	// LayerName is the canonical display name of Layer.
+	LayerName string `json:"layerName"`
+	// Domain is the professional-domain axis (space/device/optical/
+	// transport/access/logic/service).
+	Domain string `json:"domain"`
 	// SheetHint is the sheet-name substring that suggests this type.
 	SheetHint string `json:"sheetHint"`
 	// NameField is the field whose value becomes the resource Name.
@@ -113,6 +122,9 @@ func projectType(spec TypeSpec) SchemaType {
 	return SchemaType{
 		Type:              spec.Type,
 		Label:             spec.Label,
+		Layer:             spec.Layer,
+		LayerName:         LayerName(spec.Layer),
+		Domain:            spec.Domain,
 		SheetHint:         spec.SheetHint,
 		NameField:         spec.NameField(),
 		NameFieldOverride: spec.NameFieldOverride,

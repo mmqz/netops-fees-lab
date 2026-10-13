@@ -24,11 +24,11 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 （`version` = `domain.AppVersion` 单一事实源，v0.3.2 起由 `TestAppVersionMatchesChangelogHead` 锚定与 CHANGELOG 头版本一致，不再手抄漂移。`dbPath` 为 v0.6.2 新增（issue #8）：服务端实际绑定的数据库绝对路径——CLI 建的工作台在 Web 端 404 时，先比对这个字段与 CLI `--db`/输出的 `db` 字段，一步区分「连错库」与「数据丢失」。）
 
-## GET /api/schema — 资源 schema 动态发现（v0.4.0）
+## GET /api/schema — 资源 schema 动态发现（v0.4.0；W19 起含层次/域字段）
 
 返回**全部可导入资源类型的字段规格 + 数据质量规则目录**。响应体由后端 `mapping.BuildSchemaDocument()` 从 `mapping.Specs`（Go 类型规格的唯一事实源）与 domain 规则目录机械投影生成——非手抄快照，后端规格演进时该端点自动同步（mapping 包投影测试逐字段对照 Specs 钉死）。**只读、无参数、不进 MCP 工具面**（MCP 工具恒为 5 个；schema 发现是 HTTP 专属能力）。前端 `web/src/schema.ts` 编译期镜像保留，可用本端点对照校验。
 
-- `types[]`（按 Specs 注册序）：`type`（资源类型）、`label`（类型中文名）、`sheetHint`（sheet 名建议锚点）、`nameField`（展示名字段——`NameFieldOverride` 优先、否则「first *_name」启发式）、`nameFieldOverride`（显式展示名钉定，仅 port/base_station/machine_room 有）、`naturalKeyFields[]`（主自然键字段，序 = `|` 拼接序）、`keyFallbackFields[]`（条件键兜底字段，v0.4 仅 base_station）、`fields[]`。
+- `types[]`（按 Specs 注册序）：`type`（资源类型）、`label`（类型中文名）、`layer`（七层模型层数，§10.2 经 §12-B5 修订：0=空间/1=设备/2=光缆/3=传输/4=接入/5=逻辑/6=业务）、`layerName`（层中文名）、`domain`（专业域：space/device/optical/transport/access/logic/service）——v0.7.0 W19（issue #26）起投影，供消费者做同层/跨层推理、免第二张表）、`sheetHint`（sheet 名建议锚点）、`nameField`（展示名字段——`NameFieldOverride` 优先、否则「first *_name」启发式）、`nameFieldOverride`（显式展示名钉定，仅 port/base_station/machine_room 有）、`naturalKeyFields[]`（主自然键字段，序 = `|` 拼接序）、`keyFallbackFields[]`（条件键兜底字段，v0.4 仅 base_station）、`fields[]`。
 - `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界）、`intMax`（int 字段上界，缺省=无界；v0.5 W9-D 起投影——此前 vlan 上界 4094 对端点消费者不可见）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
 - `rules[]`（规则目录，按码序 E001→E006 / W001→W006 / I001）：`code`、`severity`（error/warning/info，与 `domain.SeverityForCode` 一致）、`description`（一行英文释义）。
 
@@ -40,6 +40,9 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
     {
       "type": "device",
       "label": "网元设备",
+      "layer": 1,
+      "layerName": "物理层（设备）",
+      "domain": "device",
       "sheetHint": "设备",
       "nameField": "device_name",
       "naturalKeyFields": [
