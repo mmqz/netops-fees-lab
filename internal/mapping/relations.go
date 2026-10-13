@@ -327,12 +327,17 @@ var relationSpecs = []RelationSpec{
 		Note:       "from=设备/基站，to=客户；设备/基站服务客户（多起点端）",
 	},
 	{
-		Type:       domain.RelationTypeSubscribedBy,
-		Label:      "业务属客户",
-		FromTypes:  []domain.ResourceType{domain.ResourceTypeService},
+		Type:  domain.RelationTypeSubscribedBy,
+		Label: "业务/专线属客户",
+		FromTypes: []domain.ResourceType{
+			domain.ResourceTypeService,
+			// W25（#16 验收补齐）：专线同样属客户（真实专线表携「客户名称」列），
+			// 同一语义同一关系——按客户聚合 service 与 leased_line 都可回答。
+			domain.ResourceTypeLeasedLine,
+		},
 		ToTypes:    []domain.ResourceType{domain.ResourceTypeCustomer},
-		CrossLayer: false, // L6 业务 → L6 业务（同层）
-		Note:       "from=业务，to=客户；业务属于客户",
+		CrossLayer: false, // L6 业务/专线 → L6 业务（同层）
+		Note:       "from=业务/专线，to=客户；业务/专线属于客户（W25 起含专线）",
 	},
 	{
 		Type:       domain.RelationTypeProvidedBy,

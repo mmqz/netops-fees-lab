@@ -137,6 +137,14 @@ func TestW21CrossLayerChainFixture(t *testing.T) {
 		domain.ResourceTypeService, []string{"service_code"},
 		map[string]string{"service_code": "业务编码", "service_type": "业务类型", "customer_code": "客户编码", "provide_circuit": "提供电路", "depend_device": "依赖设备"})
 
+	// ① leased_line (L6, W25 #16 验收补齐) → subscribed_by CUST-01.
+	// 真实专线表的「客户名称」列现在是 ref：按客户自然键解析出边。
+	llHeaders := []string{"专线编号", "专线名称", "客户名称", "协议带宽(Mbps)"}
+	importTyped("专线资源表", llHeaders,
+		[][]string{{"LL-01", "哈尔滨银行总部专线", "CUST-01", "200"}},
+		domain.ResourceTypeLeasedLine, []string{"line_code"},
+		map[string]string{"line_code": "专线编号", "line_name": "专线名称", "customer_code": "客户名称", "bandwidth_mbps": "协议带宽(Mbps)"})
+
 	// ── Relation assertions ──────────────────────────────────────────────
 	counts, err := db.Relations.CountByType(ctx)
 	if err != nil {
@@ -152,7 +160,7 @@ func TestW21CrossLayerChainFixture(t *testing.T) {
 		domain.RelationTypeRoutedOver:      1, // OCH-01 → CABLE-01
 		domain.RelationTypeUsesFiber:       1, // OCH-01 → CABLE-01|1
 		domain.RelationTypeCarriedBy:       1, // CIR-01 → OCH-01
-		domain.RelationTypeSubscribedBy:    1, // SVC-01 → CUST-01
+		domain.RelationTypeSubscribedBy:    2, // SVC-01 → CUST-01 + LL-01 → CUST-01（W25）
 		domain.RelationTypeProvidedBy:      1, // SVC-01 → CIR-01
 		domain.RelationTypeDependsOn:       1, // SVC-01 → DEV-C1
 		domain.RelationTypeAEnd:            1, // CIR-01 → DEV-C1 (circuit sheet)
@@ -167,8 +175,8 @@ func TestW21CrossLayerChainFixture(t *testing.T) {
 	for _, n := range counts {
 		total += n
 	}
-	if total != 14 {
-		t.Errorf("total relations = %d, want 14 (counts: %v)", total, counts)
+	if total != 15 {
+		t.Errorf("total relations = %d, want 15 (counts: %v)", total, counts)
 	}
 
 	// Edge identity spot-checks: the chain's key hops, by natural key.
@@ -194,6 +202,7 @@ func TestW21CrossLayerChainFixture(t *testing.T) {
 		t.Errorf("edge %s --%s--> %s not found", fromKey, relation, toKey)
 	}
 	edge("service", "SVC-01", "subscribed_by", "customer", "CUST-01")
+	edge("leased_line", "LL-01", "subscribed_by", "customer", "CUST-01") // W25
 	edge("service", "SVC-01", "provided_by", "circuit", "CIR-01")
 	edge("service", "SVC-01", "depends_on", "device", "DEV-C1")
 	edge("circuit", "CIR-01", "carried_by", "otn_och", "OCH-01")
@@ -241,8 +250,8 @@ func TestW21CrossLayerChainFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
 	}
-	if len(relTotal) != 14 {
-		t.Errorf("ListAll = %d relations, want 14", len(relTotal))
+	if len(relTotal) != 15 {
+		t.Errorf("ListAll = %d relations, want 15", len(relTotal))
 	}
 	_ = filepath.Join
 	_ = repo.Open

@@ -241,15 +241,20 @@ func TestMultiEndRelations(t *testing.T) {
 			from: []domain.ResourceType{domain.ResourceTypeDevice, domain.ResourceTypeBaseStation},
 			to:   []domain.ResourceType{domain.ResourceTypeCustomer},
 		},
+		// W25（#16 验收补齐）：subscribed_by 扩为多起点端——业务与专线都属客户。
+		domain.RelationTypeSubscribedBy: {
+			from: []domain.ResourceType{domain.ResourceTypeService, domain.ResourceTypeLeasedLine},
+			to:   []domain.ResourceType{domain.ResourceTypeCustomer},
+		},
 	}
-	if len(want) != 3 {
-		t.Fatalf("expectation table has %d entries, want 3", len(want))
+	if len(want) != 4 {
+		t.Fatalf("expectation table has %d entries, want 4", len(want))
 	}
 	for _, spec := range RelationSpecs() {
 		w, multi := want[spec.Type]
 		if !multi {
 			if len(spec.FromTypes) != 1 {
-				t.Errorf("%s: FromTypes = %v, want exactly one (only carried_by/depends_on/serves are multi-end)", spec.Type, spec.FromTypes)
+				t.Errorf("%s: FromTypes = %v, want exactly one (only carried_by/depends_on/serves/subscribed_by are multi-end)", spec.Type, spec.FromTypes)
 			}
 			if len(spec.ToTypes) != 1 {
 				t.Errorf("%s: ToTypes = %v, want exactly one (only carried_by/depends_on are multi-target)", spec.Type, spec.ToTypes)

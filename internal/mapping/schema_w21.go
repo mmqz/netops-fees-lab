@@ -455,8 +455,9 @@ var serviceSpec = TypeSpec{
 
 // leasedLineSpec is the 专线 schema (L6): line_code keyed. Field set from
 // the real 23-column 专线 export (§3.2's note): 专线编号/集团STN编号/
-// 装机地址/协议带宽. Address fields stay plain strings (locations, not
-// site refs — no W21 ref contract).
+// 装机地址/协议带宽 + W25 customer_code（真实表「客户名称」列——#16 的
+// 按客户聚合痛点）. Address fields stay plain strings (locations, not
+// site refs — no W21 ref contract); the customer column IS a ref.
 var leasedLineSpec = TypeSpec{
 	Type:         domain.ResourceTypeLeasedLine,
 	Label:        "专线",
@@ -471,6 +472,12 @@ var leasedLineSpec = TypeSpec{
 		{Name: "stn_no", Label: "集团STN编号", Kind: KindString, Synonyms: []string{"集团STN编号", "STN编号", "STN"}},
 		{Name: "a_end_address", Label: "A端装机地址", Kind: KindString, Synonyms: []string{"A端装机地址", "A端地址"}},
 		{Name: "z_end_address", Label: "Z端装机地址", Kind: KindString, Synonyms: []string{"Z端装机地址", "Z端地址"}},
+		// W25（#16 验收补齐）：真实专线表 23 列含「客户名称」，设计 §3.2 的字段
+		// 依据本就包含它，但实现规格漏了客户引用——「某客户有多少条专线」无
+		// 法回答（#16 原文痛点）。补 customer_code ref：导入时按客户自然键解析，
+		// 派生 subscribed_by 边（与 service 同语义：L6 业务属 L6 客户，同层）。
+		{Name: "customer_code", Label: "客户", Kind: KindRef, RefType: domain.ResourceTypeCustomer,
+			Synonyms: []string{"客户名称", "客户编码", "所属客户", "客户"}},
 		{Name: "bandwidth_mbps", Label: "协议带宽", Kind: KindInt, Synonyms: []string{"协议带宽", "带宽", "带宽(Mbps)"}},
 	},
 }

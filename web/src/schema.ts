@@ -246,6 +246,8 @@ export const TYPE_SPECS: Record<ResourceType, FieldSpec[]> = {
   leased_line: [
     { field: 'line_code', required: true, naturalKey: true, kind: 'string' },
     { field: 'line_name', required: false, naturalKey: false, kind: 'string' },
+    // W25（#16）：真实专线表「客户名称」列 → 客户引用（subscribed_by）
+    { field: 'customer_code', required: false, naturalKey: false, kind: 'ref' },
   ],
   // L4 接入层：BBU / RRU / OLT / ONU / PON口
   bbu: [{ field: 'bbu_code', required: true, naturalKey: true, kind: 'string' }],

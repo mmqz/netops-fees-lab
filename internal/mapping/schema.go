@@ -884,6 +884,10 @@ func RelationTypeFor(rt domain.ResourceType, field string) domain.RelationType {
 		return domain.RelationTypeServes
 	case rt == domain.ResourceTypeService && field == "customer_code":
 		return domain.RelationTypeSubscribedBy
+	// W25（#16 验收补齐）：专线表「客户名称」列 → 客户引用，与 service 同
+	// 语义的 subscribed_by 边（注册表 FromTypes 已同步扩展）。
+	case rt == domain.ResourceTypeLeasedLine && field == "customer_code":
+		return domain.RelationTypeSubscribedBy
 	case rt == domain.ResourceTypeService && field == "provide_circuit":
 		return domain.RelationTypeProvidedBy
 	case rt == domain.ResourceTypeService && field == "depend_device":
