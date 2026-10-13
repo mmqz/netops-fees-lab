@@ -22,18 +22,19 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.6.4 is
-// the natural-landcover round (issue #15): the offline basemap becomes a
-// light "clean" map (Amap-standard look, zero POI clutter, default), the
-// land cover actually exists — 29,449 OSM features (forest/water-bodies/
-// rivers-streams-canals/grass-farmland-wetland) plus 17,615 place labels,
-// dual WGS84 / GCJ-02 pre-projected variants embedded via go:embed — and
-// 3D drapes that land cover over the offline DEM terrain, so rivers follow
-// real elevation. Traffic overlays stay WGS84-only; natural overlays work
-// on every basemap. TestAppVersionP2 pins this constant and
-// TestAppVersionMatchesChangelogHead enforces the CHANGELOG single fact
-// source, so the three-way hand-copied versions cannot drift again.
-const AppVersion = "v0.6.4"
+// the health endpoint, the MCP server implementation and the CLI. v0.7.0 is
+// the data-model v1.0 milestone (issues #16-#29, rounds W19-W25): the
+// resource graph expands from 8 types / 4 relations to 33 types / 29
+// relations across the seven-layer model (L0 space .. L6 business), with
+// the layer/domain registry as executable code, metrics storage + ingest
+// + synthdata + anomaly scan, run-state history, the layered BFS traverse
+// / impact / context endpoints, configurable detection rules + the alert
+// state machine, and the header-fingerprint unattended import (mapping
+// templates — the「每天导入即可」enabler). TestAppVersionP2 pins this
+// constant and TestAppVersionMatchesChangelogHead enforces the CHANGELOG
+// single fact source, so the three-way hand-copied versions cannot drift
+// again.
+const AppVersion = "v0.7.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

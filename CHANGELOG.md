@@ -2,6 +2,39 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.7.0] — 2026-10-13
+
+**数据模型 v1.0 里程碑**（issues #16-#29，实施轮 W19-W25——七轮全部完成、14 个 issue 全部关闭、零降级）。核心：资源图从 8 类型/4 关系扩容到 **33 类型/29 关系**（七层模型 L0 空间…L6 业务全层），并围绕这张图补齐时序观测、运行状态、层序遍历、影响分析、检测告警与**无人值守导入**——「每天导入表格即可完成日常巡检」的完整底座。
+
+### 新增 — 数据模型扩容（W19/W21，#16 #25 #26 #29）
+- 25 个新资源类型：物理层（光缆/光缆段/纤芯/ODF/ODF端子/接头盒/机架/管道/人井/杆路/板卡）、传输层（OTN波道/SDH时隙）、逻辑层（环网/保护组/IGP域/VPN实例）、业务层（客户/业务实例/专线）、接入层（BBU/RRU/OLT/ONU/PON口）；迁移 v15+v16（ForeignKeysOff 保守重建，既有数据零改动）。
+- 25 个新关系（`carried_by`/`routed_over`/`uses_fiber`/`fiber_of`/`subscribed_by`/`provides_by`/`member_of_ring`/`uplink_to` 等 29 总数），**关系方向注册表**（FromTypes/ToTypes/CrossLayer）成为可执行代码，配一致性门禁（派生边必须落在注册表契约内；同层判定 from×to 单调）。
+- **四点一致性测试**：domain 枚举 ↔ SQL CHECK ↔ `/api/schema` ↔ web 镜像（直读 web/src/schema.ts）防漂移；层次/专业域元数据入 `/api/schema` 投影。
+- B8 自然键规范化（trim+全角折叠+大写，前导零保留——01 与 1 是两个身份，`" cable-01 "` 与 `CABLE-01` 是一个）；SuggestType 表头/表名双阶梯建议。
+
+### 新增 — 时序观测（W20，#18 #21 #27）
+- 三表族（指标批次/序列/点）+ 摄入通道（CLI `ingest` + HTTP 4 端点，**同文件幂等重导**）+ `synthdata` 确定性生成器（同 seed 字节级相同）+ 异常扫描端点；指标目录 14 键+同义词+方向+建议界。
+- 量级实测（#27）：30 万行/240 万点导入 P95 9.7s、异常扫描 ~1s、306.5 B/点；全量外推触发阈值 → 阶段 2（日聚合）裁决已文档化。
+
+### 新增 — 运行状态与图查询（W22，#22 #19）
+- `resource_status` 历史表 + 资源快照双写（台账与运行分立——B1 方案 C）；manual 先行，alert 源保留给检测引擎。
+- **层序 BFS traverse/impact/context 三端点**（§10.3-10.5）：跨层穿透、根因候选 vs 受影响面分离、层/关系过滤、预算与防环四规则；§10.9 六项验收全绿。
+
+### 新增 — 检测与告警（W23，#23）
+- `detection_rules`/`alerts`（迁移 v18）+ 纯函数判定引擎（末尾连续 window 点越限去抖、确定性告警 ID）+ 告警状态机三边（firing→acked/cleared）+ run_state 联动（source=alert）；规则不改代码即可新增（HTTP CRUD + 5 条种子）。
+
+### 新增 — 无人值守导入（W24，#28）
+- `mapping_templates`（迁移 v19）：表头指纹（sheet 名+规范化表头序列 sha256，**列序敏感**）命中即自动执行——`POST /api/imports?auto=1` / `import --auto`；表头任何变更（改名/增删列/换序）→ 指纹变化 → **拒绝并点名 sheet**（批次回落 awaiting_mapping 人工兜底，从不静默错映）。
+- 模板一键捕获（`templates save` / `POST /api/imports/{id}/template`）、幂等 upsert、回滚不对称（模板是人工确认产物，批次回滚不删模板）。**七日无人值守测试**：7 本同表头工作簿连续全自动、零人工介入。
+
+### 修复与收口 — W25（#16 #20）
+- **`leased_line.customer_code` 规格补齐**：设计依据真实专线表 23 列，但实现漏了「客户名称」列——按客户聚合专线不可答。补 ref 字段派生 `subscribed_by` 边（专线直连客户）。
+- **嵌入前端陈旧构建修复**：dist 是 W21 前构建（各轮只跑 tsc 未重建），真实浏览器缺 25 类；`make web` 重建后浏览器级验收钉死。
+- 终局验收 `scripts/w25_acceptance.sh`：14 sheet 全层工作簿（真实表头）→ 33 类型 UI 浏览器断言 12 项 + 四层模型 HTTP 断言（层次穿透 L6→L2 / 业务影响含客户专线 / 保护结构 / 客户聚合）5 项 + 导入 7 项，24/24 全过。
+
+### 门禁
+- gofmt/vet 0；**427 顶层测试全绿**（+13）；-race（mapping/importer/repo/api/app/detect/topology）0 race；tsc 0 错；demo.sh E13/W3/I1 与 demo-lab.sh 哈希 aea27501 基线不变；MCP 工具面冻结恰 5；版本三处事实源对齐 v0.7.0（`TestAppVersionP2`/`TestAppVersionMatchesChangelogHead` 钉死）。
+
 ## [0.6.4] — 2026-10-12
 
 **地表覆盖轮**（issue #15：用户反馈「2D/3D 全是陆地、没有水、没有森林」）。核心：离线地图数据此前只提取了道路/铁路/行政边界三类线划——`natural`（自然）与 `landuse`（土地利用）两大类整体缺席，2D/3D 因此呈现为一片空白陆地。本轮从既有 PBF 重提**全量自然要素**并把离线底图升级为浅色「简洁底图」设为默认（用户要求：2D 干净、类高德标准地图但无商铺标注；3D 能看见实际高度、有真实河流）。

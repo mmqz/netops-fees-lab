@@ -192,10 +192,10 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	// Release-bump adaptation (v0.6.4): this assertion intentionally
+	// Release-bump adaptation (v0.7.0): this assertion intentionally
 	// tracks AppVersion — it is the version pin, not a relaxed behavior test.
-	if AppVersion != "v0.6.4" {
-		t.Errorf("AppVersion = %q, want v0.6.4 (v0.6.4 natural-landcover round: issue #15 — clean offline basemap, 29,449 landcover features + 17,615 place labels, DEM-draped 3D)", AppVersion)
+	if AppVersion != "v0.7.0" {
+		t.Errorf("AppVersion = %q, want v0.7.0 (v0.7.0 data-model v1.0 milestone: issues #16-#29 — 33 types / 29 relations across the seven-layer model, metrics + run-state + traverse/impact/context + detection/alerts + unattended import)", AppVersion)
 	}
 }
 
