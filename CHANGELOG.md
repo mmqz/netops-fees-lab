@@ -2,6 +2,40 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.8.1] — 2026-10-14
+
+**issues #38-#45 修复轮**（audit-v0.8.0 的 8 项发现全部闭环 + 用户现场反馈 3 项；四提交：测试门禁与并发预算 / 演示数据三轮合一 / 前端交互成本与布局 / CLI 图查询通道）。
+
+### 修复 — Windows 测试门禁（#38，P1，audit §2.1）
+- `internal/testsupport.TempDir`：唯一共享的 Windows 容错临时目录（RemoveAll ~1s 重试；POSIX 首试即成）。59 个测试文件（18 个 SQLite 包）从裸 `t.TempDir()` 迁移；sim/repo 两份局部 tempDirT 副本收敛——新测试不再每轮重新踩 v0.6.2 的坑。
+- `TestHealthCarriesDBPath` 断言 `strings.HasPrefix("/")` → `filepath.IsAbs`（产品行为本正确，是测试不可移植）；GC 失败注入测试 Windows skip（目录只读属性不阻断 Windows 删除，POSIX 分支覆盖该路径）。
+- CI 新增 `windows-latest` job（用户实际平台；linux-only 门禁正是 15 项平台失败溜进 v0.7/v0.8 的原因）。
+
+### 修复 — SQLITE_BUSY 重试预算（#39，P2，audit §2.2）
+- `beginBusyAttempts` 3→6 + 指数退避 50-800ms（末次尝试后不空等）：最坏 begin 预算 ~33s，吸收整套件并行负载（Windows 审计中写锁持有被推过旧预算 5.3s 的逃逸场景）；多进程共享库文件的支持边界文档化（architecture.md §4/§7：超预算 = SQLITE_BUSY 错误，非数据损坏）。
+
+### 演示数据三轮合一（#40/#42/#45，P2，用户现场反馈「数据的层级不够啊数据太少」「每次点击画布地图的数据都要重新渲染，卡顿」的数据侧根因）
+- **字段厚度（#45）**：基站表 4→17 列（环/链、归属A IP/名称/端口、电联共享、网关/基站IP、状态、经纬度——补齐设计 §3.2 记录的真实表结构）；22 个 spec 经共享 `statusField()` 补 lifecycle 状态字段（port/fiber/customer/vpn/ring/igp 有据跳过）——无状态资源 **98% → 8.3%**；`resources` 新增 `geo_lat/geo_lng` REAL 列 + 索引（**migration v20**，json_extract 存量回填——1,288 行坐标列化）；`ResourceRepo.Nearest`（bbox 预筛 + haversine 精确排序）+ CLI `query nearest` 出口。
+- **层级/关系（#42）**：基站 1,198 条 `uplink_to`（**站坐标 haversine 最近邻派生**——坐标派生非名称匹配，不违反「禁止名称推断」红线）；电路 10→32 条三族（相邻环段 15 + 跨域长距 14 + 接入层 3）——工作台 10 链路/20 接口 → **32 链路/64 接口**；孤立资源 **75.6% → 10.2%**。
+- **数据质量（#40）**：`serves` 直连边 1,228 条（设备 30 + 基站 1,198，地市→客户映射披露为模拟）；`protection_group` + `protects` 补齐（4 组三类型）；`ptp_port` 经 samples 脚本通道纳入 demo-real.sh（2 类无数据 → 1 类）；端口 `mounted_on` 90 条；ip_pool「使用中」/service「开通」非法枚举值修正（13 条 W002 → 0）。**问题清单全清零，概览页质量评分 51 → 100**；关系 3,103 条、28/29 类型有数据（in_vpn 主动不做，#40 优先级低项）；manifest + data-sources.md 双处逐项披露。
+
+### 修复 — 地理视图交互成本（#43，P2，用户现场反馈卡顿根因）
+- 选中态与几何彻底解耦：`buildGeoData` 去掉 selected 参数（几何只随 topology/坐标系变化），链路选中高亮走独立单要素源 `links-selected`（点击 = 对 0/1 要素源的一次 O(1) setData，主源不再全量重下）。
+- 聚簇增量化：视口裁剪（±阈值带，数学上不改变可见结果）+ 以成员 id 集合为 key 的差分维护（复用未变 chip、只增删差集、派生态就地刷新）——替代每次 move/zoom 帧的全拆全建；「≤几百设备」的过时规模假设（被 1,198 基站打破）连同其代码注释一起清除。
+- 塔重建只在 3D 视图逐帧跑（2D 塔层隐藏时逐帧 setData 是纯浪费）；zoomend 恒补一次防陈旧几何。
+
+### 修复 — 工作台布局（#44，P3，用户现场反馈四诉求）
+- 页头三行 → 一行（计数 chip 并入标题行，长名截断）；七个动作按钮并入画布工具带首组（组间 wrap，窄画布不溢出）；面板**默认折叠**（画布全宽），点击设备/链路等指向面板的交互自动展开（仅会话态不落盘），显式切换的 localStorage 偏好不受影响。
+
+### 新增 — CLI 图查询通道（#41，P3，audit §2.5；附 audit §2.6 契约修复）
+- `query traverse / impact / context / nearest` 四子命令——与 HTTP 端点**同一组合根装配**（`services.GraphStore` 唯一 store 绑定 + `services.GraphContext` 唯一上下文装配，api 处理器改为委托），CLI 与 HTTP 输出**逐字节一致**（跨通道 e2e 以 JSON 相等钉死 + 10 项用法错误退出码）；脚本化巡检（导入→检测→图查询）无需先 `serve`。
+- 空集合契约（audit §2.6）：traverse `nodes`/`edges`、impact `impacted`/`candidates`、context 各集合无结果时恒为 `[]` 非 `null`（严格客户端的 len()/迭代不再需要判空分支）。
+
+### 测试与文档
+- 测试计数：429 → **434** 顶层（+3 migration v20：列/回填/最近邻；+2 图查询 e2e：跨通道一致 + 最近邻实测——期间 4 个旧 max-version 钉 19→20 为必要适配）；全量套件 3×全绿（23 包，含负载证据）；`GOOS=windows` 交叉编译 vet 通过。
+- e2e_realdata 钉死更新（1,991 行 + 4 PTP = 1,995 资源、关系计数、工作台 32/64/30、geoLat/geoLng 与状态覆盖 API 断言）；manifest/data-sources.md/architecture.md/api.md/README 同步。
+- 验证脚本：`scripts/w30_verify.sh`（数据验收度量：孤立率/状态覆盖/问题清单/关系分布）。
+
 ## [0.8.0] — 2026-10-13
 
 **真实公开数据里程碑**（用户指令：「数据用互联网公开数据填充，完全找不到的用模拟数据」；实施轮 W26-W28）。核心：演示数据集以互联网公开数据为骨架——OSM（局站/干线走廊几何）+ OpenCelliD（1,198 个真实黑龙江基站）——模拟数据仅填充公开渠道不存在的台账细节并双处披露（`docs/data-sources.md` + `testdata/realdata/manifest.json`）。裁决与边界见 [ADR-0015](docs/adr/0015-real-public-data.md)。

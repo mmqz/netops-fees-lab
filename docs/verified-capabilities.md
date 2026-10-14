@@ -1,7 +1,7 @@
 # NetOps Lab — 已验证 / 未验证能力清单
 
 > 诚实为本：每一条"已验证"都可追溯到具体的验证方式与日期；未验证事项显式列出，不粉饰。
-> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版 · v0.6.0 治理三部曲终章与数据双向闭环版）· 2026-10-12（v0.6.1 地图修复版 · v0.6.2 运维加固版 · v0.6.3 用户反馈地图轮）。
+> 验证环境：linux/amd64（2 核沙箱），Go 1.27.2，Node 24.21.0 / npm 11.19.0。验证日期：2026-10-09（v0.1.0/v0.2.0）· 2026-10-10（v0.2.1 打磨版 · v0.2.2 画布多模式版 · v0.2.3 画布全屏工作台版 · v0.3.0 地理视图版 · v0.3.2 工程审查整改版 · v0.4.0 真实电信资源类型与身份治理版）· 2026-10-11（v0.5.0 身份治理闭环与来源谱系版 · v0.6.0 治理三部曲终章与数据双向闭环版）· 2026-10-12（v0.6.1 地图修复版 · v0.6.2 运维加固版 · v0.6.3 用户反馈地图轮）· 2026-10-13（v0.6.4 地表覆盖版 · v0.7.0 数据模型 v1.0 版 · v0.8.0 真实公开数据版）· 2026-10-14（v0.8.1 issues #38-#45 修复轮）。
 
 ## ✅ 已验证（2026-10-09，linux/amd64）
 
@@ -72,6 +72,27 @@
 | **真浏览器 /lab UI 冒烟** | ~~未验证~~ → **已验证**（上表「真浏览器 /lab 全流程冒烟（终审）」行；唯一遗留：Cytoscape cose 布局的美学观感属主观项，未做人工美学评审） | 完成（2026-10-09） |
 | Windows / macOS 构建 | 仅 linux/amd64；纯 Go + 无 CGO 理论可交叉编译，未实际产出运行 | CI 后续加跨平台矩阵 |
 | 长时运行 / 并发负载 | 无 7×24 或压测数据；仿真为单用户交互式变更，SQLite 单写者 + WAL 足够，但无高并发证据；多工作区并发写显式 out-of-scope | 服务化场景再评估 |
+
+## v0.8.1（2026-10-14）issues #38-#45 修复轮
+
+> 验证环境同前（linux/amd64，Go 1.27.0，Node 24.21.0；agent-browser 1600×900
+> 做浏览器级验证）。Windows 平台测试门禁本轮起进 CI（windows-latest job），
+> 本沙箱以 `GOOS=windows go vet` 交叉编译 + 门禁子集复跑作代证据——
+> Windows 实机全量跑仍属用户环境，如实声明（下表末行）。
+
+| 能力 | 验证方式 | 结果 |
+| --- | --- | --- |
+| Windows 测试门禁（#38） | 59 文件迁移到共享 `testsupport.TempDir` 后全量套件 3×；`GOOS=windows go vet ./internal/{app,api,testsupport}/` 交叉编译；`filepath.IsAbs` 断言与 GC Windows skip 单测 | 23 包全绿 / 交叉编译 0 错误；15 项平台失败的三类根因逐一闭环（TempDir×10、POSIX 断言×1、GC 权限×1；并发 2 项归 #39；dist 陈旧 1 项为环境问题 audit §2.1.4 已裁定） |
+| SQLITE_BUSY 预算（#39） | `beginBusyAttempts` 3→6 + 指数退避；全量套件（23 包并行压 SQLite）3×全绿 + TestDoConcurrentWorkloads/TestConcurrentEngineWorkload 各 3× | 负载证据成立；最坏 begin 预算 ~33s；多进程边界文档化（architecture.md §4/§7） |
+| 演示数据验收（#40/#42/#45） | `scripts/w30_verify.sh` + `demo-real.sh` 全链路 + `e2e_realdata_test.go`（门禁） | 1,991 工作簿行 + 4 PTP = **1,995 资源 / 0 失败 / 问题清单全零**（评分 51→100）；无状态 8.3%（<20%）；孤立 10.2%（<30%）；geo REAL 列 1,288 行；基站 attributes 14 键；serves 1,228 / uplink_to 1,198 / mounted_on 90 / protects 4；工作台 30 设备/64 接口/32 链路；影响面 up 100 节点（保护组/客户/业务直连波及） |
+| migration v20（geo 列） | 三个新单测（TestMigrationV20ResourceGeoColumns / BackfillsExistingAttributes / Nearest） | 列存在 + idx_resources_geo + json_extract 存量回填（pre-v20 库升级路径实测）+ 最近邻序（haversine 非 axis 序）钉死；Insert 双静态形态使 pre-v20 迁移测试零改动通过 |
+| CLI 图查询通道（#41） | `e2e_graphquery_test.go`（门禁） | CLI vs HTTP 三文档（traverse/impact/context）**JSON 相等**；down-walk 电路→双端设备 ≥3 节点；10 项用法错误 exit 2；`query nearest` 真实基站坐标实测（5 条、类型过滤、geoLat/Lng 齐备、±0.5° 内） |
+| 空集合契约（audit §2.6） | e2e 断言 + 单测（topology 包） | impact.impacted/candidates、traverse.edges、context 各集合空时为 `[]` 非 `null` |
+| GeoCanvas 交互成本（#43） | 代码级结构证据 + agent-browser 浏览器级 | `buildGeoData` deps 不含 selected（主源 setData 仅随 topology/坐标系）；links-selected 单要素源 O(1) 高亮；簇增差分 + 视口裁剪（实测 90 marker/13 cluster 就地刷新）；塔重建 2D 关闭；2D/3D + 拖拽/缩放/选中压力测试 console 零错误 |
+| 工作台布局（#44） | agent-browser 浏览器级实测 | 页头元信息单行 32px（原三行 ~100px+）；工具带 47px 单行含七动作按钮；面板默认折叠（画布 1368px 全宽）→点击设备 marker 自动展开（540px，**无 localStorage 写入**）；显式折叠按钮落盘 '1' 且 reload 后保持；1280px 视口工具带组间 wrap 不溢出 |
+| 全量门禁 | gofmt 空 / vet 0 / `go test -count=1 -timeout 25m ./...` 3×全绿 / tsc 0 错误 / `npm run build` ~5s | **434** 顶层测试（429 + v20 ×3 + 图查询 ×2；`go test -list` 口径）；演示三脚本零回归 |
+| CI（GitHub Actions） | 推送后记录（本地与 CI 同门禁集） | 待推送后补记 run 号（Actions-minutes 配额耗尽期间 windows job 可能 0-step 失败——同 v0.6-v0.8 已知基础设施现实，如实记录） |
+| **Windows 实机全量测试** | 本沙箱无 Windows 运行时——交叉编译 + 平台 skip 分支是代证据 | 用户环境（Windows）实跑 `go test -count=1 ./...` 后回报；CI windows-latest job 将在配额恢复后自证 |
 
 ## v0.8.0（2026-10-13）真实公开数据里程碑
 

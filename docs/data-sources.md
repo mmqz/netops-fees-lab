@@ -70,12 +70,12 @@
 #   heilongjiang-2026-10-12.osm.pbf   ← Geofabrik HLJ extract（ODbL）
 #   cell_towers.csv.gz                ← OpenCelliD 快照（CC BY-SA 4.0）
 python3 scripts/realdata/extract.py     # → 地图图层 + realdata-core.json
-python3 scripts/realdata/workbooks.py  # → 31 本工作簿 + manifest.json
+python3 scripts/realdata/workbooks.py  # → 32 本工作簿 + manifest.json（W30 起）
 python3 scripts/realdata/metrics.py    # → perf-day-01..07 + ingest-mapping.json
 ./scripts/demo-real.sh                 # → 一键全链路演示
 ./scripts/w28_browser_regression.sh    # → 浏览器级图层回归（14 断言）
 ```
 
 管线确定性已验证：连续两次运行 md5 一致（gzip mtime=0、坐标 5 位量化、
-全序排序）。`internal/app/e2e_realdata_test.go` 钉死 31 本工作簿的导入
+全序排序）。`internal/app/e2e_realdata_test.go` 钉死 32 本工作簿的导入
 计数与跨层影响链，防止数据集漂移。
