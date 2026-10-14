@@ -2,7 +2,7 @@
 # NetOps Lab — 真实公开数据演示脚本（v0.8.0，scripts/realdata 三件套产出的数据）。
 #
 # 用法：
-#   ./scripts/demo-real.sh            # 全流程（导入 31 工作簿 + 7 日指标 + 检测 + 物化）
+#   ./scripts/demo-real.sh            # 全流程（导入 32 工作簿 + PTP 脚本 + 7 日指标 + 检测 + 物化）
 #
 # 数据构成（诚实披露，详见 testdata/realdata/manifest.json 与 docs/data-sources.md）：
 #   真实：局站（OSM 地名/坐标/id）、基站（OpenCelliD 1,198 站/1,851 小区）、
@@ -33,11 +33,13 @@ fi
 echo "[0/5] 工作目录：$WORK"
 
 # 导入依赖序（ref 先于被引用落库；见 workbooks.py 文档）
+# W30（issues #40/#42/#45）：基站表引用设备（上联最近邻）与客户（服务客户），
+# 故移至设备之后；端口表引用板卡（mounted_on），板卡先行；保护组在电路后。
 ORDER=(
-  sites machine_rooms base_stations customers vpn_instances rings igp_domains
-  devices ports boards racks odf odf_terminals ducts manholes poles
+  sites machine_rooms customers vpn_instances rings igp_domains devices boards
+  base_stations ports racks odf odf_terminals ducts manholes poles
   optical_cables cable_segments splice_boxes fibers otn_ochs sdh_timeslots
-  circuits ippools services leased_lines bbus rrus olts pon_ports onus
+  circuits protection_groups ippools services leased_lines bbus rrus olts pon_ports onus
 )
 
 extract_map() {
@@ -73,7 +75,15 @@ except Exception as e:
     print(f"{sys.argv[2]}\tERR\t0\t0\t{e}")
 PY
 done
-echo "[1/5] 31 本工作簿导入完成"
+# PTP 配置脚本导入（W30 #40：ptp_port 类型数据缺口——复用 samples 的解析通道，
+# 与工作簿同一 analyze → suggestedMapping → import 流程）
+"$BIN" analyze -file "$REPO_ROOT/samples/ptp-config-script.txt" > "$WORK/analysis-ptp.json"
+extract_map "$WORK/analysis-ptp.json" "$WORK/map-ptp.json"
+"$BIN" import --file "$REPO_ROOT/samples/ptp-config-script.txt" \
+  --map "$WORK/map-ptp.json" --db "$DB" > "$WORK/import-ptp.json" 2> "$WORK/import-ptp.err" || true
+PTP_ROWS=$(python3 -c "import json;print(json.load(open('$WORK/import-ptp.json'))['summary']['rowsImported'])")
+echo "      PTP 配置脚本：ptp_port $PTP_ROWS 行（issue #40 数据缺口闭环）"
+echo "[1/5] 32 本工作簿 + PTP 脚本导入完成"
 
 total_imported=$(awk -F'\t' '{s+=$2} END {print s}' "$WORK/import-summary.txt")
 total_failed=$(awk -F'\t' '{s+=$4} END {print s}' "$WORK/import-summary.txt")

@@ -46,6 +46,11 @@ type ResourceItem struct {
 	Attributes   map[string]string `json:"attributes"`
 	FirstBatchID string            `json:"firstBatchId"`
 	UpdatedAt    time.Time         `json:"updatedAt"`
+	// GeoLat/GeoLng expose the v20 REAL columns (issue #45): null when the
+	// resource carries no coordinates — the same nil semantics as the
+	// domain struct, so clients can branch without a sentinel value.
+	GeoLat *float64 `json:"geoLat"`
+	GeoLng *float64 `json:"geoLng"`
 }
 
 // newResourceItem converts a domain resource; Attributes is never nil so the
@@ -65,6 +70,8 @@ func newResourceItem(r domain.Resource) ResourceItem {
 		Attributes:   attrs,
 		FirstBatchID: r.FirstBatchID,
 		UpdatedAt:    r.UpdatedAt,
+		GeoLat:       r.GeoLat,
+		GeoLng:       r.GeoLng,
 	}
 }
 

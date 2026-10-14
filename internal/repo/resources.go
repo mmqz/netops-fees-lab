@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,8 +22,10 @@ type ResourceRepo struct{ q DBTX }
 // resourceColumns is the canonical SELECT column list of resources. The
 // W22 run-state snapshot columns (run_state/run_state_at, migration v17)
 // are READ here; the INSERT column list below deliberately omits them —
-// imports never write run state (§12-B1: 台账与运行状态分立).
-const resourceColumns = `id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, run_state, run_state_at`
+// imports never write run state (§12-B1: 台账与运行状态分立). The W30 geo
+// columns (geo_lat/geo_lng, migration v20) are read AND written by Insert —
+// they are ledger data (presentation metadata), not run-state.
+const resourceColumns = `id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, run_state, run_state_at, geo_lat, geo_lng`
 
 // scanResource scans one resources row into a domain.Resource.
 func scanResource(s scanner) (domain.Resource, error) {
@@ -34,9 +38,11 @@ func scanResource(s scanner) (domain.Resource, error) {
 		updatedAt string
 		runState  sql.NullString
 		runAt     sql.NullString
+		geoLat    sql.NullFloat64
+		geoLng    sql.NullFloat64
 	)
 	err := s.Scan(&res.ID, &rtype, &res.NaturalKey, &res.Name, &attrsJSON, &status,
-		&res.FirstBatchID, &createdAt, &updatedAt, &runState, &runAt)
+		&res.FirstBatchID, &createdAt, &updatedAt, &runState, &runAt, &geoLat, &geoLng)
 	if err != nil {
 		return domain.Resource{}, err
 	}
@@ -64,6 +70,16 @@ func scanResource(s scanner) (domain.Resource, error) {
 			return domain.Resource{}, err
 		}
 	}
+	// Geo columns (v20): NULL stays nil — a missing position must never
+	// fabricate (0,0).
+	if geoLat.Valid {
+		v := geoLat.Float64
+		res.GeoLat = &v
+	}
+	if geoLng.Valid {
+		v := geoLng.Float64
+		res.GeoLng = &v
+	}
 	return res, nil
 }
 
@@ -77,12 +93,28 @@ func (r *ResourceRepo) Insert(ctx context.Context, res domain.Resource) error {
 	if err != nil {
 		return err
 	}
-	_, err = r.q.ExecContext(ctx, `INSERT INTO resources
+	// Two static shapes (W30, issue #45): a resource WITHOUT coordinates
+	// uses the legacy 9-column insert — byte-identical to pre-v30 behaviour,
+	// which is what keeps the pre-v20 migration tests (seeding genuine old
+	// schemas through this very API) green; a resource WITH coordinates
+	// writes the geo columns too. The split is on presence, not value: nil
+	// means "no position", never (0,0).
+	var errInsert error
+	if res.GeoLat == nil && res.GeoLng == nil {
+		_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
 (id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at)
 VALUES (?,?,?,?,?,?,?,?,?)`,
-		res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
-		nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt))
-	if err != nil {
+			res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
+			nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt))
+	} else {
+		_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
+(id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, geo_lat, geo_lng)
+VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
+			nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt),
+			nullFloat(res.GeoLat), nullFloat(res.GeoLng))
+	}
+	if err := errInsert; err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("repo: insert resource %s (%s/%s): %w: %w",
 				res.ID, res.Type, res.NaturalKey, domain.ErrConflict, err)
@@ -90,6 +122,79 @@ VALUES (?,?,?,?,?,?,?,?,?)`,
 		return fmt.Errorf("repo: insert resource %s: %w", res.ID, err)
 	}
 	return nil
+}
+
+// nullFloat converts an optional coordinate to its NULL-able SQL form:
+// nil → NULL, a value → the value (0 is a legitimate coordinate only in
+// theory — the importer's KindLat/KindLng validation happens before the
+// resource is built, so a stored 0 was a real 0).
+func nullFloat(v *float64) sql.NullFloat64 {
+	if v == nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: *v, Valid: true}
+}
+
+// nearestWindowDeg bounds the bounding-box prefilter of Nearest: ~1.5° of
+// latitude (~167 km at these latitudes) and ~3° of longitude — a window
+// sized for province-scale networks (the Heilongjiang demo spans ~9° lat).
+// Resources outside the window are not candidates, documented semantics
+// rather than a silently truncated global search.
+const (
+	nearestLatWindow = 1.5
+	nearestLngWindow = 3.0
+)
+
+// Nearest returns up to limit resources of the given type that carry
+// coordinates inside the ~1.5°×3° window around (lat, lng), ordered by true
+// haversine distance (SQL narrows with an index range scan over
+// idx_resources_geo, Go ranks exactly — the pure-Go driver has no trig
+// math-functions). Fewer than limit results means fewer window candidates,
+// not "search truncated": the window is the documented query scope.
+func (r *ResourceRepo) Nearest(ctx context.Context, resourceType domain.ResourceType, lat, lng float64, limit int) ([]domain.Resource, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("repo: nearest limit %d must be positive", limit)
+	}
+	rows, err := r.q.QueryContext(ctx, `SELECT `+resourceColumns+` FROM resources
+ WHERE resource_type = ? AND geo_lat IS NOT NULL AND geo_lng IS NOT NULL
+   AND geo_lat BETWEEN ? AND ? AND geo_lng BETWEEN ? AND ?`,
+		resourceType.String(), lat-nearestLatWindow, lat+nearestLatWindow,
+		lng-nearestLngWindow, lng+nearestLngWindow)
+	if err != nil {
+		return nil, fmt.Errorf("repo: nearest query: %w", err)
+	}
+	defer rows.Close()
+	candidates := make([]domain.Resource, 0)
+	for rows.Next() {
+		res, err := scanResource(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repo: nearest scan: %w", err)
+		}
+		candidates = append(candidates, res)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: nearest rows: %w", err)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return haversineKm(lat, lng, *candidates[i].GeoLat, *candidates[i].GeoLng) <
+			haversineKm(lat, lng, *candidates[j].GeoLat, *candidates[j].GeoLng)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates, nil
+}
+
+// haversineKm is the great-circle distance in kilometres — the exact rank
+// key of Nearest (SQLite prefiltered, Go ranks: see the Nearest doc).
+func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
+	const r = 6371.0 // mean Earth radius, km
+	rad := math.Pi / 180
+	dLat := (lat2 - lat1) * rad
+	dLng := (lng2 - lng1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLng/2)*math.Sin(dLng/2)
+	return 2 * r * math.Asin(math.Sqrt(a))
 }
 
 // GetByID returns the resource with the given id, or an error wrapping

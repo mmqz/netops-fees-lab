@@ -570,6 +570,21 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 		CreatedAt:    st.now,
 		UpdatedAt:    st.now,
 	}
+	// W30 (issue #45): the geo split columns also land as REAL columns on
+	// the row — the SQL-level spatial substrate of migration v20. The values
+	// already passed the KindLat/KindLng format checks above (E004 row
+	// failure), so a parse miss here cannot happen for mapped geo columns;
+	// the guard stays defensive rather than trusting that invariant.
+	if v := vals["geo_lat"]; v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			resource.GeoLat = &f
+		}
+	}
+	if v := vals["geo_lng"]; v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			resource.GeoLng = &f
+		}
+	}
 	if err := st.tx.Resources.Insert(ctx, resource); err != nil {
 		return err
 	}

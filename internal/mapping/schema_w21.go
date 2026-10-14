@@ -53,6 +53,8 @@ var rackSpec = TypeSpec{
 			Synonyms: []string{"所属机房", "机房ID", "机房编号", "所在机房"}},
 		{Name: "column_no", Label: "列号", Kind: KindInt, Synonyms: []string{"列号", "列"}},
 		{Name: "row_no", Label: "行号", Kind: KindInt, Synonyms: []string{"行号", "行"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("机架状态"),
 	},
 }
 
@@ -77,6 +79,8 @@ var ductSpec = TypeSpec{
 		{Name: "length_km", Label: "长度", Kind: KindString, // decimals + units in real sheets
 			Synonyms: []string{"长度", "管道长度", "长度(公里)", "长度(米)"}},
 		{Name: "hole_count", Label: "孔数", Kind: KindInt, Synonyms: []string{"孔数", "管孔数"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("管道状态"),
 	},
 }
 
@@ -98,6 +102,8 @@ var manholeSpec = TypeSpec{
 		{Name: "geo_lat", Label: "纬度", Kind: KindLat, Synonyms: []string{"纬度", "lat", "GPS纬度"}},
 		{Name: "geo_lng", Label: "经度", Kind: KindLng, Synonyms: []string{"经度", "lng", "GPS经度"}},
 		{Name: "geo", Label: "经纬度", Kind: KindGeo, Synonyms: []string{"经纬度", "坐标", "GPS坐标"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("人井状态"),
 	},
 }
 
@@ -115,6 +121,8 @@ var poleSpec = TypeSpec{
 		{Name: "a_end", Label: "起点", Kind: KindString, Synonyms: []string{"起点", "起止A", "A端"}},
 		{Name: "z_end", Label: "终点", Kind: KindString, Synonyms: []string{"终点", "起止Z", "Z端"}},
 		{Name: "pole_no", Label: "杆号", Kind: KindInt, Synonyms: []string{"杆号", "杆塔号"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("杆路状态"),
 	},
 }
 
@@ -136,6 +144,8 @@ var boardSpec = TypeSpec{
 		{Name: "slot_no", Label: "槽位号", Kind: KindInt, Synonyms: []string{"槽位号", "槽位"}},
 		{Name: "board_model", Label: "板卡型号", Kind: KindString, Synonyms: []string{"板卡型号", "型号"}},
 		{Name: "board_type", Label: "板卡类型", Kind: KindString, Synonyms: []string{"板卡类型", "类型", "板卡类别"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("板卡状态"),
 	},
 }
 
@@ -163,6 +173,8 @@ var opticalCableSpec = TypeSpec{
 			Synonyms: []string{"长度", "光缆长度", "长度(公里)", "长度(米)"}},
 		{Name: "connect_device", Label: "连接设备", Kind: KindRef, RefType: domain.ResourceTypeDevice,
 			Synonyms: []string{"连接设备", "所连设备", "对端设备"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("光缆状态"),
 	},
 }
 
@@ -183,6 +195,8 @@ var cableSegmentSpec = TypeSpec{
 		{Name: "segment_index", Label: "段序", Kind: KindInt, Synonyms: []string{"段序", "段序号", "段号"}},
 		{Name: "a_end_box", Label: "A端接头盒", Kind: KindString, Synonyms: []string{"A端接头盒", "A端接头"}},
 		{Name: "z_end_box", Label: "Z端接头盒", Kind: KindString, Synonyms: []string{"Z端接头盒", "Z端接头"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("光缆段状态"),
 	},
 }
 
@@ -233,6 +247,8 @@ var odfSpec = TypeSpec{
 		{Name: "machine_room_id", Label: "所属机房", Kind: KindString,
 			Synonyms: []string{"所属机房", "机房ID", "机房编号", "所在机房"}},
 		{Name: "capacity", Label: "容量", Kind: KindInt, Synonyms: []string{"容量", "芯容量", "端口容量"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("ODF状态"),
 	},
 }
 
@@ -255,6 +271,8 @@ var odfTerminalSpec = TypeSpec{
 			Synonyms: []string{"端子号", "端子编号", "端口号"}},
 		{Name: "fiber_code", Label: "对应纤芯", Kind: KindString,
 			Synonyms: []string{"对应纤芯", "对应纤芯编号", "纤芯"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("端子状态"),
 	},
 }
 
@@ -275,6 +293,8 @@ var spliceBoxSpec = TypeSpec{
 		{Name: "geo_lat", Label: "纬度", Kind: KindLat, Synonyms: []string{"纬度", "lat", "GPS纬度"}},
 		{Name: "geo_lng", Label: "经度", Kind: KindLng, Synonyms: []string{"经度", "lng", "GPS经度"}},
 		{Name: "geo", Label: "经纬度", Kind: KindGeo, Synonyms: []string{"经纬度", "坐标", "GPS坐标"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("接头盒状态"),
 	},
 }
 
@@ -300,6 +320,8 @@ var otnOchSpec = TypeSpec{
 			Synonyms: []string{"路由光缆", "承载光缆", "经过光缆", "所经光缆"}},
 		{Name: "use_fiber", Label: "占用纤芯", Kind: KindRef, RefType: domain.ResourceTypeFiber,
 			Synonyms: []string{"占用纤芯", "使用纤芯", "所用纤芯"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("波道状态"),
 	},
 }
 
@@ -318,6 +340,8 @@ var sdhTimeslotSpec = TypeSpec{
 		{Name: "vc_level", Label: "VC级别", Kind: KindString, Synonyms: []string{"VC级别", "VC等级", "VC类型"}},
 		{Name: "timeslot_no", Label: "时隙号", Kind: KindInt, Synonyms: []string{"时隙号", "时隙序号"}},
 		{Name: "capacity_mbps", Label: "容量", Kind: KindInt, Synonyms: []string{"容量", "容量(Mbps)", "带宽"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("时隙状态"),
 	},
 }
 
@@ -340,6 +364,8 @@ var protectionGroupSpec = TypeSpec{
 			Synonyms: []string{"保护电路", "被保护电路", "保护电路编号"}},
 		{Name: "work_path", Label: "工作路径", Kind: KindString, Synonyms: []string{"工作路径", "工作路由"}},
 		{Name: "protect_path", Label: "保护路径", Kind: KindString, Synonyms: []string{"保护路径", "保护路由"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("保护组状态"),
 	},
 }
 
@@ -479,6 +505,8 @@ var leasedLineSpec = TypeSpec{
 		{Name: "customer_code", Label: "客户", Kind: KindRef, RefType: domain.ResourceTypeCustomer,
 			Synonyms: []string{"客户名称", "客户编码", "所属客户", "客户"}},
 		{Name: "bandwidth_mbps", Label: "协议带宽", Kind: KindInt, Synonyms: []string{"协议带宽", "带宽", "带宽(Mbps)"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("专线状态"),
 	},
 }
 
@@ -498,6 +526,8 @@ var bbuSpec = TypeSpec{
 		{Name: "base_station_code", Label: "所属基站", Kind: KindString,
 			Synonyms: []string{"所属基站", "基站编码", "基站编号"}},
 		{Name: "model", Label: "设备型号", Kind: KindString, Synonyms: []string{"设备型号", "型号"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("BBU状态"),
 	},
 }
 
@@ -520,6 +550,8 @@ var rruSpec = TypeSpec{
 			Synonyms: []string{"归属BBU", "所属BBU", "BBU编码", "BBU编号"}},
 		{Name: "cover_station", Label: "覆盖基站", Kind: KindRef, RefType: domain.ResourceTypeBaseStation,
 			Synonyms: []string{"覆盖基站", "覆盖小区", "所属基站", "基站编码"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("RRU状态"),
 	},
 }
 
@@ -539,6 +571,8 @@ var oltSpec = TypeSpec{
 			Synonyms: []string{"所属机房", "机房ID", "机房编号", "所在机房"}},
 		{Name: "model", Label: "型号", Kind: KindString, Synonyms: []string{"型号", "设备型号"}},
 		{Name: "pon_port_count", Label: "PON口数", Kind: KindInt, Synonyms: []string{"PON口数", "PON端口数"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("OLT状态"),
 	},
 }
 
@@ -560,6 +594,8 @@ var onuSpec = TypeSpec{
 		{Name: "connect_port", Label: "接入PON口", Required: true, Kind: KindRef, RefType: domain.ResourceTypePONPort,
 			Synonyms: []string{"接入PON口", "PON口", "所属PON口", "PON端口"}},
 		{Name: "user", Label: "用户", Kind: KindString, Synonyms: []string{"用户", "用户名称", "用户标识"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("ONU状态"),
 	},
 }
 
@@ -580,6 +616,8 @@ var ponPortSpec = TypeSpec{
 		{Name: "port_no", Label: "端口号", Required: true, NaturalKey: true, Kind: KindString,
 			Synonyms: []string{"端口号", "PON端口号", "PON口号"}},
 		{Name: "split_ratio", Label: "分光比", Kind: KindString, Synonyms: []string{"分光比", "分光比例"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("PON口状态"),
 	},
 }
 

@@ -5,7 +5,7 @@
     "bbus": 5,
     "boards": 60,
     "cable_segments": 23,
-    "circuits": 10,
+    "circuits": 32,
     "customers": 12,
     "devices": 30,
     "ducts": 7,
@@ -24,6 +24,7 @@
     "poles": 7,
     "pon_ports": 20,
     "ports": 90,
+    "protection_groups": 4,
     "racks": 15,
     "rings": 2,
     "rrus": 5,
@@ -34,6 +35,9 @@
     "vpn_instances": 3
   },
   "generated_by": "scripts/realdata/workbooks.py",
+  "notes": {
+    "W001_expected": "device.ring_code 等可选 ref 列的空值属预期（B4 裁决：既有字段不自动派生关系；真实环成员关系需显式列），audit-v0.8.0 §2.7 已判定为预期而非缺陷"
+  },
   "real": {
     "base_stations": "OpenCelliD 真实小区（编码=MCC-MNC-LAC-CID 主小区 CGI；位置/制式/运营商/地市真实；名称=最近局站派生）",
     "cable_segments": "端点=走廊锚点局真实（段界为走廊锚点，非运营商实际接头位置）",
@@ -45,6 +49,8 @@
     "splice_boxes": "端点坐标=真实锚点局坐标（接头盒本体为示意设施）"
   },
   "simulated": {
+    "base_station_serves": "服务客户列 = 地市→客户确定性映射（哈尔滨双客户轮转、大庆/黑河单客户；issue #40 serves 直连边，示范值）",
+    "base_station_uplink": "上联设备列 = 站坐标到 15 个设备局站坐标的 haversine 最近邻（issue #42 裁定：按坐标派生，非名称匹配，不违反「禁止名称推断」红线）；归属A IP/名称/端口 = 该上联设备属性",
     "bbu/rru/olt/onu/pon": "挂真实基站/机房（编码/型号/用户为模拟）",
     "circuits": "电路编号/带宽（A/Z 设备为真实布点）",
     "customers": "全部虚构（名称含虚构标记或明显虚构词）",
@@ -52,9 +58,11 @@
     "ippools": "CIDR/网关/VLAN（私网演示段）",
     "machine_rooms": "编号/名称（归属局站真实）",
     "otn_ochs": "波道占用关系（波长为 ITU 100GHz 网格真实值，速率为示范值）",
+    "protection_groups": "保护组/protects 边为工程示意（1+1/1:1/环网三类型示范，工作/保护路径=干线名）",
     "rings/igp_domains/vpn": "保护结构/路由域/VPN 为工程示意",
     "sdh_timeslots": "时隙/容量（示范值）",
     "services/leased_lines": "业务/专线实例虚构（装机地址=真实局站名+演示标记）",
+    "status_columns": "W30（#45）各台账状态列均为确定性示范值（在网为主，少量停用/在建/退网混合）；ip_pool「使用中」与 service「开通」已修正为封闭枚举内合法值（issue #40 的 13 条 W002 清零）",
     "vendor/model values": "真实产品族名作为示范值（非任何现网真实配置）"
   },
   "workbooks": [
@@ -81,6 +89,7 @@
     "poles",
     "pon_ports",
     "ports",
+    "protection_groups",
     "racks",
     "rings",
     "rrus",

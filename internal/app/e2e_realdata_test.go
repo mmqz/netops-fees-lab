@@ -12,6 +12,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"net"
 	"net/http"
 	"os"
@@ -23,26 +24,29 @@ import (
 )
 
 // realDataOrder is the ref-dependency import order (workbooks.py documents
-// it; demo-real.sh uses the same list).
+// it; demo-real.sh uses the same list). W30: base_stations moved after
+// devices (its uplink_device/serve_customer refs), boards before ports
+// (mounted_on refs), protection_groups after circuits (protects refs).
 var realDataOrder = []string{
-	"sites", "machine_rooms", "base_stations", "customers", "vpn_instances",
-	"rings", "igp_domains", "devices", "ports", "boards", "racks",
+	"sites", "machine_rooms", "customers", "vpn_instances",
+	"rings", "igp_domains", "devices", "boards", "base_stations", "ports", "racks",
 	"odf", "odf_terminals", "ducts", "manholes", "poles",
 	"optical_cables", "cable_segments", "splice_boxes", "fibers",
-	"otn_ochs", "sdh_timeslots", "circuits", "ippools", "services",
+	"otn_ochs", "sdh_timeslots", "circuits", "protection_groups", "ippools", "services",
 	"leased_lines", "bbus", "rrus", "olts", "pon_ports", "onus",
 }
 
 // realDataExpected pins the totals the manifest records (workbooks.py).
+// W30 (issues #40/#42/#45): circuits 10→32, protection_groups +4.
 var realDataExpected = map[string]int{
 	"sites": 83, "machine_rooms": 83, "base_stations": 1198, "customers": 12,
 	"vpn_instances": 3, "rings": 2, "igp_domains": 2, "devices": 30,
 	"ports": 90, "boards": 60, "racks": 15, "odf": 15, "odf_terminals": 120,
 	"ducts": 7, "manholes": 14, "poles": 7, "optical_cables": 7,
 	"cable_segments": 23, "splice_boxes": 46, "fibers": 56, "otn_ochs": 14,
-	"sdh_timeslots": 4, "circuits": 10, "ippools": 5, "services": 8,
-	"leased_lines": 6, "bbus": 5, "rrus": 5, "olts": 5, "pon_ports": 20,
-	"onus": 10,
+	"sdh_timeslots": 4, "circuits": 32, "protection_groups": 4, "ippools": 5,
+	"services": 8, "leased_lines": 6, "bbus": 5, "rrus": 5, "olts": 5,
+	"pon_ports": 20, "onus": 10,
 }
 
 func TestCLIRealDataImportChain(t *testing.T) {
@@ -55,7 +59,7 @@ func TestCLIRealDataImportChain(t *testing.T) {
 	if _, err := os.Stat(manifestPath); err != nil {
 		t.Fatalf("testdata/realdata/manifest.json missing: %v (run scripts/realdata/{extract,workbooks}.py)", err)
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	mapFile := filepath.Join(tmp, "map.json")
 
@@ -92,8 +96,8 @@ func TestCLIRealDataImportChain(t *testing.T) {
 	if totalFailed != 0 {
 		t.Errorf("total failed rows = %d, want 0", totalFailed)
 	}
-	if totalImported != 1965 {
-		t.Errorf("total imported = %d, want 1965", totalImported)
+	if totalImported != 1991 {
+		t.Errorf("total imported = %d, want 1991", totalImported)
 	}
 
 	// The relation graph built across layers (segment_of / fiber_of /
@@ -107,12 +111,17 @@ func TestCLIRealDataImportChain(t *testing.T) {
 		t.Errorf("stats byType base_station/site = %v/%v, want 1198/83", byType["base_station"], byType["site"])
 	}
 	byRel, _ := stats["byRelationType"].(map[string]any)
+	// W30 pins (issues #40/#42/#45): the previously-missing edges are now
+	// data-backed — serves/uplink_to/mounted_on/protects — and the circuit
+	// families carry 32 links (workbench scale, #42).
 	for _, want := range []struct {
 		rel   string
 		count float64
 	}{
 		{"belongs_to", 83}, {"segment_of", 23}, {"fiber_of", 56},
 		{"fiber_terminates", 56}, {"housed_in", 30}, {"installed_in", 60},
+		{"serves", 1228}, {"uplink_to", 1198}, {"mounted_on", 90},
+		{"protects", 4}, {"a_end", 32}, {"z_end", 32}, {"carried_by", 32},
 	} {
 		if got, _ := byRel[want.rel].(float64); got != want.count {
 			t.Errorf("relations %s = %v, want %v", want.rel, got, want.count)
@@ -132,9 +141,38 @@ func TestCLIRealDataImportChain(t *testing.T) {
 	if d, _ := counts["devices"].(float64); d != 30 {
 		t.Errorf("workspace devices = %v, want 30", counts["devices"])
 	}
+	// W30 (issue #42): the workbench must reflect real interconnection
+	// scale — 32 circuits materialize as 32 links with 64 endpoint
+	// interfaces (was 10 links / 20 interfaces from circuit endpoint pairs).
+	if l, _ := counts["links"].(float64); l != 32 {
+		t.Errorf("workspace links = %v, want 32 (issue #42 interconnection scale)", counts["links"])
+	}
+	if i, _ := counts["interfaces"].(float64); i != 64 {
+		t.Errorf("workspace interfaces = %v, want 64", counts["interfaces"])
+	}
 
 	ts, killServe := realDataServe(t, db)
 	defer killServe()
+
+	// W30 (issue #45) acceptance: status coverage and the geo REAL columns
+	// are visible through the API. The station fleet imports with lifecycle
+	// status (在网 majority), and list items expose geoLat/geoLng (migration
+	// v20) — the spatial substrate that used to be JSON-string-only.
+	if st := realDataGet(t, ts, "/api/resources?type=base_station&status=%E5%9C%A8%E7%BD%91&pageSize=1"); st != nil {
+		if total, _ := st["total"].(float64); total < 1100 {
+			t.Errorf("base_station status=在网 total = %v, want ≥1100 (issue #45 status coverage)", total)
+		}
+	}
+	if list := realDataGet(t, ts, "/api/resources?type=base_station&pageSize=1"); list != nil {
+		items, _ := list["items"].([]any)
+		if len(items) == 0 {
+			t.Fatalf("base_station list: no items")
+		}
+		first, _ := items[0].(map[string]any)
+		if first["geoLat"] == nil || first["geoLng"] == nil {
+			t.Errorf("base_station item lacks geoLat/geoLng (migration v20 columns, issue #45): %v", first)
+		}
+	}
 
 	// Resolve OC-HDQ (the Harbin–Daqing–Qiqihar trunk) and drive it down.
 	ocID := realDataFindResourceID(t, ts, "OC-HDQ")

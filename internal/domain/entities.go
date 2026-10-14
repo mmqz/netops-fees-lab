@@ -32,6 +32,15 @@ type Resource struct {
 	// RunStateAt is the ts of the observation the snapshot projects; the
 	// zero time means no observation.
 	RunStateAt time.Time
+
+	// GeoLat/GeoLng are the REAL-column projection of the geo_lat/geo_lng
+	// attributes (migration v20, issue #45). nil means "no coordinates"
+	// — never 0/0, which would fabricate a null-island position. The
+	// attributes JSON keeps its string form as the lossless source of
+	// truth; these pointers exist so SQL can range-scan and rank without
+	// parsing JSON per row (see ResourceRepo.Nearest).
+	GeoLat *float64
+	GeoLng *float64
 }
 
 // Relation is a typed edge between two resources. Current closed set:

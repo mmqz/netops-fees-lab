@@ -232,6 +232,26 @@ func (f FieldSpec) CheckFormat(value string) (reason string, ok bool) {
 // is exact and case-sensitive.
 var StatusEnum = []string{"在网", "停用", "在建", "退网"}
 
+// statusField builds the lifecycle-status field of the issue #45
+// field-thickness round: before W30 only device/ip_pool/circuit/service
+// carried one, so 98% of the demo resources imported with a NULL status and
+// the resource browser rendered a wall of 未知. The field is optional in
+// every spec that gets it (unmapped column → NULL status, no W002, no
+// relation effect); the demo generator now supplies values, real sheets
+// supply them when they carry the column. extra appends type-specific
+// header synonyms (机房状态/局站状态/…) so future real exports auto-map.
+func statusField(extra ...string) FieldSpec {
+	f := FieldSpec{
+		Name:     "status",
+		Label:    "状态",
+		Kind:     KindEnum,
+		Enum:     StatusEnum,
+		Synonyms: []string{"状态"},
+	}
+	f.Synonyms = append(f.Synonyms, extra...)
+	return f
+}
+
 // FieldSpec describes one target field of a resource schema (§6).
 type FieldSpec struct {
 	// Name is the canonical field name (the mapping target key).
@@ -634,6 +654,20 @@ var baseStationSpec = TypeSpec{
 		{Name: "work_order", Label: "工单号", Kind: KindString,
 			Synonyms: []string{"工单号", "工单编号", "工单"}},
 		{Name: "remark", Label: "备注", Kind: KindString, Synonyms: []string{"备注"}},
+		// W30 (issue #45) lifecycle status: the real station tables carry a
+		// 状态 column; the demo generator supplies the enum values. Optional —
+		// unmapped → NULL status (no W002).
+		statusField("基站状态"),
+		// W30 (issue #45) geo trio — the same columns/kinds as device: the
+		// OpenCelliD real coordinates (realdata-core.json) land as REAL
+		// columns via migration v20, making base_station the spatially
+		// richest type (1,198 stations) instead of the 90-port exception.
+		{Name: "geo_lat", Label: "纬度", Kind: KindLat,
+			Synonyms: []string{"纬度", "lat", "LAT", "GPS纬度", "北纬"}},
+		{Name: "geo_lng", Label: "经度", Kind: KindLng,
+			Synonyms: []string{"经度", "lng", "lon", "LON", "GPS经度", "东经"}},
+		{Name: "geo", Label: "经纬度", Kind: KindGeo,
+			Synonyms: []string{"经纬度", "装机经纬度", "坐标", "GPS坐标", "位置"}},
 	},
 }
 
@@ -669,6 +703,8 @@ var siteSpec = TypeSpec{
 			Synonyms: []string{"设备名称", "网元名称", "设备名"}},
 		{Name: "ip_address", Label: "IP地址", Kind: KindIPv4,
 			Synonyms: []string{"IP地址", "IP", "设备IP"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("局站状态"),
 	},
 }
 
@@ -712,6 +748,8 @@ var machineRoomSpec = TypeSpec{
 			Synonyms: []string{"设备名称", "网元名称", "设备名"}},
 		{Name: "ip_address", Label: "IP地址", Kind: KindIPv4,
 			Synonyms: []string{"IP地址", "IP", "设备IP"}},
+		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
+		statusField("机房状态"),
 	},
 }
 
