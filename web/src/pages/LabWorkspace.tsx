@@ -1,7 +1,8 @@
 /**
  * 拓扑工作台页 /lab/:id：
- * - 页头：名称/描述/状态哈希 chip（mono 截断 + title 全量）/ 评分徽章 /
- *   设备·接口·链路计数 chips（up/down 分色）+ 七个动作按钮（含折叠面板）；
+ * - 页头单行（#44）：工作台名/状态哈希 chip（mono 截断 + title 全量）/
+ *   评分徽章/设备·接口·链路计数 chips（up/down 分色）同行；七个动作按钮
+ *   （含折叠面板）下移并入画布工具带首行（页头三行 → 一行，画布更高更宽）；
  * - 左画布 Cytoscape + 右标签页（设备/接口/链路/检查结果/变更集/检查点）；
  *   分栏比例可拖拽（把手 + ← → 键盘微调，localStorage 持久化）；右侧面板可
  *   折叠（画布占满工作区宽）；画布支持 zen 全屏工作模式（Esc 退出，
@@ -163,13 +164,18 @@ function writeSplitPct(workspaceId: string, pct: number): void {
   }
 }
 
-/** 右侧面板折叠持久化（localStorage，跨会话）。 */
+/** 右侧面板折叠持久化（localStorage，跨会话）。
+ * #44：无记录时默认折叠（原默认展开——长期占掉 1/3 画布宽，用户诉求 3）；
+ * 仅「折叠/展开」按钮的显式切换才写偏好，点击设备/链路等自动展开不落盘
+ * （见 LabWorkspace 内 expandPanel），避免把默认值反向固化成「已展开」。 */
 function readPanelCollapsed(workspaceId: string): boolean {
   try {
-    return localStorage.getItem(`netops-lab.panel.${workspaceId}`) === '1';
+    const raw = localStorage.getItem(`netops-lab.panel.${workspaceId}`);
+    if (raw !== null) return raw === '1';
   } catch {
-    return false;
+    // 隐私模式 / 配额异常：与无记录同判——默认折叠
   }
+  return true;
 }
 
 function writePanelCollapsed(workspaceId: string, collapsed: boolean): void {
@@ -254,7 +260,8 @@ export function LabWorkspacePage() {
   const [splitPct, setSplitPct] = useState(() => readSplitPct(workspaceId));
   /** 分栏拖拽进行中（body 光标/禁选 + 挂起画布逐帧 resize）。 */
   const [splitDragging, setSplitDragging] = useState(false);
-  /** 右侧面板折叠（画布占满工作区宽；localStorage 持久化）。 */
+  /** 右侧面板折叠（#44：无记录时默认折叠，画布占满工作区宽；点击设备/
+   *  链路等自动展开（不落盘）；localStorage 持久化用户显式切换）。 */
   const [panelCollapsed, setPanelCollapsed] = useState(() => readPanelCollapsed(workspaceId));
   /** splitPct 镜像（拖动/键盘闭包读最新值）。 */
   const splitPctRef = useRef(splitPct);
@@ -335,12 +342,22 @@ export function LabWorkspacePage() {
     [toast],
   );
 
+  /** #44：任何「指向右侧面板」的交互（画布/表格选中、创建检查点、toast
+   *  查看变更集）自动展开面板。只改会话状态不写 localStorage——用户显式
+   *  偏好（折叠按钮落盘的 '1'/'0'）不被点击行为反向覆盖；无记录时下次
+   *  进入仍是默认折叠（诉求 3 的「默认」语义）。 */
+  const expandPanel = useCallback((): void => {
+    // 已展开时 React 对同值 setState 直接 bail out，无多余渲染。
+    setPanelCollapsed(false);
+  }, []);
+
   /** 成功 toast 的「查看变更集」动作（W9）：跳转右侧标签页并闪光定位新变更集。 */
   const viewChangesetsAction = useCallback(
     (changesetId?: string): { action: ToastAction } => ({
       action: {
         label: TOAST_VIEW_CHANGESETS,
         onClick: () => {
+          expandPanel(); // #44：目标在右侧面板，折叠时先展开
           setTab('changesets');
           if (changesetId !== undefined && changesetId !== '') {
             setHighlightCs(changesetId);
@@ -348,7 +365,7 @@ export function LabWorkspacePage() {
         },
       },
     }),
-    [],
+    [expandPanel],
   );
 
   const applyOpsRequest = useCallback(
@@ -462,20 +479,26 @@ export function LabWorkspacePage() {
 
   // —— 画布选中 → 右侧切换标签并定位 ——
 
-  const handleCanvasSelect = useCallback((entity: SelectedEntity): void => {
-    setSelected(entity);
-    switch (entity.kind) {
-      case 'device':
-        setTab('devices');
-        break;
-      case 'interface':
-        setTab('interfaces');
-        break;
-      case 'link':
-        setTab('links');
-        break;
-    }
-  }, []);
+  const handleCanvasSelect = useCallback(
+    (entity: SelectedEntity): void => {
+      setSelected(entity);
+      // #44：面板默认折叠后，选中目标必然要在右侧表格定位——自动展开
+      //（仅会话态，不落盘，见 expandPanel 注释）。
+      expandPanel();
+      switch (entity.kind) {
+        case 'device':
+          setTab('devices');
+          break;
+        case 'interface':
+          setTab('interfaces');
+          break;
+        case 'link':
+          setTab('links');
+          break;
+      }
+    },
+    [expandPanel],
+  );
 
   const view = useMemo(() => buildTopologyView(topology), [topology]);
 
@@ -586,6 +609,7 @@ export function LabWorkspacePage() {
   }
 
   function jumpToCheckpoints(): void {
+    expandPanel(); // #44：目标在右侧面板，折叠时先展开
     setTab('checkpoints');
     setFocusCpSignal((n) => n + 1);
   }
@@ -630,9 +654,14 @@ export function LabWorkspacePage() {
 
   return (
     <>
+      {/* #44（诉求 1+2）：页头收敛为单行——工作台名 + 哈希 + 评分 + 计数 chip
+          同行（flex nowrap，长名截断）；七个动作按钮不再占独立行，下移并入
+          画布工具带首组（见下方 TopologyCanvas actions）。 */}
       <div className="card lab-pagehead">
         <div className="lab-head-meta">
-          <h1 className="lab-head-name">{detail.name}</h1>
+          <h1 className="lab-head-name" title={detail.name}>
+            {detail.name}
+          </h1>
           <span className="chip chip--mono lab-hash-chip" title={`${LABWS_HASH_LABEL} ${detail.workspaceHash}`}>
             {detail.workspaceHash}
           </span>
@@ -649,43 +678,14 @@ export function LabWorkspacePage() {
             down={counts.interfaces - counts.upInterfaces}
           />
           <CountChip label={LABWS_CHIP_LINKS} total={counts.links} up={counts.upLinks} down={counts.links - counts.upLinks} />
-        </div>
-        {detail.description !== '' && <p className="lab-desc">{detail.description}</p>}
-        <div className="lab-head-actions">
-          <button type="button" className="btn btn--primary" disabled={anyBusy} onClick={runChecksNow}>
-            {checksBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
-            {checksBusy ? BTN_PROCESSING : LAB_BTN_RUN_CHECKS}
-          </button>
-          <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setOpsOpen(true)}>
-            {LAB_BTN_APPLY_OPS}
-          </button>
-          <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setUndoConfirm(true)}>
-            {undoBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
-            {undoBusy ? BTN_PROCESSING : LAB_BTN_UNDO}
-          </button>
-          <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={jumpToCheckpoints}>
-            {LAB_BTN_CREATE_CHECKPOINT}
-          </button>
-          <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setDiffOpen(true)}>
-            {LAB_BTN_DIFF}
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={exportReport}>
-            {LAB_BTN_EXPORT_REPORT}
-          </button>
-          {/* FX-5：折叠/展开右侧数据面板（localStorage 持久化） */}
-          <button
-            type="button"
-            className="btn btn--secondary"
-            title={panelCollapsed ? LAB_SPLIT_EXPAND_TITLE : LAB_SPLIT_COLLAPSE_TITLE}
-            onClick={togglePanelCollapsed}
-          >
-            {panelCollapsed ? <IconPanelExpand size={16} /> : <IconPanelCollapse size={16} />}
-            {panelCollapsed ? LAB_SPLIT_EXPAND : LAB_SPLIT_COLLAPSE}
-          </button>
+          {/* #44：返回列表是导航性质，随计数行收进标题行右端（用户诉求 2 只点名
+              七个动作按钮，且把返回留在工具带会多占 ~92px，1600 视口折叠态
+              恰好把 zen 挤成孤行）。 */}
           <Link className="btn btn--secondary" to="/lab" style={{ marginLeft: 'auto' }}>
             {LABWS_BACK_LIST}
           </Link>
         </div>
+        {detail.description !== '' && <p className="lab-desc">{detail.description}</p>}
         {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
       </div>
 
@@ -705,6 +705,43 @@ export function LabWorkspacePage() {
           zen={zen}
           onZenChange={handleZenChange}
           resizeSuspended={splitDragging}
+          actions={
+            <>
+              {/* #44（诉求 2）：原页头第二行的七个动作按钮 + 返回列表，与画布
+                  工具带同一行（窄画布随工具带 wrap 流到次行，不再溢出）。 */}
+              <button type="button" className="btn btn--primary" disabled={anyBusy} onClick={runChecksNow}>
+                {checksBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
+                {checksBusy ? BTN_PROCESSING : LAB_BTN_RUN_CHECKS}
+              </button>
+              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setOpsOpen(true)}>
+                {LAB_BTN_APPLY_OPS}
+              </button>
+              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setUndoConfirm(true)}>
+                {undoBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
+                {undoBusy ? BTN_PROCESSING : LAB_BTN_UNDO}
+              </button>
+              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={jumpToCheckpoints}>
+                {LAB_BTN_CREATE_CHECKPOINT}
+              </button>
+              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setDiffOpen(true)}>
+                {LAB_BTN_DIFF}
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={exportReport}>
+                {LAB_BTN_EXPORT_REPORT}
+              </button>
+              {/* FX-5：折叠/展开右侧数据面板（localStorage 持久化；语义不变，
+                  仅随组下移到画布工具带） */}
+              <button
+                type="button"
+                className="btn btn--secondary"
+                title={panelCollapsed ? LAB_SPLIT_EXPAND_TITLE : LAB_SPLIT_COLLAPSE_TITLE}
+                onClick={togglePanelCollapsed}
+              >
+                {panelCollapsed ? <IconPanelExpand size={16} /> : <IconPanelCollapse size={16} />}
+                {panelCollapsed ? LAB_SPLIT_EXPAND : LAB_SPLIT_COLLAPSE}
+              </button>
+            </>
+          }
         />
         {!panelCollapsed && !zen && (
           <div

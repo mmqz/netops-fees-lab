@@ -6,12 +6,15 @@
  *   键盘可聚焦、Enter/Space 触发选择，与右侧表格联动语义同拓扑图 tap）；
  *   GCJ-02 底图（高德）渲染前经 projLngLat 投影，WGS84 底图（ESRI/离线）原样；
  * - 链路为 GeoJSON LineString 图层：up #5b8fd9 2px 实线 / down #ff5252 3px
- *   虚线（rAF 驱动 marching-ants 动画，prefers-reduced-motion 关闭）/
- *   选中 #2f9dff 4px；端点缺坐标的链路跳过（右下角计数 chip 提示）；
+ *   虚线（rAF 驱动 marching-ants 动画，prefers-reduced-motion 关闭）；
+ *   选中高亮 #2f9dff 4px 走独立单要素源 links-selected（#43：选中变化仅
+ *   对 0/1 要素的小源 setData，主 links/devices 源不再随点击全量重下）；
+ *   端点缺坐标的链路跳过（右下角计数 chip 提示）；
  * - 3D 示意柱（fill-extrusion，仅 3D 视图可见）：屏幕高 18 + 连接数×10 px
  *   折算米高并钳制 [TOWER_MIN_M, TOWER_MAX_M]（#9：杜绝数十公里光柱；
  *   footprint 恒定 7px 屏宽——metersPerPixel 按 MapLibre 512px 世界坐标
- *   修正，zoom 期间 rAF 节流同帧重建高度与底面）；
+ *   修正。#43：缩放期间仅 3D 视图逐帧跟手重建（2D 塔层不可见，逐帧
+ *   setData 纯浪费），zoomend 恒补一次保持数据新鲜，进 3D 强制刷新）；
  *   2D↔3D 切换各自独立相机（#12 解锁：离开某视图存相机，进入时恢复；
  *   首次进入按该视图 fitBounds；经拓扑图中转 = 重新适配，可预期）；
  * - 地理高程支撑（#13）：离线 DEM 三重呈现——3D setTerrain 起伏（夸张
@@ -76,7 +79,7 @@ import {
 } from './geoBasemap';
 import type { BasemapId, GeoLayerPrefs, OverlayId, StyleOptions } from './geoBasemap';
 import { clusterBounds, clusterDevices } from './geoCluster';
-import type { ClusterPoint } from './geoCluster';
+import type { ClusterPoint, DeviceCluster } from './geoCluster';
 import { clearElevationCache, sampleElevation } from './geoElevation';
 import {
   LAB_CANVAS_LEGEND_LABEL,
@@ -225,20 +228,19 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-// —— GeoJSON 数据构建（纯函数，选中态直接写入 feature properties → setData 更新） ——
+// —— GeoJSON 数据构建（纯函数。#43：选中态不再烘进 feature properties——
+// 几何只随 topology/坐标系变化；选中高亮由独立单要素源承担，见 links-selected） ——
 
 interface GeoDeviceProps {
   id: string;
   code: string;
   status: SimEntityStatus;
-  selected: boolean;
 }
 
 interface GeoLinkProps {
   id: string;
   label: string;
   status: SimEntityStatus;
-  selected: boolean;
 }
 
 interface GeoTowerProps {
@@ -319,11 +321,7 @@ export function metersPerPixel(lat: number, zoom: number): number {
   return (78271.51696 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
 }
 
-export function buildGeoData(
-  topology: SimTopology | null,
-  selected: SelectedEntity | null,
-  toGCJ: boolean,
-): GeoData {
+export function buildGeoData(topology: SimTopology | null, toGCJ: boolean): GeoData {
   const deviceFeatures: Array<Feature<Point, GeoDeviceProps>> = [];
   const linkFeatures: Array<Feature<LineString, GeoLinkProps>> = [];
   const coords = new Map<string, [number, number]>();
@@ -348,7 +346,6 @@ export function buildGeoData(
           id: node.id,
           code: node.code,
           status: node.status,
-          selected: selected?.kind === 'device' && selected.id === node.id,
         },
       });
     }
@@ -365,7 +362,6 @@ export function buildGeoData(
           id: edge.id,
           label: edge.label,
           status: edge.status,
-          selected: selected?.kind === 'link' && selected.id === edge.id,
         },
       });
     }
@@ -468,6 +464,27 @@ function applyDataToMap(map: MLMap, data: GeoData): void {
     const src = map.getSource(sourceId) as GeoJSONSourceLike | undefined;
     if (src !== undefined) src.setData(fc);
   }
+}
+
+/**
+ * #43 选中高亮：链路选中线画在独立单要素源 links-selected 上（样式层
+ * links-selected 同名换源）。选中变化只对这个 0/1 要素的小源 setData——
+ * O(1)，主 links 源的几何/属性不再因点击而全量重下（原实现把 selected 烘进
+ * feature properties，每次点击 buildGeoData 全量重建 + 两个主源 setData）。
+ * 几何直接复用 geoData.links 里已投影的 Feature（同坐标系同数据，无需重算）。
+ */
+function applyLinkHighlight(map: MLMap, selected: SelectedEntity | null, data: GeoData | null): void {
+  const src = map.getSource('links-selected') as GeoJSONSourceLike | undefined;
+  if (src === undefined) return;
+  let feature: Feature<LineString, GeoLinkProps> | undefined;
+  if (selected !== null && selected.kind === 'link' && data !== null) {
+    feature = data.links.features.find((f) => f.properties.id === selected.id);
+  }
+  src.setData(
+    feature === undefined
+      ? (emptyFC() as FeatureCollection<LineString, GeoLinkProps>)
+      : { type: 'FeatureCollection', features: [feature] },
+  );
 }
 
 function applyTowerVisibility(map: MLMap, view: 'geo2d' | 'geo3d'): void {
@@ -603,6 +620,40 @@ function isBasemapError(ev: MLErrorEvent): boolean {
 
 // —— 组件 ——
 
+/**
+ * #43：复用簇 chip 的派生态刷新（创建路径也走它，保证新建/复用一致）。
+ * 成员集合（key）不变时计数不变，但状态可能随 ops 变化——停机角标 /
+ * --down/--selected 类 / title / aria-label 均从当前 members 重算；文本与
+ * 属性先比对再写，避免逐帧 move/zoom 下无变化时的重排浪费。
+ */
+function refreshClusterChip(el: HTMLButtonElement, members: ClusterPoint[], selected: boolean): void {
+  const n = members.length;
+  const down = members.filter((m) => m.status === 'down').length;
+  el.classList.toggle('geo-cluster--down', down > 0);
+  el.classList.toggle('geo-cluster--selected', selected);
+  const count = el.querySelector('.geo-cluster-count');
+  if (count !== null && count.textContent !== String(n)) count.textContent = String(n);
+  let badge = el.querySelector('.geo-cluster-down');
+  if (down > 0) {
+    if (badge === null) {
+      const el2 = document.createElement('span');
+      el2.className = 'geo-cluster-down';
+      el2.textContent = String(down);
+      el2.setAttribute('aria-hidden', 'true');
+      el.appendChild(el2);
+    } else if (badge.textContent !== String(down)) {
+      badge.textContent = String(down);
+    }
+  } else if (badge !== null) {
+    badge.remove();
+  }
+  const codes = members.map((m) => m.code).slice(0, 6).join('、');
+  const title = format(LAB_GEO_CLUSTER_TITLE, { n, down, codes });
+  if (el.title !== title) el.title = title;
+  const aria = format(LAB_GEO_CLUSTER_ARIA, { n, down });
+  if (el.getAttribute('aria-label') !== aria) el.setAttribute('aria-label', aria);
+}
+
 /** TopologyCanvas 经 ref 持有的命令句柄（工具带「适配视图 / 指北复位」与 F 键）。 */
 export interface GeoCanvasHandle {
   fitView: () => void;
@@ -636,8 +687,13 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const mapRef = useRef<MLMap | null>(null);
   const libRef = useRef<MapLibreModule | null>(null);
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
-  /** 聚簇 marker 持有项（W17）：key = 成员 id 升序 join，重建时全量置换。 */
-  const clusterMarkersRef = useRef<Map<string, { marker: MLMarker; el: HTMLButtonElement }>>(new Map());
+  /** 聚簇 marker 持有项（W17）：key = 成员 id 升序 join（不含状态——状态变化
+   *  走增量更新而非换 key）。#43：改为增量差分维护——复用未变 chip，只增删
+   *  差集 + 刷新已复用 chip 的计数/状态/选中类，不再全拆全建。members 供
+   *  选中 effect 与增量刷新取成员状态（id 相同但 status 可能随 ops 变化）。 */
+  const clusterMarkersRef = useRef<Map<string, { marker: MLMarker; el: HTMLButtonElement; members: ClusterPoint[] }>>(
+    new Map(),
+  );
   const updateClustersRef = useRef<(() => void) | null>(null);
   const geoDataRef = useRef<GeoData | null>(null);
   const topoRef = useRef<SimTopology | null>(topology);
@@ -716,7 +772,8 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     resizeSuspendedRef.current = resizeSuspended;
   }, [resizeSuspended]);
 
-  const geoData = useMemo(() => buildGeoData(topology, selected, gcj), [topology, selected, gcj]);
+  // #43：几何只随 topology/坐标系变化（选中态已解耦，见 applyLinkHighlight）。
+  const geoData = useMemo(() => buildGeoData(topology, gcj), [topology, gcj]);
 
   useEffect(() => {
     geoDataRef.current = geoData;
@@ -807,6 +864,8 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           if (disposed || map.getSource('devices') === undefined) return;
           map.off('styledata', reapply);
           if (geoDataRef.current !== null) applyDataToMap(map, geoDataRef.current);
+          // 样式重建后选中高亮源也是空的，与主数据同路回填（否则切底图丢高亮）。
+          applyLinkHighlight(map, selectedRef.current, geoDataRef.current);
           const topo = topoRef.current;
           const tsrc = map.getSource('towers') as GeoJSONSourceLike | undefined;
           if (topo !== null && tsrc !== undefined) tsrc.setData(buildTowerCollection(topo, map.getZoom(), gcjRef.current));
@@ -869,11 +928,16 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         window.clearInterval(watchdog);
       });
 
-      // —— 塔重建（#9）：zoom 动画期间 rAF 节流（缩放中 footprint/heightM
-      // 每帧跟手，恒定 7px 屏宽与钳制高度不再「动画结束才跳变」）——
+      // —— 塔重建（#9/#43）：zoom 动画期间 rAF 节流同帧重建 footprint + heightM
+      // （缩放中每帧跟手，恒定 7px 屏宽与钳制高度不再「动画结束才跳变」）。
+      // #43 收敛：逐帧重建只在 3D 视图（塔层可见）做——2D 下塔层 visibility:none，
+      // 逐帧 setData 是纯浪费（v0.8.0 真实数据反馈的卡顿源之一）；zoomend 恒补
+      // 一次（含 2D，保持数据新鲜，切回 3D 不会用陈旧几何）。——
       let towerRaf = 0;
-      const rebuildTowersNow = (): void => {
+      const rebuildTowersNow = (force: boolean): void => {
         if (disposed) return;
+        // 非 force（zoom 逐帧路径）仅 3D 执行；force（zoomend/进 3D）恒执行。
+        if (!force && viewRef.current !== 'geo3d') return;
         const topo = topoRef.current;
         const src = map.getSource('towers') as GeoJSONSourceLike | undefined;
         if (topo !== null && src !== undefined) src.setData(buildTowerCollection(topo, map.getZoom(), gcjRef.current));
@@ -882,15 +946,16 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         if (disposed || towerRaf !== 0) return;
         towerRaf = requestAnimationFrame(() => {
           towerRaf = 0;
-          rebuildTowersNow();
+          rebuildTowersNow(false);
         });
       };
+      const rebuildTowersEnd = (): void => rebuildTowersNow(true);
       scheduleTowerRebuildRef.current = scheduleTowerRebuild;
       map.on('zoom', scheduleTowerRebuild);
-      map.on('zoomend', scheduleTowerRebuild);
+      map.on('zoomend', rebuildTowersEnd);
       cleanups.push(() => {
         map.off('zoom', scheduleTowerRebuild);
-        map.off('zoomend', scheduleTowerRebuild);
+        map.off('zoomend', rebuildTowersEnd);
         if (towerRaf !== 0) cancelAnimationFrame(towerRaf);
         scheduleTowerRebuildRef.current = null;
       });
@@ -1013,52 +1078,85 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   }, [prefs, effective, sourcesReady]);
 
   // —— 数据 → GeoJSON source（setData 原地更新，相机保持；首批数据 fitBounds）——
+  // #43：依赖收敛为 [geoData, sourcesReady]——geoData 已只随 topology/gcj 变化
+  //（选中/视图切换都不再触发本 effect，主源 setData 仅发生在拓扑/坐标系变化）；
+  // view 出依赖（旧版切 2D↔3D 也会全量重下两个主源，几何并未变）；首批适配
+  // 改读 viewRef（同步 effect 先于本 effect 执行，值已新鲜）。
   useEffect(() => {
     const map = mapRef.current;
     if (map === null || !sourcesReady) return;
     geoDataRef.current = geoData;
     applyDataToMap(map, geoData);
+    // #43：拓扑/坐标系变化后选中链路的几何可能已变，高亮源同帧重下（O(1)）。
+    applyLinkHighlight(map, selectedRef.current, geoData);
     // 塔依赖当前 zoom：单独供给（zoom rAF 重建路径见挂载 effect）
     const tsrc = map.getSource('towers') as GeoJSONSourceLike | undefined;
     if (tsrc !== undefined) tsrc.setData(buildTowerCollection(topology, map.getZoom(), gcj));
     if (!didFitRef.current && geoData.deviceCount > 0) {
       didFitRef.current = true;
-      fitGeoBounds(map, geoData, view);
+      fitGeoBounds(map, geoData, viewRef.current);
     }
-  }, [geoData, sourcesReady, topology, view, gcj]);
+  }, [geoData, sourcesReady]);
+
+  // —— #43：选中 → 高亮源（0/1 要素）+ 地标/簇类切换，零重建零重算 ——
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === null || !sourcesReady) return;
+    applyLinkHighlight(map, selected, geoDataRef.current);
+  }, [selected, sourcesReady]);
 
   // —— 底图坐标系切换（WGS84↔GCJ-02）→ 塔体同帧重投影 ——
+  // （几何重建主路径已由数据 effect 覆盖，这里 rAF 再补一帧确保相机就绪后
+  //  按当前 zoom 取值；2D 下被 rebuildTowersNow 的视图守卫拦下，无浪费。）
   useEffect(() => {
     const map = mapRef.current;
     if (map === null || !sourcesReady) return;
     scheduleTowerRebuildRef.current?.();
   }, [gcj, sourcesReady]);
 
-  // —— 聚簇（W17）：屏幕碰撞 → 计数簇 + 单例地标，点击簇放大展开 ——
+  // —— 聚簇（W17/#43）：屏幕碰撞 → 计数簇 + 单例地标，点击簇放大展开 ——
   // 依赖全部走 ref（挂载 effect 的 move rAF 与各 effect 直接调度，无重建问题）。
+  // #43 增量化：原版每次 move/zoom 帧「全拆再全建」——DOM 拆建 + Marker
+  // 注册 + GC 是拖拽/缩放卡顿主源，且注释里的「≤几百设备」规模假设已被
+  // v0.8.0 真实数据打破。现改为两段收敛：
+  // - 视口裁剪（issue 要求）：只有视口 ± CLUSTER_PX 带内的投影点参与聚簇
+  //   与建 chip。带宽 = 聚簇阈值：带外点不可能并入任何可见簇（成员距簇心
+  //   必 < 阈值），数学上不改变可见结果；带外地标的 --clustered 类在平移
+  //   进入视口后由下一帧 move rAF 纠正（无感延迟）。
+  // - 差分维护：chip 以成员 id 集合为 key，未变者复用（簇心 = leader 的
+  //   地理坐标，成员不变则位置也不变），只增删差集 + 刷新已复用 chip 的
+  //   计数/停机/选中派生态（见 refreshClusterChip——key 不含状态，ops 后
+  //   状态变化仍能刷新）。
   const updateClusters = useCallback((): void => {
     const map = mapRef.current;
     const lib = libRef.current;
     if (map === null || lib === null) return;
-    // 全量置换簇 marker（数据/相机任一变化都重算；典型规模 ≤几百设备，
-    // O(n·k) 屏幕距离计算可忽略不计）。
-    clusterMarkersRef.current.forEach((entry) => entry.marker.remove());
-    clusterMarkersRef.current.clear();
-
     const topo = topoRef.current;
-    if (topo === null || !prefsRef.current.devices) return; // 设备层关：无簇无单例
+    // 设备层关 / 无数据：期望集为空 → 增量清空（语义等价旧版「先全拆再判空」）。
+    if (topo === null || !prefsRef.current.devices) {
+      for (const entry of clusterMarkersRef.current.values()) entry.marker.remove();
+      clusterMarkersRef.current.clear();
+      return;
+    }
 
     // 屏幕投影（含 GCJ 投影后的坐标——投影与 Marker.setLngLat 同源）。
     const pts: ClusterPoint[] = [];
+    const vw = map.getContainer().clientWidth;
+    const vh = map.getContainer().clientHeight;
     for (const node of topo.nodes) {
       const lat = node.geoLat;
       const lng = node.geoLng;
       if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
       const [plng, plat] = projLngLat(lng, lat, gcjRef.current);
       const p = map.project([plng, plat]);
+      if (p.x < -CLUSTER_PX || p.y < -CLUSTER_PX || p.x > vw + CLUSTER_PX || p.y > vh + CLUSTER_PX) continue;
       pts.push({ id: node.id, code: node.code, name: node.name, status: node.status, lng: plng, lat: plat, x: p.x, y: p.y });
     }
-    if (pts.length === 0) return;
+    if (pts.length === 0) {
+      for (const entry of clusterMarkersRef.current.values()) entry.marker.remove();
+      clusterMarkersRef.current.clear();
+      return;
+    }
 
     const { clusters, singletons } = clusterDevices(pts, CLUSTER_PX);
 
@@ -1069,32 +1167,52 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     });
 
     const selectedId = selectedRef.current?.kind === 'device' ? selectedRef.current.id : null;
+    // 期望集：视口带内的簇（成员均距簇心 < 阈值，leader 在带内即可）。
+    const desired = new Map<string, DeviceCluster>();
     for (const c of clusters) {
-      const down = c.members.filter((m) => m.status === 'down').length;
-      const selected = c.members.some((m) => m.id === selectedId);
+      desired.set(c.members.map((m) => m.id).sort().join('|'), c);
+    }
+
+    // 差分删除：结果中已不存在的簇。
+    for (const [key, entry] of clusterMarkersRef.current) {
+      if (!desired.has(key)) {
+        entry.marker.remove();
+        clusterMarkersRef.current.delete(key);
+      }
+    }
+
+    for (const [key, c] of desired) {
+      // down 计数在 refreshClusterChip 内从 members 现算（新建/复用一致）。
+      const selected = selectedId !== null && c.members.some((m) => m.id === selectedId);
+      const existing = clusterMarkersRef.current.get(key);
+      if (existing !== undefined) {
+        // 复用（成员集合不变）：仅刷新派生态，无 DOM 增删、无 Marker 注册。
+        existing.members = c.members;
+        refreshClusterChip(existing.el, existing.members, selected);
+        continue;
+      }
       const el = document.createElement('button');
       el.type = 'button';
       el.tabIndex = 0;
       el.className = 'geo-cluster';
-      if (down > 0) el.classList.add('geo-cluster--down');
-      if (selected) el.classList.add('geo-cluster--selected');
       const count = document.createElement('span');
       count.className = 'geo-cluster-count';
       count.textContent = String(c.members.length);
       el.appendChild(count);
-      if (down > 0) {
-        const downBadge = document.createElement('span');
-        downBadge.className = 'geo-cluster-down';
-        downBadge.textContent = String(down);
-        downBadge.setAttribute('aria-hidden', 'true');
-        el.appendChild(downBadge);
-      }
-      const codes = c.members.map((m) => m.code).slice(0, 6).join('、');
-      const title = format(LAB_GEO_CLUSTER_TITLE, { n: c.members.length, down, codes });
-      el.title = title;
-      el.setAttribute('aria-label', format(LAB_GEO_CLUSTER_ARIA, { n: c.members.length, down }));
+      const marker = new lib.Marker({ element: el, anchor: 'center' })
+        .setLngLat([c.center.lng, c.center.lat])
+        .addTo(map);
+      const entry: { marker: MLMarker; el: HTMLButtonElement; members: ClusterPoint[] } = {
+        marker,
+        el,
+        members: c.members,
+      };
+      // hover/click 闭包一律读 entry.members（复用路径会整体替换该数组引用，
+      // 保证状态变化后提示/展开用的是当前成员，而非创建时的旧快照）。
       const hoverIn = (): void => {
-        onHoverInfoRef.current?.({ code: `${c.members.length} 台`, name: codes, status: down > 0 ? 'down' : 'up' });
+        const d = entry.members.filter((m) => m.status === 'down').length;
+        const codes = entry.members.map((m) => m.code).slice(0, 6).join('、');
+        onHoverInfoRef.current?.({ code: `${entry.members.length} 台`, name: codes, status: d > 0 ? 'down' : 'up' });
       };
       const hoverOut = (): void => {
         onHoverInfoRef.current?.(null);
@@ -1103,7 +1221,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
         // 放大展开：目标 zoom = max(当前 + CLUSTER_ZOOM_STEP, 成员 bbox 的
         // cameraForBounds 解)——保证同城近距设备一次点击即拆簇（旧版仅
         // +2.2 级，哈尔滨 3 台在 z7.8 仍同簇，需点两次）。
-        const bounds = clusterBounds(c.members);
+        const bounds = clusterBounds(entry.members);
         let fitZoom = 0;
         try {
           const cam = map.cameraForBounds(bounds, { padding: 120 });
@@ -1122,10 +1240,8 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       el.addEventListener('mouseleave', hoverOut);
       el.addEventListener('focus', hoverIn);
       el.addEventListener('blur', hoverOut);
-      const marker = new lib.Marker({ element: el, anchor: 'center' })
-        .setLngLat([c.center.lng, c.center.lat])
-        .addTo(map);
-      clusterMarkersRef.current.set(c.members.map((m) => m.id).sort().join('|'), { marker, el });
+      refreshClusterChip(el, c.members, selected);
+      clusterMarkersRef.current.set(key, entry);
     }
   }, []);
   updateClustersRef.current = updateClusters;
@@ -1199,7 +1315,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     updateClustersRef.current?.();
   }, [topology, sourcesReady, rebuildMarkers, gcj]);
 
-  // 选中 / 标签开关 / 设备可见性 → 地标类与显隐切换
+  // 选中 / 标签开关 / 设备可见性 → 地标类与显隐切换（#43：纯类切换）
+  // 旧版在选中变化时重跑全量聚簇重建；相机未动则成员不可能变，改为对既有
+  // chip 就地切换 --selected（members 已在 entry 上，无需重算屏幕投影）。
   useEffect(() => {
     const selectedId = selected?.kind === 'device' ? selected.id : null;
     markersRef.current.forEach((entry, id) => {
@@ -1208,9 +1326,20 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       const el = entry.marker.getElement();
       el.style.display = prefs.devices ? '' : 'none';
     });
-    // 选中态也影响簇高亮：重算（选中设备可能刚被并入簇）。
+    clusterMarkersRef.current.forEach((entry) => {
+      entry.el.classList.toggle(
+        'geo-cluster--selected',
+        selectedId !== null && entry.members.some((m) => m.id === selectedId),
+      );
+    });
+  }, [selected, labels, prefs.devices]);
+
+  // 设备层开关 → 簇 chip 增量增删（关 = 期望空集全拆；开 = 按当前相机重建。
+  // #43：从选中 effect 拆出——选中不再触发射簇重算，开关本身才需要。）
+  useEffect(() => {
+    if (!sourcesReady) return;
     updateClustersRef.current?.();
-  }, [selected, labels, prefs.devices, topology]);
+  }, [prefs.devices, sourcesReady]);
 
   // —— 2D↔3D 独立相机（#12 解锁）——
   // 离开旧视图：存相机快照（center/zoom/bearing/pitch）；进入新视图：
@@ -1225,6 +1354,10 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     const prev = prevViewRef.current;
     if (prev === view) return;
     prevViewRef.current = view;
+    // #43：进 3D 强制刷新塔几何——2D 期间逐帧重建被视图守卫拦下，塔集合
+    // 可能停在旧 zoom 值上（zoomend 兜底覆盖缩放手势，这里覆盖「2D 静态
+    // 切换」；rAF 后 viewRef 已是 geo3d，不会被守卫拦截）。
+    if (view === 'geo3d') scheduleTowerRebuildRef.current?.();
     const c = map.getCenter();
     viewCamerasRef.current[prev] = {
       center: { lng: c.lng, lat: c.lat },

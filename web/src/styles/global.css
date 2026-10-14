@@ -2175,16 +2175,23 @@ body.lab-split-dragging {
   color: #8da0bf;
 }
 
-/* 工具带紧凑化：单行排布，不再换行。
-   原实现 flex-wrap: wrap + 三个文字标签（视图/布局/模式，共 ~72px）+ 常驻提示文字
-   （~216px）把画布宽度 756px 挤爆，提示文字被挤到第二行，工具带高度 85px
-   （两行），画布纵向净高度被吃掉约 35px。现改为：标签去掉（图标带 title/aria-label
-   自解释）、提示文字不再占位（见下方 hint 规则），工具带恒定单行。 */
+/* 工具带紧凑化历史（v0.2.2）：原实现 flex-wrap: wrap + 三个文字标签
+   （视图/布局/模式，共 ~72px）+ 常驻提示文字（~216px）把画布宽度 756px
+   挤爆，提示文字被挤到第二行，工具带高度 85px（两行），画布纵向净高度被
+   吃掉约 35px。当时改为：标签去掉（图标带 title/aria-label 自解释）、
+   提示文字不再占位（见下方 hint 规则）、nowrap 保单行。 */
+/* #44（诉求 2）：并入工作台动作按钮组后，窄画布（如 1280 视口 68fr 分栏
+   ≈ 690px）单行放不下整条工具带——改为换行收纳：分组（canvas-seg /
+   lab-canvas-actions）内部不折行，组与组在行间流动，仅真溢出时才出现
+   第二行（宽画布仍单行，视觉不变）。提示文字为绝对定位不参与布局（见
+   下方 hint 规则）——原 nowrap 是提示常驻占位时代的约束，现在 wrap 只在
+   溢出时生效，且此前 nowrap 在真溢出时是直接横向逃逸容器，wrap 严格更优。 */
 .lab-canvas-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  row-gap: 6px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
 }
@@ -3120,24 +3127,34 @@ body.lab-split-dragging {
   padding: 12px 0 12px 0;
 }
 
-/* 页头信息条（FX-5 紧凑化：只压 padding/间距，不动按钮/信息，1080p 画布高度优化） */
+/* 页头信息条（FX-5 紧凑化 + #44 单行化：动作按钮下移画布工具带后只剩
+   一行元信息，只压 padding/间距，1080p 画布高度优化） */
 .lab-pagehead {
   padding: 8px 12px;
   margin-bottom: 8px;
 }
 
+/* #44（诉求 1）：工作台名 + 哈希 + 评分 + 计数 chip 恒单行。原 flex-wrap
+   在真实演示视口下把哈希/计数挤到第二行（用户感知为「页头两行」）；
+   现不折行，放不下时长名截断（title 提示全名），chip 密度优先。 */
 .lab-head-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  row-gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
+/* #44：单行化后长工作台名走截断（配合上方 nowrap + min-width:0，否则
+   flex 子项的 min-content 宽度会拒绝收缩把 chip 顶出容器）。 */
 .lab-head-name {
   font-size: 16px;
   font-weight: 700;
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 工作区哈希：完整 64 位十六进制在页头是一串无信息量的乱码，却占 ~220px 宽、
@@ -3167,22 +3184,23 @@ body.lab-split-dragging {
   margin-left: 4px;
 }
 
-.lab-head-actions {
+/* #44（诉求 2）：工作台动作按钮组——原 .lab-head-actions 独立行整组下移
+   画布工具带首组（TopologyCanvas actions 插槽）。组内可换行（窄画布下
+   不溢出），按钮尺寸沿用页头时代的降档（32px，与工具带图标高度接近）。 */
+.lab-canvas-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   row-gap: 6px;
-  margin-top: 8px;
   align-items: center;
+  min-width: 0;
 }
 
-.lab-pagehead .lab-head-actions {
-  margin-top: 6px;
-}
-
-/* 页头按钮降一档：36px 对「工具栏性质」的操作条偏高，与画布工具带的 28px
-   图标按钮差距过大。页头按钮统一 32px（--btn-h-md），保留 14px 字号保证可读。 */
-.lab-head-actions .btn {
+/* 动作按钮降一档：36px 对「工具栏性质」的操作条偏高，与画布工具带的 28px
+   图标按钮差距过大。统一 32px（--btn-h-md），保留 14px 字号保证可读。 */
+.lab-canvas-actions .btn,
+/* #44：标题行右端的返回列表同用 32px（36px 默认会把单行页头抬高 12px） */
+.lab-head-meta .btn {
   height: var(--btn-h-md);
   padding: 0 12px;
   font-size: 13px;

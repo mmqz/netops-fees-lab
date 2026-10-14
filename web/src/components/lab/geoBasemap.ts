@@ -1012,6 +1012,9 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
   const sources: StyleSpecification['sources'] = {
     devices: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     links: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+    // #43：链路选中高亮独立源（0/1 要素，GeoCanvas 选中时单独 setData；
+    // 主 links 源几何只随 topology/坐标系变化，点击不再全量重下）。
+    'links-selected': { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     towers: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     'offline-admin': { type: 'geojson', data: MAPDATA_ADMIN, attribution: OSM_ATTRIBUTION },
     'offline-rail': { type: 'geojson', data: MAPDATA_RAIL, attribution: OSM_ATTRIBUTION },
@@ -1165,10 +1168,12 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
       paint: { 'line-color': LINK_DOWN_COLOR, 'line-width': 3, 'line-dasharray': [2, 1.5] },
     },
     {
+      // #43：选中线改读独立单要素源（同 id）：几何由 GeoCanvas 在选中变化时
+      // 单独供给，主 links 源不再随点击 setData（原 filter 读 feature 属性
+      // selected，每次点击全量重建 GeoJSON 才能翻亮）。
       id: 'links-selected',
       type: 'line',
-      source: 'links',
-      filter: ['==', ['get', 'selected'], true],
+      source: 'links-selected',
       layout: { visibility: linkVis },
       paint: { 'line-color': LINK_SELECTED_COLOR, 'line-width': 4 },
     },
