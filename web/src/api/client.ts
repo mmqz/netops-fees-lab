@@ -13,6 +13,7 @@ import type {
   AlertItem,
   AlertsQuery,
   ImpactDocument,
+  RunStateHistoryResponse,
   MetricKeyItem,
   MetricSeriesResult,
   ResourceMetricsResponse,
@@ -714,6 +715,11 @@ export function getImpact(id: string, direction: 'up' | 'down'): Promise<ImpactD
   return requestJson<ImpactDocument>(
     `/resources/${encodeURIComponent(id)}/impact${buildQuery({ direction })}`,
   );
+}
+
+/** GET /api/resources/{id}/run-state/history?from=&to= — 状态时序（ts 升序）。 */
+export function getRunStateHistory(id: string): Promise<RunStateHistoryResponse> {
+  return requestJson<RunStateHistoryResponse>(`/resources/${encodeURIComponent(id)}/run-state/history`);
 }
 
 // ---------------------------------------------------------------------------

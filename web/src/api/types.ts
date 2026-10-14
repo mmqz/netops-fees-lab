@@ -300,6 +300,8 @@ export interface ResourceItem {
   name: string;
   /** 自由文本状态；空字符串表示未知（导入时未提供或被规则丢弃）。 */
   status: string;
+  /** 运行状态快照（W22：up|down|degraded|maintenance|unknown；空串=无观测）。 */
+  runState?: string;
   attributes: Record<string, string>;
   firstBatchId: string;
   updatedAt: string;
@@ -1036,3 +1038,18 @@ export interface ImpactDocument {
 
 /** traverse 方向（down = 向下寻根因，up = 向上看业务，both）。 */
 export type TraverseDirection = 'down' | 'up' | 'both';
+
+// ---------------------------------------------------------------------------
+// 21. GET /api/resources/{id}/run-state/history（W22 状态时序）
+// ---------------------------------------------------------------------------
+
+export interface RunStateHistoryItem {
+  ts: string;
+  runState: string;
+  source: string;
+}
+
+export interface RunStateHistoryResponse {
+  items: RunStateHistoryItem[];
+  total: number;
+}

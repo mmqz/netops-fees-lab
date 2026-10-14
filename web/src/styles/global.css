@@ -3793,3 +3793,24 @@ body.lab-split-dragging {
   font-weight: 600;
   margin: 4px 0 2px;
 }
+
+/* v0.9-R5 资源详情 · 运行状态历史（抽屉内嵌小时间线）。 */
+.runstate-history {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.runstate-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runstate-history-row .chip {
+  font-size: 11px;
+  padding: 0 8px;
+}

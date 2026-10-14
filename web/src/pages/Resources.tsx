@@ -16,6 +16,7 @@ import type {
   RelationGraph,
   RenameProposalItem,
   ResourceDetail,
+  RunStateHistoryItem,
   ResourceItem,
   ResourceMetricsResponse,
   ResourceType,
@@ -27,6 +28,7 @@ import {
   dismissAttributeChange,
   formatApiError,
   formatApiErrorText,
+  getRunStateHistory,
   getResource,
   getResourceMetrics,
   getResourceRelations,
@@ -66,6 +68,8 @@ import {
   RES_COL_UPDATED,
   RES_DRAWER_TAB_ATTRS,
   RES_DRAWER_TAB_GRAPH,
+  RES_RUNSTATE_HISTORY_TITLE,
+  RES_RUNSTATE_LABEL,
   RES_DRAWER_TAB_METRICS,
   RES_DRAWER_TAB_RELATIONS,
   RES_DRAWER_TAB_SOURCE,
@@ -101,6 +105,7 @@ import {
 import { fieldsForType, fieldLabel } from '../schema';
 import { Drawer } from '../components/Drawer';
 import { MetricChart } from '../components/MetricChart';
+import { RunStateChip } from '../components/RunStateChip';
 import { GraphAnalysisTab } from '../components/GraphAnalysisTab';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorBlock } from '../components/ErrorBlock';
@@ -224,6 +229,8 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   const [changeErrors, setChangeErrors] = useState<Record<string, string>>({});
   /** 正在处理中的 change id（按钮禁用）。 */
   const [changeBusy, setChangeBusy] = useState<string | null>(null);
+  /** 运行状态历史（v0.9-R5）：抽屉加载时并行拉取（W22 状态时序）。 */
+  const [runStateHistory, setRunStateHistory] = useState<RunStateHistoryItem[] | null>(null);
   /** 疑似改名提案（W6-D）：本资源作为旧资源（身份保留方）的 pending 提案。 */
   const [pendingRenames, setPendingRenames] = useState<RenameProposalItem[]>([]);
   /** 改名操作行内错误（按提案 id 定位）。 */
@@ -248,12 +255,14 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
       getResourceRelations(resourceId, 1),
       listAttributeChanges({ resourceId, status: 'pending', limit: 100 }),
       listRenames({ resourceId, status: 'pending', limit: 100 }),
+      getRunStateHistory(resourceId).catch(() => null),
     ])
       .then((results) => {
         setDetail(results[0]);
         setGraph(results[1]);
         setPendingChanges(results[2].items);
         setPendingRenames(results[3].items);
+        setRunStateHistory(results[4] === null ? [] : results[4].items);
         setChangeErrors({});
         setRenameErrors({});
         setLoading(false);
@@ -602,6 +611,26 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                   <th scope="row">{RES_COL_STATUS}</th>
                   <td>
                     <StatusChip status={detail.status} />
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">{RES_RUNSTATE_LABEL}</th>
+                  <td>
+                    <RunStateChip state={detail.runState ?? ''} />
+                    {(runStateHistory ?? []).length > 0 && (
+                      <div className="runstate-history">
+                        <div className="muted-note">{RES_RUNSTATE_HISTORY_TITLE}</div>
+                        {(runStateHistory ?? []).slice(-8).reverse().map((h) => (
+                          <div className="runstate-history-row" key={h.ts}>
+                            <RunStateChip state={h.runState} />
+                            <span className="muted-note" title={h.ts}>
+                              {formatDateTime(h.ts)}
+                            </span>
+                            <span className="muted-note mono">{h.source}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </td>
                 </tr>
                 <tr>

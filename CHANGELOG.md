@@ -2,6 +2,43 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.9.0] — 2026-10-14
+
+**运营可见性与 AI 分析闭环版**（五轮迭代 R1-R5 + issues #46/#47 修复轮；需求驱动：用户「先列还有哪些能开发的，距离一个完整的产品，然后继续开发至少持续5轮」）。核心：v0.7 数据模型弧（检测告警/指标时序/图查询）与 v0.8 真实数据里程碑从「API/CLI 可用」走到「人看得见、AI 用得上」——运营侧四个 UI 入口 + 智能体侧五个只读分析工具。
+
+### 修复 — issues #46/#47（用户/审计现场反馈，先于五轮开发落地）
+- **#46（P1）**：`TestCLIGraphQueryChannels` 恒失败——`assertJSONEqual` 把唯一时钟字段 `stats.elapsedMs` 纳入深比较（两次活查询必然不同）。按 issue 方案 B 精确剔除 `stats.elapsedMs`（`stripClockFields`），`stats.visitedEdges/truncated` 等确定性键保留在契约内（真实分叉仍会红）。commit 6ed2a5c。
+- **#47（P2）**：工作台 UI 四诉求一次重构闭环：工具带 actions 插槽从首组移到**末组**（画布固有控件在前）；七个动作按钮**图标化**（32px 方形 + title/aria-label，`lab-canvas-actions` nowrap）——1600/1280 视口工具带均单行（47px 实测）；页头卡片移除（无边框单行 `.lab-pagebar`，哈希/描述走 title）；/lab 默认**画布概览**（真实拓扑 SVG 缩略图卡片网格——不挂 Cytoscape/MapLibre 实例、IntersectionObserver 懒加载、确定性渲染；表格保留为「列表模式」）。`w47_browser_regression.sh` 14/14。commit a436357。
+- 顺带修复 `w28_browser_regression.sh` 的过时导入顺序（v0.8.0 时代 ports 在 boards 前——90 行 port 静默 E003 失败；与 demo-real/e2e 对齐为 boards+base_stations 先于 ports、protection_groups 入序）。
+
+### 新增 — 告警中心页 /alerts（R1）
+- v0.7 检测告警（规则→告警→run_state 联动）的运营第一入口：状态筛选（触发中（默认——待处置队列）/已确认/已清除）+ 级别筛选 + `?state=` 深链 + useSeq 陈旧响应守卫 + 分页。
+- 行渲染：AlertStateChip（触发中红/已确认橙/已清除灰）+ SeverityBadge + 规则 + 资源链接（→ `/resources?focus=` 抽屉）+ 相对时间 + 最新值 vs 阈值（比较器中文短语）+ 处置按钮（可见性随行状态，后端仍是最终权威）。
+- 确认旅程：专用可达性对话框收集必填「确认人」（空值禁用提交、Enter 提交、busy spinner）→ firing→acked + toast 回执；清除旅程：危险确认 → 归档态。行展开详情：规则 ID/指标/序列/窗口/首末时间 + 确认与清除审计行。`r1_alerts_regression.sh` 21/21（真实旅程：31 工作簿 → 7 日摄入 → 检测 4 firing → ack/clear 全链路浏览器断言）。
+
+### 新增 — 资源抽屉指标时序可视化（R2）
+- 抽屉第四页签「性能指标」（懒加载 + useSeq 守卫 + 内联重试）：MetricChart **零依赖确定性 SVG 折线图**——y 轴 min/mid/max 网格 + x 轴首末日期、polyline + 圆点（≤60 点，title 悬浮「日期 值 单位」）、suspect 点橙色（建议界外语义）、missing 空心、**劣化序列（末值<首值）告警红渲染**、恒值序列 ±1 兜底。
+- 每序列卡片：中文标签（`GET /api/metrics/keys` 封闭目录映射）+ 单位 chip + 点数/最新值；无序列资源空态文案。7 日光功率 -8→-24 dBm 劣化故事首次在 UI 可见（红线下探 + 「最新 -24」）。`r2_metrics_regression.sh` 11/11。
+
+### 新增 — 资源抽屉影响分析页签（R3）
+- 抽屉第五页签「影响分析」四子模式：**根因分析**（impact direction=down，默认——§10.5③ 根因候选含引擎中文判定理由 + BFS 距离 + 受影响面）/ **影响面**（direction=up，§10.6② 后端默认）/ 向下穿透 / 向上汇总（层序 BFS 逐层 depth 分组 + 节点/关系/跨层计数 + 截断提示）。
+- 节点行：层族类型 chip（按节点 layer 配色，未知类型灰 chip 防御回落）+ entity-link 深链 + 运行态 chip（异常=down/degraded 红 chip，与引擎判定一致）；**只读**（分析视图无任何写通道）；空集合显式空态文案（audit §2.6 UI 面）。旅程实测：光缆置 down → 电路抽屉根因分析 → 候选=异常光缆（中文理由）+ 61 受影响。`r3_graph_regression.sh` 9/9。
+
+### 新增 — MCP 十工具面：五个只读分析工具（R4，智能体核心卖点）
+- **工具面 5 → 10**，严格只读侧扩宽：`graph_traverse`（纵向穿透全参数：direction/layers/relations/maxDepth/maxNodes/pathOnly）/ `graph_impact`（down 根因追查（含中文判定理由）| up 影响面收集）/ `graph_context`（§7.3 一站式：详情+邻接+最新指标+近期异常——AI 分析单资源首选）/ `alerts_query`（firing/acked/cleared × severity，§18 资源投影）/ `metrics_query`（劣化曲线证据，封闭键校验）。
+- 红线不变且结构性强化：**告警 ack/clear 与检测运行不设工具**（人类/HTTP/CLI 专属——注册表测试钉死 alerts_ack/alerts_clear/detection_run/metrics_ingest 等禁止名）；每个工具绑定 HTTP 同一组合根实例（topology 引擎 × `svc.GraphStore`、`svc.GraphContext` 单实现、`svc.DB().Alerts`、`svc.Metrics`）——无 SQL、无第二引擎。
+- 测试：注册表钉 10 工具；`TestMCPGraphToolsRoundTrip`（traverse/impact/context 线形 + §2.6 数组契约 + 错误词汇表）；`TestMCPAlertsMetricsRoundTrip`——**AI 根因分析全旅程走真实 MCP 线**：导入真实电信端口样例 → 摄入 5 日 -8→-24 dBm 劣化 → 检测引擎 → alerts_query 命中 firing 告警（含资源投影）→ metrics_query 取 5 点曲线佐证。真实子进程 stdio 冒烟：tools/list 恰好 10。
+- 文档：README（十工具）、teleagent-integration.md（工具表 + schema + 推荐分析旅程 alerts_query → graph_context → graph_impact → metrics_query）。
+
+### 新增 — 运行状态视图与概览告警卡（R5）
+- 资源抽屉 attrs 页签新增**运行状态行**（W22 双态模型的 UI 面）：RunStateChip（运行绿/劣化橙/停机红/维护蓝/未知灰；空=「无观测」——台账状态是登记事实，运行状态是观测事实）+ 最近 8 条状态历史小时间线（`GET /api/resources/{id}/run-state/history`，抽屉加载并行拉取、失败静默）。
+- 概览页新增**触发中告警卡**（第 5 张统计卡：firing 计数、>0 时红色高亮、独立容错）与快捷入口「告警中心」。
+
+### 工程化
+- 版本三处单一事实源升 v0.9.0（domain/web/CHANGELOG，一致性测试钉死）。
+- 浏览器回归脚本三件套（r1/r2/r3，共 41 断言）+ w47 + w28 修正，全部真实数据旅程；测试计数 435 → **443**（+2 MCP 新测试 +注册表/禁止名扩展；`internal/mcpserver` 全绿）。
+- 修正：回归脚本动态端口（固定端口曾与残留 serve 跨库串台）；`tr -d '"'` 剥 JSON 引号导致的断言解析缺陷改独立求值；React 受控输入的原生 setter 触发法。
+
 ## [0.8.1] — 2026-10-14
 
 **issues #38-#45 修复轮**（audit-v0.8.0 的 8 项发现全部闭环 + 用户现场反馈 3 项；四提交：测试门禁与并发预算 / 演示数据三轮合一 / 前端交互成本与布局 / CLI 图查询通道）。

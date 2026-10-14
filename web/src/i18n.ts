@@ -30,7 +30,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.8.1';
+export const APP_VERSION = 'v0.9.0';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -732,6 +732,31 @@ export const GRAPH_RUNSTATE_NORMAL = '正常';
 export const GRAPH_NODE_LINK_TITLE = '在资源浏览中查看该资源';
 export const GRAPH_ROOT_LABEL = '分析起点';
 export const GRAPH_REASON_LABEL = '判定理由';
+
+// ---------------------------------------------------------------------------
+// 资源详情 · 运行状态行（v0.9-R5）
+// ---------------------------------------------------------------------------
+
+export const RES_RUNSTATE_LABEL = '运行状态';
+export const RES_RUNSTATE_NO_DATA = '无观测';
+export const RES_RUNSTATE_HISTORY_TITLE = '状态历史';
+export const RES_RUNSTATE_HISTORY_EMPTY = '暂无状态观测记录';
+
+// ---------------------------------------------------------------------------
+// 概览页 · 告警概览卡（v0.9-R5）
+// ---------------------------------------------------------------------------
+
+export const OV_STAT_FIRING_ALERTS = '触发中告警';
+export const OV_ALERTS_SUB = '告警中心待处置队列';
+export const OV_ALERTS_NONE_SUB = '无触发中告警';
+export const BTN_VIEW_ALERTS = '告警中心';
+export const RUN_STATE_LABELS: Record<string, string> = {
+  up: '运行',
+  down: '停机',
+  degraded: '劣化',
+  maintenance: '维护',
+  unknown: '未知',
+};
 
 // ---------------------------------------------------------------------------
 // 质量报告页

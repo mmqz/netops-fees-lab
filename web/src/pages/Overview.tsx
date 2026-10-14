@@ -13,6 +13,7 @@ import {
   formatApiError,
   getGovernanceSummary,
   getStats,
+  listAlerts,
   listBatches,
   runValidate,
 } from '../api/client';
@@ -20,6 +21,7 @@ import { useSeq } from '../hooks/useSeq';
 import {
   BTN_IMPORT_DATA,
   BTN_ROLLBACK,
+  BTN_VIEW_ALERTS,
   BTN_VIEW_ISSUES,
   BTN_VIEW_REPORT,
   format,
@@ -59,6 +61,9 @@ import {
   OV_RECENT_BATCHES_MORE,
   OV_ROLLBACK_MESSAGE,
   OV_ROLLBACK_TITLE,
+  OV_ALERTS_NONE_SUB,
+  OV_ALERTS_SUB,
+  OV_STAT_FIRING_ALERTS,
   OV_STAT_LATEST_BATCH,
   OV_STAT_QUALITY_SCORE,
   OV_STAT_SCORE_FULL,
@@ -306,6 +311,8 @@ function OverviewBody() {
   const [govError, setGovError] = useState<string | null>(null);
   const [govErrorDetail, setGovErrorDetail] = useState<string | null>(null);
   const [data, setData] = useState<OverviewData | null>(null);
+  /** v0.9-R5：触发中告警计数（独立容错——取数失败显示 NO_VALUE，不阻塞页面）。 */
+  const [firingAlerts, setFiringAlerts] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -362,6 +369,11 @@ function OverviewBody() {
   useEffect(() => {
     loadGov();
   }, [loadGov]);
+
+  // v0.9-R5：告警计数（pageSize=1 只取 total——列表本身在告警中心页）。
+  listAlerts({ state: 'firing', page: 1, pageSize: 1 })
+    .then((paged) => setFiringAlerts(paged.total))
+    .catch(() => setFiringAlerts(null));
 
   function confirmRollback(): void {
     const target = rollbackTarget;
@@ -463,6 +475,12 @@ function OverviewBody() {
         />
         <StatCard label={OV_STAT_QUALITY_SCORE} value={score ?? NO_VALUE} sub={OV_STAT_SCORE_FULL} />
         <StatCard
+          label={OV_STAT_FIRING_ALERTS}
+          value={firingAlerts === null ? NO_VALUE : firingAlerts}
+          sub={firingAlerts === null ? undefined : firingAlerts > 0 ? OV_ALERTS_SUB : OV_ALERTS_NONE_SUB}
+          valueClass={firingAlerts !== null && firingAlerts > 0 ? 'stat-value--error' : undefined}
+        />
+        <StatCard
           label={OV_STAT_LATEST_BATCH}
           value={latestBatch === undefined ? NO_VALUE : latestBatch.workbookName}
           sub={
@@ -500,6 +518,9 @@ function OverviewBody() {
             </button>
             <button type="button" className="btn btn--secondary" onClick={() => navigate('/issues')}>
               {BTN_VIEW_ISSUES}
+            </button>
+            <button type="button" className="btn btn--secondary" onClick={() => navigate('/alerts')}>
+              {BTN_VIEW_ALERTS}
             </button>
             <button type="button" className="btn btn--secondary" onClick={() => navigate('/report')}>
               {BTN_VIEW_REPORT}

@@ -22,17 +22,17 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.8.1 is
-// the real-public-data milestone: the demo dataset is anchored on internet
-// public data (OSM places/road-rail corridor geometry + OpenCelliD's 1,198
-// real Heilongjiang base stations) with disclosed-simulated inventory
-// details (provenance in docs/data-sources.md + manifest.json), two new
-// offline map layers (cable trunk corridors / wireless base stations, dual
-// coordinate variants), the demo-real.sh one-click chain and the e2e
-// realdata guard test. TestAppVersionP2 pins this constant and
-// TestAppVersionMatchesChangelogHead enforces the CHANGELOG single fact
-// source, so the three-way hand-copied versions cannot drift again.
-const AppVersion = "v0.8.1"
+// the health endpoint, the MCP server implementation and the CLI. v0.9.0 is
+// the operations-visibility milestone: the alerts center page (/alerts with
+// the ack/clear human lifecycle), metrics timeseries visualization in the
+// resource drawer (the 7-day degradation curve), the impact-analysis drawer
+// tab (graph_traverse/impact four modes) and the MCP surface widened to ten
+// read-only-heavy tools (graph_traverse/graph_impact/graph_context/
+// alerts_query/metrics_query — the AI root-cause loop). TestAppVersionP2
+// pins this constant and TestAppVersionMatchesChangelogHead enforces the
+// CHANGELOG single fact source, so the three-way hand-copied versions
+// cannot drift again.
+const AppVersion = "v0.9.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

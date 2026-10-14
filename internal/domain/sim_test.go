@@ -194,8 +194,8 @@ func TestSimSentinelErrors(t *testing.T) {
 func TestAppVersionP2(t *testing.T) {
 	// P2: the version constant is a single pinned fact (the changelog-head
 	// cross-check below guards the other copy).
-	if AppVersion != "v0.8.1" {
-		t.Errorf("AppVersion = %q, want v0.8.1 (v0.8.1 issues #38-#45 round: Windows test gate, SQLITE_BUSY budget, demo-data thickness/hierarchy, geo columns v20, CLI graph channel, GeoCanvas interaction cost, workbench layout — CHANGELOG 0.8.1)", AppVersion)
+	if AppVersion != "v0.9.0" {
+		t.Errorf("AppVersion = %q, want v0.9.0 (v0.9.0 operations-visibility round: alerts center page, metrics timeseries SVG, impact-analysis drawer tab, run-state view, MCP ten-tool read-only analysis surface — CHANGELOG 0.9.0)", AppVersion)
 	}
 }
 
