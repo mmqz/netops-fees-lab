@@ -971,7 +971,10 @@ export const LAB_GEO_OV_CABLE_TITLE =
   '七条干线走廊：哈大齐/哈牡/哈佳/佳牡/齐加/加漠/哈伊——OSM 公路/铁路真实几何（绥满高速·滨洲线·嫩林线·京漠线等），标注锚点链里程 · © OpenStreetMap contributors';
 export const LAB_GEO_OV_BASESTATION = '无线基站';
 export const LAB_GEO_OV_BASESTATION_TITLE =
-  'OpenCelliD 真实小区 1,198 站（1,851 小区）：蓝=移动 红=联通 绿=电信 紫=广电，点径随小区数 · 数据 © OpenCelliD（CC BY-SA 4.0）';
+  'OpenCelliD 真实小区 1,198 站（1,851 小区）：蓝=移动 红=联通 绿=电信 紫=广电，点径随小区数 · 数据 © OpenCelliD（CC BY-SA 4.0）· 点击基站跳转其资源详情（台账：状态/上联/服务客户/穿透分析）';
+/** W31：基站点击跳转的资源解析失败提示（非基站台账库或网络错误时）。 */
+export const LAB_GEO_BS_NOT_FOUND = '未在资源库中找到该基站（先导入基站台账）';
+export const LAB_GEO_BS_RESOLVE_FAIL = '基站资源解析失败，请稍后重试';
 export const LAB_GEO_LAYERS_BUSINESS = '业务图层';
 /** 底图模式名（与 geoBasemap.ts BASEMAPS 一一对应）。 */
 export const LAB_GEO_BM_AMAP = '高德街道';

@@ -388,8 +388,11 @@ def write_layers(corridors: list[dict], stations: list[dict]) -> dict[str, int]:
 
     bs_features = [{
         "type": "Feature",
-        "properties": {"o": st["operator"], "r": ",".join(st["radios"]), "c": st["cell_count"],
-                       "s": st["samples"]},
+        # id = 站编码（主小区 CGI，与 base_stations.xlsx 的自然键一致）——
+        # W31：地图点击 → 资源详情 的联动键（patch_station_ids.py 已对存量
+        # 产物做同等补丁；此处是源级修正，供未来全管线重跑）。
+        "properties": {"id": st["code"], "o": st["operator"], "r": ",".join(st["radios"]),
+                       "c": st["cell_count"], "s": st["samples"]},
         "geometry": {"type": "Point", "coordinates": [st["lng"], st["lat"]]},
     } for st in stations]
     written.update(write_geojson_gz(PUBLIC_MAPDATA / "hlj-basestations.geojson.gz", bs_features, dual_gcj=True))

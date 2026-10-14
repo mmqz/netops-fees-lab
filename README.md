@@ -49,7 +49,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **地理视图（v0.3.0 三视图切换；v0.6.1 地图修复轮重制底图与图层）**：画布「拓扑图 / 2D 地图 / 3D 地图」分段切换（按工作台持久化）；导入设备表时自动识别**经度/纬度/经纬度列**（组合列按中国坐标边界启发式拆分），物化后设备携带 geoLat/geoLng；2D 俯视——设备按真实经纬度落位（状态色圆点 + 编码牌）、链路 up 蓝实线 / down 红虚线 marching-ants；3D 斜视 58°——**离线 DEM 真实地形起伏**（AWS Terrain Tiles/Mapzen 高程数据 97 瓦片随二进制内嵌，图层面板「地形高程」开关，2D 亦呈山体阴影）+ 设备按连接数分高的示意柱体（柱高物理钳制 [60,4000] 米）、右键拖拽旋转环视；2D 同城密集设备自动**聚簇**为计数气泡（点击放大展开，标签不再堆叠）；设备点击/选中与右侧表格双向联动。**底图四模式**（图层面板切换，偏好本地持久化）：**离线简洁**（v0.6.4 默认：浅色类标准地图——森林绿、河网蓝、地名 + 交通区划，**无商铺 POI 标注**，内网开箱即用）、高德街道（在线，含 POI 标注）、高德卫星（影像 + 路网标注叠加）、ESRI 深色极简；高德模式下业务坐标自动 WGS84→GCJ-02 投影。**离线叠加图层**（© OpenStreetMap contributors，黑龙江本地数据随二进制内嵌）：**自然要素**（森林/水系/草地农田/地名，29,449 条 + 17,615 地名，双坐标变体任意底图可用，默认开）、行政区划（默认开）、公路（默认开）、铁路（默认关——不干扰主观看，可一键开）；瓦片持续失败自动降级离线底图并保留叠加。**3D 自然呈现**：地表覆盖贴在离线 DEM 真实地形上——河流随山谷走势，森林给山脉上绿色。地形高程数据 © Mapzen / AWS Open Data（SRTM·GMTED，terrarium 编码，z4–z8 内嵌）。maplibre-gl 懒加载独立 chunk。设计决策详见 [docs/adr/0010-map-basemap-modes.md](docs/adr/0010-map-basemap-modes.md) 与 [docs/adr/0011-ops-capabilities.md](docs/adr/0011-ops-capabilities.md)。演示数据：`testdata/geodevices.xlsx`（黑龙江哈尔滨→漠河北南干线 + 地震局 10M 长专线，坐标为演示近似值），一键脚本 `scripts/demo-geo-lab.sh`。
 - **真实公开数据演示（v0.8.0）**：图层面板新增「真实网络数据」分组——**光缆干线**（7 条走廊：哈大齐/哈牡/哈佳/佳牡/齐加/加漠/哈伊，© OpenStreetMap 真实公路/铁路几何按线路名选取——绥满高速 G10·滨洲线·嫩林线·京漠线 G111 等，标注锚点链里程，铁路走廊细虚线分层，默认开）与**无线基站**（OpenCelliD 真实小区 1,198 站/1,851 小区，运营商配色移动蓝·联通红·电信绿·广电紫，点径随小区数，默认关一键开；数据 © OpenCelliD CC BY-SA 4.0）。配套**真实数据集** `testdata/realdata/`（32 本工作簿 1,991 行全 33 类型：真实局站 83（OSM node id 身份）/真实基站 1,198（主小区 CGI 身份）/真实光缆 A-Z 端与锚点链测地里程，模拟台账细节逐字段披露于 `docs/data-sources.md` + `manifest.json`）与一键脚本 **`scripts/demo-real.sh`**（导入 → PTP 脚本 → 7 日指标摄入 → 哈大齐劣化告警 → 物化 → 光缆置 down → 影响面 100 节点跨层波及 circuit/protection_group/customer/service/leased_line）。数据许可与嵌入边界裁决见 [docs/adr/0015-real-public-data.md](docs/adr/0015-real-public-data.md)。
 
-- **字段厚度与图连接（v0.8.1，issues #40/#42/#45）**：真实数据集重制为 32 本工作簿 1,991 行——基站表补齐真实表 17 列（环/链/归属A/电联共享/坐标…）且 1,198 站全部有 `uplink_to`（坐标最近邻派生）与 `serves` 直连边；电路 32 条三族（工作台 32 链路/64 接口）；保护组/PTP 端口补齐（33 类仅 in_vpn 无数据——低优先级主动不做）；各台账状态列合法枚举全覆盖（无状态资源 98%→8.3%，**问题清单全清零、质量评分 100**）；`resources` 表 geo 坐标 REAL 列化（migration v20）+ CLI `query nearest` 空间查询。
+- **字段厚度与图连接（v0.8.1，issues #40/#42/#45）**：真实数据集重制为 32 本工作簿 1,991 行——基站表补齐真实表 17 列（环/链/归属A/电联共享/坐标…）且 1,198 站全部有 `uplink_to`（坐标最近邻派生）与 `serves` 直连边；电路 32 条三族（工作台 32 链路/64 接口）；保护组/PTP 端口补齐（33 类仅 in_vpn 无数据——低优先级主动不做）；各台账状态列合法枚举全覆盖（无状态资源 98%→8.3%，**问题清单全清零、质量评分 100**）；`resources` 表 geo 坐标 REAL 列化（migration v20）+ CLI `query nearest` 空间查询。**地图↔台账联动**（W31）：2D/3D 地图上点击任一真实基站 → 跳转其资源详情抽屉（属性/关系/穿透分析——图层要素携带站编码=自然键）。
 - **port 资源类型（v0.3.1 真实表格导入；migration v8 换稳定键）**：真实电信端口工作簿（端口流量监控表 / 端口资源表两种表头形态）可直接导入——`device_name + port_name` 复合自然键（`|` 拼接落库，键的设备侧自 migration v8 起锚定设备名称而非 IP：设备重划 IP 不再分裂资源，存量库升级语义见 [docs/data-model.md](docs/data-model.md) §11）、逐字重复表头行自动跳过多段导出拼接、带宽 0 合法入库；样例 `samples/telecom-port-multi-header.xlsx`（项目所有者在需求会话中提供的真实电信运营导出，已授权入库、仅限本私有仓库使用——来源与授权见 [samples/README.md](samples/README.md)；自然键稳定性分析见 [docs/natural-keys.md](docs/natural-keys.md)）；3D 地图默认视野按全部数据点的包围盒几何直解自适应（修「3D 地图过大」）。
 - **base_station 资源类型与条件自然键（v0.4，migration v9）**：真实无线基站工作簿可直接导入（14 真实业务列，无地市列；样例 `samples/telecom-base-station.xlsx`，来源与授权见 [samples/README.md](samples/README.md)）——主自然键为**基站编码**（非必填，真实表编码列常为空），编码缺失时键退化为 `(地市, 无线基站名称)` 兜底拼接、跳过空值，行照常导入并记 **W004**（身份键退化，warning 级治理 issue）；E001 判重与幂等 skip 都在解析后的最终键上（编码行与名称兜底行天然异键）；基站IP 值带 /30 掩码按 string 值列入库（IP 属可变属性，永不作身份）；键策略裁决见 [docs/natural-keys.md](docs/natural-keys.md) §4、行为细节见 [docs/import-and-validation.md](docs/import-and-validation.md) §12、DDL v9 见 [docs/data-model.md](docs/data-model.md) §12。
 - **机房 / 局站资源类型与 belongs_to 跨表关联（v0.4，migration v10）**：真实机房局站表（8 真实业务列：地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；样例 `samples/telecom-site-machine-room.xlsx`，来源与授权见 [samples/README.md](samples/README.md)）**同一张 sheet 承载两类实体**——先按局站类型导入（键 = 局站ID，12 位数字编码），再按机房类型导入同一 sheet（键 = 机房ID，17 位数字编码，机房 spec 的 局站ID 列映射为可选 ref 字段）：局站先入库即自动派生 `machine_room --belongs_to--> site` 关系，导入顺序由 E003 语义钉死；两类 ID 均为 KindString（前导零即身份，绝不数值化）；机房名称/局站名称/设备名称为昵称（展示名/属性），IP 地址为可变属性；键策略裁决见 [docs/natural-keys.md](docs/natural-keys.md) §4、行为细节见 [docs/import-and-validation.md](docs/import-and-validation.md) §13、DDL v10 见 [docs/data-model.md](docs/data-model.md) §13。
@@ -91,7 +91,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ```bash
 # 1) 测试
-make test            # go test -count=1 -timeout 15m ./...（331 个顶层测试 / 20 包 ok）
+make test            # go test -count=1 -timeout 15m ./...（434 个顶层测试 / 23 包 ok，v0.8.1）
 
 # 2) 构建前端（产物嵌入 internal/webui/dist，供 go:embed 使用）
 make web             # cd web && npm ci && npm run build
@@ -163,7 +163,7 @@ netopslab lab checkpoint --db $DB --workspace <wsId> --restore --id cp-1
 | 前端 | React 18 + TypeScript 5.6（strict）+ Vite 6 | 手写设计系统 CSS，无 UI 框架 |
 | 拓扑图 | cytoscape 3.32.0（精确版本，无插件） | /lab 画布；单 chunk 嵌入（ADR-0009） |
 | 嵌入 | go:embed all:dist | 前端产物打进二进制，单文件分发 |
-| 测试 | go test（table-driven） | 331 个顶层测试 / 20 包（`go test -list '.*'` 口径）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对 |
+| 测试 | go test（table-driven） | 434 个顶层测试 / 23 包（`go test -list '.*'` 口径，v0.8.1）；含 CLI 子进程 E2E、MCP stdio 回环、确定性双库比对、跨通道图查询一致 |
 
 ## 6. 仓库结构
 

@@ -58,6 +58,7 @@
     "ippools": "CIDR/网关/VLAN（私网演示段）",
     "machine_rooms": "编号/名称（归属局站真实）",
     "otn_ochs": "波道占用关系（波长为 ITU 100GHz 网格真实值，速率为示范值）",
+    "port_vpn": "端口 所属VPN实例 列（in_vpn 边，W31 补齐 29/29 关系覆盖）——设备 idx 轮转三 VPN 的示范值",
     "protection_groups": "保护组/protects 边为工程示意（1+1/1:1/环网三类型示范，工作/保护路径=干线名）",
     "rings/igp_domains/vpn": "保护结构/路由域/VPN 为工程示意",
     "sdh_timeslots": "时隙/容量（示范值）",

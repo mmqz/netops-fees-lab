@@ -93,6 +93,9 @@
 | 全量门禁 | gofmt 空 / vet 0 / `go test -count=1 -timeout 25m ./...` 3×全绿 / tsc 0 错误 / `npm run build` ~5s | **434** 顶层测试（429 + v20 ×3 + 图查询 ×2；`go test -list` 口径）；演示三脚本零回归 |
 | CI（GitHub Actions） | run **38522197404**（e1e023e，v0.8.1）：三 job（go/web/**windows**——windows 首次在列）全部 0-step failure | 同 v0.6.0-v0.8.0 已知账户 Actions-minutes 配额耗尽（job 秒级结束、steps=0，基础设施非代码——与 38401792157/38373827971 同况）；本地门禁集与 CI 同集全绿（上表），如实记录不伪造 |
 | **Windows 实机全量测试** | 本沙箱无 Windows 运行时——交叉编译 + 平台 skip 分支是代证据 | 用户环境（Windows）实跑 `go test -count=1 ./...` 后回报；CI windows-latest job 将在配额恢复后自证 |
+| in_vpn 全覆盖（W31） | `w30_verify.sh` + e2e 钉死（in_vpn 90） | 29/29 关系类型有数据；问题清单仍全零 |
+| 地图↔台账联动（W31） | agent-browser 浏览器级：开基站图层 → 点击哈尔滨某站（queryRenderedFeatures 定位）→ URL 变为 `/resources?focus=res_…` → 抽屉打开「基站·松北区·048」，环/归属A/电联共享/基站IP/经纬度 + 状态 在网 可见；console 零错误 | 图层要素 id=站编码（patch_station_ids.py 坐标匹配 1,198/1,198）；解析失败/未导入台账走 hover 信息条降级 |
+| 数值单元格稳健性（audit §2.4） | `TestIngestNumericCells`（门禁） | 真实 float 单元格（SetCellValue 非 SetCellStr）的 perf 表全链路摄入 1 行 1 点，值 -8.5 精确 round-trip |
 
 ## v0.8.0（2026-10-13）真实公开数据里程碑
 

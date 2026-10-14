@@ -31,8 +31,13 @@
 - `query traverse / impact / context / nearest` 四子命令——与 HTTP 端点**同一组合根装配**（`services.GraphStore` 唯一 store 绑定 + `services.GraphContext` 唯一上下文装配，api 处理器改为委托），CLI 与 HTTP 输出**逐字节一致**（跨通道 e2e 以 JSON 相等钉死 + 10 项用法错误退出码）；脚本化巡检（导入→检测→图查询）无需先 `serve`。
 - 空集合契约（audit §2.6）：traverse `nodes`/`edges`、impact `impacted`/`candidates`、context 各集合无结果时恒为 `[]` 非 `null`（严格客户端的 len()/迭代不再需要判空分支）。
 
+### 深入开发收口（W31，发布后追加）
+- `in_vpn` 演示数据补齐（端口 所属VPN实例 列，90 条）——**29/29 关系类型全覆盖**（#40 的「优先级低」项收口；仍零 W001）。
+- **地图↔台账联动**：基站图层要素补站编码（`patch_station_ids.py` 确定性补丁 + extract.py 源级修正，坐标匹配 1,198/1,198 验证）——2D/3D 地图点击任一真实基站 → `GET /api/resources` 解析 → 跳转 `/resources?focus=<id>` 详情抽屉（17 列台账属性 + 关系 + 穿透分析）；hover 信息条覆盖解析失败/未导入台账两种降级提示。
+- audit §2.4 稳健性钉死：`TestIngestNumericCells`——真实数值单元格（非文本）的 perf 表全链路摄入实测（双格式均可，点值精确 round-trip）。
+
 ### 测试与文档
-- 测试计数：429 → **434** 顶层（+3 migration v20：列/回填/最近邻；+2 图查询 e2e：跨通道一致 + 最近邻实测——期间 4 个旧 max-version 钉 19→20 为必要适配）；全量套件 3×全绿（23 包，含负载证据）；`GOOS=windows` 交叉编译 vet 通过。
+- 测试计数：429 → **435** 顶层（+3 migration v20：列/回填/最近邻；+2 图查询 e2e：跨通道一致 + 最近邻实测——期间 4 个旧 max-version 钉 19→20 为必要适配）；全量套件 3×全绿（23 包，含负载证据）；`GOOS=windows` 交叉编译 vet 通过。
 - e2e_realdata 钉死更新（1,991 行 + 4 PTP = 1,995 资源、关系计数、工作台 32/64/30、geoLat/geoLng 与状态覆盖 API 断言）；manifest/data-sources.md/architecture.md/api.md/README 同步。
 - 验证脚本：`scripts/w30_verify.sh`（数据验收度量：孤立率/状态覆盖/问题清单/关系分布）。
 

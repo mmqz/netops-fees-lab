@@ -120,7 +120,7 @@ func TestCLIRealDataImportChain(t *testing.T) {
 	}{
 		{"belongs_to", 83}, {"segment_of", 23}, {"fiber_of", 56},
 		{"fiber_terminates", 56}, {"housed_in", 30}, {"installed_in", 60},
-		{"serves", 1228}, {"uplink_to", 1198}, {"mounted_on", 90},
+		{"serves", 1228}, {"uplink_to", 1198}, {"mounted_on", 90}, {"in_vpn", 90},
 		{"protects", 4}, {"a_end", 32}, {"z_end", 32}, {"carried_by", 32},
 	} {
 		if got, _ := byRel[want.rel].(float64); got != want.count {

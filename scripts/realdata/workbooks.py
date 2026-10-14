@@ -285,18 +285,21 @@ def main() -> None:
     # ---- 9 端口（每设备 3 端口；键=设备名称|端口名称）----
     # W30（#40）：补 所属板卡 列（port → board 的 mounted_on 边）；
     # 每设备第 k 端口挂第 ((k-1) % 2)+1 板卡（每设备 2 板卡，端口 3 回绕板卡 1）。
+    # W31（#40 收尾）：补 所属VPN实例 列（port → vpn_instance 的 in_vpn 边，
+    # 29/29 关系类型全覆盖——列全填避免空值 W001：设备 idx 轮转三 VPN）。
     ports = []
     for d in devices:
         for k in (1, 2, 3):
             ports.append([d["name"], f"xgei-1/1/{k}", d["ip"], f"{k}号10GE线路口",
                           "10GE", "10000", "up", "up", "传输设备", d["site"]["city"],
                           d["site"]["district"], d["vendor"], d["model"], "2026-10-06",
-                          f"BRD-{d['code']}-{((k - 1) % 2) + 1:02d}"])
+                          f"BRD-{d['code']}-{((k - 1) % 2) + 1:02d}",
+                          f"L3VPN-{d['idx'] % 3 + 1:03d}"])
     reg("ports", len(ports))
     write_xlsx("ports", "端口清单",
                ["设备名称", "端口名称", "设备IP", "端口描述", "端口类型", "带宽Mbps",
                 "管理状态", "运行状态", "设备类型", "地市", "区县", "厂家", "型号", "日期",
-                "所属板卡"],
+                "所属板卡", "所属VPN实例"],
                ports)
 
     # ---- 10 板卡 ----
@@ -611,6 +614,8 @@ def main() -> None:
                                    "大庆/黑河单客户；issue #40 serves 直连边，示范值）",
             "protection_groups": "保护组/protects 边为工程示意（1+1/1:1/环网三类型示范，"
                                  "工作/保护路径=干线名）",
+            "port_vpn": "端口 所属VPN实例 列（in_vpn 边，W31 补齐 29/29 关系覆盖）——"
+                        "设备 idx 轮转三 VPN 的示范值",
             "status_columns": "W30（#45）各台账状态列均为确定性示范值（在网为主，"
                               "少量停用/在建/退网混合）；ip_pool「使用中」与 service「开通」"
                               "已修正为封闭枚举内合法值（issue #40 的 13 条 W002 清零）",

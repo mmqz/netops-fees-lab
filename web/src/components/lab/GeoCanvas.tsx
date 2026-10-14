@@ -42,10 +42,12 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Ref } from 'react';
 import type {
   ErrorEvent as MLErrorEvent,
   Map as MLMap,
+  MapLayerMouseEvent,
   MapMouseEvent,
   MapSourceDataEvent,
   MapStyleDataEvent,
@@ -81,6 +83,7 @@ import type { BasemapId, GeoLayerPrefs, OverlayId, StyleOptions } from './geoBas
 import { clusterBounds, clusterDevices } from './geoCluster';
 import type { ClusterPoint, DeviceCluster } from './geoCluster';
 import { clearElevationCache, sampleElevation } from './geoElevation';
+import { listResources } from '../../api/client';
 import {
   LAB_CANVAS_LEGEND_LABEL,
   LAB_GEO_BIZ_DEVICES,
@@ -147,6 +150,8 @@ import {
   LOADING_TEXT,
   SIM_STATUS_LABELS,
   format,
+  LAB_GEO_BS_NOT_FOUND,
+  LAB_GEO_BS_RESOLVE_FAIL,
 } from '../../i18n';
 
 // —— 常量（与规格及 global.css 同步） ——
@@ -685,6 +690,12 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
 ) {
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
+  // W31：基站图层点击 → 资源详情跳转（?focus= 打开详情抽屉）。
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
   const libRef = useRef<MapLibreModule | null>(null);
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   /** 聚簇 marker 持有项（W17）：key = 成员 id 升序 join（不含状态——状态变化
@@ -1104,6 +1115,53 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     if (map === null || !sourcesReady) return;
     applyLinkHighlight(map, selected, geoDataRef.current);
   }, [selected, sourcesReady]);
+
+  // —— W31：基站图层点击 → 资源详情（台账联动）——
+  // feature.properties.id = 站编码（主小区 CGI = base_station 自然键，
+  // scripts/realdata/patch_station_ids.py 已补进两个坐标变体的图层）。
+  // 解析经 GET /api/resources?type=base_station&q=<code>（exact 自然键命中
+  // 恰一条），跳转 /resources?focus=<id>（详情抽屉：属性/关系/穿透分析）。
+  // 找不到（未导入基站台账的库）→ hover 信息条提示，不跳转不报错弹窗。
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === null || !sourcesReady) return;
+    let cancelled = false;
+    const onBsClick = (ev: MapLayerMouseEvent): void => {
+      const props = ev.features?.[0]?.properties as Record<string, unknown> | undefined;
+      const code = props === undefined ? undefined : (props.id as string | undefined);
+      if (code === undefined || code === '') return;
+      listResources({ type: 'base_station', q: code, page: 1, pageSize: 5 })
+        .then((paged) => {
+          if (cancelled) return;
+          const hit = paged.items.find((it) => it.naturalKey === code) ?? paged.items[0];
+          if (hit === undefined) {
+            onHoverInfoRef.current?.({ code, name: LAB_GEO_BS_NOT_FOUND, status: 'up' });
+            return;
+          }
+          navigateRef.current(`/resources?focus=${encodeURIComponent(hit.id)}`);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            onHoverInfoRef.current?.({ code, name: LAB_GEO_BS_RESOLVE_FAIL, status: 'up' });
+          }
+        });
+    };
+    const onBsEnter = (): void => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const onBsLeave = (): void => {
+      map.getCanvas().style.cursor = '';
+    };
+    map.on('click', 'basestation-pts', onBsClick);
+    map.on('mouseenter', 'basestation-pts', onBsEnter);
+    map.on('mouseleave', 'basestation-pts', onBsLeave);
+    return () => {
+      cancelled = true;
+      map.off('click', 'basestation-pts', onBsClick);
+      map.off('mouseenter', 'basestation-pts', onBsEnter);
+      map.off('mouseleave', 'basestation-pts', onBsLeave);
+    };
+  }, [sourcesReady]);
 
   // —— 底图坐标系切换（WGS84↔GCJ-02）→ 塔体同帧重投影 ——
   // （几何重建主路径已由数据 effect 覆盖，这里 rAF 再补一帧确保相机就绪后

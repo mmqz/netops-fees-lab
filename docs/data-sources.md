@@ -37,6 +37,8 @@
 | 端口所属板卡（90 条 mounted_on） | manifest | 每设备 3 端口挂 2 板卡的确定性回绕（#40） |
 | 保护组（4 组 + protects 边） | manifest `protection_groups` | 1+1/1:1/环网三类型示范；工作/保护路径=干线名（#40） |
 | 各台账 状态 列 | manifest `status_columns` | 确定性示范值（在网为主，少量停用/在建/退网）；W30 前的 ip_pool「使用中」/service「开通」为封闭枚举外非法值（13 条 W002），已修正（#40） |
+| 端口 所属VPN实例（90 条 in_vpn） | manifest `port_vpn` | W31 补齐 29/29 关系类型全覆盖——设备 idx 轮转三 VPN 的示范值（#40 优先级低项收口） |
+| 地图基站 id 属性 | `scripts/realdata/patch_station_ids.py` | W31：图层要素补站编码（=base_station 自然键）——地图点击跳转资源详情的联动键；坐标精确匹配 1,198/1,198 验证 |
 | ptp_port（4 行） | `samples/ptp-config-script.txt` | v0.5 既有解析通道，demo-real.sh W30 起纳入（#40：2 类无数据 → 1 类） |
 | 客户（12）/业务（8）/专线（6） | manifest | **全部虚构**（名称含虚构标记或明显虚构词）；专线装机地址=真实局站名+「演示装机地址」标记 |
 | 设备（30）/端口/板卡/机架/ODF/PON 家族 | manifest | 所在局站/机房/**坐标真实**；编码/IP（私网演示段）/型号（真实产品族名作示范值）模拟 |
