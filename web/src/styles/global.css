@@ -3729,3 +3729,67 @@ body.lab-split-dragging {
   height: auto;
   display: block;
 }
+
+/* v0.9-R3 资源详情 · 影响分析页签（图查询结果）。 */
+.graph-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.graph-mode {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.graph-summary {
+  display: flex;
+  gap: 8px;
+}
+
+.graph-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.graph-node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  flex-wrap: wrap;
+}
+
+.graph-node-row .entity-link {
+  font-size: 13px;
+}
+
+.graph-candidate {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.graph-candidate:last-of-type {
+  border-bottom: none;
+}
+
+.graph-reason {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 4px 8px;
+}
+
+.graph-depth-group {
+  margin-bottom: 6px;
+}
+
+.graph-depth-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 4px 0 2px;
+}

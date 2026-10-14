@@ -65,6 +65,7 @@ import {
   RES_COL_TYPE,
   RES_COL_UPDATED,
   RES_DRAWER_TAB_ATTRS,
+  RES_DRAWER_TAB_GRAPH,
   RES_DRAWER_TAB_METRICS,
   RES_DRAWER_TAB_RELATIONS,
   RES_DRAWER_TAB_SOURCE,
@@ -100,6 +101,7 @@ import {
 import { fieldsForType, fieldLabel } from '../schema';
 import { Drawer } from '../components/Drawer';
 import { MetricChart } from '../components/MetricChart';
+import { GraphAnalysisTab } from '../components/GraphAnalysisTab';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Pagination } from '../components/Pagination';
@@ -115,7 +117,7 @@ import { TOAST_COPIED } from '../i18n';
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-type DrawerTab = 'attrs' | 'source' | 'relations' | 'metrics';
+type DrawerTab = 'attrs' | 'source' | 'relations' | 'metrics' | 'graph';
 
 // ---------------------------------------------------------------------------
 // 资源抽屉
@@ -558,6 +560,13 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
             </button>
             <button
               type="button"
+              className={`tab${tab === 'graph' ? ' tab--active' : ''}`}
+              onClick={() => setTab('graph')}
+            >
+              {RES_DRAWER_TAB_GRAPH}
+            </button>
+            <button
+              type="button"
               className={`tab${tab === 'source' ? ' tab--active' : ''}`}
               onClick={() => setTab('source')}
             >
@@ -702,6 +711,7 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
               </div>
             </div>
           )}
+          {tab === 'graph' && <GraphAnalysisTab resourceId={resourceId} />}
           {tab === 'metrics' && (
             <div className="metric-list">
               {metricsError !== null && (

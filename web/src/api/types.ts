@@ -984,3 +984,55 @@ export interface ResourceMetricsResponse {
   resourceId: string;
   series: MetricSeriesResult[];
 }
+
+// ---------------------------------------------------------------------------
+// 20. 图查询（GET /api/resources/{id}/traverse | impact | context）
+// ---------------------------------------------------------------------------
+
+/** traverse 文档的节点（depth = BFS 层深）。 */
+export interface TraverseNode {
+  id: string;
+  type: string;
+  name: string;
+  layer: number;
+  depth: number;
+  status: string;
+  runState: string;
+}
+
+export interface TraverseEdge {
+  from: string;
+  to: string;
+  relation: string;
+  crossLayer: boolean;
+}
+
+/** GET /api/resources/{id}/traverse 响应。 */
+export interface TraverseDocument {
+  root: { id: string; type: string; name: string; layer: number };
+  nodes: TraverseNode[];
+  edges: TraverseEdge[];
+  paths?: string[][];
+  truncated: boolean;
+  stats: { visitedEdges: number; elapsedMs: number };
+}
+
+/** impact 文档的节点投影。 */
+export interface ImpactNode {
+  id: string;
+  type: string;
+  name: string;
+  layer: number;
+  runState: string;
+}
+
+/** GET /api/resources/{id}/impact 响应。 */
+export interface ImpactDocument {
+  root: ImpactNode;
+  impacted: Array<{ node: ImpactNode; distance: number; viaPath: string[] }>;
+  candidates: Array<{ node: ImpactNode; distance: number; reason: string }>;
+  truncated: boolean;
+}
+
+/** traverse 方向（down = 向下寻根因，up = 向上看业务，both）。 */
+export type TraverseDirection = 'down' | 'up' | 'both';

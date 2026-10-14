@@ -707,6 +707,33 @@ export const METRIC_CHART_SUSPECT = '疑似异常点';
 export const METRIC_CHART_MISSING = '缺失点';
 
 // ---------------------------------------------------------------------------
+// 资源详情 · 影响分析页签（v0.9-R3，图查询 traverse/impact）
+// ---------------------------------------------------------------------------
+
+export const RES_DRAWER_TAB_GRAPH = '影响分析';
+export const GRAPH_MODE_RCA = '根因分析';
+export const GRAPH_MODE_IMPACT = '影响面';
+export const GRAPH_MODE_TRAVERSE_DOWN = '向下穿透';
+export const GRAPH_MODE_TRAVERSE_UP = '向上汇总';
+export const GRAPH_CANDIDATES_TITLE = '根因候选';
+export const GRAPH_CANDIDATES_EMPTY = '无根因候选（本资源周边无异常节点）';
+export const GRAPH_IMPACTED_TITLE = '受影响面';
+export const GRAPH_IMPACTED_EMPTY = '无受影响资源';
+export const GRAPH_TRAVERSE_TITLE = '穿透结果';
+export const GRAPH_TRAVERSE_EMPTY = '该方向无可达资源';
+export const GRAPH_NODES_UNIT = '节点 {n}';
+export const GRAPH_EDGES_UNIT = '关系 {n}';
+export const GRAPH_CANDIDATES_COUNT = '候选 {n}';
+export const GRAPH_CROSSLAYER_UNIT = '跨层 {n}';
+export const GRAPH_DEPTH_UNIT = '距离 {n}';
+export const GRAPH_TRUNCATED_HINT = '结果已按预算截断（分类基于不完整子图，结论供参考）';
+export const GRAPH_RUNSTATE_ABNORMAL = '异常';
+export const GRAPH_RUNSTATE_NORMAL = '正常';
+export const GRAPH_NODE_LINK_TITLE = '在资源浏览中查看该资源';
+export const GRAPH_ROOT_LABEL = '分析起点';
+export const GRAPH_REASON_LABEL = '判定理由';
+
+// ---------------------------------------------------------------------------
 // 质量报告页
 // ---------------------------------------------------------------------------
 

@@ -12,9 +12,12 @@ import type {
   AlertClearResponse,
   AlertItem,
   AlertsQuery,
+  ImpactDocument,
   MetricKeyItem,
   MetricSeriesResult,
   ResourceMetricsResponse,
+  TraverseDirection,
+  TraverseDocument,
   ApplyResult,
   AttributeChangeItem,
   AttributeChangeList,
@@ -690,6 +693,28 @@ export function getResourceMetrics(id: string, keys?: string[]): Promise<Resourc
 }
 
 export type { MetricSeriesResult };
+
+// ---------------------------------------------------------------------------
+// 图查询（v0.9-R3：traverse / impact；context 留作 R4+）
+// ---------------------------------------------------------------------------
+
+/** GET /api/resources/{id}/traverse?direction=down|up|both（默认 down）。 */
+export function getTraverse(id: string, direction: TraverseDirection): Promise<TraverseDocument> {
+  return requestJson<TraverseDocument>(
+    `/resources/${encodeURIComponent(id)}/traverse${buildQuery({ direction })}`,
+  );
+}
+
+/**
+ * GET /api/resources/{id}/impact?direction=up|down — 影响面 + 根因候选。
+ * down = 根因追查（§10.5③：从疑点向下找异常根因）；up = 影响面收集
+ * （§10.6②：从异常源向上汇总业务受损面——后端默认）。
+ */
+export function getImpact(id: string, direction: 'up' | 'down'): Promise<ImpactDocument> {
+  return requestJson<ImpactDocument>(
+    `/resources/${encodeURIComponent(id)}/impact${buildQuery({ direction })}`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 防抖工具
