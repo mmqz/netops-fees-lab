@@ -3693,3 +3693,39 @@ body.lab-split-dragging {
   gap: 6px;
   flex-wrap: nowrap;
 }
+
+/* v0.9-R2 资源详情 · 指标序列卡片（SVG 折线图）。 */
+.metric-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px 6px;
+}
+
+.metric-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.metric-card-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.metric-card-unit {
+  font-size: 11px;
+  padding: 0 8px;
+}
+
+.metric-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}

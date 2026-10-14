@@ -947,3 +947,40 @@ export interface AlertClearResponse {
   state: AlertState;
   clearedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// 19. 指标时序（GET /api/metrics/keys + GET /api/resources/{id}/metrics）
+// ---------------------------------------------------------------------------
+
+/** GET /api/metrics/keys 行（封闭指标目录，来自 metric_keys 表）。 */
+export interface MetricKeyItem {
+  metricKey: string;
+  label: string;
+  unit: string;
+  valueKind: 'gauge' | 'counter' | 'ratio';
+  minValue?: number | null;
+  maxValue?: number | null;
+  direction: string;
+  createdAt: string;
+}
+
+/** 指标数据点（quality：ok|missing|suspect）。 */
+export interface MetricPoint {
+  ts: string;
+  value: number;
+  quality: 'ok' | 'missing' | 'suspect';
+}
+
+/** GET /api/resources/{id}/metrics 的单条序列。 */
+export interface MetricSeriesResult {
+  seriesId: string;
+  metricKey: string;
+  unit: string;
+  points: MetricPoint[];
+}
+
+/** GET /api/resources/{id}/metrics 响应。 */
+export interface ResourceMetricsResponse {
+  resourceId: string;
+  series: MetricSeriesResult[];
+}

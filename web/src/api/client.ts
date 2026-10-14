@@ -12,6 +12,9 @@ import type {
   AlertClearResponse,
   AlertItem,
   AlertsQuery,
+  MetricKeyItem,
+  MetricSeriesResult,
+  ResourceMetricsResponse,
   ApplyResult,
   AttributeChangeItem,
   AttributeChangeList,
@@ -666,6 +669,27 @@ export function clearAlert(id: string): Promise<AlertClearResponse> {
     method: 'POST',
   });
 }
+
+// ---------------------------------------------------------------------------
+// 指标时序（GET /api/metrics/keys + GET /api/resources/{id}/metrics）
+// ---------------------------------------------------------------------------
+
+/** GET /api/metrics/keys — 封闭指标目录（key → 中文标签/单位映射源）。 */
+export function listMetricKeys(): Promise<{ items: MetricKeyItem[]; total: number }> {
+  return requestJson<{ items: MetricKeyItem[]; total: number }>('/metrics/keys');
+}
+
+/**
+ * GET /api/resources/{id}/metrics — 该资源的全部指标序列（原始点，
+ * 按 (metricKey, ts) 排序，确定性）。可选 keys/from/to/agg 过滤。
+ */
+export function getResourceMetrics(id: string, keys?: string[]): Promise<ResourceMetricsResponse> {
+  return requestJson<ResourceMetricsResponse>(
+    `/resources/${encodeURIComponent(id)}/metrics${buildQuery({ keys: keys?.join(',') })}`,
+  );
+}
+
+export type { MetricSeriesResult };
 
 // ---------------------------------------------------------------------------
 // 防抖工具

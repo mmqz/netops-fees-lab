@@ -14,23 +14,26 @@ import type {
   GraphNode,
   Paged,
   RelationGraph,
-  ResourceDetail,
   RenameProposalItem,
+  ResourceDetail,
   ResourceItem,
+  ResourceMetricsResponse,
   ResourceType,
 } from '../api/types';
 import {
   applyAttributeChange,
+  applyRename,
   debounce,
   dismissAttributeChange,
   formatApiError,
   formatApiErrorText,
   getResource,
+  getResourceMetrics,
   getResourceRelations,
   listAttributeChanges,
-  listResources,
+  listMetricKeys,
   listRenames,
-  applyRename,
+  listResources,
   rejectRename,
 } from '../api/client';
 import {
@@ -62,8 +65,11 @@ import {
   RES_COL_TYPE,
   RES_COL_UPDATED,
   RES_DRAWER_TAB_ATTRS,
+  RES_DRAWER_TAB_METRICS,
   RES_DRAWER_TAB_RELATIONS,
   RES_DRAWER_TAB_SOURCE,
+  METRIC_EMPTY,
+  METRIC_LOAD_FAILED,
   RES_EMPTY_DESC,
   RES_EMPTY_TITLE,
   RES_EXPORT_HINT,
@@ -93,6 +99,7 @@ import {
 } from '../i18n';
 import { fieldsForType, fieldLabel } from '../schema';
 import { Drawer } from '../components/Drawer';
+import { MetricChart } from '../components/MetricChart';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Pagination } from '../components/Pagination';
@@ -108,7 +115,7 @@ import { TOAST_COPIED } from '../i18n';
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-type DrawerTab = 'attrs' | 'source' | 'relations';
+type DrawerTab = 'attrs' | 'source' | 'relations' | 'metrics';
 
 // ---------------------------------------------------------------------------
 // 资源抽屉
@@ -221,6 +228,13 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   const [renameErrors, setRenameErrors] = useState<Record<string, string>>({});
   /** 正在处理中的提案 id（按钮禁用）。 */
   const [renameBusy, setRenameBusy] = useState<string | null>(null);
+  /** 性能指标序列（v0.9-R2）：懒加载——首次切到该页签才拉，缓存于组件态；
+   *  keys 目录同理（key → 中文标签映射），两者并行、互不阻塞。 */
+  const [metrics, setMetrics] = useState<ResourceMetricsResponse | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
+  const metricsSeqRef = useRef(0);
   const toast = useToast();
 
   const load = useCallback((): void => {
@@ -249,6 +263,31 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         setLoading(false);
       });
   }, [resourceId]);
+
+  /** v0.9-R2：拉取本资源的指标序列 + 指标目录（key → 中文标签）。
+   *  懒加载语义：仅首次进入「性能指标」页签触发；失败可经页签内重试。 */
+  function loadMetrics(): void {
+    const seq = ++metricsSeqRef.current;
+    setMetricsLoading(true);
+    setMetricsError(null);
+    Promise.all([getResourceMetrics(resourceId), listMetricKeys()])
+      .then(([res, catalog]) => {
+        if (metricsSeqRef.current !== seq) return;
+        setMetrics(res);
+        const labels: Record<string, string> = {};
+        for (const item of catalog.items) {
+          labels[item.metricKey] = item.label;
+        }
+        setMetricLabels(labels);
+        setMetricsLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (metricsSeqRef.current !== seq) return;
+        const display = formatApiErrorText(err);
+        setMetricsError(display);
+        setMetricsLoading(false);
+      });
+  }
 
   /** 应用一条待确认变更：成功后行内刷新（重拉详情/关联/剩余 pending）；
    *  W13-D：引用字段且已有派生关系的 apply 会同步改挂关系，toast 文案带「关系已改挂」
@@ -507,6 +546,18 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
             </button>
             <button
               type="button"
+              className={`tab${tab === 'metrics' ? ' tab--active' : ''}`}
+              onClick={() => {
+                setTab('metrics');
+                if (metrics === null && !metricsLoading) {
+                  loadMetrics();
+                }
+              }}
+            >
+              {RES_DRAWER_TAB_METRICS}
+            </button>
+            <button
+              type="button"
               className={`tab${tab === 'source' ? ' tab--active' : ''}`}
               onClick={() => setTab('source')}
             >
@@ -649,6 +700,27 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                 )}
                 {loading2 && <Spinner size={16} />}
               </div>
+            </div>
+          )}
+          {tab === 'metrics' && (
+            <div className="metric-list">
+              {metricsError !== null && (
+                <ErrorBlock message={METRIC_LOAD_FAILED} detail={metricsError} onRetry={loadMetrics} />
+              )}
+              {metricsLoading && <Spinner size={16} />}
+              {!metricsLoading && metricsError === null && metrics !== null && metrics.series.length === 0 && (
+                <div className="muted-note">{METRIC_EMPTY}</div>
+              )}
+              {!metricsLoading &&
+                metricsError === null &&
+                metrics !== null &&
+                metrics.series.map((series) => (
+                  <MetricChart
+                    key={series.seriesId}
+                    series={series}
+                    label={metricLabels[series.metricKey] ?? series.metricKey}
+                  />
+                ))}
             </div>
           )}
         </>

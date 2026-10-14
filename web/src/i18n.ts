@@ -694,6 +694,19 @@ export const ALR_RESOURCE_LINK_TITLE = '在资源浏览中查看';
 export const ALR_EMPTY = '当前筛选条件下没有告警';
 
 // ---------------------------------------------------------------------------
+// 资源详情 · 性能指标页签（v0.9-R2）
+// ---------------------------------------------------------------------------
+
+export const RES_DRAWER_TAB_METRICS = '性能指标';
+export const METRIC_EMPTY = '该资源没有指标序列（检测告警与劣化曲线在此展示）';
+export const METRIC_LOAD_FAILED = '指标加载失败';
+export const METRIC_LOADING = '指标加载中…';
+export const METRIC_CHART_POINTS = '{n} 点';
+export const METRIC_CHART_LAST = '最新 {v}';
+export const METRIC_CHART_SUSPECT = '疑似异常点';
+export const METRIC_CHART_MISSING = '缺失点';
+
+// ---------------------------------------------------------------------------
 // 质量报告页
 // ---------------------------------------------------------------------------
 
