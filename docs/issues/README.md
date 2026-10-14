@@ -1,6 +1,6 @@
 # 测试发现的问题清单
 
-> 来源：2026-10-12 全面测试（Windows + Linux/Docker，v0.6.0 @ 2033de8）；#12–#14 为 2026-10-12 用户现场反馈（v0.6.2 验收后）；#15 为 2026-10-12 用户现场反馈（v0.6.3 验收后）；#16 为 2026-10-12 数据模型评审（v0.6.4 之后，架构级）；#17–#29 为数据模型设计衍生的决策项与缺失项（见 [design/data-model-v1.md](../design/data-model-v1.md) §11）；**#38–#41 为 v0.7.0/v0.8.0 本地审计发现（见 [audit-v0.8.0.md](../audit-v0.8.0.md)）；**#42–#45 为 v0.8.0 真实数据演示的用户现场反馈与复核**
+> 来源：2026-10-12 全面测试（Windows + Linux/Docker，v0.6.0 @ 2033de8）；#12–#14 为 2026-10-12 用户现场反馈（v0.6.2 验收后）；#15 为 2026-10-12 用户现场反馈（v0.6.3 验收后）；#16 为 2026-10-12 数据模型评审（v0.6.4 之后，架构级）；#17–#29 为数据模型设计衍生的决策项与缺失项（见 [design/data-model-v1.md](../design/data-model-v1.md) §11）；**#38–#41 为 v0.7.0/v0.8.0 本地审计发现（见 [audit-v0.8.0.md](../audit-v0.8.0.md)）；**#42–#45 为 v0.8.0 真实数据演示的用户现场反馈与复核；**#46 为 v0.8.1 本地验证发现（见 [audit-v0.8.1.md](../audit-v0.8.1.md)）**
 > 完整报告：[test-report-windows-2026-10-12.md](../test-report-windows-2026-10-12.md)
 
 ## 按优先级
@@ -106,6 +106,45 @@
 
 ---
 
+---
+
+## v0.8.1 本地验证（2026-10-14）
+
+来源：[docs/audit-v0.8.1.md](../audit-v0.8.1.md)。v0.8.1 是针对 #38–#45 的修复轮。
+
+**验证结论：8 个 issue 中 7 项完全修复，1 项仅剩测试断言缺陷。**
+
+| # | v0.8.0 | v0.8.1 | 判定 |
+| --- | --- | --- | --- |
+| 孤立资源 | 1,486 (75.6%) | **197 (9.9%)** | ✅ #42 |
+| `uplink_to` / `serves` | 0 / 0 | **1,198 / 1,228** | ✅ #42 |
+| 有 status | 40 (2.0%) | **1,826 (91.7%)** | ✅ #45 |
+| geo 列 | 无 | **1,288 有值** | ✅ #45 |
+| 工作台 接口/链路 | 20 / 10 | **64 / 32** | ✅ #42 |
+| 工作簿 / 行数 | 31 / 1,965 | **32 / 1,991** | ✅ |
+| 导入失败 | 0 | 0 | ✅ |
+| CLI 图查询 | 无 | traverse/impact/context | ✅ #41 |
+| 空集合契约 | `null` | `[]` | ✅ §2.6 |
+| Windows 测试 | 6 包 15 项失败 | 1 包 1 项 | ✅ #38 |
+
+| # | 优先级 | 标题 | 说明 |
+| --- | --- | --- | --- |
+| [46](issue-46-cli-http-clock-assert.md) | **P1** | TestCLIGraphQueryChannels 恒失败 | 断言把 `stats.elapsedMs`（运行时钟）纳入深比较，必然不同 |
+
+### 导入顺序（v0.8.1 新增约束）
+
+v0.8.1 把「所属环/上联设备/服务客户」从文本**升级为引用列**，导入必须按依赖序：
+
+```
+customers rings igp_domains vpn_instances sites machine_rooms bbus olts
+devices boards racks ports pon_ports base_stations rrus onus
+optical_cables cable_segments ducts manholes poles odf odf_terminals
+splice_boxes fibers otn_ochs sdh_timeslots circuits protection_groups
+ippools services leased_lines
+```
+
+顺序错误会报 `E003 引用不存在` 并**级联失败**（device 失败 → board/port/base_station 全失败）。
+注：`scripts/demo-real.sh` 的 ORDER 数组仍是 v0.8.0 的旧顺序，建议同步更新。
 ## v0.8.0 真实数据演示：用户现场反馈（#42–#45）
 
 来源：2026-10-13 用户实际操作 v0.8.0 真实数据演示后的反馈 + 本地库直查复核。
