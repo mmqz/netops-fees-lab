@@ -91,7 +91,7 @@
 | GeoCanvas 交互成本（#43） | 代码级结构证据 + agent-browser 浏览器级 | `buildGeoData` deps 不含 selected（主源 setData 仅随 topology/坐标系）；links-selected 单要素源 O(1) 高亮；簇增差分 + 视口裁剪（实测 90 marker/13 cluster 就地刷新）；塔重建 2D 关闭；2D/3D + 拖拽/缩放/选中压力测试 console 零错误 |
 | 工作台布局（#44） | agent-browser 浏览器级实测 | 页头元信息单行 32px（原三行 ~100px+）；工具带 47px 单行含七动作按钮；面板默认折叠（画布 1368px 全宽）→点击设备 marker 自动展开（540px，**无 localStorage 写入**）；显式折叠按钮落盘 '1' 且 reload 后保持；1280px 视口工具带组间 wrap 不溢出 |
 | 全量门禁 | gofmt 空 / vet 0 / `go test -count=1 -timeout 25m ./...` 3×全绿 / tsc 0 错误 / `npm run build` ~5s | **434** 顶层测试（429 + v20 ×3 + 图查询 ×2；`go test -list` 口径）；演示三脚本零回归 |
-| CI（GitHub Actions） | 推送后记录（本地与 CI 同门禁集） | 待推送后补记 run 号（Actions-minutes 配额耗尽期间 windows job 可能 0-step 失败——同 v0.6-v0.8 已知基础设施现实，如实记录） |
+| CI（GitHub Actions） | run **38522197404**（e1e023e，v0.8.1）：三 job（go/web/**windows**——windows 首次在列）全部 0-step failure | 同 v0.6.0-v0.8.0 已知账户 Actions-minutes 配额耗尽（job 秒级结束、steps=0，基础设施非代码——与 38401792157/38373827971 同况）；本地门禁集与 CI 同集全绿（上表），如实记录不伪造 |
 | **Windows 实机全量测试** | 本沙箱无 Windows 运行时——交叉编译 + 平台 skip 分支是代证据 | 用户环境（Windows）实跑 `go test -count=1 ./...` 后回报；CI windows-latest job 将在配额恢复后自证 |
 
 ## v0.8.0（2026-10-13）真实公开数据里程碑
