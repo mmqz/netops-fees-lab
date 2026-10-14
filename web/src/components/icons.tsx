@@ -468,3 +468,45 @@ export function IconAlert({ size = 16, className }: IconProps) {
   );
 }
 
+/* —— #47 工作台动作按钮图标化新增（undo / diff / checkpoint / ops）—— */
+
+/** 撤销（↶ 弧形回退箭头）。 */
+export function IconUndo({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </svg>
+  );
+}
+
+/** 前后对比（左右分栏 + 中缝，diff 语义）。 */
+export function IconDiff({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <rect x="3" y="4" width="7" height="16" rx="1" />
+      <rect x="14" y="4" width="7" height="16" rx="1" />
+      <path d="M12 3v18" strokeDasharray="2 2" />
+    </svg>
+  );
+}
+
+/** 检查点（旗帜——「在当前位置插旗存档」）。 */
+export function IconFlag({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <line x1="5" y1="21" x2="5" y2="4" />
+      <path d="M5 4h13l-3 4 3 4H5" />
+    </svg>
+  );
+}
+
+/** 执行操作（铅笔——typed ops 编辑语义）。 */
+export function IconPencil({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+

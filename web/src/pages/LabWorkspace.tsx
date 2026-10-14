@@ -28,7 +28,6 @@ import {
   undo,
 } from '../api/client';
 import {
-  BTN_PROCESSING,
   LAB_BTN_APPLY_OPS,
   LAB_BTN_CREATE_CHECKPOINT,
   LAB_BTN_DIFF,
@@ -75,7 +74,16 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import type { ToastAction } from '../components/Toast';
 import { TopologyCanvas } from '../components/lab/TopologyCanvas';
-import { IconPanelCollapse, IconPanelExpand } from '../components/icons';
+import {
+  IconCheck,
+  IconDiff,
+  IconDownload,
+  IconFlag,
+  IconPanelCollapse,
+  IconPanelExpand,
+  IconPencil,
+  IconUndo,
+} from '../components/icons';
 import { OpsDialog } from '../components/lab/OpsDialog';
 import { DiffDialog } from '../components/lab/DiffDialog';
 import { DeviceTab, InterfaceTab, LinkTab } from '../components/lab/EntityTabs';
@@ -654,40 +662,37 @@ export function LabWorkspacePage() {
 
   return (
     <>
-      {/* #44（诉求 1+2）：页头收敛为单行——工作台名 + 哈希 + 评分 + 计数 chip
-          同行（flex nowrap，长名截断）；七个动作按钮不再占独立行，下移并入
-          画布工具带首组（见下方 TopologyCanvas actions）。 */}
-      <div className="card lab-pagehead">
-        <div className="lab-head-meta">
-          <h1 className="lab-head-name" title={detail.name}>
-            {detail.name}
-          </h1>
-          <span className="chip chip--mono lab-hash-chip" title={`${LABWS_HASH_LABEL} ${detail.workspaceHash}`}>
-            {detail.workspaceHash}
-          </span>
-          {score === null ? (
-            <span className="chip chip--muted">{NO_VALUE}</span>
-          ) : (
-            <span className={`chip ${scoreChipClass(score)}`}>{format(LAB_SCORE_VALUE, { score })}</span>
-          )}
-          <CountChip label={LABWS_CHIP_DEVICES} total={counts.devices} up={counts.upDevices} down={counts.downDevices} />
-          <CountChip
-            label={LABWS_CHIP_INTERFACES}
-            total={counts.interfaces}
-            up={counts.upInterfaces}
-            down={counts.interfaces - counts.upInterfaces}
-          />
-          <CountChip label={LABWS_CHIP_LINKS} total={counts.links} up={counts.upLinks} down={counts.links - counts.upLinks} />
-          {/* #44：返回列表是导航性质，随计数行收进标题行右端（用户诉求 2 只点名
-              七个动作按钮，且把返回留在工具带会多占 ~92px，1600 视口折叠态
-              恰好把 zen 挤成孤行）。 */}
-          <Link className="btn btn--secondary" to="/lab" style={{ marginLeft: 'auto' }}>
-            {LABWS_BACK_LIST}
-          </Link>
-        </div>
-        {detail.description !== '' && <p className="lab-desc">{detail.description}</p>}
-        {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
+      {/* #47 诉求 3：页头去卡片化——无边框单行条（用户原话「这一卡片都移除掉」）。
+          工作台名（title 带描述与全哈希）+ 哈希 chip + 评分 + 计数 chip + 返回；
+          信息零丢失：哈希/描述改 title 悬浮，不占常驻视觉。 */}
+      <div className="lab-pagebar">
+        <h1
+          className="lab-head-name"
+          title={`${detail.name}${detail.description !== '' ? ` — ${detail.description}` : ''} · ${LABWS_HASH_LABEL} ${detail.workspaceHash}`}
+        >
+          {detail.name}
+        </h1>
+        <span className="chip chip--mono lab-hash-chip" title={`${LABWS_HASH_LABEL} ${detail.workspaceHash}`}>
+          {detail.workspaceHash}
+        </span>
+        {score === null ? (
+          <span className="chip chip--muted">{NO_VALUE}</span>
+        ) : (
+          <span className={`chip ${scoreChipClass(score)}`}>{format(LAB_SCORE_VALUE, { score })}</span>
+        )}
+        <CountChip label={LABWS_CHIP_DEVICES} total={counts.devices} up={counts.upDevices} down={counts.downDevices} />
+        <CountChip
+          label={LABWS_CHIP_INTERFACES}
+          total={counts.interfaces}
+          up={counts.upInterfaces}
+          down={counts.interfaces - counts.upInterfaces}
+        />
+        <CountChip label={LABWS_CHIP_LINKS} total={counts.links} up={counts.upLinks} down={counts.links - counts.upLinks} />
+        <Link className="btn btn--secondary lab-tile-back" to="/lab" style={{ marginLeft: 'auto' }}>
+          {LABWS_BACK_LIST}
+        </Link>
       </div>
+      {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
 
       {/* FX-5：可拖拽分栏（画布 | 6px 把手 | 面板；比例经 CSS 变量注入，折叠/zen/
           窄屏由修饰类与媒体查询覆盖——变量不阻碍层叠）。zen 时画布卡片 fixed
@@ -707,38 +712,78 @@ export function LabWorkspacePage() {
           resizeSuspended={splitDragging}
           actions={
             <>
-              {/* #44（诉求 2）：原页头第二行的七个动作按钮 + 返回列表，与画布
-                  工具带同一行（窄画布随工具带 wrap 流到次行，不再溢出）。 */}
-              <button type="button" className="btn btn--primary" disabled={anyBusy} onClick={runChecksNow}>
-                {checksBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
-                {checksBusy ? BTN_PROCESSING : LAB_BTN_RUN_CHECKS}
-              </button>
-              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setOpsOpen(true)}>
-                {LAB_BTN_APPLY_OPS}
-              </button>
-              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setUndoConfirm(true)}>
-                {undoBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : null}
-                {undoBusy ? BTN_PROCESSING : LAB_BTN_UNDO}
-              </button>
-              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={jumpToCheckpoints}>
-                {LAB_BTN_CREATE_CHECKPOINT}
-              </button>
-              <button type="button" className="btn btn--secondary" disabled={anyBusy} onClick={() => setDiffOpen(true)}>
-                {LAB_BTN_DIFF}
-              </button>
-              <button type="button" className="btn btn--secondary" onClick={exportReport}>
-                {LAB_BTN_EXPORT_REPORT}
-              </button>
-              {/* FX-5：折叠/展开右侧数据面板（localStorage 持久化；语义不变，
-                  仅随组下移到画布工具带） */}
+              {/* #47 诉求 1+2：七个工作台动作按钮图标化（title/aria-label 承载
+                  文字语义），随工具带【末组】渲染（TopologyCanvas 内定位）；
+                  宽度 ~490px → ~250px，1280 视口下与画布控件同放一行。 */}
               <button
                 type="button"
-                className="btn btn--secondary"
+                className="btn btn--secondary btn--ico"
+                disabled={anyBusy}
+                title={LAB_BTN_RUN_CHECKS}
+                aria-label={LAB_BTN_RUN_CHECKS}
+                onClick={runChecksNow}
+              >
+                {checksBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <IconCheck />}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--ico"
+                disabled={anyBusy}
+                title={LAB_BTN_APPLY_OPS}
+                aria-label={LAB_BTN_APPLY_OPS}
+                onClick={() => setOpsOpen(true)}
+              >
+                <IconPencil />
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--ico"
+                disabled={anyBusy}
+                title={LAB_BTN_UNDO}
+                aria-label={LAB_BTN_UNDO}
+                onClick={() => setUndoConfirm(true)}
+              >
+                {undoBusy ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <IconUndo />}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--ico"
+                disabled={anyBusy}
+                title={LAB_BTN_CREATE_CHECKPOINT}
+                aria-label={LAB_BTN_CREATE_CHECKPOINT}
+                onClick={jumpToCheckpoints}
+              >
+                <IconFlag />
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--ico"
+                disabled={anyBusy}
+                title={LAB_BTN_DIFF}
+                aria-label={LAB_BTN_DIFF}
+                onClick={() => setDiffOpen(true)}
+              >
+                <IconDiff />
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--ico"
+                title={LAB_BTN_EXPORT_REPORT}
+                aria-label={LAB_BTN_EXPORT_REPORT}
+                onClick={exportReport}
+              >
+                <IconDownload />
+              </button>
+              {/* FX-5：折叠/展开右侧数据面板（localStorage 持久化；语义不变，
+                  仅随组图标化） */}
+              <button
+                type="button"
+                className="btn btn--secondary btn--ico"
                 title={panelCollapsed ? LAB_SPLIT_EXPAND_TITLE : LAB_SPLIT_COLLAPSE_TITLE}
+                aria-label={panelCollapsed ? LAB_SPLIT_EXPAND : LAB_SPLIT_COLLAPSE}
                 onClick={togglePanelCollapsed}
               >
                 {panelCollapsed ? <IconPanelExpand size={16} /> : <IconPanelCollapse size={16} />}
-                {panelCollapsed ? LAB_SPLIT_EXPAND : LAB_SPLIT_COLLAPSE}
               </button>
             </>
           }

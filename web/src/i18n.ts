@@ -808,6 +808,20 @@ export const LAB_FILTER_NO_MATCH = '没有符合筛选的条目';
 // —— 画布 ——
 
 export const LAB_CANVAS_LABEL = '拓扑画布';
+
+/** #47：工具带末组——工作台级动作按钮分组（aria-label）。 */
+export const LAB_ACTIONS_GROUP = '工作台动作';
+
+/** #47 诉求 4：/lab 画布概览模式。 */
+export const LAB_VIEW_CANVAS = '画布视图';
+export const LAB_VIEW_TABLE = '列表模式';
+export const LAB_VIEW_TOGGLE_LABEL = '工作台视图切换';
+export const LAB_TILE_ENTER = '进入工作台';
+export const LAB_TILE_PREVIEW_LOADING = '加载拓扑…';
+export const LAB_TILE_PREVIEW_EMPTY = '空工作台';
+export const LAB_TILE_PREVIEW_ERROR = '拓扑加载失败';
+export const LAB_TILE_SCORE = '评分 {score}';
+export const LAB_TILE_CREATED = '创建于 {at}';
 export const LAB_LAYOUT = '布局';
 export const LAB_LAYOUT_FORCE = '力导';
 export const LAB_LAYOUT_HIER = '层级';

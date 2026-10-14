@@ -100,6 +100,7 @@ import {
   LAB_CANVAS_ZOOM_IN,
   LAB_CANVAS_ZOOM_OUT,
   LAB_CANVAS_ZOOM_HINT,
+  LAB_ACTIONS_GROUP,
   LAB_GEO_DISABLED_TITLE,
   LAB_GEO_EXPORT_DISABLED,
   LAB_GEO_FIT,
@@ -2073,18 +2074,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   return (
     <div className={zenCardCls} aria-label={LAB_CANVAS_LABEL}>
       {/* 工具带：GEO-2 视图分段（拓扑图/2D/3D）+ 布局 6 态 + 交互模式 3 态 +
-          标签开关（地图视图=设备标签）+ 地图专属控件（适配/指北）+ PNG + zen。
+          标签开关（地图视图=设备标签）+ 地图专属控件（适配/指北）+ PNG + zen +
+          工作台动作按钮组（#47 诉求 1：画布固有控件在前，工作台级动作在末组）。
           拓扑专属工具在地图视图禁用（带说明 tooltip，保持工具带结构稳定）。 */}
       <div className="lab-canvas-toolbar" role="toolbar" aria-label={LAB_CANVAS_LABEL}>
-        {/* #44：工作台级动作按钮组（LabWorkspace 原页头第二行下移并入工具带
-            首组，页头三行 → 一行；分组自带分隔线，宽画布同行、窄画布随
-            工具带 wrap 流到下一行）。 */}
-        {actions !== undefined && (
-          <>
-            <div className="lab-canvas-actions">{actions}</div>
-            <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
-          </>
-        )}
         {/* 分段控件不再带「视图/布局/模式」文字前缀：每个图标按钮本就有
             title + aria-label（屏幕阅读器可读），前缀文字在窄画布下要占
             ~72px 宽，是工具带换行、逃逸到第二行的主因之一。分组语义改由
@@ -2206,6 +2199,18 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           >
             <IconExpand />
           </button>
+        )}
+        {/* #47 诉求 1+2：工作台级动作按钮组移到工具带【末组】——画布固有
+            控件（视图/布局/模式/标签/适配/PNG/zen）在前，动作按钮殿后；
+            组内部 nowrap（不再出现「带字按钮两行」），窄画布下整组随工具
+            带 wrap 流到次行（组不撕裂）。 */}
+        {actions !== undefined && (
+          <>
+            <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
+            <div className="lab-canvas-actions" role="group" aria-label={LAB_ACTIONS_GROUP}>
+              {actions}
+            </div>
+          </>
         )}
       </div>
       <div ref={wrapRef} className="lab-canvas-wrap lab-canvas-wrap--dark">

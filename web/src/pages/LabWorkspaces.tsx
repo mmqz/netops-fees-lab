@@ -64,12 +64,117 @@ import { EmptyState } from '../components/EmptyState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { LabDialog } from '../components/lab/LabDialog';
-import { IconFlask, IconUpload } from '../components/icons';
+import { MiniTopology } from '../components/lab/MiniTopology';
+import { IconFlask, IconLayoutGrid, IconTable, IconUpload } from '../components/icons';
 import { clearLastWorkspace, saveLastWorkspace } from '../lastWorkspace';
 import { useSeq } from '../hooks/useSeq';
+import {
+  LAB_TILE_CREATED,
+  LAB_TILE_ENTER,
+  LAB_VIEW_CANVAS,
+  LAB_VIEW_TABLE,
+  LAB_VIEW_TOGGLE_LABEL,
+  LABWS_CHIP_DEVICES,
+  LABWS_CHIP_INTERFACES,
+  LABWS_CHIP_LINKS,
+} from '../i18n';
 
 const PAGE_SIZE = 20;
 const BATCHES_PAGE_SIZE = 100;
+
+/** #47 诉求 4：/lab 视图模式（画布概览 / 表格列表）。 */
+type LabViewMode = 'canvas' | 'table';
+
+const VIEW_MODE_KEY = 'netops-lab-list-view';
+
+function readViewMode(): LabViewMode {
+  try {
+    return localStorage.getItem(VIEW_MODE_KEY) === 'table' ? 'table' : 'canvas';
+  } catch {
+    return 'canvas';
+  }
+}
+
+function writeViewMode(mode: LabViewMode): void {
+  try {
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+  } catch {
+    /* 隐私模式等存储不可用：静默降级为会话内生效 */
+  }
+}
+
+/** 工作台卡片（画布概览模式）：真实拓扑缩略图 + 名称/计数/评分 + 进入/删除。 */
+function WorkspaceTile({
+  row,
+  onEnter,
+  onDelete,
+}: {
+  row: WorkspaceSummary;
+  onEnter: (row: WorkspaceSummary) => void;
+  onDelete: (row: WorkspaceSummary) => void;
+}) {
+  return (
+    <article
+      className="lab-tile"
+      role="link"
+      tabIndex={0}
+      aria-label={`${row.name}，${LAB_TILE_ENTER}`}
+      onClick={() => onEnter(row)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onEnter(row);
+        }
+      }}
+    >
+      <MiniTopology workspaceId={row.id} />
+      <div className="lab-tile-info">
+        <h3 className="lab-tile-name" title={row.name}>
+          {row.name}
+        </h3>
+        <p className="lab-tile-desc" title={row.description}>
+          {row.description === '' ? format(LAB_TILE_CREATED, { at: formatDateTime(row.createdAt) }) : row.description}
+        </p>
+        <div className="lab-tile-chips">
+          <span className="chip chip--muted">{`${LABWS_CHIP_DEVICES} ${row.deviceCount}`}</span>
+          <span className="chip chip--muted">{`${LABWS_CHIP_INTERFACES} ${row.interfaceCount}`}</span>
+          <span className="chip chip--muted">{`${LABWS_CHIP_LINKS} ${row.linkCount}`}</span>
+          {(row.lastRunScore ?? null) !== null && (
+            <span
+              className={`chip ${
+                (row.lastRunScore ?? 0) >= 90 ? 'chip--success' : (row.lastRunScore ?? 0) >= 60 ? 'chip--warning' : 'chip--error'
+              }`}
+            >
+              {format(LAB_SCORE_VALUE, { score: row.lastRunScore ?? 0 })}
+            </span>
+          )}
+        </div>
+        <div className="lab-tile-foot">
+          <button
+            type="button"
+            className="btn btn--danger-ghost btn--sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(row);
+            }}
+          >
+            {BTN_DELETE_WORKSPACE}
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary lab-tile-open"
+            onClick={(event) => {
+              event.stopPropagation();
+              onEnter(row);
+            }}
+          >
+            {LAB_TILE_ENTER}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
 
 interface CreateWorkspaceDialogProps {
   open: boolean;
@@ -261,6 +366,8 @@ export function LabWorkspacesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  /** #47 诉求 4：画布概览（默认）/ 列表模式，localStorage 持久化。 */
+  const [viewMode, setViewMode] = useState<LabViewMode>(() => readViewMode());
   /** 取数守卫（AUD2-8）。 */
   const loadGuard = useSeq();
 
@@ -314,6 +421,42 @@ export function LabWorkspacesPage() {
         toast.show(display.title, 'error', { detail: display.detail });
       });
   }
+
+  function enterWorkspace(row: WorkspaceSummary): void {
+    saveLastWorkspace(row.id);
+    navigate(`/lab/${row.id}`);
+  }
+
+  function switchViewMode(mode: LabViewMode): void {
+    setViewMode(mode);
+    writeViewMode(mode);
+  }
+
+  /** #47 诉求 4：卡片头右侧——画布/列表视图切换（分段控件语义）。 */
+  const viewToggle = (
+    <div className="canvas-seg" role="group" aria-label={LAB_VIEW_TOGGLE_LABEL}>
+      <button
+        type="button"
+        className={`canvas-tool${viewMode === 'canvas' ? ' is-active' : ''}`}
+        aria-pressed={viewMode === 'canvas'}
+        title={LAB_VIEW_CANVAS}
+        aria-label={LAB_VIEW_CANVAS}
+        onClick={() => switchViewMode('canvas')}
+      >
+        <IconLayoutGrid />
+      </button>
+      <button
+        type="button"
+        className={`canvas-tool${viewMode === 'table' ? ' is-active' : ''}`}
+        aria-pressed={viewMode === 'table'}
+        title={LAB_VIEW_TABLE}
+        aria-label={LAB_VIEW_TABLE}
+        onClick={() => switchViewMode('table')}
+      >
+        <IconTable />
+      </button>
+    </div>
+  );
 
   const columns: TableColumn<WorkspaceSummary>[] = [
     {
@@ -455,25 +598,42 @@ export function LabWorkspacesPage() {
       <div className="card">
         <div className="card-head">
           <h2 className="card-title">{LAB_TABLE_LABEL}</h2>
+          {/* #47 诉求 4：画布概览（默认）/ 列表模式切换；新建按钮在切换器右侧 */}
+          {viewToggle}
           <button type="button" className="btn btn--primary" onClick={() => setCreateOpen(true)}>
             <IconFlask />
             {BTN_CREATE_WORKSPACE}
           </button>
         </div>
         {error !== null && <ErrorBlock message={error} detail={errorDetail} onRetry={load} />}
-        <div className="table-wrap">
-          <Table
-            columns={columns}
-            rows={data?.items ?? []}
-            rowKey={(row) => row.id}
-            loading={loading}
-            onRowClick={(row) => {
-              saveLastWorkspace(row.id);
-              navigate(`/lab/${row.id}`);
-            }}
-            ariaLabel={LAB_TABLE_LABEL}
-          />
-        </div>
+        {viewMode === 'canvas' ? (
+          /* #47 诉求 4：工作台画布概览——真实拓扑缩略图卡片网格（懒加载），
+             点击卡片/「进入工作台」进入 /lab/:id；分页契约与表格模式一致。 */
+          <div className="lab-grid" aria-label={LAB_VIEW_CANVAS}>
+            {(data?.items ?? []).map((row) => (
+              <WorkspaceTile
+                key={row.id}
+                row={row}
+                onEnter={enterWorkspace}
+                onDelete={(target) => setDeleteTarget(target)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <Table
+              columns={columns}
+              rows={data?.items ?? []}
+              rowKey={(row) => row.id}
+              loading={loading}
+              onRowClick={(row) => {
+                saveLastWorkspace(row.id);
+                navigate(`/lab/${row.id}`);
+              }}
+              ariaLabel={LAB_TABLE_LABEL}
+            />
+          </div>
+        )}
         {data !== null && data.total > 0 && (
           <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />
         )}
