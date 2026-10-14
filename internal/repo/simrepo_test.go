@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func simTableCount(t *testing.T, db *DB, table string) int {
 // columns, since Open always applies every pending version) by Open, and
 // that the result is idempotent.
 func TestMigrationV5UpgradesV4Database(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -177,7 +178,7 @@ func TestMigrationV5UpgradesV4Database(t *testing.T) {
 // idempotent (a second ADD COLUMN would fail on the duplicate column, so a
 // clean reopen proves the bookkeeping works).
 func TestMigrationV6UpgradesV5Database(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -218,8 +219,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	}
 	// Necessary adaptation for v13→v14→v16→v17 (W8-D, W20, W21, W22):
 	// MAX follows the registry head.
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -275,8 +276,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 		t.Fatalf("max version: %v", err)
 	}
 	// Necessary adaptation for v13 (W8-D ptp_port): MAX 12 → 13.
-	if maxV != 19 {
-		t.Errorf("max schema version after reopen = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after reopen = %d, want 20", maxV)
 	}
 }
 

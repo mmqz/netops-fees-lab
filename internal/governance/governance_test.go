@@ -13,6 +13,7 @@ package governance_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -27,7 +28,7 @@ var govTS = time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
 
 func newGovernanceDB(t *testing.T) *repo.DB {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

@@ -12,6 +12,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,7 +33,7 @@ import (
 // database in the post-import state the search tool operates on.
 func importSeededWorkbooks(t *testing.T) *repo.DB {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestMCPServerResourceSearch(t *testing.T) {
 // and nothing else: no SQL, shell, file or production tools, and no tool
 // that could create or delete a workspace (§1.4).
 func TestMCPToolRegistry(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

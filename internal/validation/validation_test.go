@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -50,7 +51,7 @@ func importAll(t *testing.T, db *repo.DB) map[string]string {
 // returns the engine bound to it plus the batch ids.
 func newEngine(t *testing.T) (*Engine, *repo.DB, map[string]string) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

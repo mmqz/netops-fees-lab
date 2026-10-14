@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,7 +110,7 @@ func itoa(n int) string {
 func TestUnattendedTemplateJourney(t *testing.T) {
 	svc, db := newService(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 
 	// Day 1: the ordinary flow.
 	day1 := writeDeviceWorkbook(t, dir, "day1.xlsx", tplSheetName, tplHeaders, tplFixedRows("D1", 3))
@@ -265,7 +266,7 @@ func TestCaptureTemplateGuards(t *testing.T) {
 		t.Errorf("capture unknown batch = %v, want ErrNotFound", err)
 	}
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	day1 := writeDeviceWorkbook(t, dir, "g1.xlsx", tplSheetName, tplHeaders, tplFixedRows("D1", 2))
 	a, err := svc.Analyze(ctx, day1)
 	if err != nil {
@@ -283,7 +284,7 @@ func TestCaptureTemplateGuards(t *testing.T) {
 func TestCaptureTemplateReconfirmIdempotent(t *testing.T) {
 	svc, db := newService(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 
 	p1 := writeDeviceWorkbook(t, dir, "r1.xlsx", tplSheetName, tplHeaders, tplFixedRows("D1", 2))
 	a1, err := svc.Analyze(ctx, p1)
@@ -341,7 +342,7 @@ func TestCaptureTemplateReconfirmIdempotent(t *testing.T) {
 func TestImportAutoNoImportSheets(t *testing.T) {
 	svc, db := newService(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 
 	// A workbook whose sheet is confirmed first (so a template exists), then
 	// an unrecognizable sheet (gibberish headers → suggested skip).

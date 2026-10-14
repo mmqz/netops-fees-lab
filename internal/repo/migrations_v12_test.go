@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func newBaseStationResource(id, batchID string) domain.Resource {
 //     so the upgrade under test stops at v12 — v13 stays unapplied here);
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV12AddsRenameProposals(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 

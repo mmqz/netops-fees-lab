@@ -12,6 +12,7 @@ package detect
 import (
 	"context"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -56,7 +57,7 @@ func synthIntegrationMapping() metrics.IngestMapping {
 
 // TestDegradeScenarioDailyInspectionLoop runs the full loop.
 func TestDegradeScenarioDailyInspectionLoop(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	out := filepath.Join(dir, "synth")
 	sum, err := metrics.WriteSynthData(metrics.SynthOptions{
 		Out: out, Devices: synthDevices, Ports: synthPorts, Days: synthDays,

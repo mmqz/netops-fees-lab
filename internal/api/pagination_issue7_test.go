@@ -14,6 +14,7 @@ package api_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -154,7 +155,7 @@ func TestHealthCarriesDBPath(t *testing.T) {
 	if health.Status != "ok" || health.Version != domain.AppVersion {
 		t.Errorf("health: status/version = %q/%q, want ok/%s", health.Status, health.Version, domain.AppVersion)
 	}
-	if health.DBPath == "" || !strings.HasPrefix(health.DBPath, "/") {
+	if health.DBPath == "" || !filepath.IsAbs(health.DBPath) {
 		t.Errorf("health: dbPath = %q, want the absolute path of the bound database", health.DBPath)
 	}
 	if !strings.HasSuffix(health.DBPath, "netops.db") {

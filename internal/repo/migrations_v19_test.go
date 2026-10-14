@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -61,7 +62,7 @@ const v19TemplateMapping = `{"sheets":[` +
 //   - the migration seeds NOTHING: templates are user data born from a
 //     human confirmation — the table is empty after a genuine upgrade.
 func TestMigrationV19AddsMappingTemplates(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -221,8 +222,8 @@ VALUES ('tpl_b','other.xlsx','fp_v19','device','{}','设备清单','2026-01-02T0
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op (a second CREATE TABLE
@@ -236,8 +237,8 @@ VALUES ('tpl_b','other.xlsx','fp_v19','device','{}','设备清单','2026-01-02T0
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after reopen = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after reopen = %d, want 20", maxV)
 	}
 	if _, err := db3.Templates.GetTemplate(ctx, "tpl_a"); err != nil {
 		t.Errorf("GetTemplate after reopen: %v", err)

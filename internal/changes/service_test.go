@@ -3,6 +3,7 @@ package changes
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ import (
 // The two W005 proposals share the same resource.
 func newSeededService(t *testing.T) (*Service, *repo.DB, domain.Resource) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -64,7 +65,7 @@ func newSeededService(t *testing.T) (*Service, *repo.DB, domain.Resource) {
 				}
 			}
 		}
-		path := filepath.Join(t.TempDir(), "devices.xlsx")
+		path := filepath.Join(testsupport.TempDir(t), "devices.xlsx")
 		if err := f.SaveAs(path); err != nil {
 			t.Fatalf("save workbook: %v", err)
 		}
@@ -344,7 +345,7 @@ func containsStr(s, sub string) bool {
 // rename of the name attribute left the resource list showing the old
 // display name forever.
 func TestApplyNameFieldSyncsResourceName(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -386,7 +387,7 @@ func TestApplyNameFieldSyncsResourceName(t *testing.T) {
 				}
 			}
 		}
-		path := filepath.Join(t.TempDir(), "devices.xlsx")
+		path := filepath.Join(testsupport.TempDir(t), "devices.xlsx")
 		if err := f.SaveAs(path); err != nil {
 			t.Fatalf("save workbook: %v", err)
 		}

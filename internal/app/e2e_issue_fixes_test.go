@@ -11,6 +11,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,7 +23,7 @@ import (
 func importFixtures(t *testing.T, db string) {
 	t.Helper()
 	root := repoRoot(t)
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	for _, wb := range []string{"devices.xlsx", "ippools.xlsx", "circuits.xlsx"} {
 		file := filepath.Join(root, "testdata", wb)
 		analysis, code := runCLIJSON(t, "analyze "+wb, "analyze", "--file", file)
@@ -50,7 +51,7 @@ func importFixtures(t *testing.T, db string) {
 // TestCLIReportOutStdoutSummary walks the §10 journey minimally (one import)
 // and pins the stdout summary of report --out for BOTH formats.
 func TestCLIReportOutStdoutSummary(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	importFixtures(t, db)
@@ -96,7 +97,7 @@ func TestCLIReportOutStdoutSummary(t *testing.T) {
 // create JSON answers db — the absolute path of the database the workspace
 // was materialized into.
 func TestCLILabCreateCarriesDB(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	importFixtures(t, db)

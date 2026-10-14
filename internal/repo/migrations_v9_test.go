@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -64,7 +65,7 @@ func seedBaseStation(t *testing.T, db *DB, batchID, id, key string, attrs map[st
 //     enforced, and MAX(version) == 9;
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV9AddsBaseStation(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 

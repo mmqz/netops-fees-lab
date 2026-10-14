@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func withoutRowidTable(ctx context.Context, db *DB, table string) (bool, error) 
 //   - the catalog seed is idempotent (INSERT OR IGNORE re-run is a no-op);
 //   - a third Open is a bookkeeping no-op and MAX(version) == 14.
 func TestMigrationV14AddsTimeseries(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 

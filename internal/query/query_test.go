@@ -7,6 +7,7 @@ package query
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ import (
 // a fresh database and returns a Service over it.
 func newSeededService(t *testing.T) (*Service, *repo.DB) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

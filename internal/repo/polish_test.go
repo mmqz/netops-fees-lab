@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -140,7 +141,7 @@ func TestOpenPathWithSpecialCharacters(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		special = "scratch dir with#hash and%20percent"
 	}
-	dir := filepath.Join(t.TempDir(), special)
+	dir := filepath.Join(testsupport.TempDir(t), special)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

@@ -15,6 +15,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -43,7 +44,7 @@ import (
 // httptest. Both are closed at test cleanup.
 func newAPITestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
 		DBPath:  filepath.Join(dir, "netops.db"),
 		DataDir: dir,
@@ -1366,7 +1367,7 @@ func TestAPIImportBodyLimit(t *testing.T) {
 // explaining the missing configuration, instead of silently storing to a
 // relative "uploads/…" path that the analyze step could never read back.
 func TestAPIUploadWithoutDataDirFailsFast(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

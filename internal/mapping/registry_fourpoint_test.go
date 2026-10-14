@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"database/sql"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"sort"
@@ -161,7 +162,7 @@ func TestMigrationRelationsCHECK(t *testing.T) {
 // relations.relation_type CHECK constraints.
 func migratedCHECKLists(t *testing.T) (resourceCHECK, relationCHECK []string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "netops.db")
+	path := filepath.Join(testsupport.TempDir(t), "netops.db")
 	db, err := repo.Open(path)
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)

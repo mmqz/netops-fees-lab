@@ -14,6 +14,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,7 +68,7 @@ func TestCLIChangesRefRetargetFlow(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	siteMap := filepath.Join(tmp, "site.map.json")
 	roomMap := filepath.Join(tmp, "room.map.json")

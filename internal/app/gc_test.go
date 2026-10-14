@@ -7,8 +7,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +50,7 @@ func writeFile(t *testing.T, path string) {
 }
 
 func TestGCOrphanUploads(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	dbPath := filepath.Join(dir, "netops.db")
 	a, err := New(Config{DBPath: dbPath, DataDir: dir})
 	if err != nil {
@@ -129,10 +131,13 @@ func TestGCOrphanUploads(t *testing.T) {
 // logged, not fatal" semantics: a write-protected uploads directory yields
 // errors>0 and a nil error.
 func TestGCOrphanUploadsRemovalFailureNotFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("issue #38: Windows ignores the read-only directory attribute for file removal, so the chmod-based failure injection cannot reach the error path here; the POSIX branch covers it (audit-v0.8.0 §2.1.3)")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: read-only directories do not block root removal")
 	}
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	dbPath := filepath.Join(dir, "netops.db")
 	a, err := New(Config{DBPath: dbPath, DataDir: dir})
 	if err != nil {
@@ -167,7 +172,7 @@ func TestGCOrphanUploadsRemovalFailureNotFatal(t *testing.T) {
 // fresh data dir: exit code 0, exactly one JSON object on stdout with the
 // GC counts, nothing required on stderr.
 func TestCLIGCSubcommand(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	dbPath := filepath.Join(dir, "netops.db")
 
 	// Seed one orphan via the app wiring (same DB the CLI re-opens).

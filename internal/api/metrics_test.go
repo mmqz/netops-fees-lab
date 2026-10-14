@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -131,7 +132,7 @@ func TestMetricEndpointsContract(t *testing.T) {
 	}
 
 	// ② synth resources + perf days (small, deterministic).
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	if _, err := metrics.WriteSynthData(metrics.SynthOptions{
 		Out: dir, Devices: 2, Ports: 1, Days: 2, Scenario: metrics.ScenarioNormal, Seed: 42, Metrics: 3,
 	}); err != nil {

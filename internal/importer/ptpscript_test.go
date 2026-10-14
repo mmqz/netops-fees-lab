@@ -10,6 +10,7 @@ package importer
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +158,7 @@ func ptpPortSpecLen() int {
 func TestImportPTPScriptGolden(t *testing.T) {
 	svc, db := newService(t)
 	ctx := context.Background()
-	path := writePTPScript(t, t.TempDir(), "ptp-config-script.txt", false)
+	path := writePTPScript(t, testsupport.TempDir(t), "ptp-config-script.txt", false)
 
 	a, err := svc.Analyze(ctx, path)
 	if err != nil {
@@ -297,7 +298,7 @@ func TestImportPTPScriptGolden(t *testing.T) {
 func TestImportPTPScriptIdempotentVersionRows(t *testing.T) {
 	svc, db := newService(t)
 	ctx := context.Background()
-	path := writePTPScript(t, t.TempDir(), "ptp-config-script.txt", false)
+	path := writePTPScript(t, testsupport.TempDir(t), "ptp-config-script.txt", false)
 
 	if _, sum1 := importPTPScript(t, svc, path); sum1.RowsImported != 4 {
 		t.Fatalf("run 1 = %+v, want 4 imported", sum1)
@@ -335,7 +336,7 @@ func TestImportPTPScriptIdempotentVersionRows(t *testing.T) {
 func TestImportPTPScriptRenameJourney(t *testing.T) {
 	svc, db := newService(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	original := writePTPScript(t, dir, "ptp-v1.txt", false)
 	renamed := writePTPScript(t, dir, "ptp-v2.txt", true)
 

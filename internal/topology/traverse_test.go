@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -74,7 +75,7 @@ var chainEdges = []seedEdge{
 // seedChain builds the chain graph in a fresh DB and returns the store.
 func seedChain(t *testing.T) (StoreFuncs, *repo.DB) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

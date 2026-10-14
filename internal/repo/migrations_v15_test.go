@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -124,7 +125,7 @@ func countResources(t *testing.T, db *DB) int {
 //     v17, so the head follows the registry);
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV15AddsW21Types(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -209,8 +210,8 @@ func TestMigrationV15AddsW21Types(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19 (restored tail includes v17-v19)", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20 (restored tail includes v17-v19)", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.
@@ -222,8 +223,8 @@ func TestMigrationV15AddsW21Types(t *testing.T) {
 	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeOpticalCable, "W21-optical_cable"); err != nil {
 		t.Errorf("GetByTypeKey(optical_cable) after reopen: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after reopen = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after reopen = %d, want 20", maxV)
 	}
 }
 
@@ -241,7 +242,7 @@ func TestMigrationV15AddsW21Types(t *testing.T) {
 //     (W22 adaptation: the restored tail includes v17);
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV16AddsW21Relations(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -381,8 +382,8 @@ func TestMigrationV16AddsW21Relations(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19 (restored tail includes v17-v19)", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20 (restored tail includes v17-v19)", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.
@@ -394,8 +395,8 @@ func TestMigrationV16AddsW21Relations(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after reopen = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after reopen = %d, want 20", maxV)
 	}
 	if _, err := db3.Resources.GetByTypeKey(ctx, domain.ResourceTypeFiber, "GY-001|1"); err != nil {
 		t.Errorf("GetByTypeKey(fiber) after reopen: %v", err)

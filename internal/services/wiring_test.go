@@ -6,6 +6,7 @@
 package services_test
 
 import (
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ import (
 // is bound to the App's repository. Before W9-D the API built its own service
 // set from the bare db and these identities did not hold.
 func TestAppSharesOneServiceComposition(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
 		DBPath:  filepath.Join(dir, "netops.db"),
 		DataDir: dir,
@@ -79,7 +80,7 @@ func TestAppSharesOneServiceComposition(t *testing.T) {
 // propagates to both confirmation services' Now hooks (deterministic
 // decided-at stamps in tests); the default wiring keeps time.Now.
 func TestNewWiresClockOption(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

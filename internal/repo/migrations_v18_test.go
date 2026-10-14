@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -104,7 +105,7 @@ func seedV18PortSeries(t *testing.T, db *DB) (string, string) {
 //     detection_rules table is EMPTY until the lazy Go-side seed runs
 //     (rules are user data, not schema — pinned here).
 func TestMigrationV18AddsDetection(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -305,8 +306,8 @@ VALUES ('al_bad_s','dr_v18_t',?,'2026-03-05T00:00:00Z',?,-15.2,'2026-03-02T00:00
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op (a second CREATE TABLE
@@ -320,8 +321,8 @@ VALUES ('al_bad_s','dr_v18_t',?,'2026-03-05T00:00:00Z',?,-15.2,'2026-03-02T00:00
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after reopen = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after reopen = %d, want 20", maxV)
 	}
 	if _, err := db3.Alerts.GetAlertByID(ctx, probe.AlertID); err != nil {
 		t.Errorf("GetAlertByID after reopen: %v", err)
@@ -334,7 +335,7 @@ VALUES ('al_bad_s','dr_v18_t',?,'2026-03-05T00:00:00Z',?,-15.2,'2026-03-02T00:00
 // deleted rule does NOT come back (the guard is "table empty", not "row
 // missing" — rules are user data, the migration must not resurrect them).
 func TestSeedDefaultDetectionRulesLazy(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

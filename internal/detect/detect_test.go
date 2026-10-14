@@ -2,6 +2,7 @@ package detect
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 // newDetectDB opens a fresh database for the engine tests.
 func newDetectDB(t *testing.T) *repo.DB {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

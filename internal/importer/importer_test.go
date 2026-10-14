@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -56,7 +57,7 @@ func loadExpectedSummary(t *testing.T) map[string]expectedWorkbook {
 // DB is closed at test cleanup — a Close failure fails the test.
 func newService(t *testing.T) (*Service, *repo.DB) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -871,7 +872,7 @@ func TestAnalyzeErrors(t *testing.T) {
 	ctx := context.Background()
 
 	// A text file masquerading as .xlsx.
-	path := filepath.Join(t.TempDir(), "not.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "not.xlsx")
 	if err := os.WriteFile(path, []byte("this is not an xlsx workbook"), 0o644); err != nil {
 		t.Fatalf("write fake workbook: %v", err)
 	}
@@ -901,7 +902,7 @@ func TestAnalyzeErrors(t *testing.T) {
 	}
 
 	// A missing file: no batch is created (the file cannot be hashed).
-	_, err = svc.Analyze(ctx, filepath.Join(t.TempDir(), "missing.xlsx"))
+	_, err = svc.Analyze(ctx, filepath.Join(testsupport.TempDir(t), "missing.xlsx"))
 	if err == nil {
 		t.Fatal("Analyze of a missing file must fail")
 	}
@@ -1080,7 +1081,7 @@ func writeWorkbookFile(t *testing.T, sheet string, rows [][]string) string {
 			}
 		}
 	}
-	path := filepath.Join(t.TempDir(), "workbook.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "workbook.xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("save workbook: %v", err)
 	}
@@ -1413,7 +1414,7 @@ func writeMultiSheetWorkbook(t *testing.T, sheets []sheetSpec) string {
 			}
 		}
 	}
-	path := filepath.Join(t.TempDir(), "workbook.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "workbook.xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("save workbook: %v", err)
 	}

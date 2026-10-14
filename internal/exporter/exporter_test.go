@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"bytes"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -401,7 +402,7 @@ func TestExportedHeadersSuggestBack(t *testing.T) {
 }
 
 func TestWriteFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "export.xlsx")
 	resources := []domain.Resource{
 		{ID: "res_d1", Type: domain.ResourceTypeDevice, NaturalKey: "DEV-001", Name: "n1", Status: "在网",

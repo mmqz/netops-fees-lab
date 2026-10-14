@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 
@@ -69,7 +70,7 @@ func portKey(t *testing.T, db *DB, id string) string {
 //   - non-port rows and rows whose key has no '|' are untouched;
 //   - re-running the migration (rewound bookkeeping) is a data no-op.
 func TestMigrationV8RecomputesPortNaturalKeys(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -172,7 +173,7 @@ func TestMigrationV8RecomputesPortNaturalKeys(t *testing.T) {
 // rows the migration applies (bookkeeping row recorded), touches nothing and
 // leaves a usable schema — the snapshot table is created and dropped clean.
 func TestMigrationV8NoPortRowsIsNoOp(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 
 	db1, err := Open(path)

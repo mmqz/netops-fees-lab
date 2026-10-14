@@ -3,6 +3,7 @@ package renames
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ var simTS = time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
 // fixture, built here at the service level through repo calls).
 func newServiceDB(t *testing.T) (*Service, *repo.DB, string) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -323,7 +324,7 @@ func contains(sub, s string) bool {
 // fixture mirrors the shape: the merged resource must end up with the new
 // key AND the new display name.
 func TestApplySyncsResourceNameForKeyClassNameField(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -347,7 +348,7 @@ func TestAPIRenamesRejectAndRollback(t *testing.T) {
 // stays pending and the old resource untouched, and reject remains the
 // working way out.
 func TestAPIRenameApplyTargetMissingDirectDelete(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
 		DBPath:  filepath.Join(dir, "netops.db"),
 		DataDir: dir,

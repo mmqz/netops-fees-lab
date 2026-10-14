@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,7 +31,7 @@ var importOrder = []string{"devices.xlsx", "ippools.xlsx", "circuits.xlsx"}
 // returns the report generator plus the batch id of each workbook.
 func newGenerator(t *testing.T) (*Generator, *repo.DB, map[string]string) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

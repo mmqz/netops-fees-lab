@@ -10,6 +10,7 @@ package sim
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -104,7 +105,7 @@ func importGeoWorkbook(t *testing.T, db *repo.DB, devices []geoDeviceRow, circui
 	t.Helper()
 	ctx := context.Background()
 	imp := importer.New(db)
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	var batchIDs []string
 	files := []struct {
 		path string

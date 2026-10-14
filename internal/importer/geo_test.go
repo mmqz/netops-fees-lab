@@ -10,6 +10,7 @@ package importer
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func writeGeoWorkbook(t *testing.T, name, sheet string, headers []string, rows [
 			}
 		}
 	}
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(testsupport.TempDir(t), name)
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("SaveAs(%s): %v", path, err)
 	}

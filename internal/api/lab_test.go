@@ -16,6 +16,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,7 +36,7 @@ import (
 // snapshot files under <dir>/checkpoints/<workspaceId>/.
 func newLabTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
 		DBPath:  filepath.Join(dir, "netops.db"),
 		DataDir: dir,

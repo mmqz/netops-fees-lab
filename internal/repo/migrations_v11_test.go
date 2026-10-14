@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,7 +72,7 @@ func newDeviceResource(id, batchID string) domain.Resource {
 //     removes the change history with its resource, and MAX(version) == 11;
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV11AddsAttributeChanges(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -173,8 +174,8 @@ VALUES ('chg_v11_bad','res_v11_dev','bat_v11','mgmt_ip','a','b','bogus','s',3,?)
 	// metrics, W21 type expansion, W22 run state): the reopened registry
 	// applies every registered migration, advancing MAX(version) with the
 	// registry head.
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

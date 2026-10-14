@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,7 +126,7 @@ func TestCLIEndToEnd(t *testing.T) {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
 	root := repoRoot(t)
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	workbooks := []struct {
@@ -377,7 +378,7 @@ func TestCLIEndToEnd(t *testing.T) {
 // Run context (the SIGINT/SIGTERM stand-in) drains the HTTP server and Run
 // returns nil within the shutdown timeout.
 func TestAppRunGracefulShutdown(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := New(Config{
 		Addr:    "127.0.0.1:0",
 		DBPath:  filepath.Join(dir, "netops.db"),

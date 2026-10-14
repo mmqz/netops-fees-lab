@@ -9,6 +9,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,7 +67,7 @@ func TestCLIRenamesFlow(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	mapFile := filepath.Join(tmp, "map.json")
 	if err := os.WriteFile(mapFile, []byte(stationMapJSON), 0o644); err != nil {
@@ -207,7 +208,7 @@ func TestCLIRenamesReject(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	mapFile := filepath.Join(tmp, "map.json")
 	if err := os.WriteFile(mapFile, []byte(stationMapJSON), 0o644); err != nil {

@@ -10,6 +10,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ func TestCLILabFlow(t *testing.T) {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
 	root := repoRoot(t)
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// ---- import the three committed workbooks (the §10 flow).

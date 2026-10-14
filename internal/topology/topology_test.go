@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 
@@ -20,7 +21,7 @@ func testdataPath(name string) string {
 // with each workbook's suggested mapping and returns the populated DB.
 func importAll(t *testing.T) (*repo.DB, *importer.Service) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

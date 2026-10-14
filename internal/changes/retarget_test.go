@@ -13,6 +13,7 @@ package changes
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -107,7 +108,7 @@ type roomSiteFixture struct {
 // secondSiteID — one pending W005 proposal.
 func newRoomSiteFixture(t *testing.T, firstSiteID, secondSiteID string) *roomSiteFixture {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -119,7 +120,7 @@ func newRoomSiteFixture(t *testing.T, firstSiteID, secondSiteID string) *roomSit
 	imp := importer.New(db)
 	imp.Now = func() time.Time { return time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC) }
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 
 	siteAWB := writeSheetWorkbook(t, dir, "site-a.xlsx", "局站资源表",
 		[]string{"局站ID", "局站名称", "地市"},
@@ -377,7 +378,7 @@ func TestApplyRefTargetMissing(t *testing.T) {
 // relation types — each apply retargets only its own edge, the other edge
 // is untouched, both report relationRetargeted=true.
 func TestApplyCircuitEndsRetargetIndependently(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestApplyCircuitEndsRetargetIndependently(t *testing.T) {
 	imp := importer.New(db)
 	imp.Now = func() time.Time { return time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC) }
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 
 	devices := writeSheetWorkbook(t, dir, "devices.xlsx", "设备清单",
 		[]string{"设备编码", "设备名称"},

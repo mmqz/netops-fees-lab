@@ -9,10 +9,9 @@ package sim
 
 import (
 	"context"
-	"os"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
@@ -24,32 +23,10 @@ func testdataPath(name string) string {
 	return filepath.Join("..", "..", "testdata", name)
 }
 
-// tempDirT is t.TempDir with a Windows-tolerant cleanup (issue #5, same
-// rationale as internal/repo/repo_test.go: sqlite handle release lags
-// db.Close on Windows; retry RemoveAll briefly, log instead of fail).
-func tempDirT(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "netops-sim-test-*")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() {
-		var last error
-		for i := 0; i < 25; i++ {
-			if last = os.RemoveAll(dir); last == nil {
-				return
-			}
-			time.Sleep(40 * time.Millisecond)
-		}
-		t.Logf("tempdir cleanup: RemoveAll(%s) failed after ~1s of retries: %v (Windows 句柄释放延迟，忽略)", dir, last)
-	})
-	return dir
-}
-
 // newEngine opens a fresh database and returns a sim Service bound to it.
 func newEngine(t *testing.T) (*Service, *repo.DB) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(tempDirT(t), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

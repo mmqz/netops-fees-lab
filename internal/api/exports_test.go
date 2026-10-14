@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,7 +18,7 @@ import (
 // database directly (relation counts) through it.
 func newExportTestServer(t *testing.T) (*httptest.Server, *app.App) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
 		DBPath:  dir + "/netops.db",
 		DataDir: dir,

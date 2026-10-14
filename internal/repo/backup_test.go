@@ -8,6 +8,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ import (
 // a byte-consistent snapshot must carry) and returns the opened handle.
 func seedBackupSource(t *testing.T) *DB {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "netops.db")
+	path := filepath.Join(testsupport.TempDir(t), "netops.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -48,7 +49,7 @@ func seedBackupSource(t *testing.T) *DB {
 func TestBackupSnapshotRoundTrip(t *testing.T) {
 	db := seedBackupSource(t)
 	ctx := context.Background()
-	dst := filepath.Join(t.TempDir(), "nested", "checkpoints", "ws-1", "cp-1.db")
+	dst := filepath.Join(testsupport.TempDir(t), "nested", "checkpoints", "ws-1", "cp-1.db")
 
 	if err := db.Backup(ctx, dst); err != nil {
 		t.Fatalf("Backup: %v", err)
@@ -100,7 +101,7 @@ func TestBackupSnapshotRoundTrip(t *testing.T) {
 func TestBackupOverwritesStaleDestination(t *testing.T) {
 	db := seedBackupSource(t)
 	ctx := context.Background()
-	dst := filepath.Join(t.TempDir(), "cp.db")
+	dst := filepath.Join(testsupport.TempDir(t), "cp.db")
 
 	if err := db.Backup(ctx, dst); err != nil {
 		t.Fatalf("first Backup: %v", err)
@@ -125,7 +126,7 @@ func TestBackupOverwritesStaleDestination(t *testing.T) {
 func TestOpenReadOnlyRefusesWrites(t *testing.T) {
 	db := seedBackupSource(t)
 	ctx := context.Background()
-	dst := filepath.Join(t.TempDir(), "cp.db")
+	dst := filepath.Join(testsupport.TempDir(t), "cp.db")
 	if err := db.Backup(ctx, dst); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestBackupErrorWrapping(t *testing.T) {
 	db := seedBackupSource(t)
 	ctx := context.Background()
 
-	dirDst := t.TempDir() // a directory, not a file
+	dirDst := testsupport.TempDir(t) // a directory, not a file
 	err := db.Backup(ctx, dirDst)
 	if err == nil {
 		t.Fatalf("Backup into a directory path must fail")
@@ -164,7 +165,7 @@ func TestBackupErrorWrapping(t *testing.T) {
 		t.Fatalf("error %q must carry the repo: backup to %s wrap", err.Error(), dirDst)
 	}
 
-	_, err = OpenReadOnly(filepath.Join(t.TempDir(), "missing.db"))
+	_, err = OpenReadOnly(filepath.Join(testsupport.TempDir(t), "missing.db"))
 	if err == nil {
 		t.Fatalf("OpenReadOnly on a missing file must fail")
 	}

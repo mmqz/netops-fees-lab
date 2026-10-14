@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,8 +43,8 @@ func readAllFiles(t *testing.T, dir string) map[string][]byte {
 // seed → byte-identical output (every file), and a different seed →
 // different bytes (the seed actually matters).
 func TestSynthDeterminism(t *testing.T) {
-	dirA := t.TempDir()
-	dirB := t.TempDir()
+	dirA := testsupport.TempDir(t)
+	dirB := testsupport.TempDir(t)
 	opts := SynthOptions{Out: dirA, Devices: 5, Ports: 2, Days: 4, Scenario: ScenarioDegrade, Seed: 42, Metrics: 6}
 	if _, err := WriteSynthData(opts); err != nil {
 		t.Fatalf("generate A: %v", err)
@@ -77,7 +78,7 @@ func TestSynthDeterminism(t *testing.T) {
 	}
 
 	// A different seed must produce different bytes.
-	dirC := t.TempDir()
+	dirC := testsupport.TempDir(t)
 	opts.Out = dirC
 	opts.Seed = 43
 	if _, err := WriteSynthData(opts); err != nil {
@@ -104,8 +105,8 @@ func TestSynthDeterminism(t *testing.T) {
 // channel with the SUGGESTED mapping, and the anomaly scan then surfaces
 // the degrade-scenario ports — the whole W20 story in one test.
 func TestSynthFilesFeedsBothChannels(t *testing.T) {
-	dir := t.TempDir()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	dir := testsupport.TempDir(t)
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestSynthFilesFeedsBothChannels(t *testing.T) {
 // stays inside its catalog plausibility bounds (the generator's own
 // acceptance rule).
 func TestSynthValuesRespectBounds(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	const days, devices, ports = 10, 12, 3
 	for _, scenario := range []string{ScenarioNormal, ScenarioDegrade, ScenarioOutage} {
 		sub := filepath.Join(dir, scenario)
@@ -220,7 +221,7 @@ func TestSynthValuesRespectBounds(t *testing.T) {
 // RX power declines monotonically ~0.15/day while the healthy ports stay
 // flat — the deterministic subset is stable across the window.
 func TestSynthDegradeCurveShape(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	const devices, ports, days = 20, 1, 6
 	if _, err := WriteSynthData(SynthOptions{
 		Out: dir, Devices: devices, Ports: ports, Days: days, Scenario: ScenarioDegrade, Seed: 7,

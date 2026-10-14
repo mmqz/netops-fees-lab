@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -27,7 +28,7 @@ import (
 // importer/api suites; here we test the QUERY side).
 func newSeededAPITestServer(t *testing.T) (*httptest.Server, *app.App) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
 		DBPath:  filepath.Join(dir, "netops.db"),
 		DataDir: dir,

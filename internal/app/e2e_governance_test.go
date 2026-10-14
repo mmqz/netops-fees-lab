@@ -10,6 +10,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"testing"
 )
 
@@ -20,7 +21,7 @@ func TestCLIGovernanceSummary(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	db := dir + "/netops.db"
 
 	// Seed the three committed workbooks through the CLI itself (the
@@ -134,7 +135,7 @@ func TestCLIGovernanceEmpty(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	db := t.TempDir() + "/netops.db"
+	db := testsupport.TempDir(t) + "/netops.db"
 
 	out, code := runCLIJSON(t, "query governance empty", "query", "--db", db, "governance")
 	if code != 0 {
@@ -176,7 +177,7 @@ func TestCLIGovernanceUsage(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	db := t.TempDir() + "/netops.db"
+	db := testsupport.TempDir(t) + "/netops.db"
 
 	for _, args := range [][]string{
 		{"query", "--db", db, "governance", "--bogus"},

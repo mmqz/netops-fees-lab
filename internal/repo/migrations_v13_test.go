@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -43,7 +44,7 @@ func withoutV13(t *testing.T) {
 //     FK is still enforced, and MAX(version) == 13;
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV13AddsPTPPort(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 

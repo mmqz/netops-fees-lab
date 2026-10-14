@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -24,7 +25,7 @@ var fixedClock = func() time.Time {
 // bound to it (deterministic clock).
 func newMetricService(t *testing.T) (*Service, *repo.DB) {
 	t.Helper()
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}
@@ -73,7 +74,7 @@ func writeWorkbook(t *testing.T, dir, name, sheet string, rows [][]string) strin
 // port resource id of device/port.
 func seedPortInventory(t *testing.T, db *repo.DB, device, ip, port string) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "resources.xlsx")
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -167,7 +168,7 @@ func TestIngestResolvesBothWays(t *testing.T) {
 	ctx := context.Background()
 	portID := seedPortInventory(t, db, "DEV-A", "10.0.0.1", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	// Path (a): device name + port name.
 	fileA := writeWorkbook(t, dir, "perf-a.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
@@ -231,7 +232,7 @@ func TestIngestIdempotency(t *testing.T) {
 	ctx := context.Background()
 	seedPortInventory(t, db, "DEV-B", "10.0.0.2", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
 		perfRow("2026-01-01", "DEV-B", "10.0.0.2", "GE-0/0/1", "-8.50"),
@@ -325,7 +326,7 @@ func TestIngestSuspectQuality(t *testing.T) {
 	ctx := context.Background()
 	portID := seedPortInventory(t, db, "DEV-C", "10.0.0.3", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
 		perfRow("2026-01-01", "DEV-C", "10.0.0.3", "GE-0/0/1", "-77.0"), // below -30 bound
@@ -367,7 +368,7 @@ func TestIngestFailedRows(t *testing.T) {
 	ctx := context.Background()
 	seedPortInventory(t, db, "DEV-D", "10.0.0.4", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
 		perfRow("2026-01-01", "DEV-D", "10.0.0.4", "GE-0/0/1", "-8.50"), // ok
@@ -398,7 +399,7 @@ func TestIngestEmptyMetricCell(t *testing.T) {
 	ctx := context.Background()
 	portID := seedPortInventory(t, db, "DEV-E", "10.0.0.5", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	row := perfRow("2026-01-01", "DEV-E", "10.0.0.5", "GE-0/0/1", "")
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{perfHeadersRow, row})
 	sum, err := s.Ingest(ctx, file, rxMapping(), "perf.xlsx")
@@ -421,7 +422,7 @@ func TestIngestDateForms(t *testing.T) {
 	s, db := newMetricService(t)
 	ctx := context.Background()
 	seedPortInventory(t, db, "DEV-F", "10.0.0.6", "GE-0/0/1")
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
 		perfRow("2026-01-15", "DEV-F", "10.0.0.6", "GE-0/0/1", "-8.10"),
@@ -455,7 +456,7 @@ func TestIngestDateForms(t *testing.T) {
 func TestIngestRejectsBadMapping(t *testing.T) {
 	s, db := newMetricService(t)
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
 		perfRow("2026-01-01", "DEV-G", "10.0.0.7", "GE-0/0/1", "-8.50"),
@@ -483,7 +484,7 @@ func TestRollbackSharedSeries(t *testing.T) {
 	s, db := newMetricService(t)
 	ctx := context.Background()
 	portID := seedPortInventory(t, db, "DEV-H", "10.0.0.8", "GE-0/0/1")
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 
 	// Batch 1: two days.
 	file1 := writeWorkbook(t, dir, "perf-1.xlsx", "端口性能", [][]string{
@@ -570,7 +571,7 @@ func TestRollbackPrunesEmptySeries(t *testing.T) {
 	s, db := newMetricService(t)
 	ctx := context.Background()
 	seedPortInventory(t, db, "DEV-I", "10.0.0.9", "GE-0/0/1")
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	file := writeWorkbook(t, dir, "perf.xlsx", "端口性能", [][]string{
 		perfHeadersRow,
 		perfRow("2026-01-01", "DEV-I", "10.0.0.9", "GE-0/0/1", "-8.50"),
@@ -609,7 +610,7 @@ func TestServiceAnomalies(t *testing.T) {
 	seedPortInventory(t, db, "DEV-J1", "10.0.1.1", "GE-0/0/1")
 	seedPortInventory(t, db, "DEV-J2", "10.0.1.2", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	// DEV-J1: optical power declines 0.5/day for 6 days (delta -2.5).
 	rows := [][]string{perfHeadersRow}
 	for d := 1; d <= 6; d++ {
@@ -711,7 +712,7 @@ func TestServiceResourceSeries(t *testing.T) {
 	ctx := context.Background()
 	portID := seedPortInventory(t, db, "DEV-K", "10.0.2.1", "GE-0/0/1")
 
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	rows := [][]string{perfHeadersRow}
 	for d := 1; d <= 4; d++ {
 		rx := -8.0 - 0.1*float64(d-1)

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestRegistryShape(t *testing.T) {
 // same order, same values (bounds included). Any drift (a registry edit
 // without the migration, or a manual table edit) fails here loudly.
 func TestCatalogSyncs(t *testing.T) {
-	db, err := repo.Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)
 	}

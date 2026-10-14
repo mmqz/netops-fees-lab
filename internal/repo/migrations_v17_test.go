@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -63,7 +64,7 @@ func preV17Resource(ctx context.Context, db *DB, id string) (key, name, attrs, s
 //     with its resource, and MAX(version) == 17;
 //   - a third Open is a bookkeeping no-op (idempotency).
 func TestMigrationV17AddsRunState(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 
@@ -204,8 +205,8 @@ func TestMigrationV17AddsRunState(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after upgrade = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after upgrade = %d, want 20", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op (a second ADD COLUMN would
@@ -218,8 +219,8 @@ func TestMigrationV17AddsRunState(t *testing.T) {
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 19 {
-		t.Errorf("max schema version after reopen = %d, want 19", maxV)
+	if maxV != 20 {
+		t.Errorf("max schema version after reopen = %d, want 20", maxV)
 	}
 }
 
@@ -228,7 +229,7 @@ func TestMigrationV17AddsRunState(t *testing.T) {
 // RunState == "" (NULL — no observation) while its ledger fields survive
 // byte-identically, and CountByRunState reports every row in the null bucket.
 func TestMigrationV17LegacyRowsStayNULL(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 

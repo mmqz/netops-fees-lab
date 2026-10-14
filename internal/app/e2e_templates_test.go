@@ -9,6 +9,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,7 @@ func TestCLITemplatesUnattended(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// Day 1: the ordinary flow. The mapping file is the suggested mapping

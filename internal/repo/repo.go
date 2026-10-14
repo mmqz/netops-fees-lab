@@ -27,7 +27,20 @@ import (
 // lock up front, so the busy_timeout already absorbed the common contention;
 // the retry below is the last line of defense for the rare case where a
 // writer held the lock for the whole timeout window.
-const beginBusyAttempts = 3
+//
+// Issue #39 (audit-v0.8.0 §2.2): three attempts with 50/100/150ms backoff
+// (~300ms extra) proved too small a budget under whole-suite load — the
+// Windows audit saw SQLITE_BUSY escape when parallel test binaries starved
+// a write-lock holder past busy_timeout(5s)+300ms. Six attempts with
+// exponential backoff (50ms … 1.6s, ~3.1s extra) keep the worst-case begin
+// budget around 6×5s+3s ≈ 33s, which absorbs the load spikes of a machine
+// running the full test suite concurrently while still failing fast enough
+// for a genuinely stuck writer. Multi-instance concurrency boundary: a
+// single process is fully supported; multiple processes sharing one
+// database file are supported up to this begin budget (WAL +
+// busy_timeout + bounded begin retry) — sustained write-lock hold times
+// beyond it surface as SQLITE_BUSY errors, never as corruption.
+const beginBusyAttempts = 6
 
 // DBTX is the minimal query interface shared by *sql.DB (autocommit mode)
 // and *sql.Tx (transaction mode). All repositories accept it so the same
@@ -237,11 +250,15 @@ func (d *DB) beginTx(ctx context.Context) (*sql.Tx, error) {
 		if !isBusyError(err) {
 			return nil, fmt.Errorf("repo: begin transaction: %w", err)
 		}
-		backoff := time.Duration(50*(attempt+1)) * time.Millisecond // 50ms, 100ms
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("repo: begin transaction: %w", ctx.Err())
-		case <-time.After(backoff):
+		// Exponential backoff (issue #39): 50, 100, 200, 400, 800ms
+		// between attempts — no sleep after the final one.
+		if attempt < beginBusyAttempts-1 {
+			backoff := time.Duration(50<<attempt) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("repo: begin transaction: %w", ctx.Err())
+			case <-time.After(backoff):
+			}
 		}
 	}
 	return nil, fmt.Errorf("repo: begin transaction (SQLITE_BUSY, %d attempts): %w", beginBusyAttempts, lastErr)

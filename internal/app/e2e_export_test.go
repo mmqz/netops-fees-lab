@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"sort"
@@ -196,7 +197,7 @@ func TestCLIExportRoundTrip(t *testing.T) {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
 	root := repoRoot(t)
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db1 := filepath.Join(tmp, "seed.db")
 	samples := filepath.Join(root, "samples")
 
@@ -411,7 +412,7 @@ func TestCLIExportUsage(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopslab binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	out := filepath.Join(tmp, "export.xlsx")
 
