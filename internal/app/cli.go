@@ -28,6 +28,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
+	"github.com/mmqz/netops-lab/internal/topology"
 	"github.com/mmqz/netops-lab/internal/workbook"
 )
 
@@ -962,7 +963,7 @@ type reportResponse struct {
 // The sub-subcommand may appear before or after the query-level flags; only
 // --db is accepted at the query level.
 func cmdQuery(args []string, stdout, stderr io.Writer) error {
-	dbPath, sub, subArgs, err := splitSubArgs("query", "resources / stats / relations / governance", args)
+	dbPath, sub, subArgs, err := splitSubArgs("query", "resources / stats / relations / governance / traverse / impact / context / nearest", args)
 	if err != nil {
 		return err
 	}
@@ -982,8 +983,21 @@ func cmdQuery(args []string, stdout, stderr io.Writer) error {
 		return cmdQueryRelations(ctx, a, subArgs, stdout, stderr)
 	case "governance":
 		return cmdQueryGovernance(ctx, a, subArgs, stdout, stderr)
+	// Issue #41 (audit §2.5): the v0.7.0 graph queries were HTTP-only,
+	// which left scripted/offline workflows (daily inspection without a
+	// serve) without traverse/impact/context. Same service layer as the
+	// HTTP endpoints (the composition root's ONE store binding and ONE
+	// context assembly), same stdout-exactly-one-JSON contract (§10).
+	case "traverse":
+		return cmdQueryTraverse(ctx, a, subArgs, stdout, stderr)
+	case "impact":
+		return cmdQueryImpact(ctx, a, subArgs, stdout, stderr)
+	case "context":
+		return cmdQueryContext(ctx, a, subArgs, stdout, stderr)
+	case "nearest":
+		return cmdQueryNearest(ctx, a, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("query 子命令必须是 resources、stats、relations 或 governance，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("query 子命令必须是 resources、stats、relations、governance、traverse、impact、context 或 nearest，收到 %q", sub)}
 	}
 }
 
@@ -1213,6 +1227,206 @@ func cmdQueryGovernance(ctx context.Context, a *App, args []string, stdout, stde
 		return err
 	}
 	return writeJSON(stdout, summary)
+}
+
+// cmdQueryTraverse implements `query traverse --id [--direction
+// down|up|both] [--layers 0,1,2] [--relations a,b] [--max-depth 1..8]
+// [--max-nodes 1..500] [--path-only]` — the CLI twin of
+// GET /api/resources/{id}/traverse (issue #41). Flags mirror the HTTP query
+// parameters one-for-one (kebab-case per CLI convention); defaults and
+// validation bounds are the same constants the HTTP layer applies, so the
+// two channels answer the same documents from the same engine call.
+func cmdQueryTraverse(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("query traverse")
+	id := fs.String("id", "", "根资源 id，必填")
+	direction := fs.String("direction", string(topology.DirectionDown),
+		"遍历方向：down（默认，追根因）/ up / both")
+	layers := fs.String("layers", "", "层号过滤，逗号分隔（0..6，缺省全部）")
+	relations := fs.String("relations", "", "关系类型过滤，逗号分隔（合法值见 query stats 或 /api/schema，缺省全部）")
+	maxDepth := fs.Int("max-depth", topology.DefaultTraverseMaxDepth, "最大深度（1..8）")
+	maxNodes := fs.Int("max-nodes", topology.DefaultTraverseMaxNodes, "节点预算（1..500）")
+	pathOnly := fs.Bool("path-only", false, "仅返回根到最深节点的一条最短路径")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "query traverse 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+
+	params := topology.TraverseParams{MaxDepth: *maxDepth, MaxNodes: *maxNodes, PathOnly: *pathOnly}
+	switch *direction {
+	case topology.DirectionDown, topology.DirectionUp, topology.DirectionBoth:
+		params.Direction = *direction
+	default:
+		return &usageError{msg: fmt.Sprintf("--direction 必须是 down/up/both，收到 %q", *direction), usage: usage.String()}
+	}
+	if *layers != "" {
+		params.Layers = map[int]bool{}
+		for _, part := range strings.Split(*layers, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			v, err := strconv.Atoi(part)
+			if err != nil || v < 0 || v > 6 {
+				return &usageError{msg: fmt.Sprintf("--layers 含非法层号 %q（层号必须是 0..6）", part), usage: usage.String()}
+			}
+			params.Layers[v] = true
+		}
+	}
+	if *relations != "" {
+		params.Relations = map[domain.RelationType]bool{}
+		for _, part := range strings.Split(*relations, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			rt := domain.RelationType(part)
+			if !rt.IsValid() {
+				return &usageError{msg: fmt.Sprintf("--relations 含未登记的关系类型 %q（合法值见 query stats 或 /api/schema）", part), usage: usage.String()}
+			}
+			params.Relations[rt] = true
+		}
+	}
+	if *maxDepth < 1 || *maxDepth > topology.MaxTraverseMaxDepth {
+		return &usageError{msg: fmt.Sprintf("--max-depth 必须是 1..%d 的整数", topology.MaxTraverseMaxDepth), usage: usage.String()}
+	}
+	if *maxNodes < 1 || *maxNodes > topology.MaxTraverseMaxNodes {
+		return &usageError{msg: fmt.Sprintf("--max-nodes 必须是 1..%d 的整数", topology.MaxTraverseMaxNodes), usage: usage.String()}
+	}
+
+	result, err := topology.Traverse(ctx, a.Services.GraphStore(), *id, params)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cmdQueryImpact implements `query impact --id [--direction up|down]
+// [--max-depth 1..8]` — the CLI twin of GET /api/resources/{id}/impact
+// (issue #41). direction defaults to up（影响面）; down is the root-cause
+// walk with candidates.
+func cmdQueryImpact(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("query impact")
+	id := fs.String("id", "", "根资源 id，必填")
+	direction := fs.String("direction", string(topology.DirectionUp), "收集方向：up（默认，影响面）/ down（根因候选）")
+	maxDepth := fs.Int("max-depth", 8, "最大深度（1..8）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "query impact 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	switch *direction {
+	case topology.DirectionUp, topology.DirectionDown:
+	default:
+		return &usageError{msg: fmt.Sprintf("--direction 必须是 up/down（impact 不支持 both），收到 %q", *direction), usage: usage.String()}
+	}
+	if *maxDepth < 1 || *maxDepth > topology.MaxTraverseMaxDepth {
+		return &usageError{msg: fmt.Sprintf("--max-depth 必须是 1..%d 的整数", topology.MaxTraverseMaxDepth), usage: usage.String()}
+	}
+
+	result, err := topology.Impact(ctx, a.Services.GraphStore(), *id, *direction, *maxDepth)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cmdQueryContext implements `query context --id [--depth 1|2]
+// [--metrics latest|none]` — the CLI twin of GET /api/resources/{id}/
+// context (issue #41). The §7.3 one-shot AI context document comes from the
+// composition root's ONE assembly (Services.GraphContext) — the HTTP and
+// CLI channels are byte-identical by construction.
+func cmdQueryContext(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("query context")
+	id := fs.String("id", "", "资源 id，必填")
+	depth := fs.Int("depth", 1, "邻域跳数：1 或 2")
+	withMetrics := fs.String("metrics", "latest", "指标块：latest（默认，每序列最新点）/ none")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "query context 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *depth != 1 && *depth != 2 {
+		return &usageError{msg: fmt.Sprintf("--depth 必须是 1 或 2，收到 %d", *depth), usage: usage.String()}
+	}
+	metricsMode := true
+	switch *withMetrics {
+	case "latest":
+		metricsMode = true
+	case "none":
+		metricsMode = false
+	default:
+		return &usageError{msg: fmt.Sprintf("--metrics 必须是 latest 或 none，收到 %q", *withMetrics), usage: usage.String()}
+	}
+
+	result, err := a.Services.GraphContext(ctx, *id, *depth, metricsMode)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cmdQueryNearest implements `query nearest --type T --lat F --lng F
+// [--limit N]` — the SQL-level spatial query the v20 geo columns enable
+// (issue #45's acceptance: "resources 有 geo 列且可做空间查询"). Returns
+// the nearest resources of one type by true haversine distance within the
+// documented ~1.5°×3° window (see repo.ResourceRepo.Nearest).
+func cmdQueryNearest(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("query nearest")
+	typ := fs.String("type", "", "资源类型（注册类型之一），必填")
+	lat := fs.Float64("lat", 0, "查询点纬度（-90..90），必填")
+	lng := fs.Float64("lng", 0, "查询点经度（-180..180），必填")
+	limit := fs.Int("limit", 5, "返回数量（1..100）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "query nearest 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *typ == "" {
+		return &usageError{msg: "缺少 --type 参数", usage: usage.String()}
+	}
+	rt, err := domain.ParseResourceType(*typ)
+	if err != nil {
+		return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一，收到 %q", *typ), usage: usage.String()}
+	}
+	if *lat < -90 || *lat > 90 {
+		return &usageError{msg: fmt.Sprintf("--lat 必须在 -90..90，收到 %v", *lat), usage: usage.String()}
+	}
+	if *lng < -180 || *lng > 180 {
+		return &usageError{msg: fmt.Sprintf("--lng 必须在 -180..180，收到 %v", *lng), usage: usage.String()}
+	}
+	if *limit < 1 || *limit > 100 {
+		return &usageError{msg: fmt.Sprintf("--limit 必须在 1..100，收到 %d", *limit), usage: usage.String()}
+	}
+
+	resources, err := a.DB.Resources.Nearest(ctx, rt, *lat, *lng, *limit)
+	if err != nil {
+		return err
+	}
+	items := make([]query.ResourceItem, 0, len(resources))
+	for _, r := range resources {
+		items = append(items, query.NewResourceItem(r))
+	}
+	return writeJSON(stdout, map[string]any{
+		"type":  rt.String(),
+		"lat":   *lat,
+		"lng":   *lng,
+		"count": len(items),
+		"items": items,
+	})
 }
 
 // cmdMCP implements `netopslab mcp [--db]` (also env NETOPS_DB): run the MCP

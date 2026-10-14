@@ -119,8 +119,10 @@ func Impact(ctx context.Context, store TraverseStore, rootID, direction string, 
 	}
 
 	// Candidates: abnormal nodes (root included, §10.6 ③) with an
-	// abnormal-free traversal-direction downstream.
-	var candidates []CandidateItem
+	// abnormal-free traversal-direction downstream. make(…, 0): the empty
+	// case must serialize as [] not null (audit §2.6 — a nil slice would
+	// project to JSON null and crash len()/iteration on strict clients).
+	candidates := make([]CandidateItem, 0)
 	for id, st := range visited {
 		if !abnormal(st) {
 			continue
@@ -155,7 +157,8 @@ func Impact(ctx context.Context, store TraverseStore, rootID, direction string, 
 			}
 		}
 	}
-	var impacted []ImpactedItem
+	// Same null-vs-[] contract (audit §2.6): initialized, not nil.
+	impacted := make([]ImpactedItem, 0)
 	for id := range impactedIDs {
 		st := visited[id]
 		impacted = append(impacted, ImpactedItem{

@@ -9,13 +9,11 @@ package api
 // untouched (deprecated in docs, §10.10).
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/metrics"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/topology"
 )
@@ -25,25 +23,12 @@ import (
 // package (shared with the engine's zero-value hardening).
 const defaultImpactMaxDepth = 8
 
-// graphStore binds the repository to the engines' TraverseStore contract:
-// node payloads via ResourceRepo.GetByID (one read per resource, the
-// engine's info cache dedupes), incident edges via RelationRepo.
-// ListByResource — the per-node load whose EXPLAIN QUERY PLAN resolves to
-// MULTI-INDEX OR over the UNIQUE(from,to,type) prefix and idx_relations_to
-// (the §10.7 indexes), i.e. genuinely O(V+E) incremental loading.
+// graphStore returns the composition root's repository binding of the
+// engines' TraverseStore contract (services.Services.GraphStore — issue
+// #41: the binding moved to the single composition point when the CLI
+// graph channel needed the SAME store; the doc comment lives there).
 func (s *Server) graphStore() topology.StoreFuncs {
-	return topology.StoreFuncs{
-		NodeFn: func(ctx context.Context, id string) (topology.NodeInfo, error) {
-			r, err := s.db.Resources.GetByID(ctx, id)
-			if err != nil {
-				return topology.NodeInfo{}, err
-			}
-			return topology.NodeInfoOf(r), nil
-		},
-		EdgeFn: func(ctx context.Context, id string) ([]domain.Relation, error) {
-			return s.db.Relations.ListByResource(ctx, id)
-		},
-	}
+	return s.svc.GraphStore()
 }
 
 // handleResourceTraverse implements
@@ -195,34 +180,6 @@ func (s *Server) handleResourceImpact(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// contextNeighbors is the neighbors summary of the context response: the
-// legacy depth-N relations subgraph minus the center (the center IS the
-// inlined resource).
-type contextNeighbors struct {
-	Nodes []topology.Node `json:"nodes"`
-	Edges []topology.Edge `json:"edges"`
-}
-
-// contextMetric is ONE latest point of ONE series of the resource.
-type contextMetric struct {
-	MetricKey string  `json:"metricKey"`
-	Unit      string  `json:"unit"`
-	TS        string  `json:"ts"`
-	Value     float64 `json:"value"`
-	Quality   string  `json:"quality"`
-}
-
-// contextResponse is the §7.3 one-shot AI context assembly: the resource
-// detail (the GET /api/resources/{id} shape, runState included, flattened),
-// the legacy relations neighbors summary, the latest point of every metric
-// series of the resource and the anomalies-scan items filtered to it.
-type contextResponse struct {
-	query.ResourceDetail
-	Neighbors       contextNeighbors      `json:"neighbors"`
-	Metrics         []contextMetric       `json:"metrics"`
-	RecentAnomalies []metrics.AnomalyItem `json:"recentAnomalies"`
-}
-
 // handleResourceContext implements
 // GET /api/resources/{id}/context?depth=1&metrics=latest.
 //
@@ -259,50 +216,14 @@ func (s *Server) handleResourceContext(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	id := r.PathValue("id")
-	detail, err := s.query.ResourceDetail(r.Context(), id)
+	// Issue #41: the assembly itself lives in the composition root
+	// (Services.GraphContext) — the HTTP handler and the CLI `query
+	// context` channel answer the byte-identical document from ONE
+	// implementation (the cross-channel e2e test pins equivalence).
+	resp, err := s.svc.GraphContext(r.Context(), r.PathValue("id"), depth, withMetrics)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return
-	}
-	rels, err := s.query.Relations(r.Context(), id, depth)
-	if err != nil {
-		s.respondErrorFor(w, r, err, "")
-		return
-	}
-
-	resp := contextResponse{ResourceDetail: detail, Neighbors: contextNeighbors{Nodes: rels.Nodes, Edges: rels.Edges}}
-	if withMetrics {
-		series, err := s.metrics.ResourceSeries(r.Context(), id, nil, "", "", metrics.AggRaw)
-		if err != nil {
-			s.respondErrorFor(w, r, err, "")
-			return
-		}
-		resp.Metrics = make([]contextMetric, 0, len(series))
-		for _, sr := range series {
-			if len(sr.Points) == 0 {
-				continue
-			}
-			last := sr.Points[len(sr.Points)-1]
-			resp.Metrics = append(resp.Metrics, contextMetric{
-				MetricKey: sr.MetricKey, Unit: sr.Unit, TS: last.TS, Value: last.Value,
-				Quality: string(last.Quality),
-			})
-		}
-	}
-	// The anomalies scan with default parameters (metricKey="", unbounded
-	// window, default threshold, any direction) filtered to this resource —
-	// "the /api/metrics/anomalies result filtered to this resource".
-	items, err := s.metrics.Anomalies(r.Context(), "", "", "", 0, "")
-	if err != nil {
-		s.respondErrorFor(w, r, err, "")
-		return
-	}
-	resp.RecentAnomalies = make([]metrics.AnomalyItem, 0)
-	for _, it := range items {
-		if it.ResourceID == id {
-			resp.RecentAnomalies = append(resp.RecentAnomalies, it)
-		}
 	}
 	respondJSON(w, http.StatusOK, resp)
 }

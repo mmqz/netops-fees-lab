@@ -55,7 +55,10 @@ type ResourceItem struct {
 
 // newResourceItem converts a domain resource; Attributes is never nil so the
 // JSON object is always present.
-func newResourceItem(r domain.Resource) ResourceItem {
+// NewResourceItem converts a domain resource for external consumers (the
+// CLI query nearest channel of issue #45 shares this shape with the HTTP
+// list endpoints — one conversion, zero drift).
+func NewResourceItem(r domain.Resource) ResourceItem {
 	attrs := r.Attributes
 	if attrs == nil {
 		attrs = map[string]string{}
@@ -123,7 +126,7 @@ func (s *Service) SearchResources(ctx context.Context, f SearchFilter) (PageResu
 	}
 	items := make([]ResourceItem, 0, len(resources))
 	for _, r := range resources {
-		items = append(items, newResourceItem(r))
+		items = append(items, NewResourceItem(r))
 	}
 	return PageResult[ResourceItem]{Items: items, Total: total, Page: f.Page, PageSize: f.PageSize}, nil
 }
@@ -189,7 +192,7 @@ func (s *Service) SearchResourcesWithSource(ctx context.Context, f SourceSearchF
 	}
 	items := make([]ResourceWithSource, 0, len(resources))
 	for _, r := range resources {
-		item := ResourceWithSource{ResourceItem: newResourceItem(r)}
+		item := ResourceWithSource{ResourceItem: NewResourceItem(r)}
 		for _, ref := range refsByID[r.ID] {
 			if ref.BatchID == r.FirstBatchID {
 				item.Source = &ResourceSource{Workbook: ref.Workbook, Sheet: ref.Sheet, RowNumber: ref.RowNumber}
@@ -256,7 +259,7 @@ func (s *Service) ResourceDetail(ctx context.Context, id string) (ResourceDetail
 		return ResourceDetail{}, fmt.Errorf("query: relations of resource %s: %w", id, err)
 	}
 	return ResourceDetail{
-		ResourceItem:  newResourceItem(r),
+		ResourceItem:  NewResourceItem(r),
 		SourceRefs:    refItems,
 		RelationCount: len(relations),
 	}, nil

@@ -264,7 +264,10 @@ func runTraverse(ctx context.Context, store TraverseStore, rootID string, p Trav
 	}
 
 	emitted := map[string]bool{}
-	var edges []TraverseEdge
+	// make(…, 0): a single-node traversal (or an edges-filtered one) must
+	// serialize edges as [] — never null (audit §2.6, same contract the
+	// impact arrays got).
+	edges := make([]TraverseEdge, 0)
 	queue := []string{rootID}
 	truncated := false
 

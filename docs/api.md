@@ -978,6 +978,21 @@ body `{runState: "up|down|degraded|maintenance|unknown", source?: "manual", ts?:
 
 `?depth=1（邻居深度，默认 1 上限 2，走旧 relations BFS）&metrics=latest`。**扁平文档**：资源详情字段（id/type/naturalKey/name/status/runState/attributes/sourceRefs/relationCount）+ `neighbors`（depth-1 子图：nodes+edges）+ `metrics`（该资源各序列最新点：metricKey/unit/ts/value/quality）+ `recentAnomalies`（该资源的异常扫描结果；W23 起告警将并入此块）。404 未知资源。
 
+### CLI 图查询通道（issue #41，v0.8.1）
+
+traverse / impact / context 三个图查询能力**不再是 HTTP 独占**——同一引擎、同一组合根装配（`services.GraphStore` 的唯一 store 绑定与 `services.GraphContext` 的唯一上下文装配），CLI 与 HTTP 输出**逐字节一致**（跨通道 e2e 以 JSON 相等钉死）：
+
+```
+netopslab query --db <path> traverse --id <id> [--direction down|up|both] [--layers 0,1,2]   [--relations carried_by,uses_fiber] [--max-depth 1..8] [--max-nodes 1..500] [--path-only]
+netopslab query --db <path> impact   --id <id> [--direction up|down] [--max-depth 1..8]
+netopslab query --db <path> context  --id <id> [--depth 1|2] [--metrics latest|none]
+netopslab query --db <path> nearest  --type base_station --lat 45.80 --lng 126.53 [--limit 5]
+```
+
+参数语义与 HTTP 查询参数一一对应（CLI 惯例的 kebab-case），校验边界同源（同常量）；stdout 恰好一个 JSON 对象（§10 契约）。`query nearest` 是 v20 geo 列的空间查询出口（issue #45）：类型过滤 + haversine 真距离排序，~1.5°×3° 窗口语义见 `repo.ResourceRepo.Nearest`。脚本化巡检（导入→检测→图查询）从此无需先 `serve`。
+
+**空集合契约（audit §2.6，v0.8.1）**：traverse 的 `nodes`/`edges`、impact 的 `impacted`/`candidates`、context 的 `metrics`/`recentAnomalies`/`neighbors.nodes`/`neighbors.edges` 无结果时恒为 `[]`，**不是 `null`**——严格客户端的 `len()`/迭代不再需要判空分支。
+
 ### GET /api/stats 扩展
 
 新增 `byRunState{up,down,degraded,maintenance,unknown,null}`（null = 无观测资源数——NULL 与显式 unknown 的区分在聚合层保持）。
