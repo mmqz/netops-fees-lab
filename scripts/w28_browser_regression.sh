@@ -40,10 +40,10 @@ go build -o "$BIN" ./cmd/netopslab
 
 echo "[1/4] 导入真实数据工作簿（31 本，v0.8.0 testdata/realdata）"
 ORDER=(
-  sites machine_rooms base_stations customers vpn_instances rings igp_domains
-  devices ports boards racks odf odf_terminals ducts manholes poles
+  sites machine_rooms customers vpn_instances rings igp_domains devices boards
+  base_stations ports racks odf odf_terminals ducts manholes poles
   optical_cables cable_segments splice_boxes fibers otn_ochs sdh_timeslots
-  circuits ippools services leased_lines bbus rrus olts pon_ports onus
+  circuits protection_groups ippools services leased_lines bbus rrus olts pon_ports onus
 )
 for wb in "${ORDER[@]}"; do
   f="testdata/realdata/$wb.xlsx"

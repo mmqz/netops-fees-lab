@@ -8,6 +8,10 @@
  */
 
 import type {
+  AlertAckResponse,
+  AlertClearResponse,
+  AlertItem,
+  AlertsQuery,
   ApplyResult,
   AttributeChangeItem,
   AttributeChangeList,
@@ -629,6 +633,38 @@ export function restoreCheckpoint(id: string, checkpointId: string): Promise<Res
     `/workspaces/${encodeURIComponent(id)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
     {},
   );
+}
+
+// ---------------------------------------------------------------------------
+// 告警中心（GET /api/alerts + ack/clear，v0.7 检测告警）
+// ---------------------------------------------------------------------------
+
+/** GET /api/alerts?state=&severity=&resource_id=&page=&pageSize= */
+export function listAlerts(query: AlertsQuery): Promise<Paged<AlertItem>> {
+  return requestJson<Paged<AlertItem>>(
+    `/alerts${buildQuery({
+      state: query.state,
+      severity: query.severity,
+      resource_id: query.resourceId,
+      page: query.page,
+      pageSize: query.pageSize,
+    })}`,
+  );
+}
+
+/**
+ * POST /api/alerts/{id}/ack — firing→acked（人类确认边）。
+ * ackedBy 必填（确认人，告警审计字段）。
+ */
+export function ackAlert(id: string, ackedBy: string): Promise<AlertAckResponse> {
+  return postJson<AlertAckResponse>(`/alerts/${encodeURIComponent(id)}/ack`, { ackedBy });
+}
+
+/** POST /api/alerts/{id}/clear — firing|acked→cleared（人类清除边，空体合法）。 */
+export function clearAlert(id: string): Promise<AlertClearResponse> {
+  return requestJson<AlertClearResponse>(`/alerts/${encodeURIComponent(id)}/clear`, {
+    method: 'POST',
+  });
 }
 
 // ---------------------------------------------------------------------------

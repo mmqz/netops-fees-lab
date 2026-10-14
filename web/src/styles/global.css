@@ -3685,3 +3685,11 @@ body.lab-split-dragging {
     scroll-behavior: auto !important;
   }
 }
+
+/* v0.9 告警中心：行内处置按钮组（确认/清除，同一行不折行）。 */
+.alert-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}

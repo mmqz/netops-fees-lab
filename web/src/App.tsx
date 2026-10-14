@@ -15,6 +15,7 @@ import {
   BREADCRUMB_HOME,
   BREADCRUMB_LABEL,
   BTN_BACK_HOME,
+  NAV_ALERTS,
   NAV_IMPORT,
   NAV_ISSUES,
   NAV_LAB_GROUP,
@@ -30,6 +31,7 @@ import {
 import { ToastProvider } from './components/Toast';
 import { EmptyState } from './components/EmptyState';
 import {
+  IconAlert,
   IconDoc,
   IconFlask,
   IconHome,
@@ -43,6 +45,7 @@ import { OverviewPage } from './pages/Overview';
 import { ImportWizardPage } from './pages/ImportWizard';
 import { ResourcesPage } from './pages/Resources';
 import { IssuesPage } from './pages/Issues';
+import { AlertsPage } from './pages/Alerts';
 import { ReportPage } from './pages/Report';
 import { LabWorkspacesPage } from './pages/LabWorkspaces';
 import { LabWorkspacePage } from './pages/LabWorkspace';
@@ -60,6 +63,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/import', label: NAV_IMPORT, icon: <IconUpload /> },
   { to: '/resources', label: NAV_RESOURCES, icon: <IconTable /> },
   { to: '/issues', label: NAV_ISSUES, icon: <IconWarning /> },
+  { to: '/alerts', label: NAV_ALERTS, icon: <IconAlert /> },
   { to: '/report', label: NAV_REPORT, icon: <IconReport /> },
 ];
 
@@ -75,6 +79,8 @@ function routeTitle(pathname: string): string {
       return NAV_RESOURCES;
     case '/issues':
       return NAV_ISSUES;
+    case '/alerts':
+      return NAV_ALERTS;
     case '/report':
       return NAV_REPORT;
     default:
@@ -214,6 +220,7 @@ function AppShell() {
             <Route path="/import" element={<ImportWizardPage />} />
             <Route path="/resources" element={<ResourcesPage />} />
             <Route path="/issues" element={<IssuesPage />} />
+            <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/report" element={<ReportPage />} />
             <Route path="/lab" element={<LabWorkspacesPage />} />
             <Route path="/lab/:id" element={<LabWorkspacePage />} />

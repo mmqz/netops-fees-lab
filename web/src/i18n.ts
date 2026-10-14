@@ -7,6 +7,8 @@
  */
 
 import type {
+  AlertComparator,
+  AlertState,
   BatchStatus,
   ChangeSetStatus,
   ChangeSetTrigger,
@@ -633,6 +635,63 @@ export const ISS_EVIDENCE_KEY = '键';
 export const ISS_EVIDENCE_VALUE = '值';
 export const ISS_EVIDENCE_EMPTY = '该问题没有附加证据';
 export const ISS_EXPAND_HINT = '点击行可展开证据明细';
+
+// ---------------------------------------------------------------------------
+// 告警中心页（v0.9 /alerts）
+// ---------------------------------------------------------------------------
+
+export const NAV_ALERTS = '告警中心';
+
+/** 告警状态（firing|acked|cleared）。 */
+export const ALERT_STATE_LABELS: Record<AlertState, string> = {
+  firing: '触发中',
+  acked: '已确认',
+  cleared: '已清除',
+};
+
+/** 阈值比较器 → 中文短语（用于「最新值 vs 阈值」行内描述）。 */
+export const ALERT_COMPARATOR_LABELS: Record<AlertComparator, string> = {
+  gt: '高于',
+  gte: '不低于',
+  lt: '低于',
+  lte: '不高于',
+};
+
+export const ALR_FILTER_STATE = '状态';
+export const ALR_FILTER_SEVERITY = '级别';
+export const ALR_COL_STATE = '状态';
+export const ALR_COL_SEVERITY = '级别';
+export const ALR_COL_RULE = '规则';
+export const ALR_COL_RESOURCE = '资源';
+export const ALR_COL_FIRED = '触发时间';
+export const ALR_COL_VALUE = '最新值 / 阈值';
+export const ALR_COL_ACTIONS = '处置';
+export const ALR_VALUE_TEXT = '{value}（{comparator}阈值 {threshold}）';
+export const ALR_BTN_ACK = '确认';
+export const ALR_BTN_CLEAR = '清除';
+export const ALR_BTN_CLEAR_WORKING = '清除中…';
+export const ALR_HINT = '触发中的告警需先确认（记录处置人）再清除；清除即归档，告警记录保留为审计线索';
+export const ALR_ACK_TITLE = '确认告警';
+export const ALR_ACK_LABEL = '确认人';
+export const ALR_ACK_PLACEHOLDER = '例如：张工';
+export const ALR_ACK_HINT = '确认人将写入告警审计字段（触发中 → 已确认）';
+export const ALR_ACK_WORKING = '确认中…';
+export const ALR_CLEAR_TITLE = '清除告警';
+export const ALR_CLEAR_MESSAGE = '清除后该告警转入「已清除」归档态，记录保留可查。确定清除吗？';
+export const ALR_ACKED_TOAST = '告警已确认（处置人：{who}）';
+export const ALR_CLEARED_TOAST = '告警已清除并归档';
+export const ALR_ACTION_FAILED = '处置失败：{message}';
+export const ALR_DETAIL_TITLE = '告警详情';
+export const ALR_DETAIL_RULE_ID = '规则 ID';
+export const ALR_DETAIL_SERIES = '指标序列';
+export const ALR_DETAIL_METRIC = '指标';
+export const ALR_DETAIL_WINDOW = '窗口（点数）';
+export const ALR_DETAIL_FIRST_SEEN = '首次出现';
+export const ALR_DETAIL_LAST_FIRED = '本次触发';
+export const ALR_DETAIL_ACK_LINE = '已由 {who} 确认（{at}）';
+export const ALR_DETAIL_CLEARED_LINE = '已清除（{at}）';
+export const ALR_RESOURCE_LINK_TITLE = '在资源浏览中查看';
+export const ALR_EMPTY = '当前筛选条件下没有告警';
 
 // ---------------------------------------------------------------------------
 // 质量报告页

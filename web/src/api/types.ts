@@ -887,3 +887,63 @@ export interface RestoreResult {
   workspaceHash: string;
   checks?: RunSummary | null;
 }
+
+// ---------------------------------------------------------------------------
+// 18. GET /api/alerts + POST /api/alerts/{id}/ack|clear（检测告警，v0.7）
+// ---------------------------------------------------------------------------
+
+/** 告警状态（与 alerts.state CHECK 一致：firing|acked|cleared）。 */
+export type AlertState = 'firing' | 'acked' | 'cleared';
+
+/** 阈值比较器（detection_rules.comparator）。 */
+export type AlertComparator = 'gt' | 'lt' | 'gte' | 'lte';
+
+/** GET /api/alerts 单条告警（含 rule + series → resource JOIN 字段）。 */
+export interface AlertItem {
+  alertId: string;
+  ruleId: string;
+  ruleLabel: string;
+  metricKey: string;
+  comparator: AlertComparator;
+  threshold: number;
+  window: number;
+  severity: Severity;
+  seriesId: string;
+  state: AlertState;
+  firedAt: string;
+  firstSeen: string;
+  clearedAt?: string | null;
+  ackedAt?: string | null;
+  ackedBy?: string | null;
+  lastValue: number;
+  resource: {
+    id: string;
+    type: string;
+    naturalKey: string;
+    name: string;
+  };
+}
+
+/** GET /api/alerts 查询参数（state/severity/resource_id 可选）。 */
+export interface AlertsQuery {
+  state?: AlertState;
+  severity?: Severity;
+  resourceId?: string;
+  page: number;
+  pageSize: number;
+}
+
+/** POST /api/alerts/{id}/ack 响应（生命周期回执）。 */
+export interface AlertAckResponse {
+  alertId: string;
+  state: AlertState;
+  ackedAt: string;
+  ackedBy: string;
+}
+
+/** POST /api/alerts/{id}/clear 响应。 */
+export interface AlertClearResponse {
+  alertId: string;
+  state: AlertState;
+  clearedAt: string;
+}
