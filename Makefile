@@ -1,6 +1,6 @@
 # NetOps Lab — developer targets.
 
-.PHONY: fmt vet test testdata build build-testdatagen web demo demo-lab all clean
+.PHONY: fmt vet test testdata build build-testdatagen web demo demo-lab run-win all clean
 
 fmt:
 	gofmt -l -w .
@@ -42,6 +42,12 @@ demo:
 # → undo → checkpoint create/break/restore. See scripts/demo-lab.sh.
 demo-lab:
 	bash scripts/demo-lab.sh
+
+# Windows one-click run: frontend -> binary -> realdata import -> serve -> browser.
+# Equivalent of `make demo-real` for Windows (the .sh scripts need bash).
+# See run.ps1 and docs/run-windows.md.
+run-win:
+	pwsh -NoProfile -ExecutionPolicy Bypass -File ./run.ps1
 
 # Full production artifact: frontend first, then the binary that embeds it.
 all: web build

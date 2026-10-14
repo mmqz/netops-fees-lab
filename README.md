@@ -112,6 +112,28 @@ make build           # bin/netopslab
 
 说明：`make web` 会把 `web/` 构建到 `internal/webui/dist`（该目录不提交，仅保留 `.gitkeep` 占位）；`make build` 嵌入的是**当时 dist 里的内容**——先 `make web` 再 `make build` 才会得到带真实前端的二进制。`make all` = `web + build`。
 
+### Windows 一键运行（PowerShell）
+
+上面的 `make` 与 `scripts/*.sh` 需要 bash。**Windows 用户直接用 `run.ps1`**：
+
+```powershell
+.\run.ps1              # 全流程 + 自动开浏览器（http://127.0.0.1:8080）
+.\run.ps1 -Rebuild     # 强制重建数据库
+.\run.ps1 -Port 9000   # 换端口
+.\run.ps1 -SkipWeb -SkipBuild   # 跳过构建（都最新时）
+```
+
+脚本一步完成：**构建前端 → 构建二进制 → 按依赖序导入 32 工作簿 → 7 日性能
+→ 检测告警 → 物化工作台 → 启动服务 → 开浏览器**。
+数据库已存在时自动跳过导入（幂等）。
+
+> ⚠️ 顺序不能颠倒：`internal/webui/dist` 被 `go:embed` 在**构建时**嵌入二进制。
+> 只重建前端而不重建二进制 → 新增地图图层**静默缺失**
+> （`GET /mapdata/*.geojson.gz` 返回 `200 text/html`，控制台无报错）。
+> `run.ps1` 按正确顺序执行，并在启动后**自检图层 Content-Type**。
+
+完整参数与排错见 [docs/run-windows.md](docs/run-windows.md)；`make run-win` 等价于 `.\run.ps1`。
+
 ### 仿真工作台快速开始（CLI 路径）
 
 无浏览器环境时，故障注入故事可用 CLI 完整走通（即 `scripts/demo-lab.sh` 的内核）：
@@ -282,6 +304,8 @@ TeleAgent 集成：MCP 注册方式与 CLI 回退路径（以结构化 JSON 供 
 NetOps Lab is a local-first cloud-network resource governance and AI simulation workbench delivering Stage 0 + Phase 1 + Phase 2. Phase 1 imports eight resource types (devices, IP pools, circuits, ports, base stations, machine rooms, sites, PTP ports — base stations/machine rooms/sites are v0.4 real-telecom workbook types, ptp_port is the v0.5 real-telecom script channel) through a user-confirmed column mapping (scripts map through a deterministic parser to a virtual sheet) into SQLite (pure Go, no CGO), with single-transaction atomicity, row-level accounting, idempotent re-import (skip-path re-imports append per-batch source-ref provenance, W7), batch rollback, attribute-change and suspected-rename proposals with human-confirmed apply/reject flows (W005/W006), and a deterministic, versioned validation engine (13 rules, E001–E006/W001–W006/I001) with source evidence. The v0.6 governance arc completes the trilogy and closes the data loop: ref-field attribute applies (machine-room site_id, pool assigned_device, circuit a/z ends) retarget the derived relation to the new target inside the same apply transaction (409 ref_target_missing when the target is gone; an edgeless reference never creates an orphan relation — lineage invariant), and a deterministic xlsx export channel (byte-identical across runs and across the CLI/HTTP channels; key-component back-fill preserves composite and fallback natural keys) round-trips through the same analyze → suggest → import pipeline into an equivalent fresh database (resource and relation sets equal, W005/W006 applied states included). Phase 2 adds the simulation workbench: one-click materialization of a virtual topology (27 devices / 40 interfaces / 20 links in the demo), a closed set of 10 typed operations (including fault injection) that humans AND the AI (via MCP) apply through the same engine path as atomic changesets, five deterministic checks (CHK-001..005, score 100−5E−1W), up-only BFS connectivity, before/after run diff (business-key matching, connectivity lost/gained pairs, score delta), and three-tier undo: transaction rollback for failed changesets, LIFO changeset-inverse undo (undo-of-undo works), and checkpoints via the SQLite Online Backup API with workspace-scoped restore-as-forward-ops (hash-equal verification, no-op detection). Exits: stdlib HTTP API (17 new §7 routes), embedded React 18 UI with a Cytoscape topology canvas (/lab), structured-JSON CLI (lab subcommand tree), and an MCP stdio server exposing exactly five tools (one read-only search + four typed lab tools; no workspace create/delete for the AI), all wired through a single composition root (internal/services, W9 — N+1-free MCP reads). Verified: 331 top-level Go tests green (v0.6.0 release count, counting convention in docs/verified-capabilities.md), and a one-screen governance overview (pending queues, decision audit, issue distribution, inventory shapes — SQL-COUNT aggregate, deterministic except generatedAt), live-server API journey, CLI e2e, in-process MCP round-trip + real-process stdio smoke, determinism (two fresh DBs), atomicity, checkpoint round-trip, repeatable demo-lab.sh double-run. Unverified: deployed-TeleAgent MCP invocation, Windows/macOS builds (the /lab browser smoke passed in the 2026-10-10 final review and again at v0.4.0). No production write capability anywhere; all data is synthetic, with the single documented `samples/` exception (real telecom export samples, owner-authorized, private-repository-only — see samples/README.md).
 
 ## 文档索引
+
+- [docs/run-windows.md](docs/run-windows.md) — **Windows 一键运行**（run.ps1 用法与排错）
 
 | 文档 | 内容 |
 | --- | --- |

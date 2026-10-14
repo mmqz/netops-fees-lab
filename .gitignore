@@ -19,5 +19,8 @@
 .DS_Store
 *.log
 
+# run.ps1 artifact: last started workspace id
+/.last-workspace
+
 # local scratch (test servers, verification artifacts)
 /tmp/
