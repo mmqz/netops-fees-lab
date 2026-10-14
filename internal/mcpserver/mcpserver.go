@@ -1,15 +1,21 @@
 // Package mcpserver exposes the NetOps Lab MCP STDIO server: resource_search
-// of PROJECT_BRIEF §10 plus the four simulation-workbench lab tools of
+// of PROJECT_BRIEF §10, the four simulation-workbench lab tools of
 // PROJECT_BRIEF_P2 §8 (lab_apply_ops, lab_run_checks, lab_diff_undo,
-// lab_checkpoint) — EXACTLY FIVE tools and nothing else: no SQL, shell, SSH or
-// file tools, no production write capability of any kind (the SEC
-// non-negotiable of PROJECT_BRIEF §1 and PROJECT_BRIEF_P2 §1).
+// lab_checkpoint) and the five read-only analysis tools of v0.9 R4
+// (graph_traverse, graph_impact, graph_context, alerts_query, metrics_query)
+// — EXACTLY TEN tools and nothing else: no SQL, shell, SSH or file tools, no
+// production write capability of any kind (the SEC non-negotiable of
+// PROJECT_BRIEF §1 and PROJECT_BRIEF_P2 §1; the R4 additions widen only the
+// READ surface — ack/clear and detection runs stay human/HTTP/CLI).
 //
 // The AI mutates simulation state ONLY through these tools, and only by
 // typed application operations on an existing workspace — no tool can create
 // or delete a workspace (materialization stays a human/HTTP action), and
 // restore_* op codes are rejected inside lab_apply_ops because the engine's
-// own decoder guards every external boundary.
+// own decoder guards every external boundary. The R4 analysis tools are
+// strictly read-only: the resource domain stays human-write-only, alert
+// lifecycle edges (ack/clear) stay human-only, and detection runs stay
+// explicit operator actions.
 //
 // The server speaks MCP over newline-delimited JSON-RPC 2.0 via the
 // modelcontextprotocol go-sdk v1.8.0 (IOTransport over the caller-provided
@@ -119,6 +125,7 @@ func NewServer(svc *services.Services) *mcp.Server {
 		return nil, out, nil
 	})
 	addLabTools(server, svc.Lab)
+	addGraphTools(server, svc)
 	return server
 }
 

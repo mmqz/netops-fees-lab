@@ -164,8 +164,9 @@ func (s *Server) Routes() http.Handler {
 	// W22 graph query endpoints (§7.3 后两个 + §10): the layer-delta vertical
 	// traverse, the impact (root-cause candidates / impacted surface) and the
 	// one-shot AI context assembly. The legacy /relations endpoint above
-	// stays untouched (deprecated in docs — §10.10 并行提供). MCP stays
-	// frozen at five tools: the engines are exposed over HTTP only.
+	// stays untouched (deprecated in docs — §10.10 并行提供). v0.9 R4: the
+	// engines are ALSO exposed read-only over MCP (graph_traverse /
+	// graph_impact / graph_context); the write edges stay HTTP/CLI-only.
 	mux.HandleFunc("GET /api/resources/{id}/traverse", s.handleResourceTraverse)
 	mux.HandleFunc("GET /api/resources/{id}/impact", s.handleResourceImpact)
 	mux.HandleFunc("GET /api/resources/{id}/context", s.handleResourceContext)

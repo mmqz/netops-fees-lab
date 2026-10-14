@@ -1,6 +1,6 @@
 # NetOps Lab — TeleAgent 集成指南（MCP 注册 + CLI 回退）
 
-> ⚠️ **诚实声明**：部署态 TeleAgent 的 MCP 调用**未在本开发环境验证**（环境内没有 TeleAgent 实例；v0.2.0 时点状态与 Phase 1 相同）。已验证的是：进程内 MCP stdio 回环（go-sdk 客户端 × `mcpserver.Run`，`TestMCPServerResourceSearch` / `TestMCPToolRegistry` / `TestMCPLab*` ×4）**以及**真子进程 stdio 冒烟（`netopslab mcp --db <fresh>` 裸 JSON-RPC initialize + tools/list → 服务器身份 `netops-lab v0.2.0`〔该冒烟为 v0.2.0 时点捕获，版本号现随 `domain.AppVersion` 演进为 v0.6.0〕、工具恰好 5 个）。**接入部署态时请按本文操作，并把结果（成功/报错/协议差异）反馈给工程组。** 在验证完成前，建议优先使用 CLI 回退路径（§4）——它与 MCP 共用同一引擎，输出同为结构化 JSON。
+> ⚠️ **诚实声明**：部署态 TeleAgent 的 MCP 调用**未在本开发环境验证**（环境内没有 TeleAgent 实例；v0.2.0 时点状态与 Phase 1 相同）。已验证的是：进程内 MCP stdio 回环（go-sdk 客户端 × `mcpserver.Run`，`TestMCPServerResourceSearch` / `TestMCPToolRegistry` / `TestMCPLab*` ×4 / `TestMCPGraphToolsRoundTrip` / `TestMCPAlertsMetricsRoundTrip`）**以及**真子进程 stdio 冒烟（`netopslab mcp --db <fresh>` 裸 JSON-RPC initialize + tools/list → 服务器身份与工具清单〔v0.2.0 时点为 5 工具，v0.9 起 **10 工具**〕）。**接入部署态时请按本文操作，并把结果（成功/报错/协议差异）反馈给工程组。** 在验证完成前，建议优先使用 CLI 回退路径（§4）——它与 MCP 共用同一引擎，输出同为结构化 JSON。
 
 ## 1. 前置
 
@@ -25,11 +25,16 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 
 - name：`netops-lab`
 - version：`v0.6.0`（`domain.AppVersion` 常量，MCP initialize 响应报告；v0.3.2 起该常量由 `TestAppVersionMatchesChangelogHead` 与 CHANGELOG 头版本锚定，此示例值随版本演进——以握手实际响应为准）
-- 工具清单（`tools/list`）：**恰好 5 个**（无 SQL/Shell/SSH/文件工具；`TestMCPToolRegistry` 断言排序比较）：
+- 工具清单（`tools/list`）：**恰好 10 个**（无 SQL/Shell/SSH/文件工具；`TestMCPToolRegistry` 断言排序比较；v0.9 R4 新增 5 个只读分析工具）：
 
 | 工具 | 类别 | 一句话职责 |
 | --- | --- | --- |
 | `resource_search` | 只读 | 检索导入资源（P1，不变） |
+| `graph_traverse` | 只读分析 | 纵向穿透（§10.3 层序 BFS，down/up/both） |
+| `graph_impact` | 只读分析 | 根因候选 + 影响面分类（§10.5/§10.6） |
+| `graph_context` | 只读分析 | 一站式分析上下文（详情 + 邻接 + 最新指标 + 异常） |
+| `alerts_query` | 只读分析 | 检测告警查询（firing/acked/cleared × severity） |
+| `metrics_query` | 只读分析 | 指标时序查询（劣化曲线证据） |
 | `lab_apply_ops` | 仿真写 | 对工作区应用类型化操作（含故障注入），单事务变更集 + 自动校验 |
 | `lab_run_checks` | 只读 | 立即执行五项校验，返回发现行 |
 | `lab_diff_undo` | 读/写复用 | 一次调用做 run 前后对比（diff）或撤销变更集（undo），`mode` 判别 |
@@ -54,6 +59,15 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 
 - 输入：`workspaceId`（string，必填）
 - 输出：`{"runId","counts":{"error","warning","info"},"score","workspaceHash","results":[{"checkCode","severity","passed","entityKind","entityId","message"}]}`——**仅发现行**（紧凑供 AI 消费；`passed` 恒 false）
+
+**`graph_traverse` / `graph_impact` / `graph_context` / `alerts_query` / `metrics_query`**（v0.9 R4，五个只读分析工具——AI 根因分析闭环）：
+
+- `graph_traverse` 输入：`resourceId`（必填）、`direction`（down（默认）/up/both）、`layers`（0..6 逗号列表）、`relations`（逗号列表）、`maxDepth`（1..8，缺省 6）、`maxNodes`（1..500，缺省 200）、`pathOnly`；输出与 HTTP `GET /api/resources/{id}/traverse` **同一引擎文档**（root/nodes/edges/truncated/stats）；
+- `graph_impact` 输入：`resourceId`、`direction`（down 根因追查 / up 影响面收集（默认））、`maxDepth`（缺省 8）；输出 = HTTP impact 契约（root/impacted/candidates/truncated，空集合恒 `[]`）；
+- `graph_context` 输入：`resourceId`、`depth`（1..2，缺省 1）、`metrics`（latest（默认）/none）；输出 = §7.3 一站式文档（资源详情 + neighbors + metrics 最新点 + recentAnomalies）——**AI 分析单资源的首选入口**；
+- `alerts_query` 输入：`state`（firing（默认）/acked/cleared）、`severity`、`resourceId`、`limit`（缺省 20 上限 100）、`offset`；输出 `{items, total, offset, limit}`，item 含规则/阈值/最新值/资源投影与时间线——**ack/clear 不存在对应工具**（仅人类 HTTP/CLI）；
+- `metrics_query` 输入：`resourceId`、`keys`（逗号列表，封闭目录校验）；输出 `{resourceId, series[]}`（每序列 points：ts/value/quality）；
+- 推荐分析旅程：`alerts_query(state=firing)` → 取告警的 `resource.id` → `graph_context` 看邻接与指标 → `graph_impact(direction=down)` 取根因候选（中文判定理由）→ `metrics_query` 取劣化曲线佐证。
 
 **`lab_diff_undo`**（一个工具两种模式，`mode` 判别，联动字段校验）：
 

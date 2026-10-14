@@ -1,9 +1,11 @@
 // Tests drive the REAL MCP server (NewServer + Run) over os.Pipe stdio
 // transports with the go-sdk client performing the full JSON-RPC MCP
 // initialize handshake, then tools/list and tools/call. TestMCPToolRegistry
-// is the §11 SEC-P2 acceptance test: exactly five tools — resource_search
-// plus the four lab tools of PROJECT_BRIEF_P2 §8 — and nothing else (no
-// SQL/shell/file/production tools, no workspace create/delete tool). The
+// is the §11 SEC-P2 acceptance test: exactly ten tools — resource_search,
+// the four lab tools of PROJECT_BRIEF_P2 §8 and the five read-only analysis
+// tools of v0.9 R4 — and nothing else (no SQL/shell/file/production tools,
+// no workspace create/delete tool, no alert ack/clear or detection-run
+// tool: the analysis surface is read-only). The
 // lab tests materialize a workspace DIRECTLY through sim.Service on the test
 // side (simulating the human/HTTP creation MCP cannot perform) and then
 // exercise every tool through the real MCP client.
@@ -248,9 +250,13 @@ func TestMCPToolRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	// The five contract tools, SORTED for comparison (§8 pins the set, the
+	// The ten contract tools, SORTED for comparison (§8 pins the set, the
 	// registry order is unspecified).
-	want := []string{"lab_apply_ops", "lab_checkpoint", "lab_diff_undo", "lab_run_checks", "resource_search"}
+	want := []string{
+		"alerts_query", "graph_context", "graph_impact", "graph_traverse",
+		"lab_apply_ops", "lab_checkpoint", "lab_diff_undo", "lab_run_checks",
+		"metrics_query", "resource_search",
+	}
 	names := make([]string, 0, len(list.Tools))
 	for _, tool := range list.Tools {
 		names = append(names, tool.Name)
@@ -265,8 +271,8 @@ func TestMCPToolRegistry(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 5 {
-		t.Fatalf("tools/list exposes %d tools (%v), want exactly the five contract tools %v", len(names), names, want)
+	if len(names) != 10 {
+		t.Fatalf("tools/list exposes %d tools (%v), want exactly the ten contract tools %v", len(names), names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {
@@ -282,6 +288,18 @@ func TestMCPToolRegistry(t *testing.T) {
 		t.Errorf("CallTool(run_sql) succeeded — unknown tools must not be callable")
 	} else if !strings.Contains(err.Error(), "unknown tool") {
 		t.Errorf("CallTool(run_sql) error = %v, want an unknown-tool protocol error", err)
+	}
+	// The R4 analysis surface is read-only by construction: the alert
+	// lifecycle edges (ack/clear) and the detection run are NOT tools —
+	// they stay human/HTTP/CLI. Their absence is pinned here like the
+	// workspace-create prohibition above.
+	for _, forbidden := range []string{"alerts_ack", "alerts_clear", "detection_run", "metrics_ingest"} {
+		_, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: forbidden})
+		if err == nil {
+			t.Errorf("CallTool(%s) succeeded — no such write tool may exist", forbidden)
+		} else if !strings.Contains(err.Error(), "unknown tool") {
+			t.Errorf("CallTool(%s) error = %v, want an unknown-tool protocol error", forbidden, err)
+		}
 	}
 	// A workspace-create-shaped tool must not exist either (§1.4: MCP cannot
 	// create or delete workspaces).
