@@ -9,6 +9,7 @@ package sim
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -183,7 +184,7 @@ func runDeterminismScript(t *testing.T) (*Service, determinismArtifacts) {
 // random; all sim ids come from the global sequences).
 func normalizeArtifacts(a determinismArtifacts, workspaceID string) determinismArtifacts {
 	norm := func(s string) string {
-		return replaceUUID(s, workspaceID)
+		return replaceResourceUUIDs(replaceUUID(s, workspaceID))
 	}
 	a.TopologyJSON = norm(a.TopologyJSON)
 	// a.Hash needs no normalization: the hash covers business fields only
@@ -219,6 +220,24 @@ func replaceUUID(s, id string) string {
 		s = s[i+len(id):]
 	}
 }
+
+// replaceResourceUUIDs canonicalizes imported resource uuids to a fixed
+// placeholder: the layer overlay payload (issue #51) carries the lineage
+// resource ids, which are freshly generated uuids on every import —
+// structural determinism compares shapes, not import identities. Two id
+// shapes occur: the importer's res_<uuid> and the test fixtures' bare
+// uuid inside a resourceId JSON field.
+func replaceResourceUUIDs(s string) string {
+	out := resourceUUIDPattern.ReplaceAllString(s, "res_<id>")
+	out = resourceIdUUIDPattern.ReplaceAllString(out, `"resourceId":"<id>"`)
+	return out
+}
+
+// resourceUUIDPattern matches res_ followed by a 36-char uuid.
+var resourceUUIDPattern = regexp.MustCompile(`res_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+// resourceIdUUIDPattern matches a bare uuid inside a resourceId field.
+var resourceIdUUIDPattern = regexp.MustCompile(`"resourceId":"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"`)
 
 // indexOfSubstring finds substr in s (testing helper).
 func indexOfSubstring(s, substr string) int {

@@ -7,9 +7,14 @@
 import type { SimEntityStatus, SimTopology, TopologyEdge, TopologyNode } from '../../api/types';
 import { LAB_I_ERR_ADDR, LAB_I_ERR_BOTH, LAB_I_ERR_PREFIX } from '../../i18n';
 
-/** 选中实体：画布点击或表格行点击时互相定位。 */
+/**
+ * 选中实体：画布点击或表格行点击时互相定位。
+ * #51 扩展：layerNode / layerLink 是图层覆盖层的只读实体（基站簇、OLT、
+ * 客户、逻辑电路边……）——详情呈现于 LabWorkspace 的图层信息面板，
+ * 不进入演练操作（操作对话框仍只面向 device/interface/link）。
+ */
 export interface SelectedEntity {
-  kind: 'device' | 'interface' | 'link';
+  kind: 'device' | 'interface' | 'link' | 'layerNode' | 'layerLink';
   id: string;
 }
 

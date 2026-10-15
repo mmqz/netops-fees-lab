@@ -104,6 +104,12 @@ type DB struct {
 	// per detection sweep — api / cli / scheduler all land here.
 	DetectionRuns *DetectionRunRepo
 
+	// Layer overlay (migration v23, issue #51 / W33): the read-only canvas
+	// projection of the unified graph — virtual_nodes (L0/L4/L5/L6) and
+	// virtual_layer_links (L3/L4/L5/L6).
+	LayerNodes *LayerNodeRepo
+	LayerLinks *LayerLinkRepo
+
 	// Mapping templates (migration v19, W24 — §12-B7 方案 A): the confirmed
 	// per-sheet mapping store of the unattended import channel.
 	Templates *TemplateRepo
@@ -165,6 +171,8 @@ func wire(db *DB, q DBTX) {
 	db.DetectionRules = &DetectionRuleRepo{q: q}
 	db.Alerts = &AlertRepo{q: q}
 	db.DetectionRuns = &DetectionRunRepo{q: q}
+	db.LayerNodes = &LayerNodeRepo{q: q}
+	db.LayerLinks = &LayerLinkRepo{q: q}
 	db.Templates = &TemplateRepo{q: q}
 }
 
@@ -216,6 +224,12 @@ type Tx struct {
 
 	// Detection run history (migration v21, v0.11-R11).
 	DetectionRuns *DetectionRunRepo
+
+	// Layer overlay (migration v23, issue #51 / W33): the read-only canvas
+	// projection of the unified graph — virtual_nodes (L0/L4/L5/L6) and
+	// virtual_layer_links (L3/L4/L5/L6).
+	LayerNodes *LayerNodeRepo
+	LayerLinks *LayerLinkRepo
 
 	// Mapping templates (migration v19, W24).
 	Templates *TemplateRepo
@@ -307,6 +321,8 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		DetectionRules:   &DetectionRuleRepo{q: sqlTx},
 		Alerts:           &AlertRepo{q: sqlTx},
 		DetectionRuns:    &DetectionRunRepo{q: sqlTx},
+		LayerNodes:       &LayerNodeRepo{q: sqlTx},
+		LayerLinks:       &LayerLinkRepo{q: sqlTx},
 		Templates:        &TemplateRepo{q: sqlTx},
 	}
 	defer func() {

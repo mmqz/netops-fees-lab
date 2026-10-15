@@ -156,13 +156,16 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 
 // workspaceListItem is one entry of GET /api/workspaces (§7).
 type workspaceListItem struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description"`
-	DeviceCount     int       `json:"deviceCount"`
-	InterfaceCount  int       `json:"interfaceCount"`
-	LinkCount       int       `json:"linkCount"`
-	UpDeviceCount   int       `json:"upDeviceCount"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	DeviceCount    int    `json:"deviceCount"`
+	InterfaceCount int    `json:"interfaceCount"`
+	LinkCount      int    `json:"linkCount"`
+	UpDeviceCount  int    `json:"upDeviceCount"`
+	// #51 图层覆盖层计数（工作台列表/详情摘要用）。
+	LayerNodeCount  int       `json:"layerNodeCount"`
+	LayerLinkCount  int       `json:"layerLinkCount"`
 	ChangeSetCount  int       `json:"changesetCount"`
 	CheckpointCount int       `json:"checkpointCount"`
 	LastRunID       *string   `json:"lastRunId"`
@@ -176,6 +179,15 @@ type workspacesPage struct {
 	Total    int                 `json:"total"`
 	Page     int                 `json:"page"`
 	PageSize int                 `json:"pageSize"`
+}
+
+// layerMembersPage is the envelope of the cluster drill-down (issue #51).
+type layerMembersPage struct {
+	Items    []sim.LayerMember `json:"items"`
+	Total    int               `json:"total"`
+	Page     int               `json:"page"`
+	PageSize int               `json:"pageSize"`
+	Cluster  string            `json:"cluster"`
 }
 
 // handleWorkspacesList implements GET /api/workspaces?page=&pageSize=
@@ -226,6 +238,14 @@ func (s *Server) workspaceListItem(r *http.Request, ws domain.Workspace) (worksp
 	if err != nil {
 		return workspaceListItem{}, err
 	}
+	layerNodeCount, err := s.db.LayerNodes.CountByWorkspace(ctx, ws.ID)
+	if err != nil {
+		return workspaceListItem{}, err
+	}
+	layerLinkCount, err := s.db.LayerLinks.CountByWorkspace(ctx, ws.ID)
+	if err != nil {
+		return workspaceListItem{}, err
+	}
 	item := workspaceListItem{
 		ID:              ws.ID,
 		Name:            ws.Name,
@@ -234,6 +254,8 @@ func (s *Server) workspaceListItem(r *http.Request, ws domain.Workspace) (worksp
 		UpDeviceCount:   devCounts[domain.EntityStatusUp],
 		InterfaceCount:  ifaceCounts[domain.EntityStatusUp] + ifaceCounts[domain.EntityStatusDown],
 		LinkCount:       linkCounts[domain.EntityStatusUp] + linkCounts[domain.EntityStatusDown],
+		LayerNodeCount:  layerNodeCount,
+		LayerLinkCount:  layerLinkCount,
 		ChangeSetCount:  csCount,
 		CheckpointCount: cpCount,
 		CreatedAt:       ws.CreatedAt,
@@ -292,6 +314,9 @@ type workspaceDetailCounts struct {
 	UpLinks      int `json:"upLinks"`
 	ChangeSets   int `json:"changesets"`
 	Checkpoints  int `json:"checkpoints"`
+	// #51 图层覆盖层（只读投影，不计入状态哈希）。
+	LayerNodes int `json:"layerNodes"`
+	LayerLinks int `json:"layerLinks"`
 }
 
 // workspaceLatestChangeSet is the latestChangeset block of the detail view
@@ -363,6 +388,16 @@ func (s *Server) handleWorkspaceDetail(w http.ResponseWriter, r *http.Request) {
 		s.respondSimError(w, r, err)
 		return
 	}
+	layerNodeCount, err := s.db.LayerNodes.CountByWorkspace(ctx, ws.ID)
+	if err != nil {
+		s.respondSimError(w, r, err)
+		return
+	}
+	layerLinkCount, err := s.db.LayerLinks.CountByWorkspace(ctx, ws.ID)
+	if err != nil {
+		s.respondSimError(w, r, err)
+		return
+	}
 	hash, err := s.sim.WorkspaceHash(ctx, ws.ID)
 	if err != nil {
 		s.respondSimError(w, r, err)
@@ -384,6 +419,8 @@ func (s *Server) handleWorkspaceDetail(w http.ResponseWriter, r *http.Request) {
 			UpLinks:      linkCounts[domain.EntityStatusUp],
 			ChangeSets:   csCount,
 			Checkpoints:  cpCount,
+			LayerNodes:   layerNodeCount,
+			LayerLinks:   layerLinkCount,
 		},
 		WorkspaceHash: hash,
 		CreatedAt:     ws.CreatedAt,
@@ -1026,4 +1063,28 @@ func (s *Server) handleLabReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, rep)
+}
+
+// handleWorkspaceLayerMembers implements GET
+// /api/workspaces/{id}/layer-members?cluster=&page=&pageSize= (issue #51):
+// the paged per-station drill-down behind a canvas cluster node. cluster
+// is the anchor virtual device id (the aggregate node's anchorDeviceId).
+func (s *Server) handleWorkspaceLayerMembers(w http.ResponseWriter, r *http.Request) {
+	page, pageSize, ok := parsePagination(w, r)
+	if !ok {
+		return
+	}
+	cluster := r.URL.Query().Get("cluster")
+	if cluster == "" {
+		respondErrorf(w, http.StatusBadRequest, "bad_request", "cluster 查询参数必填（聚合节点的 anchorDeviceId）")
+		return
+	}
+	members, total, err := s.sim.LayerMembers(r.Context(), r.PathValue("id"), cluster, page, pageSize)
+	if err != nil {
+		s.respondSimError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, layerMembersPage{
+		Items: members, Total: total, Page: page, PageSize: pageSize, Cluster: cluster,
+	})
 }

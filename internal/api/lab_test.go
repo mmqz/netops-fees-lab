@@ -1319,3 +1319,53 @@ func mustMarshal(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// TestLabLayerMembersContract pins the cluster drill-down endpoint's
+// error contract (issue #51): cluster is required (400), an unknown
+// workspace 404s, and an unknown cluster pages out empty (200, zero
+// total). The success path — aggregated payload + members — is covered
+// end to end by TestCLIRealDataImportChain over the realdata dataset.
+func TestLabLayerMembersContract(t *testing.T) {
+	srv, _ := newLabTestServer(t)
+	importLabWorkbooks(t, srv)
+	resp, body := doRequest(t, srv, http.MethodPost, "/api/workspaces",
+		labJSON(t, map[string]any{"name": "lab-layer-members"}), "application/json")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create workspace: status = %d, want 201", resp.StatusCode)
+	}
+	var created labMaterializeResp
+	decodeJSON(t, "create workspace", body, &created)
+	wsPath := "/api/workspaces/" + created.WorkspaceID
+
+	// Missing cluster → 400 bad_request.
+	resp, body = doRequest(t, srv, http.MethodGet, wsPath+"/layer-members?page=1&pageSize=5", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("layer-members without cluster: status = %d, want 400", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "cluster") {
+		t.Fatalf("layer-members 400 body = %s, want cluster hint", body)
+	}
+
+	// Unknown workspace → 404.
+	resp, _ = doRequest(t, srv, http.MethodGet, "/api/workspaces/no-such-ws/layer-members?cluster=vd-1", nil, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("layer-members unknown workspace: status = %d, want 404", resp.StatusCode)
+	}
+
+	// Unknown cluster → 200 with an empty page (a cluster is data, not an
+	// addressable entity).
+	resp, body = doRequest(t, srv, http.MethodGet, wsPath+"/layer-members?cluster=vd-999", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("layer-members unknown cluster: status = %d, want 200", resp.StatusCode)
+	}
+	var page struct {
+		Items    []any  `json:"items"`
+		Total    int    `json:"total"`
+		PageSize int    `json:"pageSize"`
+		Cluster  string `json:"cluster"`
+	}
+	decodeJSON(t, "layer-members", body, &page)
+	if len(page.Items) != 0 || page.Total != 0 || page.PageSize != 20 || page.Cluster != "vd-999" {
+		t.Fatalf("layer-members empty page = %+v", page)
+	}
+}

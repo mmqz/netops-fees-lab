@@ -74,6 +74,7 @@ import type {
   WorkspaceSummary,
   RenameList,
   RenameProposalItem,
+  LayerMembersPage,
 } from './types';
 import { ERR_API_CHECKPOINT_MISSING_FILE, ERR_API_CONFLICT, ERR_API_INVALID_REQUEST, ERR_API_NOT_FOUND, ERR_API_NOT_LATEST, ERR_API_OP_FAILED, ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
 
@@ -619,6 +620,25 @@ export function deleteWorkspace(id: string): Promise<DeleteWorkspaceResult> {
 /** GET /api/workspaces/{id}/topology */
 export function getTopology(id: string): Promise<SimTopology> {
   return requestJson<SimTopology>(`/workspaces/${encodeURIComponent(id)}/topology`);
+}
+
+/**
+ * GET /api/workspaces/{id}/layer-members?cluster=&page=&pageSize=
+ * （#51：基站聚簇成员下钻分页；cluster = 聚合节点的 anchorDeviceId）。
+ */
+export function getLayerMembers(
+  workspaceId: string,
+  cluster: string,
+  page: number,
+  pageSize: number,
+): Promise<LayerMembersPage> {
+  return requestJson<LayerMembersPage>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/layer-members${buildQuery({
+      cluster,
+      page: String(page),
+      pageSize: String(pageSize),
+    })}`,
+  );
 }
 
 /** POST /api/workspaces/{id}/topology/path body {fromDevice,toDevice}（设备编码） */

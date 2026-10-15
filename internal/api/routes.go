@@ -98,6 +98,7 @@ func (s *Server) apiRoutes() []route {
 		{Method: "GET", Pattern: "/api/workspaces/{id}", Tag: "lab", Summary: "工作台详情（拓扑摘要与统计）", Handler: s.handleWorkspaceDetail},
 		{Method: "DELETE", Pattern: "/api/workspaces/{id}", Tag: "lab", Summary: "删除工作台（含其仿真数据）", Handler: s.handleWorkspaceDelete},
 		{Method: "GET", Pattern: "/api/workspaces/{id}/topology", Tag: "lab", Summary: "工作台拓扑图数据（分层布局）", Handler: s.handleWorkspaceTopology},
+		{Method: "GET", Pattern: "/api/workspaces/{id}/layer-members", Tag: "lab", Summary: "图层聚簇成员分页（issue #51：基站簇下钻，cluster=锚设备 id）", Handler: s.handleWorkspaceLayerMembers},
 		{Method: "POST", Pattern: "/api/workspaces/{id}/topology/path", Tag: "lab", Summary: "拓扑两设备间路径查询", Handler: s.handleWorkspacePath},
 		{Method: "POST", Pattern: "/api/workspaces/{id}/ops", Tag: "lab", Summary: "仿真操作（故障注入/恢复，写变更集）", Handler: s.handleWorkspaceOps},
 		{Method: "POST", Pattern: "/api/workspaces/{id}/checks/run", Tag: "lab", Summary: "运行一次连通性检查", Handler: s.handleWorkspaceChecksRun},

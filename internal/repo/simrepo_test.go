@@ -120,10 +120,12 @@ func TestMigrationV5UpgradesV4Database(t *testing.T) {
 		`DROP TABLE changesets`,
 		`DROP TABLE links`,
 		`DROP TABLE interfaces`,
+		`DROP TABLE virtual_layer_links`,
+		`DROP TABLE virtual_nodes`,
 		`DROP TABLE virtual_devices`,
 		`DROP TABLE sequences`,
 		`DROP TABLE workspaces`,
-		`DELETE FROM schema_migrations WHERE version = 5`,
+		`DELETE FROM schema_migrations WHERE version IN (5, 23)`,
 	} {
 		if _, err := db1.sql.ExecContext(ctx, stmt); err != nil {
 			t.Fatalf("rewind %q: %v", stmt, err)
@@ -219,8 +221,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 	}
 	// Necessary adaptation for v13→v14→v16→v17→v21 (W8-D, W20, W21,
 	// W22, R11): MAX follows the registry head.
-	if maxV != 22 {
-		t.Errorf("max schema version after upgrade = %d, want 22", maxV)
+	if maxV != 23 {
+		t.Errorf("max schema version after upgrade = %d, want 23", maxV)
 	}
 	// Old data is readable and position-less (NULL → nil pointers).
 	d, err := db2.VirtualDevices.GetByCode(ctx, "ws_v6", "DEV-V6")
@@ -276,8 +278,8 @@ func TestMigrationV6UpgradesV5Database(t *testing.T) {
 		t.Fatalf("max version: %v", err)
 	}
 	// Necessary adaptation for v13 (W8-D ptp_port): MAX 12 → 13.
-	if maxV != 22 {
-		t.Errorf("max schema version after reopen = %d, want 22", maxV)
+	if maxV != 23 {
+		t.Errorf("max schema version after reopen = %d, want 23", maxV)
 	}
 }
 

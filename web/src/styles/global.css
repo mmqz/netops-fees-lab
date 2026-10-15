@@ -4109,3 +4109,139 @@ body.lab-split-dragging {
   font-size: 11px;
   padding: 0 8px;
 }
+
+/* ---------------------------------------------------------------------------
+ * #51 图层覆盖层：七层开关胶囊 + 影响分析面板 + 层语义图例
+ * -------------------------------------------------------------------------- */
+
+/* 七层开关：窄胶囊（L0..L6 两字符 + 状态色），工具带内成组 */
+.canvas-layers {
+  gap: 1px;
+}
+
+.canvas-layer-key {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 2px;
+}
+
+/* 激活层开关：琥珀系（与覆盖层 L3 传输语义同源的暖色，区别于演练本体
+ * 开关的主蓝——一眼可辨「这是覆盖层」）。 */
+.canvas-layers .canvas-tool--toggle.is-active {
+  color: #8a6d1f;
+  border-color: rgba(201, 154, 63, 0.55);
+  background: #fdf6e3;
+}
+
+/* 影响分析面板（画布左下，图例上方）：深色卡片，琥珀命中语义 */
+.canvas-impact-panel {
+  left: 10px;
+  bottom: 58px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 240px;
+  max-width: 340px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 176, 46, 0.35);
+  background: rgba(24, 18, 6, 0.92);
+  font-size: 12px;
+  color: #e8dcc0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.impact-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.impact-panel-title {
+  font-weight: 600;
+  color: #ffb02e;
+}
+
+.impact-panel-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(255, 176, 46, 0.4);
+  border-radius: 5px;
+  background: transparent;
+  color: #d9b96a;
+  cursor: pointer;
+}
+
+.impact-panel-clear:hover {
+  background: rgba(255, 176, 46, 0.15);
+}
+
+.impact-panel-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.impact-panel-key {
+  flex-shrink: 0;
+  color: #b39a5e;
+  font-weight: 600;
+}
+
+.impact-panel-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f0e6cc;
+}
+
+.impact-panel-value--hit::before {
+  content: '●';
+  color: #ffb02e;
+  margin-right: 4px;
+}
+
+.impact-panel-line--muted {
+  color: #9a8a68;
+}
+
+.impact-panel-line--err {
+  color: #ff9d95;
+}
+
+/* 层语义图例：追加到既有图例（画布左下角）；语义色点 */
+.legend-dot--logical {
+  background: transparent;
+  border-top: 2px dashed #f2a93b;
+  border-radius: 0;
+  height: 0;
+}
+
+.legend-dot--service {
+  background: transparent;
+  border-top: 2px dotted #4caf7d;
+  border-radius: 0;
+  height: 0;
+}
+
+.legend-dot--access {
+  background: transparent;
+  border-top: 2px solid #8899aa;
+  border-radius: 0;
+  height: 0;
+}
+
+.legend-dot--cluster {
+  background: #3d3524;
+  border: 1px solid #c99a3f;
+}
+
+.legend-dot--business {
+  background: #1d3b30;
+  border: 1px solid #69b08c;
+}

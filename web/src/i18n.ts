@@ -1073,6 +1073,7 @@ export const LAB_UNDO_MESSAGE =
 // —— 右侧标签页 ——
 
 export const LAB_TAB_DEVICES = '设备';
+export const LAB_TAB_LAYERS = '图层';
 export const LAB_TAB_INTERFACES = '接口';
 export const LAB_TAB_LINKS = '链路';
 export const LAB_TAB_CHECKS = '检查结果';
@@ -1613,3 +1614,93 @@ export function formatRelativeTime(iso?: string | null): string {
   if (days <= 7) return format(TIME_DAYS_AGO, { n: days });
   return formatDateTime(iso);
 }
+
+// ---------------------------------------------------------------------------
+// 拓扑画布图层覆盖层（#51：七层平台呈现 + 影响分析高亮 + 簇下钻）
+// ---------------------------------------------------------------------------
+
+/** 图层开关行 aria 标签。 */
+export const LAB_LAYERS_GROUP = '图层显示（#51 七层平台）';
+
+/** 各层开关文案（L1/L2 是演练实体本体，L0 空间锚点默认关）。 */
+export const LAYER_TOGGLE_LABELS: Record<string, string> = {
+  L0: 'L0 空间锚点',
+  L1: 'L1 设备',
+  L2: 'L2 光缆',
+  L3: 'L3 传输承载',
+  L4: 'L4 接入层',
+  L5: 'L5 逻辑分组',
+  L6: 'L6 业务层',
+};
+
+/** 图层无数据时开关的禁用提示。 */
+export const LAYER_TOGGLE_EMPTY = '该层在本工作台无数据';
+
+/** 聚簇节点显示名（×N 为成员数）。 */
+export const LAYER_CLUSTER_LABEL = '接入 ×{n}';
+
+/** L4 层开关打开时聚簇摘要（tooltip/面板）。 */
+export const LAYER_CLUSTER_SUMMARY = '{clusters} 个接入簇 · 共 {stations} 个基站（聚合显示，点击下钻）';
+
+/** 大图布局保护：可见节点超阈值自动改网格布局的提示。 */
+export const LAYER_LAYOUT_GUARD = '可见节点 {n} 超过 {max}，已自动切换网格布局（性能保护）';
+
+/** 影响分析：右键菜单项。 */
+export const LAB_CANVAS_CTX_IMPACT = '影响分析';
+export const LAB_CANVAS_CTX_IMPACT_TITLE = '从本资源向业务层收集影响面（#51 故障故事）';
+export const LAB_CANVAS_CTX_IMPACT_ROOT = '向下找根因';
+export const LAB_CANVAS_CTX_IMPACT_ROOT_TITLE = '从表象向异常根因追查（§10.5③）';
+
+/** 影响分析进行中/失败提示。 */
+export const LAB_IMPACT_LOADING = '正在收集影响面…';
+export const LAB_IMPACT_EMPTY = '影响面为空（该资源向上未触达业务层，或均为已停用节点）';
+export const LAB_IMPACT_ERROR = '影响分析失败';
+
+/** 影响高亮面板标题与摘要。 */
+export const LAB_IMPACT_PANEL_TITLE = '影响分析结果';
+export const LAB_IMPACT_PANEL_ROOT = '分析起点';
+export const LAB_IMPACT_PANEL_IMPACTED = '受影响面（向上 {n}）';
+export const LAB_IMPACT_PANEL_CANDIDATES = '根因候选（{n}）';
+export const LAB_IMPACT_PANEL_CLEAR = '清除高亮（Esc）';
+export const LAB_IMPACT_DIMMED_HINT = '未受影响元素已压暗；受影响节点/边为琥珀色';
+
+/** 图层节点 hover/详情文案。 */
+export const LAYER_KIND_LABELS: Record<string, string> = {
+  cluster: '接入簇',
+  base_station: '基站',
+  olt: 'OLT',
+  onu: 'ONU',
+  bbu: 'BBU',
+  rru: 'RRU',
+  ring: '环网',
+  igp_domain: 'IGP 域',
+  vpn_instance: 'VPN 实例',
+  protection_group: '保护组',
+  ip_pool: '地址池',
+  customer: '客户',
+  service: '业务',
+  leased_line: '专线',
+  manhole: '人井',
+  pole: '杆路',
+};
+
+/** 边语义图例（四色语义：物理实线灰蓝 / 逻辑虚线琥珀 / 业务点线绿 / 上联细灰）。 */
+export const LAYER_SEM_LABELS: Record<string, string> = {
+  physical: '物理链路（光缆走廊）',
+  logical: '逻辑承载（电路/波道）',
+  service: '业务关联（客户/业务）',
+  access: '接入上联',
+  group: '分组归属',
+};
+
+/** 簇下钻面板。 */
+export const LAYER_MEMBERS_TITLE = '接入簇成员（{total}）';
+export const LAYER_MEMBERS_CODE = '基站编码';
+export const LAYER_MEMBERS_NAME = '名称';
+export const LAYER_MEMBERS_STATUS = '状态';
+export const LAYER_MEMBERS_LOAD_ERR = '成员加载失败';
+export const LAYER_PON_PORTS = 'PON 口 {n} 个';
+export const LAYER_STATION_SERVES = '服务基站 {n} 个';
+
+/** 图层选中卡（zen 模式之外，画布下方/侧栏的简要信息）。 */
+export const LAYER_NODE_INFO = '{kind} · {code}';

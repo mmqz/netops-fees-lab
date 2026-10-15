@@ -638,6 +638,9 @@ export interface WorkspaceCounts {
   upLinks: number;
   changesets: number;
   checkpoints: number;
+  /** #51 图层覆盖层（只读投影；v0.12 前的旧工作台可能缺键）。 */
+  layerNodes?: number;
+  layerLinks?: number;
 }
 
 /** GET /api/workspaces/{id} → 工作台详情。 */
@@ -692,6 +695,8 @@ export interface TopologyNode {
    */
   geoLat?: number;
   geoLng?: number;
+  /** 设备血缘资源 id（#51：画布影响分析锚点）；人工创建设备无此键。 */
+  resourceId?: string;
   interfaces: Array<{
     id: string;
     name: string;
@@ -714,6 +719,67 @@ export interface TopologyEdge {
   zDeviceCode: string;
   status: SimEntityStatus;
   label: string;
+  /** 链路血缘资源 id（电路/光缆走廊；#51：画布影响分析锚点）；无此键=合成链路。 */
+  resourceId?: string;
+}
+
+/** 图层节点种类（#51 层级覆盖层的闭合词汇）。 */
+export type OverlayLayer = 'L0' | 'L3' | 'L4' | 'L5' | 'L6';
+
+/** 图层边语义（闭合词汇，与后端 CHECK 同源）。 */
+export type LayerLinkSem = 'logical' | 'service' | 'access' | 'group';
+
+/** 图层节点载荷：L0 空间锚点 / L4 接入（基站聚合簇、olt/onu/bbu/rru）/
+ *  L5 分组（环/IGP/VPN/保护组/地址池）/ L6 业务（客户/业务/专线）。 */
+export interface LayerNodePayload {
+  id: string;
+  resourceId?: string;
+  layer: OverlayLayer;
+  kind: string;
+  code: string;
+  name: string;
+  status?: string;
+  /** 视觉锚定的虚拟设备 id（布局贴近其上联/依赖设备）。 */
+  anchorDeviceId?: string;
+  geoLat?: number;
+  geoLng?: number;
+  /** 聚合簇：成员基站数（aggregated=true 时存在）。 */
+  memberCount?: number;
+  /** 聚合簇：样例基站编码（前 5 个）。 */
+  sample?: string[];
+  aggregated?: boolean;
+  /** 类型化附加信息：olt 的 PON 口清单 / 客户的基站服务数。 */
+  detail?: { ponPorts?: string[]; stationServes?: number };
+}
+
+/** 图层边载荷：端点可为 device（虚拟设备）/ interface（接口）/ node（图层节点）。 */
+export interface LayerEdgePayload {
+  id: string;
+  layer: OverlayLayer;
+  sem: LayerLinkSem;
+  label: string;
+  resourceId?: string;
+  aKind: 'device' | 'interface' | 'node';
+  aRef: string;
+  aCode?: string;
+  zKind: 'device' | 'interface' | 'node';
+  zRef: string;
+  zCode?: string;
+}
+
+/** 图层每层计数（含 L4 聚簇形态）。 */
+export interface LayerCount {
+  nodes: number;
+  edges: number;
+  clusters: number;
+  clusteredNodes: number;
+}
+
+/** 拓扑载荷的图层覆盖层（#51）：聚合后的节点 + 语义边 + 每层摘要。 */
+export interface TopologyLayers {
+  nodes: LayerNodePayload[];
+  edges: LayerEdgePayload[];
+  summary: { byLayer: Partial<Record<OverlayLayer, LayerCount>> };
 }
 
 /** GET /api/workspaces/{id}/topology。 */
@@ -722,6 +788,29 @@ export interface SimTopology {
   workspaceHash: string;
   nodes: TopologyNode[];
   edges: TopologyEdge[];
+  /** 图层覆盖层（#51，v0.12 前物化的工作台无此键）。 */
+  layers?: TopologyLayers;
+}
+
+/** 图层聚簇成员（#51 基站簇下钻行）。 */
+export interface LayerMember {
+  id: string;
+  resourceId?: string;
+  kind: string;
+  code: string;
+  name: string;
+  status?: string;
+  geoLat?: number;
+  geoLng?: number;
+}
+
+/** GET /api/workspaces/{id}/layer-members 分页信封。 */
+export interface LayerMembersPage {
+  items: LayerMember[];
+  total: number;
+  page: number;
+  pageSize: number;
+  cluster: string;
 }
 
 /** POST /api/workspaces/{id}/topology/path 连通性查询结果。 */

@@ -158,12 +158,93 @@ func TestCLIRealDataImportChain(t *testing.T) {
         if l, _ := counts["links"].(float64); l != 23 {
                 t.Errorf("workspace links = %v, want 23 physical corridor hops (issue #49 × #52)", counts["links"])
         }
-        if i, _ := counts["interfaces"].(float64); i != 46 {
-                t.Errorf("workspace interfaces = %v, want 46 (2 per hop)", counts["interfaces"])
+        // Issue #51 (W33): interfaces are now the REAL port resources
+        // (399 ports attributed via port→board→device) plus the synthetic
+        // spill (1: a junction device's real ports are exhausted by its 4
+        // corridor hops) — the reverse-inference 2×links era is over.
+        if i, _ := counts["interfaces"].(float64); i != 400 {
+                t.Errorf("workspace interfaces = %v, want 400 (399 real ports + 1 synthetic spill)", counts["interfaces"])
+        }
+        // The layer overlay (issue #51): 1,286 nodes (1,198 base stations
+        // + bbu/rru/olt/onu + rings/igp/vpn/pg/pools + customers/services/
+        // leased lines + manholes/poles), 1,073 semantic edges, 17 source
+        // resource types (acceptance F.1: ≥ 8, was 1).
+        if n, _ := counts["layerNodes"].(float64); n != 1286 {
+                t.Errorf("workspace layerNodes = %v, want 1286", counts["layerNodes"])
+        }
+        if l, _ := counts["layerLinks"].(float64); l != 1073 {
+                t.Errorf("workspace layerLinks = %v, want 1073", counts["layerLinks"])
+        }
+        types, _ := counts["sourceTypes"].([]any)
+        if len(types) < 8 {
+                t.Errorf("sourceTypes = %v, want ≥8 distinct input types (issue #51 F.1)", types)
         }
 
         ts, killServe := realDataServe(t, db)
         defer killServe()
+
+        // Issue #51: the topology payload carries the layer overlay — the
+        // L4 base stations arrive aggregated (cluster nodes with member
+        // counts), L3 logical + L6 business edges are present, and the
+        // cluster drill-down endpoint pages the members.
+        topo := realDataGet(t, ts, "/api/workspaces/"+wsOut["workspaceId"].(string)+"/topology")
+        layers, _ := topo["layers"].(map[string]any)
+        if layers == nil {
+                t.Fatalf("topology payload lacks the layers section (issue #51)")
+        }
+        summary, _ := layers["summary"].(map[string]any)
+        byLayer, _ := summary["byLayer"].(map[string]any)
+        l4, _ := byLayer["L4"].(map[string]any)
+        if l4 != nil {
+                // OpenCelliD's HLJ coverage concentrates on the Harbin/Daqing
+                // corridor (manifest discloses it): all 1,198 stations
+                // uplink to 11 device sites — the honest crowd-sourced
+                // shape, not a generator artifact.
+                if clusters, _ := l4["clusters"].(float64); clusters != 11 {
+                        t.Errorf("L4 clusters = %v, want 11 (OpenCelliD coverage shape)", clusters)
+                }
+                if clustered, _ := l4["clusteredNodes"].(float64); clustered != 1198 {
+                        t.Errorf("L4 clusteredNodes = %v, want 1198 (all stations)", clustered)
+                }
+        } else {
+                t.Errorf("layers summary lacks L4 (got %v)", byLayer)
+        }
+        l3, _ := byLayer["L3"].(map[string]any)
+        if l3 == nil {
+                t.Errorf("layers summary lacks L3 (logical circuits — got %v)", byLayer)
+        } else if edges, _ := l3["edges"].(float64); edges < 200 {
+                t.Errorf("L3 logical edges = %v, want ≥200 circuits (issue #52 families)", edges)
+        }
+        l6, _ := byLayer["L6"].(map[string]any)
+        if l6 == nil {
+                t.Errorf("layers summary lacks L6 (business layer — got %v)", byLayer)
+        } else if nodes, _ := l6["nodes"].(float64); nodes != 26 {
+                t.Errorf("L6 business nodes = %v, want 26 (12 customers + 8 services + 6 leased lines)", nodes)
+        }
+        // Cluster drill-down: page 1 of the first aggregate node's members.
+        layerNodes, _ := layers["nodes"].([]any)
+        var clusterAnchor string
+        for _, raw := range layerNodes {
+                n, _ := raw.(map[string]any)
+                if kind, _ := n["kind"].(string); kind == "cluster" {
+                        clusterAnchor, _ = n["anchorDeviceId"].(string)
+                        if mc, _ := n["memberCount"].(float64); mc < 1 {
+                                t.Errorf("cluster node memberCount = %v, want ≥1", mc)
+                        }
+                        break
+                }
+        }
+        if clusterAnchor == "" {
+                t.Fatalf("no cluster node in the layers payload (issue #51 aggregation)")
+        }
+        members := realDataGet(t, ts, "/api/workspaces/"+wsOut["workspaceId"].(string)+
+                "/layer-members?cluster="+clusterAnchor+"&pageSize=5")
+        if items, _ := members["items"].([]any); len(items) != 5 {
+                t.Errorf("layer-members page returned %d items, want 5 (pageSize)", len(items))
+        }
+        if total, _ := members["total"].(float64); total < 1 {
+                t.Errorf("layer-members total = %v, want ≥1", total)
+        }
 
         // W30 (issue #45) acceptance: status coverage and the geo REAL columns
         // are visible through the API. The station fleet imports with lifecycle

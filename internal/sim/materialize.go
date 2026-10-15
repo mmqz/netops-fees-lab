@@ -41,6 +41,12 @@ type MaterializeResult struct {
 		Devices    int `json:"devices"`
 		Interfaces int `json:"interfaces"`
 		Links      int `json:"links"`
+		// Layer overlay (issue #51, W33): the read-only canvas
+		// projection — overlay nodes/edges and the distinct source
+		// resource types that fed the workspace (drill + overlay).
+		LayerNodes  int      `json:"layerNodes"`
+		LayerLinks  int      `json:"layerLinks"`
+		SourceTypes []string `json:"sourceTypes"`
 	} `json:"counts"`
 	WorkspaceHash string `json:"workspaceHash"`
 }
@@ -188,16 +194,31 @@ func (s *Service) Materialize(ctx context.Context, name, description string, bat
 			}
 		}
 
+		// Interfaces — REAL port resources first (issue #51): port→board→
+		// device attribution; datasets without ports (the Phase 1 fixtures)
+		// keep the synthetic eth<n> path byte-identically. Link endpoints
+		// bind real interfaces first, spilling to synthetic only when a
+		// device's real ports are exhausted.
+		alloc := newIfaceAllocator()
+		realIfaces, err := s.materializePortInterfaces(ctx, tx, workspaceID, scopeSet, deviceByResource, alloc, now)
+		if err != nil {
+			return err
+		}
+		if s.afterWrite != nil {
+			if err := s.afterWrite("interfaces"); err != nil {
+				return fmt.Errorf("sim: materialize (fault injection after interfaces): %w", err)
+			}
+		}
+
 		// Links — physical layer first (issue #49): per-hop device links
 		// along cable corridor anchor chains; circuits remain the fallback
 		// for datasets without cable segments (Phase 1 fixtures).
-		nextPort := make(map[string]int) // device id → next free port index
-		nLinks, err := s.materializePhysicalLinks(ctx, tx, workspaceID, scopeSet, deviceByResource, nextPort, now)
+		nLinks, err := s.materializePhysicalLinks(ctx, tx, workspaceID, scopeSet, deviceByResource, alloc, now)
 		if err != nil {
 			return err
 		}
 		if nLinks == 0 {
-			nLinks, err = s.materializeCircuitLinks(ctx, tx, workspaceID, scopeSet, deviceByResource, nextPort, now)
+			nLinks, err = s.materializeCircuitLinks(ctx, tx, workspaceID, scopeSet, deviceByResource, alloc, now)
 			if err != nil {
 				return err
 			}
@@ -208,12 +229,27 @@ func (s *Service) Materialize(ctx context.Context, name, description string, bat
 			}
 		}
 
+		// Layer overlay (issue #51, W33): the read-only canvas projection of
+		// the unified graph — L0/L4/L5/L6 nodes + L3/L4/L5/L6 edges. Never
+		// part of the drill state or the workspace hash.
+		overlay, err := s.materializeLayers(ctx, tx, workspaceID, scopeSet, deviceByResource, alloc.portIface, now)
+		if err != nil {
+			return err
+		}
+		result.Counts.LayerNodes = overlay.Nodes
+		result.Counts.LayerLinks = overlay.Links
+		result.Counts.SourceTypes = append(
+			[]string{domain.ResourceTypeDevice.String(), domain.ResourceTypePort.String()},
+			overlay.SourceTypes...)
+
 		result.Counts.Links = nLinks
 
 		result.WorkspaceID = workspaceID
 		result.Name = name
 		result.SourceBatchIDs = scope
-		result.Counts.Interfaces = 2 * result.Counts.Links
+		// Interfaces = REAL port interfaces + synthetic endpoints bound by
+		// links (issue #51: the count is no longer the 2×links formula).
+		result.Counts.Interfaces = realIfaces + alloc.synthetic
 
 		// Hash from the same typed state loader as every other read (one
 		// source of truth), still inside the transaction.
@@ -269,7 +305,7 @@ func (s *Service) materializePhysicalLinks(
 	workspaceID string,
 	scopeSet map[string]bool,
 	deviceByResource map[string]domain.VirtualDevice,
-	nextPort map[string]int,
+	alloc *ifaceAllocator,
 	now time.Time,
 ) (int, error) {
 	boxResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeSpliceBox})
@@ -404,11 +440,11 @@ func (s *Service) materializePhysicalLinks(
 	})
 	created := 0
 	for _, h := range hops {
-		aIfaceID, err := s.materializePort(ctx, tx, workspaceID, h.devA.ID, nextPort, now)
+		aIfaceID, err := alloc.allocate(ctx, tx, workspaceID, h.devA.ID, now)
 		if err != nil {
 			return 0, err
 		}
-		zIfaceID, err := s.materializePort(ctx, tx, workspaceID, h.devZ.ID, nextPort, now)
+		zIfaceID, err := alloc.allocate(ctx, tx, workspaceID, h.devZ.ID, now)
 		if err != nil {
 			return 0, err
 		}
@@ -452,7 +488,7 @@ func (s *Service) materializeCircuitLinks(
 	workspaceID string,
 	scopeSet map[string]bool,
 	deviceByResource map[string]domain.VirtualDevice,
-	nextPort map[string]int,
+	alloc *ifaceAllocator,
 	now time.Time,
 ) (int, error) {
 	circuitResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeCircuit})
@@ -479,11 +515,11 @@ func (s *Service) materializeCircuitLinks(
 		if devA.ID == devZ.ID {
 			continue // self-referencing circuit (Phase 1 W003) — skipped
 		}
-		aIfaceID, err := s.materializePort(ctx, tx, workspaceID, devA.ID, nextPort, now)
+		aIfaceID, err := alloc.allocate(ctx, tx, workspaceID, devA.ID, now)
 		if err != nil {
 			return 0, err
 		}
-		zIfaceID, err := s.materializePort(ctx, tx, workspaceID, devZ.ID, nextPort, now)
+		zIfaceID, err := alloc.allocate(ctx, tx, workspaceID, devZ.ID, now)
 		if err != nil {
 			return 0, err
 		}
@@ -514,29 +550,6 @@ func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
 		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLng/2)*math.Sin(dLng/2)
 	return 2 * r * math.Asin(math.Sqrt(a))
-}
-
-// materializePort allocates eth<next free index> on the device (the
-// deterministic lowest-free-port rule of §6: ports are handed out in
-// circuit order, so the map simply counts up per device) and inserts the
-// interface (up, unconfigured).
-func (s *Service) materializePort(ctx context.Context, tx *repo.Tx, workspaceID, deviceID string, nextPort map[string]int, now time.Time) (string, error) {
-	idx := nextPort[deviceID]
-	nextPort[deviceID] = idx + 1
-	n, err := tx.Sequences.Allocate(ctx, domain.SeqInterface)
-	if err != nil {
-		return "", fmt.Errorf("sim: materialize: allocate interface id: %w", err)
-	}
-	ifaceID := domain.FormatSimID(domain.SeqInterface, n)
-	if err := tx.SimInterfaces.Insert(ctx, domain.SimInterface{
-		ID: ifaceID, WorkspaceID: workspaceID, DeviceID: deviceID,
-		Name: fmt.Sprintf("eth%d", idx), Status: domain.EntityStatusUp,
-		IPv4Addr: "", IPv4Prefix: -1,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		return "", fmt.Errorf("sim: materialize: insert interface %s: %w", ifaceID, err)
-	}
-	return ifaceID, nil
 }
 
 // circuitEndpoints resolves a circuit resource's a_end and z_end relations

@@ -179,8 +179,23 @@ func TestWorkspaceMaterialize(t *testing.T) {
 		t.Fatalf("Materialize(db2): %v", err)
 	}
 	topo2 := mustTopology(t, svc2, res2.WorkspaceID)
-	if !reflect.DeepEqual(topo.Nodes, topo2.Nodes) || !reflect.DeepEqual(topo.Edges, topo2.Edges) {
-		t.Fatalf("topology differs across two fresh databases")
+	// The payload carries lineage resource ids (issue #51) — freshly
+	// generated uuids on every import; strip them before the deep compare.
+	stripLineage := func(src Topology) Topology {
+		out := src
+		out.Nodes = append([]TopologyNode(nil), src.Nodes...)
+		for i := range out.Nodes {
+			out.Nodes[i].ResourceID = ""
+		}
+		out.Edges = append([]TopologyEdge(nil), src.Edges...)
+		for i := range out.Edges {
+			out.Edges[i].ResourceID = ""
+		}
+		return out
+	}
+	if !reflect.DeepEqual(stripLineage(topo).Nodes, stripLineage(topo2).Nodes) ||
+		!reflect.DeepEqual(stripLineage(topo).Edges, stripLineage(topo2).Edges) {
+		t.Fatalf("topology differs across two fresh databases (modulo lineage ids)")
 	}
 	if topo.WorkspaceID == topo2.WorkspaceID {
 		t.Fatalf("two materializations must yield two distinct workspace ids")
@@ -197,10 +212,10 @@ func TestWorkspaceMaterialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal topo2: %v", err)
 	}
-	norm1 := strings.ReplaceAll(string(j1), topo.WorkspaceID, "<ws>")
-	norm2 := strings.ReplaceAll(string(j2), topo2.WorkspaceID, "<ws>")
+	norm1 := replaceResourceUUIDs(strings.ReplaceAll(string(j1), topo.WorkspaceID, "<ws>"))
+	norm2 := replaceResourceUUIDs(strings.ReplaceAll(string(j2), topo2.WorkspaceID, "<ws>"))
 	if norm1 != norm2 {
-		t.Fatalf("topology JSON differs across two fresh databases (modulo workspace id)")
+		t.Fatalf("topology JSON differs across two fresh databases (modulo workspace id + import uuids)")
 	}
 }
 

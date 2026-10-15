@@ -27,7 +27,8 @@ type SequenceRepo struct{ q DBTX }
 func (r *SequenceRepo) Allocate(ctx context.Context, kind string) (int, error) {
 	switch kind {
 	case domain.SeqDevice, domain.SeqInterface, domain.SeqLink,
-		domain.SeqChangeSet, domain.SeqCheckRun, domain.SeqCheckpoint:
+		domain.SeqChangeSet, domain.SeqCheckRun, domain.SeqCheckpoint,
+		domain.SeqLayerNode, domain.SeqLayerLink:
 	default:
 		return 0, fmt.Errorf("repo: allocate sequence %s: invalid kind %q", kind, kind)
 	}

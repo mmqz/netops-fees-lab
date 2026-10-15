@@ -65,7 +65,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import cytoscape from 'cytoscape';
 import type { CollectionReturnValue, Core, EdgeSingular, ElementDefinition, Layouts, LayoutOptions, NodeSingular, StylesheetJson } from 'cytoscape';
-import type { SimEntityStatus, SimTopology } from '../../api/types';
+import type {
+  ImpactDocument,
+  LayerNodePayload,
+  OverlayLayer,
+  SimEntityStatus,
+  SimTopology,
+} from '../../api/types';
+import { getImpact } from '../../api/client';
 import type { SelectedEntity } from './selection';
 import { isUnconfiguredIPv4 } from './selection';
 import {
@@ -151,6 +158,25 @@ import {
   LOADING_TEXT,
   SIM_STATUS_LABELS,
   format,
+  LAYER_CLUSTER_LABEL,
+  LAYER_KIND_LABELS,
+  LAYER_LAYOUT_GUARD,
+  LAYER_SEM_LABELS,
+  LAYER_TOGGLE_EMPTY,
+  LAYER_TOGGLE_LABELS,
+  LAB_CANVAS_CTX_IMPACT,
+  LAB_CANVAS_CTX_IMPACT_ROOT,
+  LAB_CANVAS_CTX_IMPACT_ROOT_TITLE,
+  LAB_CANVAS_CTX_IMPACT_TITLE,
+  LAB_IMPACT_EMPTY,
+  LAB_IMPACT_ERROR,
+  LAB_IMPACT_LOADING,
+  LAB_IMPACT_PANEL_CANDIDATES,
+  LAB_IMPACT_PANEL_CLEAR,
+  LAB_IMPACT_PANEL_IMPACTED,
+  LAB_IMPACT_PANEL_ROOT,
+  LAB_IMPACT_PANEL_TITLE,
+  LAB_LAYERS_GROUP,
 } from '../../i18n';
 import {
   IconCamera,
@@ -190,13 +216,29 @@ const VIEW_KINDS: CanvasView[] = ['topo', 'geo2d', 'geo3d'];
 const isViewKind = (v: unknown): v is CanvasView =>
   typeof v === 'string' && (VIEW_KINDS as string[]).includes(v);
 
-/** 按工作台持久化的画布偏好（v2：布局 + 交互模式 + 标签开关 + 顶层视图 GEO-2）。 */
+/**
+ * 按工作台持久化的画布偏好（v3：布局 + 交互模式 + 标签开关 + 顶层视图 GEO-2
+ * + #51 图层开关）。图层默认值依据 issue #51 施工规格 C.1：L1/L2/L3/L6 默认开
+ * （设备+光缆+传输+业务四层贯通主干），L0/L4/L5 默认关（空间锚点、1,198 基站
+ * 聚簇、逻辑分组按需打开）。
+ */
 interface CanvasPrefs {
   layout: LayoutKind;
   mode: ModeKind;
   labels: boolean;
   view: CanvasView;
+  layers: Record<LayerToggleKey, boolean>;
 }
+
+/** 图层开关键（含演练实体本体 L1/L2）。 */
+type LayerToggleKey = 'L0' | 'L1' | 'L2' | OverlayLayer;
+
+/**
+ * cytoscape 类型缺口补丁：运行时有 Element.show()/hide()（布局与拾取
+ * 均尊重 hidden 状态），官方 .d.ts 只声明了 hidden()——这里补一个窄
+ * 类型，避免整库 cast。
+ */
+type ElementWithVisibility = CollectionReturnValue & { show(): unknown; hide(): unknown };
 
 /** FX-6：右键菜单项（label=可见文案；title=tooltip；hint=快捷键提示列）。 */
 interface CanvasMenuItem {
@@ -217,7 +259,13 @@ interface CanvasMenuState {
   items: CanvasMenuItem[];
 }
 
-const DEFAULT_PREFS: CanvasPrefs = { layout: 'force', mode: 'select', labels: true, view: 'topo' };
+const DEFAULT_PREFS: CanvasPrefs = {
+  layout: 'force',
+  mode: 'select',
+  labels: true,
+  view: 'topo',
+  layers: { L0: false, L1: true, L2: true, L3: true, L4: false, L5: false, L6: true },
+};
 
 const LAYOUT_KINDS: LayoutKind[] = ['force', 'hier', 'concentric', 'grid', 'circle', 'freeze'];
 const MODE_KINDS: ModeKind[] = ['select', 'trace', 'focus'];
@@ -250,6 +298,32 @@ const EDGE_DOWN_COLOR = '#f2554a';
 const EDGE_SELECTED_COLOR = '#4f8ef7';
 
 const EDGE_LABEL_COLOR = '#9fb2ce';
+
+// —— #51 图层覆盖层调色板（C.2 语义着色：物理实线灰蓝 / 逻辑虚线琥珀 /
+//    业务点线绿 / 接入细实线浅灰 / 分组点划石板灰）——
+/** L3 逻辑承载（电路/波道）：虚线琥珀。 */
+const LAYER_LOGICAL_COLOR = '#f2a93b';
+/** L6 业务关联（客户/业务/专线）：点线绿。 */
+const LAYER_SERVICE_COLOR = '#4caf7d';
+/** L4 接入上联/接入树：细实线浅灰。 */
+const LAYER_ACCESS_COLOR = '#8899aa';
+/** L5 分组归属（环/IGP/VPN/保护组/地址池）：点划石板灰。 */
+const LAYER_GROUP_COLOR = '#5c7185';
+/** L4 接入节点（olt/onu/bbu/rru）填充。 */
+const LAYER_ACCESS_FILL = '#27405e';
+/** 聚簇节点填充（琥珀提示的接入簇）。 */
+const LAYER_CLUSTER_FILL = '#3d3524';
+const LAYER_CLUSTER_BORDER = '#c99a3f';
+/** L6 业务节点填充（绿系）。 */
+const LAYER_BUSINESS_FILL = '#1d3b30';
+const LAYER_BUSINESS_BORDER = '#69b08c';
+/** L5 分组节点填充（石板灰）。 */
+const LAYER_GROUPNODE_FILL = '#232f3f';
+const LAYER_GROUPNODE_BORDER = '#7d93ab';
+/** L0 空间锚点（人井/杆路）：极小暗点。 */
+const LAYER_SPATIAL_FILL = '#3a4656';
+/** 影响分析高亮：受影响琥珀 / 压暗。 */
+const IMPACT_HIT_COLOR = '#ffb02e';
 
 /** 路径追踪高亮（v0.2.2）：青绿色系，与故障红/接口琥珀/选中蓝全部错开。 */
 const TRACE_ROUTE_COLOR = '#3fd8c7';
@@ -313,6 +387,9 @@ const POSITION_SAVE_DELAY_MS = 160;
 /** FX-6：PNG 快照导出倍率。 */
 const PNG_EXPORT_SCALE = 2;
 
+/** #51 布局护栏：可见节点超过该数禁用 force/concentric（自动降级 grid）。 */
+const LAYOUT_GUARD_MAX = 800;
+
 /** 迷你导航图尺寸（CSS px，内部按 devicePixelRatio 放大）。 */
 const MINIMAP_W = 160;
 const MINIMAP_H = 104;
@@ -352,12 +429,21 @@ function readPrefs(persistKey: string | undefined): CanvasPrefs {
       const parsed: unknown = JSON.parse(raw);
       if (typeof parsed === 'object' && parsed !== null) {
         const rec = parsed as Record<string, unknown>;
+        const layers = { ...DEFAULT_PREFS.layers };
+        if (typeof rec.layers === 'object' && rec.layers !== null) {
+          const stored = rec.layers as Record<string, unknown>;
+          for (const key of Object.keys(layers) as LayerToggleKey[]) {
+            if (typeof stored[key] === 'boolean') layers[key] = stored[key] as boolean;
+          }
+        }
         return {
           layout: isLayoutKind(rec.layout) ? rec.layout : DEFAULT_PREFS.layout,
           mode: isModeKind(rec.mode) ? rec.mode : DEFAULT_PREFS.mode,
           labels: typeof rec.labels === 'boolean' ? rec.labels : DEFAULT_PREFS.labels,
           // GEO-2：旧 v2 档案无 view 字段 → 默认 topo（向后兼容）
           view: isViewKind(rec.view) ? rec.view : DEFAULT_PREFS.view,
+          // #51：v3 之前的档案无 layers → 施工规格 C.1 的默认组合
+          layers,
         };
       }
     }
@@ -637,9 +723,10 @@ function fitToView(cy: Core): void {
 
 /** 迷你导航图坐标变换：模型坐标 → 缩略图像素（内容等比缩放并居中）。 */
 function minimapTransform(cy: Core): { scale: number; ox: number; oy: number } | null {
-  const nodes = cy.nodes();
+  // #51：迷你图只反映可见元素（隐藏图层不占视口）。
+  const nodes = cy.nodes(':visible');
   if (nodes.length === 0) return null;
-  const bb = cy.elements().boundingBox();
+  const bb = cy.elements(':visible').boundingBox();
   const bw = Math.max(bb.w, 1);
   const bh = Math.max(bb.h, 1);
   const pad = 7;
@@ -796,6 +883,169 @@ const CY_STYLE: Array<{ selector: string; style: Record<string, string | number 
       opacity: 0.14,
     },
   },
+  // —— #51 图层覆盖层：节点形态（接入小圆 / 业务圆角 / 分组六角 / 空间暗点 /
+  //    聚簇胶囊 ×N）——
+  {
+    selector: 'node[overlay = "true"]',
+    style: {
+      shape: 'round-rectangle',
+      'corner-radius': 4,
+      width: 64,
+      height: 22,
+      'font-size': 10,
+      'font-weight': 500,
+      'min-zoomed-font-size': 5,
+    },
+  },
+  {
+    selector: 'node[kind = "cluster"]',
+    style: {
+      shape: 'round-rectangle',
+      'corner-radius': 9,
+      'background-color': LAYER_CLUSTER_FILL,
+      'border-color': LAYER_CLUSTER_BORDER,
+      color: '#f0d9a8',
+      width: 74,
+      height: 22,
+    },
+  },
+  {
+    selector: 'node[layer = "L4"]',
+    style: {
+      shape: 'ellipse',
+      'background-color': LAYER_ACCESS_FILL,
+      'border-color': LAYER_ACCESS_COLOR,
+      color: '#c6d4e6',
+      width: 34,
+      height: 34,
+      'font-size': 7,
+    },
+  },
+  {
+    selector: 'node[layer = "L6"]',
+    style: {
+      shape: 'round-rectangle',
+      'corner-radius': 11,
+      'background-color': LAYER_BUSINESS_FILL,
+      'border-color': LAYER_BUSINESS_BORDER,
+      color: '#bfe3cf',
+    },
+  },
+  {
+    selector: 'node[layer = "L5"]',
+    style: {
+      shape: 'round-diamond',
+      'background-color': LAYER_GROUPNODE_FILL,
+      'border-color': LAYER_GROUPNODE_BORDER,
+      color: '#aebfd2',
+      width: 40,
+      height: 40,
+      'font-size': 7,
+    },
+  },
+  {
+    selector: 'node[layer = "L0"]',
+    style: {
+      shape: 'ellipse',
+      'background-color': LAYER_SPATIAL_FILL,
+      'border-color': '#4e5d6f',
+      color: '#8b98a8',
+      width: 14,
+      height: 14,
+      'font-size': 6,
+      label: '',
+    },
+  },
+  // —— #51 语义边（C.2 四色：逻辑虚线琥珀 / 业务点线绿 / 接入细灰 / 分组点划）——
+  {
+    selector: 'edge[kind = "layer-link"]',
+    style: {
+      width: 1.4,
+      'curve-style': 'bezier',
+      'target-arrow-shape': 'none',
+      'min-zoomed-font-size': 6,
+    },
+  },
+  {
+    selector: 'edge[sem = "logical"]',
+    style: {
+      'line-color': LAYER_LOGICAL_COLOR,
+      'line-style': 'dashed',
+      'line-dash-pattern': [10, 5],
+      width: 2,
+    },
+  },
+  {
+    selector: 'edge[sem = "service"]',
+    style: {
+      'line-color': LAYER_SERVICE_COLOR,
+      'line-style': 'dotted',
+      'line-dash-pattern': [2, 4],
+      width: 1.8,
+    },
+  },
+  {
+    selector: 'edge[sem = "access"]',
+    style: {
+      'line-color': LAYER_ACCESS_COLOR,
+      width: 1.2,
+    },
+  },
+  {
+    selector: 'edge[sem = "group"]',
+    style: {
+      'line-color': LAYER_GROUP_COLOR,
+      'line-style': 'dashed',
+      'line-dash-pattern': [3, 5],
+      width: 1.2,
+      opacity: 0.7,
+    },
+  },
+  {
+    selector: 'edge[kind = "layer-link"]:selected',
+    style: {
+      'line-color': EDGE_SELECTED_COLOR,
+      width: 3,
+    },
+  },
+  {
+    selector: 'node[overlay = "true"]:selected',
+    style: {
+      'border-width': 3,
+      'border-color': NODE_SELECTED_BORDER,
+    },
+  },
+  // —— #51 影响分析高亮（F.4：受影响琥珀，其余压暗）——
+  {
+    selector: 'node.impact-dim, edge.impact-dim',
+    style: {
+      opacity: 0.12,
+    },
+  },
+  {
+    selector: 'node.impact-hit',
+    style: {
+      'border-color': IMPACT_HIT_COLOR,
+      'border-width': 3,
+      'z-index': 200,
+    },
+  },
+  {
+    selector: 'edge.impact-hit',
+    style: {
+      'line-color': IMPACT_HIT_COLOR,
+      width: 3,
+      'z-index': 200,
+    },
+  },
+  {
+    selector: 'node.impact-root',
+    style: {
+      'border-color': '#f2554a',
+      'border-width': 3.5,
+      'z-index': 210,
+    },
+  },
 ];
 
 interface TopologyCanvasProps {
@@ -913,6 +1163,90 @@ function buildZenInfo(topology: SimTopology, selected: SelectedEntity): ZenInfo 
   return null;
 }
 
+/**
+ * 图层覆盖元素（#51）：聚合簇/接入/分组/业务节点 + 语义边。可见性不由这里
+ * 决定——全部元素进图，图层开关用 show/hide 切换（F.2：切层不重载数据、
+ * 不重排布局）。聚簇节点的展示码是「接入 ×N」；语义边端点解析 device/
+ * interface/node 三种引用（interface 归属设备——in_vpn 边挂到端口所在设备）。
+ * 聚簇与锚定节点（基站簇/OLT/ONU/业务）派生一条细灰上联边指向锚设备，
+ * 呈现「接入上联」的第四种边语义（C.2）。
+ */
+function buildLayerElements(topology: SimTopology): ElementDefinition[] {
+  const layers = topology.layers;
+  if (layers === undefined) return [];
+  const deviceIds = new Set(topology.nodes.map((node) => node.id));
+  const deviceOfInterface = new Map<string, string>();
+  for (const node of topology.nodes) {
+    for (const iface of node.interfaces) deviceOfInterface.set(iface.id, node.id);
+  }
+  const resolveEndpoint = (kind: string, ref: string): string | null => {
+    if (kind === 'device') return deviceIds.has(ref) ? ref : null;
+    if (kind === 'node') return ref;
+    if (kind === 'interface') return deviceOfInterface.get(ref) ?? null;
+    return null;
+  };
+  const displayCode = (node: LayerNodePayload): string =>
+    node.aggregated === true ? format(LAYER_CLUSTER_LABEL, { n: node.memberCount ?? 0 }) : node.code;
+
+  const nodes: ElementDefinition[] = layers.nodes.map((node) => ({
+    group: 'nodes',
+    data: {
+      id: node.id,
+      kind: node.kind,
+      layer: node.layer,
+      overlay: 'true',
+      code: displayCode(node),
+      rawCode: node.code,
+      name: node.name,
+      status: node.status ?? '',
+      resourceId: node.resourceId ?? '',
+      memberCount: node.memberCount ?? 0,
+      aggregated: node.aggregated === true ? 'true' : 'false',
+    },
+  }));
+  const edges: ElementDefinition[] = [];
+  for (const edge of layers.edges) {
+    const source = resolveEndpoint(edge.aKind, edge.aRef);
+    const target = resolveEndpoint(edge.zKind, edge.zRef);
+    if (source === null || target === null || source === target) continue;
+    edges.push({
+      group: 'edges',
+      data: {
+        id: edge.id,
+        kind: 'layer-link',
+        layer: edge.layer,
+        sem: edge.sem,
+        source,
+        target,
+        label: edge.label,
+        status: '',
+        resourceId: edge.resourceId ?? '',
+      },
+    });
+  }
+  // 派生上联边：聚簇（基站）与锚定接入/业务节点 → 锚设备（细实线浅灰，
+  // C.2 的「接入上联」——数据侧即 anchorDeviceId，非新造关系）。
+  for (const node of layers.nodes) {
+    if (node.anchorDeviceId === undefined || !deviceIds.has(node.anchorDeviceId)) continue;
+    if (node.kind !== 'cluster' && node.layer !== 'L4' && node.layer !== 'L6') continue;
+    edges.push({
+      group: 'edges',
+      data: {
+        id: `anchored-${node.id}`,
+        kind: 'layer-link',
+        layer: node.layer,
+        sem: 'access',
+        source: node.id,
+        target: node.anchorDeviceId,
+        label: '',
+        status: '',
+        resourceId: '',
+      },
+    });
+  }
+  return [...nodes, ...edges];
+}
+
 function buildElements(topology: SimTopology): ElementDefinition[] {
   const nodes: ElementDefinition[] = topology.nodes.map((node) => ({
     group: 'nodes',
@@ -923,6 +1257,7 @@ function buildElements(topology: SimTopology): ElementDefinition[] {
       code: node.code,
       name: node.name,
       status: node.status,
+      resourceId: node.resourceId ?? '',
       // 接口故障：任一接口停机 → 琥珀描边（图例「接口故障」）
       ifaceFault: node.interfaces.some((iface) => iface.status === 'down') ? 'true' : 'false',
     },
@@ -936,9 +1271,10 @@ function buildElements(topology: SimTopology): ElementDefinition[] {
       target: edge.zDeviceId,
       status: edge.status,
       label: edge.label,
+      resourceId: edge.resourceId ?? '',
     },
   }));
-  return [...nodes, ...edges];
+  return [...nodes, ...edges, ...buildLayerElements(topology)];
 }
 
 export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen = false, onZenChange, resizeSuspended = false, actions }: TopologyCanvasProps) {
@@ -978,6 +1314,8 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   /** 打开菜单前的焦点元素（Esc 关闭时还焦点）。 */
   const menuReturnFocusRef = useRef<HTMLElement | null>(null);
   /** 当前缩放百分比（zoom 事件 → rAF 节流刷新）。 */
+  /** #51 布局护栏提示（超阈值自动切网格时显示一条，下次布局清除）。 */
+  const [layoutGuardHint, setLayoutGuardHint] = useState<string>('');
   const [zoomPct, setZoomPct] = useState(100);
   /** persistKey 镜像（cxttap / 位置存档 / PNG 文件名在挂载期闭包里读最新值）。 */
   const persistKeyRef = useRef(persistKey);
@@ -994,6 +1332,67 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     focusTap: (id: string) => void;
     traceStart: (id: string) => void;
   }>({ focusTap: () => undefined, traceStart: () => undefined });
+  // —— #51 影响分析（F.4）：从选中资源向业务层收集影响面并在画布高亮 ——
+  const [impactResult, setImpactResult] = useState<ImpactDocument | null>(null);
+  const [impactRootLabel, setImpactRootLabel] = useState<string>('');
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [impactError, setImpactError] = useState<string | null>(null);
+
+  /** 清除影响高亮（Esc / 清除按钮 / 新分析）。 */
+  const clearImpactHighlight = useCallback((): void => {
+    setImpactResult(null);
+    setImpactRootLabel('');
+    setImpactError(null);
+    const cy = cyRef.current;
+    if (cy === null || cy.destroyed()) return;
+    cy.elements().removeClass('impact-hit impact-dim impact-root');
+  }, []);
+
+  /**
+   * 影响分析执行：拉取 impact 文档 → 按 resourceId 匹配画布元素（含覆盖层
+   * 节点/边与演练设备/链路的血缘）→ 琥珀高亮命中，其余压暗。
+   */
+  const runImpactAnalysis = useCallback(
+    async (resourceId: string, label: string, direction: 'up' | 'down'): Promise<void> => {
+      setImpactLoading(true);
+      setImpactError(null);
+      try {
+        const doc = await getImpact(resourceId, direction);
+        setImpactResult(doc);
+        setImpactRootLabel(label);
+        const cy = cyRef.current;
+        if (cy !== null && !cy.destroyed()) {
+          const hit = new Set<string>();
+          hit.add(doc.root.id);
+          for (const item of doc.impacted) hit.add(item.node.id);
+          for (const item of doc.candidates) hit.add(item.node.id);
+          cy.batch(() => {
+            cy.elements().removeClass('impact-hit impact-dim impact-root');
+            cy.elements().forEach((ele) => {
+              const rid = String(ele.data('resourceId') ?? '');
+              if (rid === '' || !hit.has(rid)) {
+                ele.addClass('impact-dim');
+              } else if (rid === doc.root.id) {
+                ele.addClass('impact-root');
+              } else {
+                ele.addClass('impact-hit');
+              }
+            });
+          });
+        }
+      } catch (err) {
+        setImpactResult(null);
+        setImpactError(err instanceof Error ? err.message : LAB_IMPACT_ERROR);
+      } finally {
+        setImpactLoading(false);
+      }
+    },
+    [],
+  );
+
+  /** 右键菜单影响分析动作转发（菜单渲染周期与 useCallback 解耦）。 */
+  const menuImpactRef = useRef<((resourceId: string, label: string, direction: 'up' | 'down') => Promise<void>) | null>(null);
+
   /** 视图动作转发（全局快捷键 F/L、菜单 fit/reset、外部关闭读取）。 */
   const viewActionsRef = useRef<{
     fitView: () => void;
@@ -1070,8 +1469,19 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     (cy: Core, kind: LayoutKind, eles?: CollectionReturnValue): void => {
       layoutRunRef.current?.stop();
       if (kind === 'freeze') return;
-      const target = eles ?? cy.elements();
+      // #51（spec D.2 规模保护）：布局只作用于可见元素（隐藏的覆盖层节点
+      // 不参与），且 force/concentric 在可见节点超阈值时自动降级 grid——
+      // O(n²) 布局在千级节点上不可交互。
+      const visible = (eles ?? cy.elements()).filter(':visible');
+      const visibleNodeCount = visible.nodes().length;
+      const target = visible;
       if (target.length === 0) return;
+      if ((kind === 'force' || kind === 'concentric') && visibleNodeCount > LAYOUT_GUARD_MAX) {
+        setLayoutGuardHint(format(LAYER_LAYOUT_GUARD, { n: visibleNodeCount, max: LAYOUT_GUARD_MAX }));
+        kind = 'grid';
+      } else if (layoutGuardHint !== '') {
+        setLayoutGuardHint('');
+      }
       const reduceMotion = prefersReducedMotion();
       const options = layoutOptionsFor(kind, target, !reduceMotion);
       if (options === null) return;
@@ -1088,7 +1498,7 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
       layoutRunRef.current = run;
       run.run();
     },
-    [],
+    [layoutGuardHint],
   );
 
   /** 摘除路径追踪 / 邻域聚焦的全部视觉痕迹（模式切换、Esc、空白点击、数据变更）。 */
@@ -1118,10 +1528,20 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     const tf = minimapTransform(cy);
     if (tf === null) return;
     const { scale, ox, oy } = tf;
-    cy.nodes().forEach((node) => {
+    cy.nodes(':visible').forEach((node) => {
       const x = node.position('x') * scale + ox;
       const y = node.position('y') * scale + oy;
-      ctx.fillStyle = node.data('status') === 'down' ? '#f2554a' : '#7387ab';
+      const layer = node.data('layer') as string | undefined;
+      ctx.fillStyle =
+        node.data('status') === 'down'
+          ? '#f2554a'
+          : layer === 'L6'
+            ? '#69b08c'
+            : layer === 'L4'
+              ? '#c99a3f'
+              : layer === 'L5'
+                ? '#7d93ab'
+                : '#7387ab';
       ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
     });
     const ext = cy.extent();
@@ -1241,6 +1661,7 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   useEffect(() => {
     menuActionsRef.current = { focusTap: contextFocusTap, traceStart: contextTraceStart };
     viewActionsRef.current = { fitView, resetView, toggleLabels, exportPng, closeMenu };
+    menuImpactRef.current = (resourceId, label, direction) => runImpactAnalysis(resourceId, label, direction);
   });
 
   // —— GEO-2：视图切换 ——
@@ -1295,6 +1716,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
       if (inOpenDialog(event.target) || inOpenDialog(document.activeElement)) return;
       if (menu !== null) {
         viewActionsRef.current.closeMenu(true);
+        return;
+      }
+      if (impactResult !== null || impactError !== null) {
+        clearImpactHighlight();
         return;
       }
       if (modeArtifactsActive()) {
@@ -1454,6 +1879,11 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
         actionsRef.current.traceTap(node.id());
         return;
       }
+      if (node.data('overlay') === 'true') {
+        // #51：图层覆盖节点（聚簇/接入/分组/业务）——只读实体，进图层信息面板
+        onSelectRef.current({ kind: 'layerNode', id: node.id() });
+        return;
+      }
       if (modeRef.current === 'focus') {
         actionsRef.current.focusTap(node.id());
         // 聚焦模式仍联动右侧表格（点击即定位行）
@@ -1464,6 +1894,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     });
     cy.on('tap', 'edge', (event) => {
       const edge = event.target;
+      if (edge.data('kind') === 'layer-link') {
+        onSelectRef.current({ kind: 'layerLink', id: edge.id() });
+        return;
+      }
       onSelectRef.current({ kind: 'link', id: edge.id() });
     });
     // 点击画布空白：清除路径追踪 / 邻域聚焦（选择模式保持原状）
@@ -1491,6 +1925,16 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
         hoverClearTimer = null;
       }
       const node = event.target;
+      if (node.data('overlay') === 'true') {
+        // #51：覆盖层节点——kind 标注进 name 行（如「基站 · 名称」）
+        const kindLabel = LAYER_KIND_LABELS[node.data('kind') as string] ?? node.data('kind');
+        setHoverInfo({
+          code: node.data('code') as string,
+          name: `${kindLabel} · ${node.data('name') ?? ''}`,
+          status: (node.data('status') === 'down' ? 'down' : 'up') as SimEntityStatus,
+        });
+        return;
+      }
       setHoverInfo({
         code: node.data('code') as string,
         name: node.data('name') as string,
@@ -1603,25 +2047,56 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
       if (ele.isNode()) {
         const id = ele.id();
         const code = String(ele.data('code') ?? id);
+        const resourceID = String(ele.data('resourceId') ?? '');
+        const isOverlayNode = ele.data('overlay') === 'true';
+        const nodeItems: CanvasMenuItem[] = [];
+        if (resourceID !== '') {
+          nodeItems.push(
+            {
+              key: 'impact',
+              label: LAB_CANVAS_CTX_IMPACT,
+              title: LAB_CANVAS_CTX_IMPACT_TITLE,
+              run: () => void menuImpactRef.current?.(resourceID, code, 'up'),
+            },
+            {
+              key: 'impact-root',
+              label: LAB_CANVAS_CTX_IMPACT_ROOT,
+              title: LAB_CANVAS_CTX_IMPACT_ROOT_TITLE,
+              run: () => void menuImpactRef.current?.(resourceID, code, 'down'),
+            },
+          );
+        }
         openMenu(LAB_CANVAS_MENU_NODE, [
-          {
-            key: 'focus',
-            label: LAB_CANVAS_CTX_FOCUS,
-            title: LAB_CANVAS_CTX_FOCUS_TITLE,
-            run: () => menuActionsRef.current.focusTap(id),
-          },
-          {
-            key: 'trace',
-            label: LAB_CANVAS_CTX_TRACE,
-            title: LAB_CANVAS_CTX_TRACE_TITLE,
-            run: () => menuActionsRef.current.traceStart(id),
-          },
-          {
-            key: 'locate',
-            label: LAB_CANVAS_CTX_LOCATE,
-            title: LAB_CANVAS_CTX_LOCATE_TITLE,
-            run: () => onSelectRef.current({ kind: 'device', id }),
-          },
+          ...(isOverlayNode
+            ? [
+                {
+                  key: 'locate-layer',
+                  label: LAYER_KIND_LABELS[ele.data('kind') as string] ?? '图层实体',
+                  title: String(ele.data('name') ?? ''),
+                  run: () => onSelectRef.current({ kind: 'layerNode', id }),
+                },
+              ]
+            : [
+                {
+                  key: 'focus',
+                  label: LAB_CANVAS_CTX_FOCUS,
+                  title: LAB_CANVAS_CTX_FOCUS_TITLE,
+                  run: () => menuActionsRef.current.focusTap(id),
+                },
+                {
+                  key: 'trace',
+                  label: LAB_CANVAS_CTX_TRACE,
+                  title: LAB_CANVAS_CTX_TRACE_TITLE,
+                  run: () => menuActionsRef.current.traceStart(id),
+                },
+                {
+                  key: 'locate',
+                  label: LAB_CANVAS_CTX_LOCATE,
+                  title: LAB_CANVAS_CTX_LOCATE_TITLE,
+                  run: () => onSelectRef.current({ kind: 'device', id }),
+                },
+              ]),
+          ...nodeItems,
           {
             key: 'copy',
             label: LAB_CANVAS_CTX_COPY_ID,
@@ -1634,20 +2109,40 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
       if (ele.isEdge()) {
         const id = ele.id();
         const label = String(ele.data('label') ?? '') || id;
-        openMenu(LAB_CANVAS_MENU_EDGE, [
-          {
-            key: 'locate',
-            label: LAB_CANVAS_CTX_LOCATE_LINK,
-            title: LAB_CANVAS_CTX_LOCATE_LINK_TITLE,
-            run: () => onSelectRef.current({ kind: 'link', id }),
-          },
+        const resourceID = String(ele.data('resourceId') ?? '');
+        const isLayerLink = ele.data('kind') === 'layer-link';
+        const edgeItems: CanvasMenuItem[] = [
+          isLayerLink
+            ? {
+                key: 'locate',
+                label: LAYER_SEM_LABELS[ele.data('sem') as string] ?? '图层边',
+                title: label,
+                run: () => onSelectRef.current({ kind: 'layerLink', id }),
+              }
+            : {
+                key: 'locate',
+                label: LAB_CANVAS_CTX_LOCATE_LINK,
+                title: LAB_CANVAS_CTX_LOCATE_LINK_TITLE,
+                run: () => onSelectRef.current({ kind: 'link', id }),
+              },
+          ...(resourceID !== ''
+            ? [
+                {
+                  key: 'impact',
+                  label: LAB_CANVAS_CTX_IMPACT,
+                  title: LAB_CANVAS_CTX_IMPACT_TITLE,
+                  run: () => void menuImpactRef.current?.(resourceID, label, 'up'),
+                },
+              ]
+            : []),
           {
             key: 'copy',
             label: LAB_CANVAS_CTX_COPY_LINK_ID,
             title: LAB_CANVAS_CTX_COPY_LINK_ID_TITLE,
             run: () => void copyTextToClipboard(label),
           },
-        ]);
+        ];
+        openMenu(LAB_CANVAS_MENU_EDGE, edgeItems);
       }
     });
 
@@ -1787,6 +2282,41 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     }
   }, [topology, layout, edgeLabels, startLayout, clearModeArtifacts]);
 
+  // —— #51 图层开关（F.2：show/hide 切换，不重建元素、不重排布局、不重新
+  //    请求数据——覆盖层数据随 topology 一次到达并缓存在内存）——
+  //    L1 关 → 演练设备全部隐藏（所有边因端点隐藏而隐藏）；L2 关 → 仅物理
+  //    链路隐藏（逻辑边保留）。切换时清除路径追踪/邻域聚焦/影响高亮，避免
+  //    高亮残留在已隐藏元素上。
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (cy === null || cy.destroyed()) return;
+    const layers = prefs.layers;
+    cy.batch(() => {
+      cy.nodes().forEach((node) => {
+        const layer = node.data('layer') as string | undefined;
+        const visible = layer === undefined ? layers.L1 : (layers as Record<string, boolean>)[layer] !== false;
+        const el = node as unknown as ElementWithVisibility;
+        if (visible) {
+          el.show();
+        } else {
+          el.hide();
+        }
+      });
+      cy.edges().forEach((edge) => {
+        const layer = edge.data('layer') as string | undefined;
+        let visible = layer === undefined ? layers.L2 : (layers as Record<string, boolean>)[layer] !== false;
+        if (visible && (edge.source().hidden() || edge.target().hidden())) visible = false;
+        const el = edge as unknown as ElementWithVisibility;
+        if (visible) {
+          el.show();
+        } else {
+          el.hide();
+        }
+      });
+    });
+    scheduleMinimapRef.current();
+  }, [prefs.layers, topology]);
+
   // —— 选中联动（右侧表格 → 画布） ——
   useEffect(() => {
     const cy = cyRef.current;
@@ -1830,6 +2360,13 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
 
   function toggleLabels(): void {
     setPrefs((p) => ({ ...p, labels: !p.labels }));
+  }
+
+  /** #51：图层开关（L1/L2/L3/L6 主干默认开，L0/L4/L5 按需）。 */
+  function toggleLayer(key: LayerToggleKey): void {
+    setPrefs((p) => ({ ...p, layers: { ...p.layers, [key]: !p.layers[key] } }));
+    clearModeArtifacts();
+    clearImpactHighlight();
   }
 
   // —— 视图控制（W2）——
@@ -2165,6 +2702,34 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           </>
         )}
         <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
+        {/* #51 七层开关：L1/L2 演练本体 + L0/L3/L4/L5/L6 覆盖层。空层禁用
+            （无数据）。切层 = show/hide，不重排、不重拉数据（F.2）。 */}
+        <div className="canvas-seg canvas-layers" role="group" aria-label={LAB_LAYERS_GROUP}>
+          {(Object.keys(LAYER_TOGGLE_LABELS) as LayerToggleKey[]).map((key) => {
+            const summary =
+              key === 'L1' || key === 'L2' ? undefined : topology?.layers?.summary.byLayer[key as OverlayLayer];
+            const hasData =
+              key === 'L1' || key === 'L2'
+                ? (topology?.nodes.length ?? 0) > 0
+                : (summary?.nodes ?? 0) > 0;
+            const active = prefs.layers[key] && hasData;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`canvas-tool canvas-tool--toggle${active ? ' is-active' : ''}`}
+                aria-pressed={active}
+                title={hasData ? LAYER_TOGGLE_LABELS[key] : `${LAYER_TOGGLE_LABELS[key]}（${LAYER_TOGGLE_EMPTY}）`}
+                aria-label={LAYER_TOGGLE_LABELS[key]}
+                disabled={view !== 'topo' || !hasData}
+                onClick={() => toggleLayer(key)}
+              >
+                <span className="canvas-layer-key">{key}</span>
+              </button>
+            );
+          })}
+        </div>
+        <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
         {/* FX-6：PNG 快照导出（空拓扑禁用；地图视图禁用——快照仅拓扑视图） */}
         <button
           type="button"
@@ -2295,6 +2860,58 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
             </span>
             <span className="hoverinfo-sep" aria-hidden="true">·</span>
             <span className="hoverinfo-status">{SIM_STATUS_LABELS[hoverInfo.status]}</span>
+          </div>
+        )}
+        {/* #51 影响分析结果面板（F.4 故障故事：起点 + 受影响面计数 + 根因
+            候选列表首行 + 清除按钮；画布上命中元素琥珀高亮、其余压暗）。 */}
+        {(impactLoading || impactError !== null || impactResult !== null) && (
+          <div className="lab-canvas-overlay canvas-impact-panel" role="status" aria-label={LAB_IMPACT_PANEL_TITLE}>
+            <div className="impact-panel-head">
+              <span className="impact-panel-title">{LAB_IMPACT_PANEL_TITLE}</span>
+              <button
+                type="button"
+                className="impact-panel-clear"
+                title={LAB_IMPACT_PANEL_CLEAR}
+                aria-label={LAB_IMPACT_PANEL_CLEAR}
+                onClick={clearImpactHighlight}
+              >
+                <IconClose size={12} />
+              </button>
+            </div>
+            {impactLoading && <div className="impact-panel-line">{LAB_IMPACT_LOADING}</div>}
+            {impactError !== null && <div className="impact-panel-line impact-panel-line--err">{LAB_IMPACT_ERROR}：{impactError}</div>}
+            {impactResult !== null && !impactLoading && (
+              <>
+                <div className="impact-panel-line">
+                  <span className="impact-panel-key">{LAB_IMPACT_PANEL_ROOT}</span>
+                  <span className="impact-panel-value" title={impactResult.root.name}>
+                    {impactRootLabel !== '' ? impactRootLabel : impactResult.root.name}
+                    {impactResult.root.runState !== '' ? `（${impactResult.root.runState}）` : ''}
+                  </span>
+                </div>
+                <div className="impact-panel-line">
+                  <span className="impact-panel-key">
+                    {format(LAB_IMPACT_PANEL_IMPACTED, { n: impactResult.impacted.length })}
+                  </span>
+                  <span className="impact-panel-value impact-panel-value--hit" />
+                </div>
+                {impactResult.impacted.length === 0 && (
+                  <div className="impact-panel-line impact-panel-line--muted">{LAB_IMPACT_EMPTY}</div>
+                )}
+                {impactResult.candidates.length > 0 && (
+                  <div className="impact-panel-line">
+                    <span className="impact-panel-key">
+                      {format(LAB_IMPACT_PANEL_CANDIDATES, { n: impactResult.candidates.length })}
+                    </span>
+                    <span className="impact-panel-value" title={impactResult.candidates[0]?.node.name}>
+                      {impactResult.candidates[0]?.node.name}
+                      {impactResult.candidates.length > 1 ? ' …' : ''}
+                    </span>
+                  </div>
+                )}
+                {layoutGuardHint !== '' && <div className="impact-panel-line impact-panel-line--muted">{layoutGuardHint}</div>}
+              </>
+            )}
           </div>
         )}
         {/* FX-5：zen 左上浮动选中详情卡（位于 hover 信息条下方；无选中不显示。
@@ -2448,6 +3065,31 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
               <span className="legend-line legend-line--down" aria-hidden="true" />
               {LAB_LEGEND_LINK_DOWN}
             </span>
+            {/* #51：图层次语义图例（相应层开启时显示）——四色边 + 簇/业务节点 */}
+            {prefs.layers.L3 && (
+              <span className="legend-item">
+                <span className="legend-dot legend-dot--logical" aria-hidden="true" />
+                {LAYER_SEM_LABELS.logical}
+              </span>
+            )}
+            {prefs.layers.L6 && (
+              <span className="legend-item">
+                <span className="legend-dot legend-dot--service" aria-hidden="true" />
+                {LAYER_SEM_LABELS.service}
+              </span>
+            )}
+            {prefs.layers.L4 && (
+              <>
+                <span className="legend-item">
+                  <span className="legend-dot legend-dot--access" aria-hidden="true" />
+                  {LAYER_SEM_LABELS.access}
+                </span>
+                <span className="legend-item">
+                  <span className="legend-dot legend-dot--cluster" aria-hidden="true" />
+                  {LAYER_KIND_LABELS.cluster}
+                </span>
+              </>
+            )}
           </div>
         )}
         {view === 'topo' && empty && (

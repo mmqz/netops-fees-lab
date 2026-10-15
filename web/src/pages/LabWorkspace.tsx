@@ -39,6 +39,7 @@ import {
   LAB_TAB_CHECKPOINTS,
   LAB_TAB_CHECKS,
   LAB_TAB_DEVICES,
+  LAB_TAB_LAYERS,
   LAB_TAB_INTERFACES,
   LAB_TAB_LINKS,
   LAB_UNDO_MESSAGE,
@@ -87,6 +88,7 @@ import {
 import { OpsDialog } from '../components/lab/OpsDialog';
 import { DiffDialog } from '../components/lab/DiffDialog';
 import { DeviceTab, InterfaceTab, LinkTab } from '../components/lab/EntityTabs';
+import { LayerInfoTab } from '../components/lab/LayerInfoTab';
 import { ChecksTab } from '../components/lab/ChecksTab';
 import { ChangeSetsTab } from '../components/lab/ChangeSetsTab';
 import { CheckpointsTab } from '../components/lab/CheckpointsTab';
@@ -95,9 +97,10 @@ import type { SelectedEntity } from '../components/lab/selection';
 import { clearLastWorkspace, saveLastWorkspace } from '../lastWorkspace';
 import { useSeq } from '../hooks/useSeq';
 
-type LabTab = 'devices' | 'interfaces' | 'links' | 'checks' | 'changesets' | 'checkpoints';
+type LabTab = 'layers' | 'devices' | 'interfaces' | 'links' | 'checks' | 'changesets' | 'checkpoints';
 
 const TABS: Array<{ value: LabTab; label: string }> = [
+  { value: 'layers', label: LAB_TAB_LAYERS },
   { value: 'devices', label: LAB_TAB_DEVICES },
   { value: 'interfaces', label: LAB_TAB_INTERFACES },
   { value: 'links', label: LAB_TAB_LINKS },
@@ -494,6 +497,10 @@ export function LabWorkspacePage() {
       //（仅会话态，不落盘，见 expandPanel 注释）。
       expandPanel();
       switch (entity.kind) {
+        case 'layerNode':
+        case 'layerLink':
+          setTab('layers');
+          break;
         case 'device':
           setTab('devices');
           break;
@@ -688,6 +695,11 @@ export function LabWorkspacePage() {
           down={counts.interfaces - counts.upInterfaces}
         />
         <CountChip label={LABWS_CHIP_LINKS} total={counts.links} up={counts.upLinks} down={counts.links - counts.upLinks} />
+        {(counts.layerNodes ?? 0) > 0 && (
+          <span className="chip chip--muted" title="图层覆盖层：L0/L4/L5/L6 节点 / L3-L6 语义边（只读投影，#51）">
+            图层 {counts.layerNodes}/{counts.layerLinks}
+          </span>
+        )}
         <Link className="btn btn--secondary lab-tile-back" to="/lab" style={{ marginLeft: 'auto' }}>
           {LABWS_BACK_LIST}
         </Link>
@@ -829,6 +841,9 @@ export function LabWorkspacePage() {
             ))}
           </div>
           <div className="lab-panel-body">
+            {tab === 'layers' && (
+              <LayerInfoTab topology={topology} selected={selected} workspaceId={workspaceId} />
+            )}
             {tab === 'devices' && (
               <DeviceTab view={view} selected={selected} onSelect={setSelected} applyOps={applyOpsRequest} opsBusy={opsBusy} />
             )}
