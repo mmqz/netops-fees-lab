@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
+  AlertItem,
   AttributeChangeItem,
   GraphEdge,
   GraphNode,
@@ -32,6 +33,7 @@ import {
   getResource,
   getResourceMetrics,
   getResourceRelations,
+  listAlerts,
   listAttributeChanges,
   listMetricKeys,
   listRenames,
@@ -67,14 +69,29 @@ import {
   RES_COL_TYPE,
   RES_COL_UPDATED,
   RES_DRAWER_TAB_ATTRS,
+  RES_DRAWER_TAB_ALERTS,
   RES_DRAWER_TAB_GRAPH,
   RES_RUNSTATE_HISTORY_TITLE,
   RES_RUNSTATE_LABEL,
   RES_DRAWER_TAB_METRICS,
   RES_DRAWER_TAB_RELATIONS,
   RES_DRAWER_TAB_SOURCE,
+  METRIC_CHART_POINTS,
   METRIC_EMPTY,
+  METRICS_EXPORT_BTN,
+  METRICS_EXPORT_EMPTY,
+  METRICS_EXPORT_FILENAME,
+  METRICS_EXPORT_TOAST,
+  METRICS_EXPORT_WORKING,
   METRIC_LOAD_FAILED,
+  RES_ALERTS_EMPTY,
+  RES_ALERTS_LINK,
+  RES_ALERTS_LOAD_FAILED,
+  RES_ALERTS_MORE,
+  RES_ALERTS_TAB_HINT,
+  ALR_VALUE_TEXT,
+  ALERT_COMPARATOR_LABELS,
+  formatRelativeTime,
   RES_EMPTY_DESC,
   RES_EMPTY_TITLE,
   RES_EXPORT_HINT,
@@ -106,6 +123,8 @@ import { fieldsForType, fieldLabel } from '../schema';
 import { Drawer } from '../components/Drawer';
 import { MetricChart } from '../components/MetricChart';
 import { RunStateChip } from '../components/RunStateChip';
+import { AlertStateChip } from '../components/AlertStateChip';
+import { SeverityBadge } from '../components/SeverityBadge';
 import { GraphAnalysisTab } from '../components/GraphAnalysisTab';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorBlock } from '../components/ErrorBlock';
@@ -122,7 +141,29 @@ import { TOAST_COPIED } from '../i18n';
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
 
-type DrawerTab = 'attrs' | 'source' | 'relations' | 'metrics' | 'graph';
+type DrawerTab = 'attrs' | 'source' | 'relations' | 'metrics' | 'alerts' | 'graph';
+
+/** 指标 CSV 列（v0.11-R12：与告警导出对称的序列+点平面化）。 */
+const METRICS_CSV_COLUMNS = ['seriesId', 'metricKey', 'ts', 'value', 'quality'] as const;
+
+/** CSV 字段转义：含逗号/引号/换行时包引号并双写内部引号（告警导出同规则）。 */
+function csvCell(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/** 指标点总数（导出工具条的一行汇总）。 */
+function totalMetricPoints(metrics: ResourceMetricsResponse): number {
+  return metrics.series.reduce((sum, series) => sum + series.points.length, 0);
+}
+
+/** 数字显示：整数无小数位，浮点保留最多 4 位有效（告警页同规则）。 */
+function fmtMetricNum(value: number): string {
+  if (Number.isInteger(value)) return String(value);
+  return String(Number(value.toPrecision(4)));
+}
 
 // ---------------------------------------------------------------------------
 // 资源抽屉
@@ -244,6 +285,14 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
   const metricsSeqRef = useRef(0);
+  /** 本资源告警（v0.11-R12）：懒加载——首次切到「告警」页签才拉，
+   *  拉最近 50 条（全部生命周期状态），更多引导去告警中心。 */
+  const [alertsData, setAlertsData] = useState<Paged<AlertItem> | null>(null);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+  const alertsSeqRef = useRef(0);
+  /** 指标 CSV 导出中（防重复点击）。 */
+  const [metricsExporting, setMetricsExporting] = useState(false);
   const toast = useToast();
 
   const load = useCallback((): void => {
@@ -298,6 +347,58 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         setMetricsError(display);
         setMetricsLoading(false);
       });
+  }
+
+  /** v0.11-R12：拉本资源的告警记录（全部状态，最近 50 条）。 */
+  function loadAlerts(): void {
+    const seq = ++alertsSeqRef.current;
+    setAlertsLoading(true);
+    setAlertsError(null);
+    listAlerts({ resourceId, page: 1, pageSize: 50 })
+      .then((paged) => {
+        if (alertsSeqRef.current !== seq) return;
+        setAlertsData(paged);
+        setAlertsLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (alertsSeqRef.current !== seq) return;
+        setAlertsError(formatApiErrorText(err));
+        setAlertsLoading(false);
+      });
+  }
+
+  /** v0.11-R12：导出当前资源的指标点为 CSV（与告警导出对称：
+   *  BOM 保证 Excel 识别 UTF-8、RFC4180 转义、30s 延迟撤销句柄）。 */
+  function exportMetricsCsv(): void {
+    if (metricsExporting) return;
+    if (metrics === null || metrics.series.length === 0) {
+      toast.show(METRICS_EXPORT_EMPTY, 'info');
+      return;
+    }
+    setMetricsExporting(true);
+    try {
+      const rows: string[] = [METRICS_CSV_COLUMNS.join(',')];
+      let points = 0;
+      for (const series of metrics.series) {
+        for (const p of series.points) {
+          rows.push(csvCell(series.seriesId) + ',' + csvCell(series.metricKey) + ',' + csvCell(p.ts) + ',' + String(p.value) + ',' + p.quality);
+          points += 1;
+        }
+      }
+      const blob = new Blob([`\ufeff${rows.join('\r\n')}\r\n`], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${METRICS_EXPORT_FILENAME}-${resourceId}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // 延迟撤销：立即 revoke 与浏览器抓取下载句柄存在竞态（R7 惯例）
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      toast.show(format(METRICS_EXPORT_TOAST, { n: points, s: metrics.series.length }), 'success');
+    } finally {
+      setMetricsExporting(false);
+    }
   }
 
   /** 应用一条待确认变更：成功后行内刷新（重拉详情/关联/剩余 pending）；
@@ -569,6 +670,18 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
             </button>
             <button
               type="button"
+              className={`tab${tab === 'alerts' ? ' tab--active' : ''}`}
+              onClick={() => {
+                setTab('alerts');
+                if (alertsData === null && !alertsLoading) {
+                  loadAlerts();
+                }
+              }}
+            >
+              {RES_DRAWER_TAB_ALERTS}
+            </button>
+            <button
+              type="button"
               className={`tab${tab === 'graph' ? ' tab--active' : ''}`}
               onClick={() => setTab('graph')}
             >
@@ -753,6 +866,25 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
               {!metricsLoading &&
                 metricsError === null &&
                 metrics !== null &&
+                metrics.series.length > 0 && (
+                  <div className="metric-list-toolbar">
+                    <span className="muted-note">
+                      {format(METRIC_CHART_POINTS, { n: totalMetricPoints(metrics) })} · {metrics.series.length} 条序列
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm metric-export-btn"
+                      disabled={metricsExporting}
+                      onClick={exportMetricsCsv}
+                      title={METRICS_EXPORT_BTN}
+                    >
+                      {metricsExporting ? METRICS_EXPORT_WORKING : METRICS_EXPORT_BTN}
+                    </button>
+                  </div>
+                )}
+              {!metricsLoading &&
+                metricsError === null &&
+                metrics !== null &&
                 metrics.series.map((series) => (
                   <MetricChart
                     key={series.seriesId}
@@ -760,6 +892,52 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
                     label={metricLabels[series.metricKey] ?? series.metricKey}
                   />
                 ))}
+            </div>
+          )}
+          {tab === 'alerts' && (
+            <div className="drawer-alerts">
+              <div className="muted-note">{RES_ALERTS_TAB_HINT}</div>
+              {alertsError !== null && (
+                <ErrorBlock message={RES_ALERTS_LOAD_FAILED} detail={alertsError} onRetry={loadAlerts} />
+              )}
+              {alertsLoading && <Spinner size={16} />}
+              {!alertsLoading && alertsError === null && alertsData !== null && alertsData.items.length === 0 && (
+                <div className="muted-note">{RES_ALERTS_EMPTY}</div>
+              )}
+              {!alertsLoading &&
+                alertsError === null &&
+                alertsData !== null &&
+                alertsData.items.length > 0 && (
+                  <>
+                    {alertsData.items.map((alert) => (
+                      <div className="drawer-alert-row" key={alert.alertId}>
+                        <AlertStateChip state={alert.state} />
+                        <SeverityBadge severity={alert.severity} />
+                        <span className="cell-strong">{alert.ruleLabel}</span>
+                        <span className="mono" title={alert.metricKey}>
+                          {format(ALR_VALUE_TEXT, {
+                            value: fmtMetricNum(alert.lastValue),
+                            comparator: ALERT_COMPARATOR_LABELS[alert.comparator],
+                            threshold: fmtMetricNum(alert.threshold),
+                          })}
+                        </span>
+                        <span className="muted-note" title={formatDateTime(alert.firedAt)}>
+                          {formatRelativeTime(alert.firedAt)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="drawer-alerts-footer">
+                      {alertsData.total > alertsData.items.length && (
+                        <span className="muted-note">
+                          {format(RES_ALERTS_MORE, { n: alertsData.items.length, total: alertsData.total })}
+                        </span>
+                      )}
+                      <Link className="btn btn--secondary btn--sm" to="/alerts">
+                        {RES_ALERTS_LINK}
+                      </Link>
+                    </div>
+                  </>
+                )}
             </div>
           )}
         </>

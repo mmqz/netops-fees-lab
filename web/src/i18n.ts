@@ -823,6 +823,28 @@ export const METRIC_CHART_SUSPECT = '疑似异常点';
 export const METRIC_CHART_MISSING = '缺失点';
 
 // ---------------------------------------------------------------------------
+// 资源详情 · 指标 CSV 导出（v0.11-R12：与告警 CSV 导出对称）
+// ---------------------------------------------------------------------------
+
+export const METRICS_EXPORT_BTN = '导出指标 CSV';
+export const METRICS_EXPORT_EMPTY = '无指标数据点可导出';
+export const METRICS_EXPORT_TOAST = '已导出 {n} 个数据点（{s} 条序列）';
+export const METRICS_EXPORT_FAILED = '导出失败：{message}';
+export const METRICS_EXPORT_WORKING = '导出中…';
+export const METRICS_EXPORT_FILENAME = 'netops-metrics';
+
+// ---------------------------------------------------------------------------
+// 资源详情 · 告警页签（v0.11-R12：故障定位动线闭环——资源视角的告警史）
+// ---------------------------------------------------------------------------
+
+export const RES_DRAWER_TAB_ALERTS = '告警';
+export const RES_ALERTS_TAB_HINT = '该资源的告警记录（全部生命周期状态）；确认与清除在告警中心操作。';
+export const RES_ALERTS_EMPTY = '该资源无告警记录';
+export const RES_ALERTS_LOAD_FAILED = '告警加载失败';
+export const RES_ALERTS_LINK = '去告警中心处置';
+export const RES_ALERTS_MORE = '仅显示最近 {n} 条（共 {total} 条），其余在告警中心查看';
+
+// ---------------------------------------------------------------------------
 // 资源详情 · 影响分析页签（v0.9-R3，图查询 traverse/impact）
 // ---------------------------------------------------------------------------
 

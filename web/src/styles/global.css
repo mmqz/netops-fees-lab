@@ -3914,6 +3914,42 @@ body.lab-split-dragging {
   gap: 12px;
 }
 
+/* v0.11-R12 指标导出工具条：一行汇总 + 导出按钮。 */
+.metric-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+/* v0.11-R12 资源详情 · 告警页签行：chip 徽章 + 规则 + 值域 + 时间。 */
+.drawer-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-alert-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.drawer-alerts-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .metric-card {
   border: 1px solid var(--border);
   border-radius: 6px;
