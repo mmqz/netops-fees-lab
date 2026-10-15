@@ -22,18 +22,15 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.10.0 is
-// the operations-loop completion round: the detection rules management page
-// (/rules with full CRUD over the same API), the run-detection UI entry
-// (POST /api/detection/run from the browser with the receipt dialog), alerts
-// CSV export, the outbound webhook notification channel (serve/detect
-// --webhook-url, best-effort delivery that never fails the run) and the
-// OpenAPI 3 document generated from the single route table
-// (GET /api/openapi.json — zero spec drift by construction, plus the /dev
-// reference page). TestAppVersionP2 pins this constant and
-// TestAppVersionMatchesChangelogHead enforces the CHANGELOG single fact
-// source, so the three-way hand-copied versions cannot drift again.
-const AppVersion = "v0.10.0"
+// the health endpoint, the MCP server implementation and the CLI. v0.11.0 is
+// the autonomous-operations round: scheduled inspection (--detect-interval
+// patrol with recorded rounds), the detection run history (detection_runs,
+// migration v21 — every api/cli/scheduler sweep leaves a durable receipt),
+// alert distribution stats (GET /api/alerts/stats), the resource-scoped alert
+// tab + metrics CSV export (the fault-location loop closes both ways), the
+// opt-in write gate (serve --auth-token, Bearer on mutations) and the
+// operator's one-shot database snapshot (netopslab backup).
+const AppVersion = "v0.11.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

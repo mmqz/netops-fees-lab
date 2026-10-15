@@ -2,6 +2,43 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.11.0] — 2026-10-15
+
+**自主运营版**（五轮迭代 R11-R14；需求驱动：距完整产品的差距清单——「检测只能显式触发」「运行回执不落库不可审计」「概览硬拉 firing 总数」「资源抽屉无告警视角」「零认证」「无整库备份」）。核心：把 v0.10 的「触发得了」推进到「自动巡检、历史可查、分布可见、双向定位、写有门禁、库有快照」。
+
+### 新增 — 定时巡检调度器（R11）
+- `serve --detect-interval 15m`（最小 1s，空 = v0.10 显式触发行为）：每个间隔执行一次全库检测扫描并落库回执、触发 webhook 通知——运营闭环的最后一块，从「手动触发」到「自动运行」。调度器单飞（上一轮未完成则跳过该轮并记 warn，绝不排队重叠）；优雅停机（一个 SIGINT 同时停监听器与巡检）；nil 安全（`Status()` 未启用时返回禁用快照，调用点零分支）。
+- 通知走回调注入（`NotifyFunc`），依赖方向保持单向（notify → detect），无第二个通知器/引擎实例。
+
+### 新增 — 检测运行历史（R11）
+- 迁移 v21 `detection_runs`：每次扫描（api/cli/scheduler）落一条持久回执——来源（CHECK 闭集，MCP 只读红线在存储层物理不可持久化）、时钟区间、耗时、评估窗口回显、数据截止、四计数、失败原因（失败轮本身就是可审计的运营事实）。
+- `detect.RunAndRecord` 包装引擎（引擎保持纯函数，时钟注入可测）：成功与失败都落库；失败路径的回执写入用 `context.WithoutCancel` 脱离取消（被取消/超时的扫描正是值得留痕的失败）。`POST /api/detection/run` 与 `netopslab detect` 输出同形信封（runId/source/bracket/from/to，加法式扩展，v0.10 消费者不受影响）。
+- `GET /api/detection/runs`（最新在前分页）+ 路由表自动进 OpenAPI。
+
+### 新增 — 告警分布统计 + 巡检状态条（R11）
+- `GET /api/alerts/stats`：闭集零填充——`byState` 三态计数 + `activeBySeverity`（firing+acked 的 error/warning/info 矩阵，运维大屏的「待处置工作量」视图）。Overview 告警卡改由该端点驱动（取代 v0.9 的 `pageSize=1` 探针，更少请求更全信息，副行展示待处置矩阵 + 已确认数）。
+- /alerts 顶部巡检状态条：上次回执（来源徽章 · 相对时间 · 耗时 · 新增/清除，失败态红字悬停看原因）+ 下次自动巡检时刻（health 调度块驱动）+「运行历史」对话框（来源徽章/开始/耗时/三计数/成功失败/窗口/数据截止，分页）。
+
+### 新增 — 资源视角告警 + 指标 CSV 导出（R12）
+- 资源抽屉第六个页签「告警」：本资源告警史（全部生命周期状态，最近 50 条，行 = 状态徽章 + 级别徽章 + 规则标签 + 值域 vs 阈值 + 相对时间）；确认/清除操作面仍在告警中心（单一写面），页脚深链直达——告警页链出到资源、资源抽屉链回告警，故障定位动线双向闭环。
+- 指标页签对称导出：`seriesId,metricKey,ts,value,quality` 平面化 CSV（BOM + RFC4180 转义 + 30s 延迟撤销——R7 下载竞态教训前置应用）；工具条显示点数/序列数。
+
+### 新增 — 写操作令牌网关（R13）
+- `serve --auth-token T`：所有变更类 /api 请求（POST/PATCH/DELETE）要求 `Authorization: Bearer <token>`（常数时间比较）；读面（GET/HEAD）、`/api/health`、`/api/openapi.json` 与 SPA 刻意开放（演示/大屏/AI 分析是读侧，审计身份属于写侧）；401 走标准错误信封。空 = 不启用（v0.10 行为零差异）。
+- 前端配套：请求封装自动附着存储的 Bearer（含 multipart 上传与裸 fetch 的删除路径）；侧栏页脚「访问令牌」入口 → 保存/清除对话框（localStorage + 已设置徽章）——401 文案点名修法，一键可达。
+
+### 新增 — 整库备份 CLI（R14）
+- `netopslab backup --db path --out snapshot.db`：仓库层 SQLite 在线备份 API（实验室检查点同机制）首次暴露为运维命令——字节一致快照，绝不裸拷贝活库；源库读写不中断；自动建目录；stdout 单 JSON 对象 `{out, bytes}`；缺 --out 为用法错误（exit 2）。
+
+### 优化 — 读路径索引（R14 审计驱动）
+- 迁移 v22 `idx_alerts_state_fired (state, fired_at)`：告警队列默认筛选 + `fired_at` 排序与 v0.11 stats 的 GROUP BY 此前无法使用 v18 索引（state 是第三列）——EXPLAIN QUERY PLAN 测试钉死新索引的使用。
+- 审计诚实记录：metrics `(series_id, ts)` 候选索引经查证被**否决**——v14 表即 `WITHOUT ROWID` + 同形主键，序列窗口读已走主键；测试反向钉死（防止后人再加冗余索引白交写入税）。
+
+### 工程与测试
+- 回归脚本：`r11_scheduler_regression.sh` 30/30（真实 `--detect-interval 3s` + webhook 接收端 + 浏览器巡检条/运行历史/Overview）、`r12_resource_alerts_regression.sh` 12/12（?focus 深链 → 告警页签 → 下载劫持验证 CSV）、`r13_auth_regression.sh` 10/10（curl 401 矩阵 + 浏览器无令牌 401 → 存令牌 → 同对话框重试成功的完整旅程）；r6/r7/r8/r9 复跑全绿（26/12/13/13）。
+- 新测试：v21/v22 迁移（含失败回执、CHECK 闭集、EXPLAIN 计划）、recorder（成功/失败/拒绝来源）、scheduler（真实时钟三轮/单飞/nil/通知失败不致命）、stats 契约（与列表 total 互证）、health 调度块、backup 往返（快照可开可读）。
+- 本地门禁（CI Actions 配额仍为 0 步模式，按 v0.6-v0.10 惯例以本地为准）：gofmt 空 · vet 0 · 24 包全 ok · tsc 0 错误 · 前端构建通过。
+
 ## [0.10.0] — 2026-10-15
 
 **运营闭环补全与 API 可发现性版**（四轮迭代 R6-R9；需求驱动：距完整产品的差距清单——「规则 API 有而 UI 无」「检测运行只有 CLI/MCP 通道」「无出站通知」「无机器可读 API 文档」）。核心：把 v0.9 的「看得见」推进到「配置得出、触发得了、通知得到、可被集成」。

@@ -194,8 +194,8 @@ func TestSimSentinelErrors(t *testing.T) {
 func TestAppVersionP2(t *testing.T) {
 	// P2: the version constant is a single pinned fact (the changelog-head
 	// cross-check below guards the other copy).
-	if AppVersion != "v0.10.0" {
-		t.Errorf("AppVersion = %q, want v0.10.0 (v0.10.0 operations-loop completion round: rules management page /rules, run-detection UI entry + receipt, alerts CSV export, webhook notification channel, OpenAPI 3 document from the route table — CHANGELOG 0.10.0)", AppVersion)
+	if AppVersion != "v0.11.0" {
+		t.Errorf("AppVersion = %q, want v0.11.0 (v0.11.0 autonomous-operations round: --detect-interval patrol, detection run history, alert stats, resource alert tab + metrics CSV, --auth-token write gate, netopslab backup — CHANGELOG 0.11.0)", AppVersion)
 	}
 }
 
