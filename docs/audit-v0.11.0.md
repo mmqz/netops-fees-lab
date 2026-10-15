@@ -1,7 +1,7 @@
-# v0.10.0 本地验证报告
+# v0.10.0 / v0.11.0 本地验证报告
 
 > 拉取方式：`gh api` 下载 tarball（git 443 不通，见 §4）
-> 验证对象：`5486d754`（云端 main，含 v0.9.0 + v0.10.0 + v0.11 R11/R12）
+> 验证对象：`5ca2962`（云端 main，含 v0.9.0 + v0.10.0 + v0.11.0 R11-R14）
 > 环境：Windows / amd64
 > 日期：2026-10-15
 
@@ -149,3 +149,68 @@ robocopy $remote $local /MIR /XD .git bin data node_modules
 
 **教训**：PowerShell 的 `>` 与 `gh api -o` 都不能安全落盘二进制；
 必须用 Python/curl 的二进制写入。
+
+
+---
+
+## 5. v0.11.0「自主运营版」补充验证（2026-10-15 更新）
+
+云端继续迭代到 v0.11.0（五轮 R11-R14）。补充验证：
+
+### 5.1 版本与迁移
+
+```
+AppVersion  v0.11.0
+迁移        v20 geo 列 / v21 detection_runs / v22 alerts 状态索引
+表总数      29
+OpenAPI     61 paths
+```
+
+### 5.2 新能力自检（实测 HTTP）
+
+| 端点 | 结果 |
+| --- | --- |
+| `/api/health` | ✅ 含 **scheduler 块**（enabled/intervalSeconds/running/rounds/lastRunAt/nextRunAt） |
+| `/api/openapi.json` | ✅ 61 paths |
+| `/api/alerts/stats` | ✅ `{firing: 4, acked: 0, cleared: 0}`（闭集零填充） |
+| `/api/detection/runs` | ✅ 运行历史表存在（迁移 v21） |
+
+### 5.3 v0.11.0 新增能力（CHANGELOG）
+
+```
+R11  定时巡检调度器（serve --detect-interval，单飞、优雅停机）
+     检测运行历史落库（迁移 v21 detection_runs，失败轮也留痕）
+     告警分布统计 + /alerts 巡检状态条
+R12  资源抽屉「告警」页签（双向定位闭环）+ 指标 CSV 导出
+R13  写操作令牌网关（serve --auth-token，Bearer 常数时间比较）
+R14  告警状态读索引 + netopslab backup 整库快照
+```
+
+### 5.4 测试状态（v0.11.0）
+
+```
+go test -count=1 ./...
+  → 23 包 ok
+  → 1 包 FAIL: internal/detect（TestSchedulerFiresAndRecords，见 #48）
+```
+
+**#48 在 v0.11.0 上仍复现**（预期——issue 刚提，尚未修复）。
+
+### 5.5 同步过程记录（git 443 不通的完整处置）
+
+本次同步遇到两个非显然的坑，记录备查：
+
+```
+坑 1  PowerShell 的 > 重定向破坏二进制
+      gh api .../tarball > file.tar.gz
+      → 首字节 1F EF BF BD（应为 1F 8B）
+      修法：用 Python urllib 二进制写入，或 curl
+
+坑 2  robocopy 写入 LF 文件 + core.autocrlf=true
+      → 390 个文件被标记为「已修改」（实际只是换行符差异）
+      → git rebase 报「cannot rebase: You have unstaged changes」
+      修法：git checkout -f origin/main（不要手工 commit 这些假变更）
+```
+
+另注意：`git checkout -f origin/main` 会进入 **detached HEAD**——
+提交后需 `git branch -f main <sha> && git checkout main` 才能正常 push。
