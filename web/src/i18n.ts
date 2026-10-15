@@ -1296,7 +1296,11 @@ export const LAB_GEO_OV_ADMIN_TITLE = '省/市/县边界与地名（黑龙江本
 export const LAB_GEO_OV_RAIL = '铁路';
 export const LAB_GEO_OV_RAIL_TITLE = '铁路线（滨洲线等，含名称标注 · 默认关闭避免干扰主观看）';
 export const LAB_GEO_OV_ROAD = '公路';
-export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（含大兴安岭地方道路 · 默认开启）';
+export const LAB_GEO_OV_ROAD_TITLE = '干线公路与国道编号（含大兴安岭地方道路 · 按需开启，勾选后加载 ~4.3MB）';
+/** 恢复完整底图（#50：重图层默认降级为懒加载，一键找回 v0.6 观感）。 */
+export const LAB_GEO_RESTORE_FULL = '恢复完整底图';
+export const LAB_GEO_RESTORE_FULL_TITLE =
+  '一键开启全部离线叠加与地形/等高线（自然要素 16MB + 等高线 7.3MB 按需加载，首次勾选后解析期间地图可能短暂繁忙）';
 /** 地形高程开关（W17：离线 DEM，任何底图下可用）。 */
 export const LAB_GEO_OV_TERRAIN = '地形高程';
 export const LAB_GEO_OV_TERRAIN_TITLE =

@@ -121,6 +121,55 @@ const CONTOURS_GCJ_URL = '/mapdata/hlj-contours-gcj.geojson.gz';
 /** 等高线图层 id（可见性随 contours 偏好，不随底图坐标系禁用）。 */
 export const CONTOUR_LAYERS = ['contours-major', 'contours-minor', 'contours-label'];
 
+// —— 懒加载叠加源（issue #50）——
+// MapLibre 对 style 里声明的 GeoJSON URL 源**在 setStyle 时即全量拉取**
+//（与 layer visibility 无关）——默认全开即 34MB / 10.6 万要素首帧。修复：
+// 源声明时按当前可见性决定填 URL 还是空 FeatureCollection；运行中勾选
+// 由 GeoCanvas 调 fillOverlaySources 补 setData(URL)。空集常量在此共享。
+export const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+/** overlay → 底层 GeoJSON source id（natural 三态共享一源；road 双源）。 */
+export const OVERLAY_SOURCE_IDS: Record<OverlayId, string[]> = {
+  admin: ['offline-admin'],
+  railway: ['offline-rail'],
+  road: ['offline-roads-main', 'offline-roads-dxa'],
+  forest: ['natural'],
+  water: ['natural'],
+  green: ['natural'],
+  places: ['places'],
+  cable: ['cables'],
+  basestation: ['basestations'],
+};
+
+/** 等高线 source id（懒加载同机制，开关是 prefs.contours）。 */
+export const CONTOURS_SOURCE_ID = 'contours';
+
+/** 懒源拉取 URL（GeoCanvas 运行中勾选时 setData 用；按底图坐标系选变体）。 */
+export function overlaySourceUrl(sourceId: string, isGCJ: boolean): string {
+  switch (sourceId) {
+    case 'offline-admin':
+      return MAPDATA_ADMIN;
+    case 'offline-rail':
+      return MAPDATA_RAIL;
+    case 'offline-roads-main':
+      return MAPDATA_ROADS_MAIN;
+    case 'offline-roads-dxa':
+      return MAPDATA_ROADS_DXA;
+    case 'natural':
+      return isGCJ ? MAPDATA_NATURAL_GCJ : MAPDATA_NATURAL;
+    case 'places':
+      return isGCJ ? MAPDATA_PLACES_GCJ : MAPDATA_PLACES;
+    case 'cables':
+      return isGCJ ? MAPDATA_CABLES_GCJ : MAPDATA_CABLES;
+    case 'basestations':
+      return isGCJ ? MAPDATA_BS_GCJ : MAPDATA_BS;
+    case CONTOURS_SOURCE_ID:
+      return isGCJ ? CONTOURS_GCJ_URL : CONTOURS_URL;
+    default:
+      return '';
+  }
+}
+
 /** 中文标注字形（免密钥；完全离线时静默降级——MapLibre 容忍字形拉取失败）。 */
 const GLYPHS_URL = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 const FONT = ['Noto Sans Regular'];
@@ -221,30 +270,35 @@ export const ANY_BASEMAP_OVERLAYS: OverlayId[] = ['forest', 'water', 'green', 'p
 
 export interface GeoLayerPrefs {
   basemap: BasemapId;
-  /** 离线叠加：地名/区划/森林/水系/草地农田默认开（#15「干净 2D」的地表
-   *  感）；公路默认开（用户要"河流交通这些"）；铁路默认关（用户要求铁路
-   *  不得干扰主观看，可一键开）。 */
+  /** 离线叠加：地图可见性开关。默认「导航最小集」（issue #50）：仅区划
+   *  （导航基础）+ 光缆（主叙事）+ 地名（可选）；公路/铁路/自然要素
+   *  （hlj-natural 16MB）/等高线（7.3MB）/地形 DEM 默认关，图层面板
+   *  勾选即懒加载，「恢复完整底图」一键全开（v0.6.4 之前的默认全开
+   *  每首帧拉 34MB / 10.6 万要素，现场反馈卡顿）。 */
   overlays: Record<OverlayId, boolean>;
   /** 业务链路图层可见性。 */
   links: boolean;
   /** 设备地标（HTML Marker）可见性。 */
   devices: boolean;
-  /** 地形高程（W17）：3D 视图起伏 + 2D 山体阴影（离线 DEM，默认开）。 */
+  /** 地形高程（W17）：3D 视图起伏 + 2D 山体阴影（离线 DEM，默认关 #50）。 */
   terrain: boolean;
-  /** 等高线（W17/#13）：任意底图可用（GCJ 变体预投影），默认开。 */
+  /** 等高线（W17/#13）：任意底图可用（GCJ 变体预投影），默认关 #50。 */
   contours: boolean;
 }
 
 export const DEFAULT_PREFS: GeoLayerPrefs = {
   basemap: 'offline',
   overlays: {
+    // issue #50 默认降级：重图层（road 4.3MB / natural 16MB / contours
+    // 7.3MB / DEM）按需懒加载，默认组合解压总量 ≈2.1MB（admin 1.8 +
+    // cable 0.27），首帧可交互 <1s。完整底图 = 图层面板「恢复完整底图」。
     admin: true,
     railway: false,
-    road: true,
-    forest: true,
-    water: true,
-    green: true,
-    places: true,
+    road: false,
+    forest: false,
+    water: false,
+    green: false,
+    places: false,
     // v0.8.0 真实网络数据：光缆干线默认开（7 条走廊是主叙事）；基站默认关
     // （1,198 站点密集，一键开——图层标题带运营商图例说明）。
     cable: true,
@@ -252,11 +306,15 @@ export const DEFAULT_PREFS: GeoLayerPrefs = {
   },
   links: true,
   devices: true,
-  terrain: true,
-  contours: true,
+  terrain: false,
+  contours: false,
 };
 
-const PREFS_KEY = 'netops-lab.geo.layers.v2';
+const PREFS_KEY = 'netops-lab.geo.layers.v3';
+const PREFS_KEY_V2 = 'netops-lab.geo.layers.v2';
+/** v2 → v3 迁移时重置为关闭的重图层（issue #50：默认降级 + 一键恢复）。 */
+const MIGRATE_OFF_OVERLAYS: OverlayId[] = ['road', 'forest', 'water', 'green', 'places', 'basestation', 'railway'];
+const MIGRATE_OFF_FLAGS: Array<'terrain' | 'contours'> = ['terrain', 'contours'];
 
 const overlayBool = (
   ovRaw: Record<string, unknown>,
@@ -268,10 +326,31 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
   const fresh = (): GeoLayerPrefs => ({ ...DEFAULT_PREFS, overlays: { ...DEFAULT_PREFS.overlays } });
   if (typeof localStorage === 'undefined') return fresh();
   try {
+    // v3（issue #50）：新键起步。v2 老偏好迁移——底图/业务开关沿用，
+    // 重图层一律重置为关（v2 时代默认全开正是 34MB 首帧卡顿的来源，
+    // 老用户升级后同样需要降级体验；「恢复完整底图」一键找回）。
     const raw = localStorage.getItem(PREFS_KEY);
-    if (raw === null) return fresh();
+    if (raw === null) {
+      const rawV2 = localStorage.getItem(PREFS_KEY_V2);
+      if (rawV2 === null) return fresh();
+      const migrated = parsePrefs(rawV2);
+      if (migrated === null) return fresh();
+      for (const id of MIGRATE_OFF_OVERLAYS) migrated.overlays[id] = false;
+      for (const f of MIGRATE_OFF_FLAGS) migrated[f] = false;
+      return migrated;
+    }
+    const parsed = parsePrefs(raw);
+    return parsed ?? fresh();
+  } catch {
+    return fresh();
+  }
+}
+
+/** 解析一份偏好 JSON（v2/v3 同构）；null = 结构不合法。 */
+function parsePrefs(raw: string): GeoLayerPrefs | null {
+  try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return fresh();
+    if (typeof parsed !== 'object' || parsed === null) return null;
     const p = parsed as Record<string, unknown>;
     const base: BasemapId =
       typeof p['basemap'] === 'string' && p['basemap'] in BASEMAPS ? (p['basemap'] as BasemapId) : DEFAULT_PREFS.basemap;
@@ -295,7 +374,7 @@ export function loadGeoLayerPrefs(): GeoLayerPrefs {
       contours: typeof p['contours'] === 'boolean' ? p['contours'] : DEFAULT_PREFS.contours,
     };
   } catch {
-    return fresh();
+    return null;
   }
 }
 
@@ -1006,9 +1085,16 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
   const def = BASEMAPS[basemapId];
   const withRaster = opts.withRaster && def.tiles !== null;
   const t = def.theme === 'light' ? LIGHT : DARK;
-  const contourData = def.isGCJ ? CONTOURS_GCJ_URL : CONTOURS_URL;
-  const naturalData = def.isGCJ ? MAPDATA_NATURAL_GCJ : MAPDATA_NATURAL;
-  const placesData = def.isGCJ ? MAPDATA_PLACES_GCJ : MAPDATA_PLACES;
+  // 懒加载源（#50）：不可见的叠加源声明为空 FeatureCollection（MapLibre
+  // 对 style 内 URL 源在 setStyle 即全量拉取）——勾选后由 GeoCanvas
+  // fillOverlaySources 补拉。 WGS84-only 叠加在 GCJ 底图下永远不可见 →
+  // 同样不拉。
+  const vis = opts.overlayVisibility;
+  const lazyData = (sourceId: string, visible: boolean): GeoJSON.FeatureCollection | string =>
+    visible ? overlaySourceUrl(sourceId, def.isGCJ) : EMPTY_FC;
+  const contourData = opts.contoursVisible ? (def.isGCJ ? CONTOURS_GCJ_URL : CONTOURS_URL) : EMPTY_FC;
+  const naturalData = lazyData('natural', vis.forest || vis.water || vis.green);
+  const placesData = lazyData('places', vis.places);
   const sources: StyleSpecification['sources'] = {
     devices: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     links: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
@@ -1016,17 +1102,17 @@ export function buildGeoStyle(basemapId: BasemapId, opts: StyleOptions): StyleSp
     // 主 links 源几何只随 topology/坐标系变化，点击不再全量重下）。
     'links-selected': { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     towers: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
-    'offline-admin': { type: 'geojson', data: MAPDATA_ADMIN, attribution: OSM_ATTRIBUTION },
-    'offline-rail': { type: 'geojson', data: MAPDATA_RAIL, attribution: OSM_ATTRIBUTION },
-    'offline-roads-main': { type: 'geojson', data: MAPDATA_ROADS_MAIN, attribution: OSM_ATTRIBUTION },
-    'offline-roads-dxa': { type: 'geojson', data: MAPDATA_ROADS_DXA, attribution: OSM_ATTRIBUTION },
+    'offline-admin': { type: 'geojson', data: lazyData('offline-admin', vis.admin && overlaysAvailable(basemapId)), attribution: OSM_ATTRIBUTION },
+    'offline-rail': { type: 'geojson', data: lazyData('offline-rail', vis.railway && overlaysAvailable(basemapId)), attribution: OSM_ATTRIBUTION },
+    'offline-roads-main': { type: 'geojson', data: lazyData('offline-roads-main', vis.road && overlaysAvailable(basemapId)), attribution: OSM_ATTRIBUTION },
+    'offline-roads-dxa': { type: 'geojson', data: lazyData('offline-roads-dxa', vis.road && overlaysAvailable(basemapId)), attribution: OSM_ATTRIBUTION },
     // 自然要素 + 地名（v0.6.4/#15）：双坐标变体按底图选源（高德 = GCJ 预投影）
     natural: { type: 'geojson', data: naturalData, attribution: OSM_ATTRIBUTION },
     places: { type: 'geojson', data: placesData, attribution: OSM_ATTRIBUTION },
     // 真实网络数据（v0.8.0）：光缆走廊（OSM 几何）+ 无线基站（OpenCelliD
     // CC BY-SA 4.0，署名单列）；双坐标变体按底图选源（高德 = GCJ 预投影）。
-    cables: { type: 'geojson', data: def.isGCJ ? MAPDATA_CABLES_GCJ : MAPDATA_CABLES, attribution: OSM_ATTRIBUTION },
-    basestations: { type: 'geojson', data: def.isGCJ ? MAPDATA_BS_GCJ : MAPDATA_BS, attribution: OCID_ATTRIBUTION },
+    cables: { type: 'geojson', data: lazyData('cables', vis.cable), attribution: OSM_ATTRIBUTION },
+    basestations: { type: 'geojson', data: lazyData('basestations', vis.basestation), attribution: OCID_ATTRIBUTION },
     // 等高线（W17/#13）：按底图坐标系选变体，高程派生数据同 DEM 署名
     contours: { type: 'geojson', data: contourData, attribution: DEM_ATTRIBUTION },
     // 离线 DEM（恒在：本地瓦片不依赖外网；terrain 起伏与 hillshade 都从它取）

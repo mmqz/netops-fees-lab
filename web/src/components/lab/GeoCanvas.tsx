@@ -63,10 +63,12 @@ import {
   BASEMAP_REF_SOURCE_ID,
   BASEMAP_SOURCE_ID,
   CONTOUR_LAYERS,
+  CONTOURS_SOURCE_ID,
   DEM_SOURCE_ID,
   HILLSHADE_LAYER_ID,
   LINK_LAYERS,
   OVERLAY_LAYERS,
+  OVERLAY_SOURCE_IDS,
   TOWER_MAX_M,
   TOWER_MIN_M,
   WGS84_ONLY_OVERLAYS,
@@ -74,6 +76,7 @@ import {
   basemapIsGCJ,
   buildGeoStyle,
   loadGeoLayerPrefs,
+  overlaySourceUrl,
   overlaysAvailable,
   projLngLat,
   saveGeoLayerPrefs,
@@ -110,6 +113,8 @@ import {
   LAB_GEO_LAYERS_REALDATA,
   LAB_GEO_OV_CABLE,
   LAB_GEO_OV_CABLE_TITLE,
+  LAB_GEO_RESTORE_FULL,
+  LAB_GEO_RESTORE_FULL_TITLE,
   LAB_GEO_OV_BASESTATION,
   LAB_GEO_OV_BASESTATION_TITLE,
   LAB_GEO_LAYERS_TOGGLE,
@@ -283,9 +288,11 @@ interface MarkerEntry {
 /** 地图懒加载后的模块命名空间。 */
 type MapLibreModule = typeof import('maplibre-gl');
 
-/** geojson source 的最小结构（maplibre 未导出 GeoJSONSource 类型）。 */
+/** geojson source 的最小结构（maplibre 未导出 GeoJSONSource 类型）。
+ * setData 接受 URL 字符串（#50 懒加载补拉：服务器带 Content-Encoding: gzip，
+ * 浏览器 fetch 透明解压）或 FeatureCollection。 */
 interface GeoJSONSourceLike {
-  setData(data: FeatureCollection): unknown;
+  setData(data: FeatureCollection | string): unknown;
 }
 
 /** hover 信息条载荷（与拓扑画布 HoverInfo 结构一致）。 */
@@ -544,6 +551,47 @@ function applyLayerVisibilities(map: MLMap, prefs: GeoLayerPrefs, effective: Bas
   }
   if (map.getLayer(HILLSHADE_LAYER_ID) !== undefined) {
     map.setLayoutProperty(HILLSHADE_LAYER_ID, 'visibility', prefs.terrain ? 'visible' : 'none');
+  }
+}
+
+/** 懒加载源补拉（issue #50）：buildGeoStyle 只给可见叠加源填 URL，运行中
+ * 勾选（不重建样式）时源里还是空 FeatureCollection——此函数把所有「已开
+ * 而源仍为空集」的叠加源 setData(URL)（幂等：源 data 已是字符串 URL 即
+ * 跳过；GCJ 底图选 GCJ 预投影变体）。natural 三态共享一源，任一开即拉。 */
+function fillOverlaySources(map: MLMap, prefs: GeoLayerPrefs, effective: BasemapId): void {
+  const isGCJ = basemapIsGCJ(effective);
+  const overlaysOn = overlaysAvailable(effective);
+  const want = new Set<string>();
+  for (const id of WGS84_ONLY_OVERLAYS) {
+    if (prefs.overlays[id] && overlaysOn) {
+      for (const sid of OVERLAY_SOURCE_IDS[id]) want.add(sid);
+    }
+  }
+  for (const id of ANY_BASEMAP_OVERLAYS) {
+    if (prefs.overlays[id]) {
+      for (const sid of OVERLAY_SOURCE_IDS[id]) want.add(sid);
+    }
+  }
+  if (prefs.contours) want.add(CONTOURS_SOURCE_ID);
+  for (const sid of want) {
+    const src = map.getSource(sid) as GeoJSONSourceLike | undefined;
+    if (src === undefined) continue;
+    // 已是 URL（本次 style 烘焙时填过 / 已拉取过）则跳过：serialize() 的
+    // data 在「空集」时是对象、URL 时是字符串。
+    try {
+      const data = (src as unknown as { serialize(): { data?: unknown } }).serialize().data;
+      if (typeof data === 'string' && data !== '') continue;
+    } catch {
+      // serialize 失败（旧 maplibre 行为差异）：继续补拉，幂等代价 = 一次重复 setData
+    }
+    const url = overlaySourceUrl(sid, isGCJ);
+    if (url !== '') {
+      try {
+        src.setData(url);
+      } catch {
+        // 源尚在样式重建途中：跳过（styledata 后的 reapply/effect 会重试）
+      }
+    }
   }
 }
 
@@ -882,6 +930,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
           if (topo !== null && tsrc !== undefined) tsrc.setData(buildTowerCollection(topo, map.getZoom(), gcjRef.current));
           applyTowerVisibility(map, viewRef.current);
           applyLayerVisibilities(map, prefsRef.current, effectiveRef.current);
+          // 懒源补拉（#50）：样式重建后已可见的叠加源若未带 URL（GCJ 降级
+          // 等边界），统一补齐。
+          fillOverlaySources(map, prefsRef.current, effectiveRef.current);
           // setStyle 会清掉 terrain：按当前视图/偏好重挂（W17）。
           applyTerrainFor(map, viewRef.current, prefsRef.current.terrain);
           updateClustersRef.current?.();
@@ -1086,6 +1137,9 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
     const map = mapRef.current;
     if (map === null || !sourcesReady) return;
     applyLayerVisibilities(map, prefs, effective);
+    // #50 懒加载：勾选重图层时源仍是空集 → 此处补拉（首帧默认最小集，
+    // 34MB 自然要素/等高线只在用户主动开启后才下载）。
+    fillOverlaySources(map, prefs, effective);
   }, [prefs, effective, sourcesReady]);
 
   // —— 数据 → GeoJSON source（setData 原地更新，相机保持；首批数据 fitBounds）——
@@ -1527,6 +1581,26 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
   const toggleContours = useCallback((): void => {
     setPrefs((p) => ({ ...p, contours: !p.contours }));
   }, []);
+  /** 一键恢复完整底图（#50）：重图层默认懒加载后的找回入口——全部离线
+   *  叠加 + 地形 + 等高线一次开（懒源补拉由 prefs effect 统一执行）。 */
+  const restoreFullBasemap = useCallback((): void => {
+    setPrefs((p) => ({
+      ...p,
+      overlays: {
+        admin: true,
+        railway: true,
+        road: true,
+        forest: true,
+        water: true,
+        green: true,
+        places: true,
+        cable: true,
+        basestation: true,
+      },
+      terrain: true,
+      contours: true,
+    }));
+  }, []);
 
   const overlaysUsable = overlaysAvailable(effective);
   const basemapChoices: Array<{ id: BasemapId; label: string; title: string }> = [
@@ -1671,6 +1745,15 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
                 <input type="checkbox" checked={prefs.contours} onChange={toggleContours} />
                 {LAB_GEO_OV_CONTOUR}
               </label>
+              {/* 一键找回完整底图（#50：默认最小集后重图层全开的入口）。 */}
+              <button
+                type="button"
+                className="geo-layerpanel-restore"
+                title={LAB_GEO_RESTORE_FULL_TITLE}
+                onClick={restoreFullBasemap}
+              >
+                {LAB_GEO_RESTORE_FULL}
+              </button>
             </div>
             <div className="geo-layerpanel-section">{LAB_GEO_LAYERS_BUSINESS}</div>
             <div className="geo-layerpanel-options">

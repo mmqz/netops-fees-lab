@@ -2999,6 +2999,26 @@ body.lab-split-dragging {
   line-height: 1.45;
 }
 
+/* 一键恢复完整底图（#50）：默认最小集后重图层全开入口 */
+.geo-layerpanel-restore {
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px solid #3a4a66;
+  border-radius: 6px;
+  background: #1b2842;
+  color: #9db4e0;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  width: 100%;
+}
+
+.geo-layerpanel-restore:hover {
+  background: #24365c;
+  color: #cfe0ff;
+  border-color: #54749f;
+}
+
 /* 悬浮层公共（同 .lab-canvas-overlay 语义：容器不接指针，控件自身可点） */
 .geo-overlay {
   position: absolute;
