@@ -13,7 +13,7 @@
 #   1. analyze → suggestedMapping → import --map（31 本工作簿按依赖序）
 #   2. ingest 7 日端口性能（哈大齐劣化场景）
 #   3. detect 检测运行 → firing 告警（丢包率连续越限）→ run_state 联动
-#   4. lab workspace 物化（30 设备真实坐标）+ traverse 影响分析（哈大齐光缆下钻）
+#   4. lab workspace 物化（133 设备真实坐标，83 局站全覆盖）+ traverse 影响分析（哈大齐光缆下钻）
 #   5. stats 汇总 + 资源/关系类型分布
 #
 # 每次运行使用全新临时数据库；结束后打印路径与核对数。
@@ -98,7 +98,7 @@ for day in 01 02 03 04 05 06 07; do
   "$BIN" ingest --db "$DB" --file "$REALDATA/perf-day-$day.xlsx" \
     --map "$REALDATA/ingest-mapping.json" > "$WORK/ingest-$day.json"
 done
-echo "[2/5] 7 日端口性能摄入完成（30 设备 × 3 端口/日）"
+echo "[2/5] 7 日端口性能摄入完成（133 设备 × 3 端口/日）"
 
 # —— 3. 检测运行 ——
 "$BIN" detect --db "$DB" > "$WORK/detect.json"

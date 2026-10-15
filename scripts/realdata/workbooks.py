@@ -13,6 +13,16 @@
   专线名称（虚构）、端口/板卡/机架/ODF/PON 编码细节。
 - 全部取值确定性（无随机）：同一 core.json → 字节级同输出。
 
+W32 轮（issue #52，2026-10-15）：解除 15 站硬编码限流。
+- 设备布点改为 OSM 83 局站全覆盖 + 层级差异化：枢纽局（12 个地市驻局 +
+  加格达奇区）每站 3 台（-01 干线核心/-02 主备/-03 汇聚出域），县域局每站
+  1 台、每第 3 站 +1 台备份 → 132 台（对齐真实省干网「每传输节点必有设备」）。
+- 环/IGP 归属改由 OSM 走廊就近关系（core.json reason 字段）派生：西北链
+  （哈大齐/齐加/加漠）→ RING-HDQ/IGP-OSPF-01，东部环 → RING-JM/IGP-ISIS-02。
+- 电路 32 → 206 条四族：相邻环段 83 + 跨域长距 60 + 地市网状 52 + 接入层
+  主备对 11（支撑网状影响分析样本量）。
+- 服务客户映射扩至全部 13 地市（设备 serves + 基站 serves 全覆盖）。
+
 W30 轮（issues #40/#42/#45，2026-10-14）：
 - 基站表补齐真实表字段列（环/链、归属A IP/名称/端口、电联共享、网关/基站IP、
   状态、经纬度）+ 两个 W21 ref 列：上联设备（经纬度最近邻派生——issue #42
@@ -70,15 +80,33 @@ CUSTOMERS = [
     ("CUST-012", "双鸭山煤电信息化中心（虚构演示名）", "能源", "何工"),
 ]
 
-# 设备布点（北南干线 + 东西干线）：地市/锚点局站名 → 2 台/站
-DEVICE_SITE_NAMES = [
-    "哈尔滨市", "大庆市", "齐齐哈尔市", "讷河市", "嫩江市", "加格达奇区", "塔河县", "漠河市",
-    "牡丹江市", "佳木斯市", "尚志市", "绥化市", "伊春市", "七台河市", "鸡西市",
-]
+# 设备布点（issue #52：解除 15 站硬编码）——OSM 83 局站全覆盖 + 层级差异化：
+#   枢纽局（site_name==地市名 或 加格达奇区，共 13 站）→ 每站 3 台
+#     （-01 干线核心 / -02 主备 / -03 汇聚出域）
+#   县域局（其余 70 站）→ 每站 1 台，每第 3 站 +1 台备份（确定性）
+# 期望规模：13×3 + 70 + ⌈70/3⌉ ≈ 132 台（覆盖率 83/83 = 100%，issue #52 验收 ≥80%）。
+# 环/IGP 归属由走廊就近关系派生（core.json reason，公开数据用尽，非名称猜测）：
+#   西北链（哈大齐 TRK-HDQ/齐加 TRK-QJ/加漠 TRK-JM2）→ RING-HDQ / IGP-OSPF-01
+#   东部环（哈牡/哈佳/佳牡/哈伊）→ RING-JM / IGP-ISIS-02
+HDQ_TRUNKS = ("TRK-HDQ", "TRK-QJ", "TRK-JM2")
+PREFECTURE_EXTRA = {"加格达奇区"}  # 大兴安岭地区首府（city=加格达奇 非地市名）
+
+
+def is_hub_site(s: dict) -> bool:
+    """地市驻局判定：站点名==地市名(±市) 或 加格达奇区。"""
+    return (s["site_name"] == s["city"]
+            or s["site_name"] == s["city"] + "市"
+            or s["site_name"] in PREFECTURE_EXTRA)
+
+
+def ring_of_site(s: dict) -> str:
+    """环归属（走廊就近派生）：西北链→RING-HDQ，其余→RING-JM。"""
+    trunk = (s.get("reason") or "").split(":")[-1]
+    return "RING-HDQ" if trunk in HDQ_TRUNKS else "RING-JM"
 
 
 def gen_ip(i: int, j: int) -> str:
-    """管理 IP（模拟）：10.40+站序.0.10+设备序"""
+    """管理 IP（模拟）：10.40+站序.0.10+设备序（#52 后站序 0..82）。"""
     return f"10.{40 + i}.0.{10 + j}"
 
 
@@ -152,27 +180,38 @@ def main() -> None:
                  m["site"]["city"], m["site"]["district"], "在网"] for m in mrs])
 
     # ---- 8′ 设备先行构造（基站上联最近邻需要设备坐标；写出仍在第 8 步）----
-    dev_sites = []
-    for n in DEVICE_SITE_NAMES:
-        s = by_name.get(n) or next((x for x in sites if x["site_name"].startswith(n)), None)
-        if s is not None:
-            dev_sites.append(s)
+    # issue #52：83 局站全覆盖 + 层级差异化台数（is_hub_site 判定见模块头），
+    # 环/IGP 由走廊就近关系派生（ring_of_site）。idx=全局站序（确定性 IP/状态相位）。
+    # #52 附带消歧：OSM 存在同名局站（漠河市/塔河县/安达市 各 2 个节点）——
+    # 设备名称=局站名+次序后缀（首个不加）。端口表以 设备名称|端口名称 为身份键，
+    # 指标表按 设备名称+端口名 绑定，重名会触发 E011 身份冲突；旧 15 站名单
+    # 恰好只取同名首个掩盖了该问题，全覆盖后必须消歧（站点身份本身=site_id 不受影响）。
+    seen_names: dict[str, int] = {}
+    site_disp: dict[str, str] = {}
+    for s in sites:
+        base = s["site_name"]
+        n = seen_names.get(base, 0)
+        seen_names[base] = n + 1
+        site_disp[s["site_id"]] = base if n == 0 else f"{base}-{n + 1}"
     devices = []
-    for i, s in enumerate(dev_sites):
-        for j in (1, 2):
+    for i, s in enumerate(sites):
+        count = 3 if is_hub_site(s) else (2 if i % 3 == 0 else 1)
+        for j in range(1, count + 1):
             vendor, model = VENDORS[(i + j) % len(VENDORS)]
             devices.append({
                 "code": f"DEV-{s['site_id'][2:]}-{j:02d}",
-                "name": f"{s['site_name']}传输设备{j:02d}",
+                "name": f"{site_disp[s['site_id']]}传输设备{j:02d}",
                 "site": s, "ip": gen_ip(i, j), "vendor": vendor, "model": model,
                 "mr": "MR" + s["site_id"][2:],
-                # W30（#40）：环列全填（哈大齐干线→RING-HDQ，其余→RING-JM）——
-                # 25 条空值 W001 清零；环归属为示范值（manifest 披露）
-                "ring": "RING-HDQ" if i < 8 else "RING-JM",
-                "igp": "IGP-OSPF-01" if i < 8 else "IGP-ISIS-02",
+                # W30（#40）：环列全填；#52：归属改由走廊就近派生（非索引奇偶）
+                "ring": ring_of_site(s),
+                "igp": "IGP-OSPF-01" if ring_of_site(s) == "RING-HDQ" else "IGP-ISIS-02",
                 "idx": i,
             })
-    dev_by_siteid = {d["site"]["site_id"]: d for d in devices}
+    dev_sites = sites  # #52：全部 83 站有设备（覆盖率 100%）
+    dev_by_siteid = {}
+    for d in devices:  # 每站首台（-01）为代表设备：光缆连接设备/最近邻上联的确定性取值
+        dev_by_siteid.setdefault(d["site"]["site_id"], d)
 
     # 上联设备（issue #42）：每站最近邻设备（haversine，坐标派生非名称匹配）。
     # 首选同站 -01 设备；最近邻结果落库为 uplink_device ref 列（uplink_to 边）。
@@ -185,7 +224,14 @@ def main() -> None:
         return dev_by_siteid[best["site_id"]]
 
     # 服务客户（issue #40 serves 边）：地市→客户确定性映射（模拟披露）。
-    city_customer = {"哈尔滨": ["CUST-001", "CUST-002"], "大庆": ["CUST-004"], "黑河": ["CUST-009"]}
+    # #52：扩至全部 13 地市（此前 3 地市）——基站 serves 全覆盖。
+    city_customer = {
+        "哈尔滨": ["CUST-001", "CUST-002"], "齐齐哈尔": ["CUST-003"],
+        "大庆": ["CUST-004"], "牡丹江": ["CUST-005"], "佳木斯": ["CUST-006"],
+        "绥化": ["CUST-007"], "伊春": ["CUST-008"], "黑河": ["CUST-009"],
+        "加格达奇": ["CUST-010", "CUST-011"], "双鸭山": ["CUST-012"],
+        "七台河": ["CUST-012"], "鸡西": ["CUST-005"], "鹤岗": ["CUST-009"],
+    }
     serve_counter: dict[str, int] = {}
 
     def station_customer(city: str) -> str:
@@ -266,19 +312,19 @@ def main() -> None:
 
     # ---- 8 设备（构造已提前至机房后——基站上联最近邻需要；此处仅写出）----
     # W30（#40）：补 服务客户 列 → serves（device → customer）直连边。
-    # 设备地市无对应客户时落到 CUST-001（示范值，manifest 披露）。
-    dev_city_customer = {"哈尔滨市": "CUST-001", "大庆市": "CUST-004",
-                         "齐齐哈尔市": "CUST-003", "牡丹江市": "CUST-005",
-                         "佳木斯市": "CUST-006", "绥化市": "CUST-007",
-                         "伊春市": "CUST-008", "加格达奇区": "CUST-010",
-                         "漠河市": "CUST-011"}
+    # #52：映射扩至全部 13 地市（按 site.city 匹配，县域设备归入所属地市客户）。
+    dev_city_customer = {"哈尔滨": "CUST-001", "齐齐哈尔": "CUST-003", "大庆": "CUST-004",
+                         "牡丹江": "CUST-005", "佳木斯": "CUST-006", "绥化": "CUST-007",
+                         "伊春": "CUST-008", "黑河": "CUST-009", "加格达奇": "CUST-010",
+                         "双鸭山": "CUST-012", "七台河": "CUST-012", "鸡西": "CUST-005",
+                         "鹤岗": "CUST-009"}
     reg("devices", len(devices))
     write_xlsx("devices", "设备清单",
                ["设备编码", "设备名称", "城市", "厂商", "型号", "管理IP", "状态", "所属机房",
                 "所属环", "所属IGP域", "服务客户", "经度", "纬度"],
                [[d["code"], d["name"], d["site"]["city"], d["vendor"], d["model"], d["ip"],
                  "在网", d["mr"], d["ring"], d["igp"],
-                 dev_city_customer.get(d["site"]["site_name"], "CUST-001"),
+                 dev_city_customer.get(d["site"]["city"], "CUST-001"),
                  d["site"]["lng"], d["site"]["lat"]]
                 for d in devices])
 
@@ -459,26 +505,29 @@ def main() -> None:
     write_xlsx("sdh_timeslots", "时隙表",
                ["时隙编码", "VC级别", "时隙号", "容量", "状态"], tslots)
 
-    # ---- 23 电路（A/Z 设备=真实布点设备；W30 #42：10 → 32 条）----
-    # 三族电路（全部确定性）：
-    #   ① 相邻环段 15 条：(i, i+2 mod 15)——干线沿线逐站互联（工作台主链路族）
-    #   ② 跨域长距 14 条：(i, i+7 mod 15) for i<7 + (i, i+5 mod 15) for i<7——跨区互联
-    #   ③ 接入层 3 条：-02 设备对（机房双设备互联）
-    # 承载：全部 32 条走 OTN 波道（7 干线×2 波道循环——同波道多电路为真实形态）。
-    # W30（#40）：不再输出「承载时隙」列——列存在而值为空会逐行触发 W001
+    # ---- 23 电路（A/Z 设备=真实布点设备；W30 #42：10 → 32 条；W32 #52：32 → 206 条）----
+    # 四族电路（全部确定性，覆盖 83 站全网）：
+    #   ① 相邻环段 83 条：(i, i+2 mod 83)——干线沿线逐站互联（工作台主链路族）
+    #   ② 跨域长距 60 条：(i, i+7 mod 83) for i<60——跨区互联
+    #   ③ 地市网状 52 条：13 枢纽 -01 设备 4 邻域 (h, h+k mod 13) k=1..4——
+    #      地市间网状互联（影响分析样本量，#52 验收 ≥200）
+    #   ④ 接入层主备对 11 条：-02 设备 3 步环（机房双设备互联）
+    # 承载：全部 206 条走 OTN 波道（7 干线×2 波道循环——同波道多电路为真实形态）。
+    # W30（#40）：不输出「承载时隙」列——列存在而值为空会逐行触发 W001
     # （映射列的空值 ≠ 未映射列），SDH 时隙资源作为台账目录保留（无电路引用）。
-    key_devs = [d for d in devices if d["name"].endswith("01")]
-    dev02 = [d for d in devices if d["name"].endswith("02")]
+    key_devs = [d for d in devices if d["name"].endswith("01")]      # 83：每站干线核心
+    hub_devs = [d for d in key_devs if is_hub_site(d["site"])]       # 13：地市枢纽
+    dev02 = [d for d in devices if d["name"].endswith("02")]         # 枢纽-02 + 县域备份
     pairs = []
-    for i in range(15):
-        pairs.append((key_devs[i], key_devs[(i + 2) % 15]))
-    for i in range(7):
-        pairs.append((key_devs[i], key_devs[(i + 7) % 15]))
-    for i in range(7):
-        pairs.append((key_devs[(i + 5) % 15], key_devs[i]))
-    pairs.append((dev02[1], dev02[3]))    # 哈尔滨-02 ↔ 齐齐哈尔-02
-    pairs.append((dev02[5], dev02[7]))    # 嫩江-02 ↔ 塔河-02
-    pairs.append((dev02[9], dev02[11]))   # 牡丹江-02 ↔ 绥化-02
+    for i in range(len(key_devs)):
+        pairs.append((key_devs[i], key_devs[(i + 2) % len(key_devs)]))
+    for i in range(60):
+        pairs.append((key_devs[i], key_devs[(i + 7) % len(key_devs)]))
+    for i in range(len(hub_devs)):
+        for k in (1, 2, 3, 4):
+            pairs.append((hub_devs[i], hub_devs[(i + k) % len(hub_devs)]))
+    for i in range(0, max(len(dev02) - 3, 0), 3):
+        pairs.append((dev02[i], dev02[i + 3]))
     circuits = []
     for i, (a, z) in enumerate(pairs, 1):
         if a is z:
@@ -510,7 +559,8 @@ def main() -> None:
     # ---- 24 地址池 ----
     # W30（#40）：状态列非法枚举值修正——「使用中」不在封闭枚举
     # （在网/停用/在建/退网）内，13 条 W002 把质量评分拉到 51/100。
-    pools = [[f"管理地址池-{i:03d}", f"10.{60 + i}.0.0/24", f"10.{60 + i}.0.1",
+    # #52：基段 10.60 → 10.200（设备管理IP已用 10.40-122，避免演示段重叠）。
+    pools = [[f"管理地址池-{i:03d}", f"10.{200 + i}.0.0/24", f"10.{200 + i}.0.1",
               100 + i, key_devs[i]["code"], "在网" if i < 4 else "停用"] for i in range(5)]
     reg("ippools", len(pools))
     write_xlsx("ippools", "地址池表",
@@ -601,15 +651,20 @@ def main() -> None:
             "cable_segments": "端点=走廊锚点局真实（段界为走廊锚点，非运营商实际接头位置）",
             "splice_boxes": "端点坐标=真实锚点局坐标（接头盒本体为示意设施）",
             "manholes": "坐标=走廊锚点线性内插（真实坐标系内插，设施为示意）",
-            "devices": "所在局站/机房/坐标真实（编码/名称/IP/型号为模拟）",
+            "devices": "所在局站/机房/坐标真实（编码/名称/IP/型号为模拟）；W32（#52）："
+                     "83 局站全覆盖——枢纽局（地市驻局+加格达奇区，13 站）每站 3 台，"
+                     "县域局每站 1 台、每第 3 站 +1 备份（台数为层级化示范值，"
+                     "对齐真实省干网「每传输节点必有设备」量级）；环/IGP 归属由"
+                     "OSM 走廊就近关系（core.json reason）派生",
             "corridor_layers": "web/public/mapdata/hlj-cables*.geojson.gz=OSM 道路/铁路真实几何"
                                "（按线路名选取：绥满高速/滨洲线/嫩林线/京漠线等）",
         },
         "simulated": {
             "machine_rooms": "编号/名称（归属局站真实）",
-            "base_station_uplink": "上联设备列 = 站坐标到 15 个设备局站坐标的 haversine 最近邻"
+            "base_station_uplink": "上联设备列 = 站坐标到 83 个设备局站坐标的 haversine 最近邻"
                                    "（issue #42 裁定：按坐标派生，非名称匹配，不违反"
-                                   "「禁止名称推断」红线）；归属A IP/名称/端口 = 该上联设备属性",
+                                   "「禁止名称推断」红线；#52 后候选池为全部 83 站——上联落在"
+                                   "真实就近局站）；归属A IP/名称/端口 = 该上联设备属性",
             "base_station_serves": "服务客户列 = 地市→客户确定性映射（哈尔滨双客户轮转、"
                                    "大庆/黑河单客户；issue #40 serves 直连边，示范值）",
             "protection_groups": "保护组/protects 边为工程示意（1+1/1:1/环网三类型示范，"
@@ -619,13 +674,14 @@ def main() -> None:
             "status_columns": "W30（#45）各台账状态列均为确定性示范值（在网为主，"
                               "少量停用/在建/退网混合）；ip_pool「使用中」与 service「开通」"
                               "已修正为封闭枚举内合法值（issue #40 的 13 条 W002 清零）",
-            "circuits": "电路编号/带宽（A/Z 设备为真实布点）；W30 扩至 32 条三族"
-                        "（相邻环段 15 + 跨域长距 14 + 接入层 3）——issue #42 工作台链路量级",
+            "circuits": "电路编号/带宽（A/Z 设备为真实布点）；W30 扩至 32 条；"
+                        "W32（#52）再扩至 206 条四族（相邻环段 83 + 跨域长距 60 + "
+                        "地市网状 52 + 接入层主备 11）——支撑网状影响分析样本量",
             "fibers": "纤芯占用/使用情况/局向/收发关系（示范值）；成端端子为模拟编码",
             "otn_ochs": "波道占用关系（波长为 ITU 100GHz 网格真实值，速率为示范值）",
             "sdh_timeslots": "时隙/容量（示范值）",
             "circuits": "电路编号/带宽（A/Z 设备为真实布点）",
-            "ippools": "CIDR/网关/VLAN（私网演示段）",
+            "ippools": "CIDR/网关/VLAN（私网演示段 10.200+，避开设备管理段 10.40-122）",
             "customers": "全部虚构（名称含虚构标记或明显虚构词）",
             "services/leased_lines": "业务/专线实例虚构（装机地址=真实局站名+演示标记）",
             "rings/igp_domains/vpn": "保护结构/路由域/VPN 为工程示意",
