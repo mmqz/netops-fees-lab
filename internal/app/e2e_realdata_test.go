@@ -141,14 +141,17 @@ func TestCLIRealDataImportChain(t *testing.T) {
 	if d, _ := counts["devices"].(float64); d != 30 {
 		t.Errorf("workspace devices = %v, want 30", counts["devices"])
 	}
-	// W30 (issue #42): the workbench must reflect real interconnection
-	// scale — 32 circuits materialize as 32 links with 64 endpoint
-	// interfaces (was 10 links / 20 interfaces from circuit endpoint pairs).
-	if l, _ := counts["links"].(float64); l != 32 {
-		t.Errorf("workspace links = %v, want 32 (issue #42 interconnection scale)", counts["links"])
+	// Issue #49: links are now the PHYSICAL per-hop interconnections along
+	// the 7 cable corridors' anchor chains — the 7 corridors fold into 16
+	// hops (device-anchored stations; intermediate no-device anchors like
+	// 肇东/安达 collapse). The 32 business circuits no longer draw as
+	// device-direct end-to-end arcs (avg 448km, 96.9% over 200km); they
+	// stay in the unified resource graph (traverse/impact) instead.
+	if l, _ := counts["links"].(float64); l != 16 {
+		t.Errorf("workspace links = %v, want 16 physical corridor hops (issue #49)", counts["links"])
 	}
-	if i, _ := counts["interfaces"].(float64); i != 64 {
-		t.Errorf("workspace interfaces = %v, want 64", counts["interfaces"])
+	if i, _ := counts["interfaces"].(float64); i != 32 {
+		t.Errorf("workspace interfaces = %v, want 32 (2 per hop)", counts["interfaces"])
 	}
 
 	ts, killServe := realDataServe(t, db)

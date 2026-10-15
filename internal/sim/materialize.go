@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,13 +47,20 @@ type MaterializeResult struct {
 
 // Materialize creates a workspace from imported resources
 // (PROJECT_BRIEF_P2 §6): every device resource of the selected batches
-// becomes a virtual device (status 在网 → up, anything else → down), and
-// every circuit resource whose a_end/z_end relations both resolve to
-// workspace devices becomes a link with deterministic eth<n> port
-// allocation (circuits in ascending natural_key order, lowest free port
-// index per endpoint device). Self-referencing circuits are skipped
-// (mirrors the Phase 1 W003 row). Circuit status is ignored — links start
-// up.
+// becomes a virtual device (status 在网 → up, anything else → down).
+//
+// LINKS follow the physical-layer-first rule (issue #49): when the
+// dataset carries cable corridors (cable_segment + splice_box rows),
+// links are the PER-HOP device interconnections along each optical
+// cable's anchor chain — segments collapse between consecutive devices,
+// so a hop spans one corridor span (~100-160km at province-trunk scale),
+// never a circuit's end-to-end arc (the old behavior drew business
+// circuits as device-direct lines averaging 448km, 96.9% over 200km —
+// visually a ball of cross-province spaghetti). Datasets WITHOUT cable
+// segments (the Phase 1 fixtures: devices + circuits only) fall back to
+// the legacy circuit links unchanged. Circuits remain fully represented
+// in the unified resource graph (traverse/impact) — the lab canvas is
+// the physical drill sandbox, the graph is the business analysis view.
 //
 // batchIDs empty selects ALL completed batches (in import order). A
 // duplicate name yields domain.ErrConflict, an unknown batch id
@@ -179,63 +188,27 @@ func (s *Service) Materialize(ctx context.Context, name, description string, bat
 			}
 		}
 
-		// Links: circuits in ascending natural_key order; the a_end/z_end
-		// relations must both resolve to workspace devices; the lowest
-		// free port index of each endpoint device becomes eth<idx>
-		// (0-based, per device). Self-referencing circuits are skipped.
-		circuitResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeCircuit})
-		if err != nil {
-			return fmt.Errorf("sim: materialize: list circuit resources: %w", err)
-		}
+		// Links — physical layer first (issue #49): per-hop device links
+		// along cable corridor anchor chains; circuits remain the fallback
+		// for datasets without cable segments (Phase 1 fixtures).
 		nextPort := make(map[string]int) // device id → next free port index
-		for _, res := range circuitResources {
-			if !scopeSet[res.FirstBatchID] {
-				continue
-			}
-			aEnd, zEnd, ok, err := circuitEndpoints(ctx, tx, res.ID)
-			if err != nil {
-				// A storage error must not silently drop the circuit's
-				// link (AUD1-5): materialize is atomic-complete or fails.
-				return fmt.Errorf("sim: materialize: endpoints of circuit %s: %w", res.NaturalKey, err)
-			}
-			if !ok {
-				continue // missing endpoint relation(s)
-			}
-			devA, okA := deviceByResource[aEnd]
-			devZ, okZ := deviceByResource[zEnd]
-			if !okA || !okZ {
-				continue // endpoint not a workspace device (out of scope)
-			}
-			if devA.ID == devZ.ID {
-				continue // self-referencing circuit (Phase 1 W003) — skipped
-			}
-			aIfaceID, err := s.materializePort(ctx, tx, workspaceID, devA.ID, nextPort, now)
+		nLinks, err := s.materializePhysicalLinks(ctx, tx, workspaceID, scopeSet, deviceByResource, nextPort, now)
+		if err != nil {
+			return err
+		}
+		if nLinks == 0 {
+			nLinks, err = s.materializeCircuitLinks(ctx, tx, workspaceID, scopeSet, deviceByResource, nextPort, now)
 			if err != nil {
 				return err
 			}
-			zIfaceID, err := s.materializePort(ctx, tx, workspaceID, devZ.ID, nextPort, now)
-			if err != nil {
-				return err
-			}
-			n, err := tx.Sequences.Allocate(ctx, domain.SeqLink)
-			if err != nil {
-				return fmt.Errorf("sim: materialize: allocate link id: %w", err)
-			}
-			if err := tx.SimLinks.Insert(ctx, domain.SimLink{
-				ID: domain.FormatSimID(domain.SeqLink, n), WorkspaceID: workspaceID,
-				AInterfaceID: aIfaceID, ZInterfaceID: zIfaceID,
-				Status: domain.EntityStatusUp, Label: res.NaturalKey, ResourceID: res.ID,
-				CreatedAt: now, UpdatedAt: now,
-			}); err != nil {
-				return fmt.Errorf("sim: materialize: insert link %s: %w", res.NaturalKey, err)
-			}
-			result.Counts.Links++
 		}
 		if s.afterWrite != nil {
 			if err := s.afterWrite("links"); err != nil {
 				return fmt.Errorf("sim: materialize (fault injection after links): %w", err)
 			}
 		}
+
+		result.Counts.Links = nLinks
 
 		result.WorkspaceID = workspaceID
 		result.Name = name
@@ -259,6 +232,288 @@ func (s *Service) Materialize(ctx context.Context, name, description string, bat
 		return MaterializeResult{}, fmt.Errorf("sim: materialize: %w", err)
 	}
 	return result, nil
+}
+
+// materializePhysicalLinks derives PHYSICAL per-hop links from the
+// cable corridors (issue #49) and returns how many were created. Zero
+// (with nil error) means the dataset carries no in-scope cable segments
+// — the caller then falls back to the legacy circuit links (Phase 1
+// fixtures).
+//
+// Algorithm — corridor anchor-chain folding, fully deterministic:
+//
+//  1. Load cable_segment resources (scope-filtered) and splice_box
+//     resources (geo-anchoring lookup).
+//  2. Order segments by (cable natural key asc, segment_index asc).
+//  3. Each segment end (a_end_box / z_end_box) resolves through the
+//     splice_box geo to the NEAREST geo-carrying workspace device
+//     (haversine; ties break on the lower device code — the -01 device
+//     of a station wins). Box codes compare case-insensitively (the
+//     importer normalizes both sides).
+//  4. Walk each cable's segment sequence as a chain of device endpoints;
+//     consecutive equal devices collapse (intermediate corridor anchors
+//     without devices are skipped — the ledger's honest truth), and each
+//     consecutive DISTINCT device pair becomes one hop link labeled with
+//     the cable code, ResourceID = the optical_cable resource (cable-
+//     level lineage: hops of one cable share it).
+//  5. Every cable contributes its own hops (two parallel cables along
+//     one corridor stay two links — the real redundancy shape); the
+//     deterministic creation order is (cable code, chain position).
+//
+// Segments with an unresolvable end (missing box, box without geo, or a
+// nil resolution) contribute no chain endpoint for that side — nothing
+// is silently invented. A storage error aborts the materialize (AUD1-5).
+func (s *Service) materializePhysicalLinks(
+	ctx context.Context,
+	tx *repo.Tx,
+	workspaceID string,
+	scopeSet map[string]bool,
+	deviceByResource map[string]domain.VirtualDevice,
+	nextPort map[string]int,
+	now time.Time,
+) (int, error) {
+	boxResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeSpliceBox})
+	if err != nil {
+		return 0, fmt.Errorf("sim: materialize: list splice boxes: %w", err)
+	}
+	boxGeo := make(map[string][2]float64, len(boxResources))
+	for _, box := range boxResources {
+		lat := parseGeoAttr(box.Attributes["geo_lat"], -90, 90)
+		lng := parseGeoAttr(box.Attributes["geo_lng"], -180, 180)
+		if lat == nil || lng == nil {
+			continue
+		}
+		boxGeo[strings.ToUpper(box.NaturalKey)] = [2]float64{*lng, *lat}
+	}
+
+	type geoDev struct {
+		dev      domain.VirtualDevice
+		lng, lat float64
+	}
+	var geoDevices []geoDev
+	for _, dev := range deviceByResource {
+		if dev.GeoLat == nil || dev.GeoLng == nil {
+			continue
+		}
+		geoDevices = append(geoDevices, geoDev{dev: dev, lng: *dev.GeoLng, lat: *dev.GeoLat})
+	}
+	if len(boxGeo) == 0 || len(geoDevices) == 0 {
+		return 0, nil // no anchored corridors / no positioned devices → fallback
+	}
+	sort.Slice(geoDevices, func(i, j int) bool { return geoDevices[i].dev.Code < geoDevices[j].dev.Code })
+
+	segResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeCableSegment})
+	if err != nil {
+		return 0, fmt.Errorf("sim: materialize: list cable segments: %w", err)
+	}
+	type segRow struct {
+		cableCode  string
+		index      int
+		aBox, zBox string
+	}
+	var segs []segRow
+	inScope := 0
+	for _, seg := range segResources {
+		if !scopeSet[seg.FirstBatchID] {
+			continue
+		}
+		inScope++
+		idx, _ := strconv.Atoi(seg.Attributes["segment_index"])
+		segs = append(segs, segRow{
+			cableCode: seg.Attributes["cable_code"],
+			index:     idx,
+			aBox:      strings.ToUpper(seg.Attributes["a_end_box"]),
+			zBox:      strings.ToUpper(seg.Attributes["z_end_box"]),
+		})
+	}
+	if inScope == 0 {
+		return 0, nil // Phase 1 dataset — circuits take over
+	}
+	sort.Slice(segs, func(i, j int) bool {
+		if segs[i].cableCode != segs[j].cableCode {
+			return segs[i].cableCode < segs[j].cableCode
+		}
+		return segs[i].index < segs[j].index
+	})
+
+	resolveEnd := func(box string) *domain.VirtualDevice {
+		geo, ok := boxGeo[box]
+		if !ok {
+			return nil
+		}
+		var best *domain.VirtualDevice
+		bestKm := math.Inf(1)
+		for _, gd := range geoDevices {
+			km := haversineKm(geo[1], geo[0], gd.lat, gd.lng)
+			if km < bestKm-1e-9 { // strictly nearer; pool order breaks ties
+				bestKm = km
+				d := gd.dev
+				best = &d
+			}
+		}
+		return best
+	}
+
+	cableResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeOpticalCable})
+	if err != nil {
+		return 0, fmt.Errorf("sim: materialize: list optical cables: %w", err)
+	}
+	cableByCode := make(map[string]domain.Resource, len(cableResources))
+	for _, cab := range cableResources {
+		if scopeSet[cab.FirstBatchID] {
+			cableByCode[strings.ToUpper(cab.NaturalKey)] = cab
+		}
+	}
+
+	type hop struct {
+		cableCode  string
+		pos        int
+		devA, devZ domain.VirtualDevice
+	}
+	var hops []hop
+	var chain []domain.VirtualDevice // resolved endpoints of the current cable
+	var curCable string
+	flushCable := func() {
+		for i := 0; i+1 < len(chain); i++ {
+			if chain[i].ID == chain[i+1].ID {
+				continue // collapsed intermediate anchor without devices
+			}
+			hops = append(hops, hop{cableCode: curCable, pos: i, devA: chain[i], devZ: chain[i+1]})
+		}
+		chain = chain[:0]
+	}
+	for _, seg := range segs {
+		if seg.cableCode != curCable {
+			flushCable()
+			curCable = seg.cableCode
+		}
+		if devA := resolveEnd(seg.aBox); devA != nil {
+			chain = append(chain, *devA)
+		}
+		if devZ := resolveEnd(seg.zBox); devZ != nil {
+			chain = append(chain, *devZ)
+		}
+	}
+	flushCable()
+
+	sort.Slice(hops, func(i, j int) bool {
+		if hops[i].cableCode != hops[j].cableCode {
+			return hops[i].cableCode < hops[j].cableCode
+		}
+		return hops[i].pos < hops[j].pos
+	})
+	created := 0
+	for _, h := range hops {
+		aIfaceID, err := s.materializePort(ctx, tx, workspaceID, h.devA.ID, nextPort, now)
+		if err != nil {
+			return 0, err
+		}
+		zIfaceID, err := s.materializePort(ctx, tx, workspaceID, h.devZ.ID, nextPort, now)
+		if err != nil {
+			return 0, err
+		}
+		n, err := tx.Sequences.Allocate(ctx, domain.SeqLink)
+		if err != nil {
+			return 0, fmt.Errorf("sim: materialize: allocate link id: %w", err)
+		}
+		label := h.cableCode
+		resourceID := ""
+		if cab, ok := cableByCode[strings.ToUpper(h.cableCode)]; ok {
+			resourceID = cab.ID
+			if label == "" {
+				label = cab.NaturalKey
+			}
+		}
+		if label == "" {
+			label = fmt.Sprintf("hop#%d", h.pos+1)
+		}
+		if err := tx.SimLinks.Insert(ctx, domain.SimLink{
+			ID: domain.FormatSimID(domain.SeqLink, n), WorkspaceID: workspaceID,
+			AInterfaceID: aIfaceID, ZInterfaceID: zIfaceID,
+			Status: domain.EntityStatusUp, Label: label, ResourceID: resourceID,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			return 0, fmt.Errorf("sim: materialize: insert link %s: %w", label, err)
+		}
+		created++
+	}
+	return created, nil
+}
+
+// materializeCircuitLinks is the legacy link source (the Phase 1 shape):
+// every circuit whose a_end/z_end relations both resolve to workspace
+// devices becomes a link with deterministic eth<n> port allocation
+// (circuits in ascending natural_key order, lowest free port index per
+// endpoint device). Self-referencing circuits are skipped (mirrors the
+// Phase 1 W003 row). Circuit status is ignored — links start up.
+func (s *Service) materializeCircuitLinks(
+	ctx context.Context,
+	tx *repo.Tx,
+	workspaceID string,
+	scopeSet map[string]bool,
+	deviceByResource map[string]domain.VirtualDevice,
+	nextPort map[string]int,
+	now time.Time,
+) (int, error) {
+	circuitResources, _, err := tx.Resources.Search(ctx, repo.ResourceSearchFilter{Type: domain.ResourceTypeCircuit})
+	if err != nil {
+		return 0, fmt.Errorf("sim: materialize: list circuit resources: %w", err)
+	}
+	created := 0
+	for _, res := range circuitResources {
+		if !scopeSet[res.FirstBatchID] {
+			continue
+		}
+		aEnd, zEnd, ok, err := circuitEndpoints(ctx, tx, res.ID)
+		if err != nil {
+			return 0, fmt.Errorf("sim: materialize: endpoints of circuit %s: %w (AUD1-5)", res.NaturalKey, err)
+		}
+		if !ok {
+			continue // missing endpoint relation(s)
+		}
+		devA, okA := deviceByResource[aEnd]
+		devZ, okZ := deviceByResource[zEnd]
+		if !okA || !okZ {
+			continue // endpoint not a workspace device (out of scope)
+		}
+		if devA.ID == devZ.ID {
+			continue // self-referencing circuit (Phase 1 W003) — skipped
+		}
+		aIfaceID, err := s.materializePort(ctx, tx, workspaceID, devA.ID, nextPort, now)
+		if err != nil {
+			return 0, err
+		}
+		zIfaceID, err := s.materializePort(ctx, tx, workspaceID, devZ.ID, nextPort, now)
+		if err != nil {
+			return 0, err
+		}
+		n, err := tx.Sequences.Allocate(ctx, domain.SeqLink)
+		if err != nil {
+			return 0, fmt.Errorf("sim: materialize: allocate link id: %w", err)
+		}
+		if err := tx.SimLinks.Insert(ctx, domain.SimLink{
+			ID: domain.FormatSimID(domain.SeqLink, n), WorkspaceID: workspaceID,
+			AInterfaceID: aIfaceID, ZInterfaceID: zIfaceID,
+			Status: domain.EntityStatusUp, Label: res.NaturalKey, ResourceID: res.ID,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			return 0, fmt.Errorf("sim: materialize: insert link %s: %w", res.NaturalKey, err)
+		}
+		created++
+	}
+	return created, nil
+}
+
+// haversineKm is the great-circle distance in kilometers (the same
+// formula the realdata pipeline uses for nearest-device uplinks).
+func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
+	const r = 6371.0
+	rad := math.Pi / 180
+	dLat := (lat2 - lat1) * rad
+	dLng := (lng2 - lng1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLng/2)*math.Sin(dLng/2)
+	return 2 * r * math.Asin(math.Sqrt(a))
 }
 
 // materializePort allocates eth<next free index> on the device (the
