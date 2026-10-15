@@ -2,6 +2,37 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.10.0] — 2026-10-15
+
+**运营闭环补全与 API 可发现性版**（四轮迭代 R6-R9；需求驱动：距完整产品的差距清单——「规则 API 有而 UI 无」「检测运行只有 CLI/MCP 通道」「无出站通知」「无机器可读 API 文档」）。核心：把 v0.9 的「看得见」推进到「配置得出、触发得了、通知得到、可被集成」。
+
+### 新增 — 检测规则管理页 /rules（R6）
+- v0.7 起规则 CRUD API 完整而 UI 零覆盖（只能 CLI/curl）——本轮补上配置侧入口：全量表格（启停徽章/级别徽章/**规则标签列**/指标/比较器+阈值条件/窗口/更新时间/行内启停/编辑/删除，title=ruleId 精确定位）+ 行展开完整条件审计视图。
+- 新建/编辑共用 RuleDialog：指标**封闭目录下拉**（`GET /api/metrics/keys`，含中文标签与合法区间提示）、比较器/阈值/窗口/级别/标签/启停；编辑态指标只读（身份字段，后端 400 契约）；删除走确认对话框，被 4 条告警引用的规则后端 409（审计保护）→ 前端 toast 透传理由并引导改用停用。
+- 筛选：仅看启用中开关 + 指标下拉；`filter-push`/`field-row`/`modal--form` 三个新 CSS 原语。`r6_rules_regression.sh` 26/26（真实旅程：31 工作簿 → 检测 → 默认规则表 → 创建（目录下拉+必填校验+toast+行数）→ 编辑（只读身份）→ 改阈值 → 启停往返 → 409 审计保护（API+浏览器 toast）→ 干净删除 → 筛选 → console 零错误）。
+
+### 新增 — 立即检测 UI 入口 + 告警 CSV 导出（R7）
+- `POST /api/detection/run` 自 v0.7 只有 CLI/MCP 通道：RunDetectionDialog 三态一体（确认说明 → 运行中 → 回执）共用组件，/alerts 与 /rules 双入口（待处置队列的「现在跑一次」+ 改规则后的立即验证）；回执四格统计（发现/新建/清除/写入）+ 数据截止 + 告警变更明细表（created/cleared chip）；完成自动刷新筛选队列。
+- 告警导出：当前 state+severity 筛选分页拉全（pageSize 200、100 页守卫）→ 20 列 CSV（BOM 保证 Excel 识别 UTF-8、RFC4180 转义、日期文件名）；空结果 info 提示不下载。
+- **修复真实产品缺陷**（回归现场抓获）：`URL.revokeObjectURL` 在 `a.click()` 后立即执行与浏览器抓取下载句柄存在竞态——改为 30s 延迟撤销。`r7_run_export_regression.sh` 12/12（确认文案 → 回执统计+数据截止 → 重跑零变更确定性 → 自动刷新 → /rules 入口 → 下载劫持验证 BOM/表头/行数==API total → 空导出 → console 零错误）。
+
+### 新增 — Webhook 通知通道（R8）
+- 检测环出站通道：`internal/notify` 尽力而为投递器——POST JSON（event=detection.run + deliveredAt + 四计数 + evaluatedAt + **封顶 50 行**告警变更明细 + alertsTruncated 标志）；5s 投递界；失败仅 warn 日志、**绝不影响检测结果**；nil 接收器 = 通道关闭（调用点零分支）。
+- 接线：`app.Config.WebhookURL` 单一装配点，HTTP 通道在 200 计算后异步投递（背景 ctx），CLI 通道在进程退出前同步投递；`serve --webhook-url` / `detect --webhook-url`；MCP 面永不通知（只读红线）。
+- 测试：notify 单测（nil no-op/POST+JSON 契约/明细行/50 行封顶（计数不封）/503 与不可达的错误不致命/300ms 超时界）+ api 集成（劣化场景一次投递镜像运行回执；失败接收端保持 200）。`r8_webhook_e2e.sh` 13/13（真 serve --webhook-url + python 接收端 + **浏览器触发**（R7 对话框）→ 契约断言 + findings 与 API 回执一致 + CLI 通道投递）。
+
+### 新增 — OpenAPI 3 文档 + /dev 参考页（R9）
+- **路由表单源化**：65 个端点集中于 `internal/api/routes.go`（method/pattern/tag/中文摘要/handler），`Routes()` 循环注册 + OpenAPI 文档同表生成——**规格与实现结构性零漂移**（无摘要的路由无法存在，删路由则双处消失）。
+- `GET /api/openapi.json`：OpenAPI 3.0.3，info.version 用 domain 常量（与 /api/health 同源），按表序 tags，每操作带中文摘要；sync.Once 记忆化。范围诚实：发现性文档而非全 schema 契约（信封级描述；深形状在 docs/design 与 TS 客户端）。
+- 防漂移测试：spec paths == 表面；每个文档 (path, method) 用占位参数对活服务器探测断言**永不落入未注册 fallback 404**；两次读取字节一致；version == health。
+- /dev API 参考页：实时渲染文档（方法徽章 GET/POST/PATCH/DELETE 四色 + 分组目录 + 端点计数）——JSON 端点的人类孪生。`r9_openapi_regression.sh` 13/13（文档契约 7 + /dev 渲染 5 + /alerts /rules 无退化抽检）。
+- 回归脚本工程教训（痛苦换来的）：**`GROUPS` 是 bash 内置特殊变量**（进程组 ID 数组）——对它的赋值被吞、读取返回 gid（1001）；脚本改用 `API_GROUPS` 并注释钉死该陷阱。另：`VAR=$(fn)` 在 `set -e` 下函数返回码杀脚本——`local x=$(...)` 恒 0 + 显式 `return 0` 的惯例。
+
+### 工程内务
+- 告警中心/规则页共用的 CSS 原语与 i18n 文案节（RUL_*/RUN_*/ALR_EXP_*/API_*）。
+- README §2 能力清单与快速开始更新（--webhook-url 用法与载荷契约、/dev、/rules）。
+- 门禁：`gofmt -l .` 空 · `go vet` 0 告警 · `go test -count=1` **24 包全 ok**（新增 internal/notify；443 → 461 测试）· `tsc -b` 0 错误 · `npm run build` ✓ · 四份浏览器级回归脚本全绿（26/12/13/13）。
+
 ## [0.9.0] — 2026-10-14
 
 **运营可见性与 AI 分析闭环版**（五轮迭代 R1-R5 + issues #46/#47 修复轮；需求驱动：用户「先列还有哪些能开发的，距离一个完整的产品，然后继续开发至少持续5轮」）。核心：v0.7 数据模型弧（检测告警/指标时序/图查询）与 v0.8 真实数据里程碑从「API/CLI 可用」走到「人看得见、AI 用得上」——运营侧四个 UI 入口 + 智能体侧五个只读分析工具。

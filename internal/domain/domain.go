@@ -22,17 +22,18 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.9.0 is
-// the operations-visibility milestone: the alerts center page (/alerts with
-// the ack/clear human lifecycle), metrics timeseries visualization in the
-// resource drawer (the 7-day degradation curve), the impact-analysis drawer
-// tab (graph_traverse/impact four modes) and the MCP surface widened to ten
-// read-only-heavy tools (graph_traverse/graph_impact/graph_context/
-// alerts_query/metrics_query — the AI root-cause loop). TestAppVersionP2
-// pins this constant and TestAppVersionMatchesChangelogHead enforces the
-// CHANGELOG single fact source, so the three-way hand-copied versions
-// cannot drift again.
-const AppVersion = "v0.9.0"
+// the health endpoint, the MCP server implementation and the CLI. v0.10.0 is
+// the operations-loop completion round: the detection rules management page
+// (/rules with full CRUD over the same API), the run-detection UI entry
+// (POST /api/detection/run from the browser with the receipt dialog), alerts
+// CSV export, the outbound webhook notification channel (serve/detect
+// --webhook-url, best-effort delivery that never fails the run) and the
+// OpenAPI 3 document generated from the single route table
+// (GET /api/openapi.json — zero spec drift by construction, plus the /dev
+// reference page). TestAppVersionP2 pins this constant and
+// TestAppVersionMatchesChangelogHead enforces the CHANGELOG single fact
+// source, so the three-way hand-copied versions cannot drift again.
+const AppVersion = "v0.10.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

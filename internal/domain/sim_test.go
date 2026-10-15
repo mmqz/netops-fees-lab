@@ -194,8 +194,8 @@ func TestSimSentinelErrors(t *testing.T) {
 func TestAppVersionP2(t *testing.T) {
 	// P2: the version constant is a single pinned fact (the changelog-head
 	// cross-check below guards the other copy).
-	if AppVersion != "v0.9.0" {
-		t.Errorf("AppVersion = %q, want v0.9.0 (v0.9.0 operations-visibility round: alerts center page, metrics timeseries SVG, impact-analysis drawer tab, run-state view, MCP ten-tool read-only analysis surface — CHANGELOG 0.9.0)", AppVersion)
+	if AppVersion != "v0.10.0" {
+		t.Errorf("AppVersion = %q, want v0.10.0 (v0.10.0 operations-loop completion round: rules management page /rules, run-detection UI entry + receipt, alerts CSV export, webhook notification channel, OpenAPI 3 document from the route table — CHANGELOG 0.10.0)", AppVersion)
 	}
 }
 
