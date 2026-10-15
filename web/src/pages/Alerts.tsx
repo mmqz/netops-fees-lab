@@ -30,6 +30,7 @@ import {
   ALR_BTN_ACK,
   ALR_BTN_CLEAR,
   ALR_BTN_CLEAR_WORKING,
+  ALR_BTN_EXPORT,
   ALR_CLEAR_MESSAGE,
   ALR_CLEAR_TITLE,
   ALR_CLEARED_TOAST,
@@ -40,6 +41,11 @@ import {
   ALR_COL_SEVERITY,
   ALR_COL_STATE,
   ALR_COL_VALUE,
+  ALR_EXPORT_EMPTY,
+  ALR_EXPORT_FAILED,
+  ALR_EXPORT_FILENAME,
+  ALR_EXPORT_TOAST,
+  ALR_EXPORT_WORKING,
   ALERT_COMPARATOR_LABELS,
   ALR_DETAIL_ACK_LINE,
   ALR_DETAIL_CLEARED_LINE,
@@ -61,6 +67,7 @@ import {
   BTN_PROCESSING,
   FILTER_ALL,
   NAV_ALERTS,
+  RUN_BTN_LABEL,
   SEVERITY_LABELS,
   format,
   formatDateTime,
@@ -70,6 +77,7 @@ import { AlertStateChip } from '../components/AlertStateChip';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Pagination } from '../components/Pagination';
+import { RunDetectionDialog } from '../components/RunDetectionDialog';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
@@ -80,6 +88,64 @@ const PAGE_SIZE = 20;
 
 const STATE_OPTIONS: AlertState[] = ['firing', 'acked', 'cleared'];
 const SEVERITY_OPTIONS: Severity[] = ['error', 'warning', 'info'];
+
+const CSV_COLUMNS = [
+  'alertId',
+  'state',
+  'severity',
+  'ruleId',
+  'ruleLabel',
+  'metricKey',
+  'comparator',
+  'threshold',
+  'window',
+  'lastValue',
+  'seriesId',
+  'resourceId',
+  'resourceType',
+  'resourceNaturalKey',
+  'resourceName',
+  'firedAt',
+  'firstSeen',
+  'ackedAt',
+  'ackedBy',
+  'clearedAt',
+] as const;
+
+/** CSV 字段转义：含逗号/引号/换行时包引号并双写内部引号。 */
+function csvCell(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/** 告警行 → CSV 行（列序 = CSV_COLUMNS）。 */
+function alertCsvRow(alert: AlertItem): string {
+  const cells: string[] = [
+    alert.alertId,
+    alert.state,
+    alert.severity,
+    alert.ruleId,
+    alert.ruleLabel,
+    alert.metricKey,
+    alert.comparator,
+    String(alert.threshold),
+    String(alert.window),
+    String(alert.lastValue),
+    alert.seriesId,
+    alert.resource.id,
+    alert.resource.type,
+    alert.resource.naturalKey,
+    alert.resource.name,
+    alert.firedAt,
+    alert.firstSeen,
+    alert.ackedAt ?? '',
+    alert.ackedBy ?? '',
+    alert.clearedAt ?? '',
+  ];
+  return cells.map(csvCell).join(',');
+}
 
 /** 数字显示：整数无小数位，浮点保留最多 4 位有效（阈值/最新值通用）。 */
 function fmtNum(value: number): string {
@@ -193,6 +259,10 @@ export function AlertsPage() {
   const [clearTarget, setClearTarget] = useState<AlertItem | null>(null);
   const [clearBusy, setClearBusy] = useState(false);
 
+  // 立即检测（v0.10-R7）+ CSV 导出
+  const [runOpen, setRunOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   const toast = useToast();
 
   // 深链同步：?state= 变化时刷新筛选（非法值按默认 firing 处理）
@@ -243,6 +313,57 @@ export function AlertsPage() {
   function failToast(err: unknown): void {
     const display = formatApiErrorText(err);
     toast.show(format(ALR_ACTION_FAILED, { message: display }), 'error');
+  }
+
+  /** 导出当前筛选的全量告警（分页拉全后拼 CSV，含 BOM 便于 Excel 识别 UTF-8）。 */
+  function exportCsv(): void {
+    if (exporting) return;
+    if (data !== null && data.total === 0) {
+      toast.show(ALR_EXPORT_EMPTY, 'info');
+      return;
+    }
+    setExporting(true);
+    const filter = {
+      state: state === '' ? undefined : (state as AlertState),
+      severity: severity === '' ? undefined : (severity as Severity),
+    };
+    const collected: AlertItem[] = [];
+    let pageNow = 1;
+    const fetchPage = (): void => {
+      listAlerts({ ...filter, page: pageNow, pageSize: 200 })
+        .then((paged) => {
+          collected.push(...paged.items);
+          if (collected.length < paged.total && pageNow < 100) {
+            pageNow += 1;
+            fetchPage();
+            return;
+          }
+          setExporting(false);
+          if (collected.length === 0) {
+            toast.show(ALR_EXPORT_EMPTY, 'info');
+            return;
+          }
+          const lines = [CSV_COLUMNS.join(','), ...collected.map(alertCsvRow)];
+          const blob = new Blob([`\ufeff${lines.join('\r\n')}\r\n`], {
+            type: 'text/csv;charset=utf-8',
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${ALR_EXPORT_FILENAME}-${new Date().toISOString().slice(0, 10)}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          // 延迟撤销：立即 revoke 与浏览器抓取下载句柄存在竞态（大文件/慢设备上可能中断下载）
+          window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+          toast.show(format(ALR_EXPORT_TOAST, { n: collected.length }), 'success');
+        })
+        .catch((err: unknown) => {
+          setExporting(false);
+          toast.show(format(ALR_EXPORT_FAILED, { message: formatApiErrorText(err) }), 'error');
+        });
+    };
+    fetchPage();
   }
 
   function confirmAck(ackedBy: string): void {
@@ -400,6 +521,22 @@ export function AlertsPage() {
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          className="btn btn--secondary filter-push"
+          disabled={exporting}
+          onClick={exportCsv}
+          title={ALR_BTN_EXPORT}
+        >
+          {exporting ? ALR_EXPORT_WORKING : ALR_BTN_EXPORT}
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => setRunOpen(true)}
+        >
+          {RUN_BTN_LABEL}
+        </button>
       </div>
 
       <div className="muted-note table-hint">{ALR_HINT}</div>
@@ -484,6 +621,14 @@ export function AlertsPage() {
         onConfirm={confirmAck}
         onCancel={() => {
           if (!ackBusy) setAckTarget(null);
+        }}
+      />
+      <RunDetectionDialog
+        open={runOpen}
+        onClose={() => setRunOpen(false)}
+        onFinished={() => {
+          // 检测运行可能新建/清除了告警：立即刷新当前筛选
+          fetchAlerts();
         }}
       />
       <ConfirmDialog

@@ -80,6 +80,7 @@ import {
   RUL_METRIC_UNIT_HINT,
   RUL_METRIC_UNIT_NO_RANGE,
   RUL_CREATED_TOAST,
+  RUN_BTN_LABEL,
   RUL_RULE_CREATED_AT,
   RUL_RULE_META,
   RUL_RULE_META_ID,
@@ -99,6 +100,7 @@ import {
 } from '../i18n';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBlock } from '../components/ErrorBlock';
+import { RunDetectionDialog } from '../components/RunDetectionDialog';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
@@ -390,6 +392,9 @@ export function RulesPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
 
+  // 立即检测（改规则后的验证入口，v0.10-R7）
+  const [runOpen, setRunOpen] = useState(false);
+
   const requestSeqRef = useRef(0);
   const toast = useToast();
 
@@ -668,6 +673,13 @@ export function RulesPage() {
         </label>
         <button
           type="button"
+          className="btn btn--secondary"
+          onClick={() => setRunOpen(true)}
+        >
+          {RUN_BTN_LABEL}
+        </button>
+        <button
+          type="button"
           className="btn btn--primary filter-push"
           onClick={() => setCreateOpen(true)}
         >
@@ -748,6 +760,7 @@ export function RulesPage() {
           if (!dialogBusy) setEditTarget(null);
         }}
       />
+      <RunDetectionDialog open={runOpen} onClose={() => setRunOpen(false)} onFinished={() => undefined} />
       <ConfirmDialog
         open={deleteTarget !== null}
         title={RUL_DELETE_TITLE}

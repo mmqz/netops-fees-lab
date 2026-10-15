@@ -753,6 +753,41 @@ export const RUL_TOGGLED_OFF_TOAST = '规则已停用（{id}）';
 export const RUL_ACTION_FAILED = '操作失败：{message}';
 
 // ---------------------------------------------------------------------------
+// 立即检测（v0.10-R7，POST /api/detection/run 的 UI 入口，告警页/规则页共用）
+// ---------------------------------------------------------------------------
+
+export const RUN_BTN_LABEL = '立即检测';
+export const RUN_BTN_WORKING = '检测中…';
+export const RUN_CONFIRM_TITLE = '运行检测';
+export const RUN_CONFIRM_MESSAGE =
+  '对全库指标序列执行一次阈值检测扫描（评估所有启用规则）。运行完成后自动刷新告警列表。';
+export const RUN_RESULT_TITLE = '检测运行回执';
+export const RUN_FINDINGS = '发现越限 {n}';
+export const RUN_CREATED = '新建告警 {n}';
+export const RUN_CLEARED = '恢复清除 {n}';
+export const RUN_RUNSTATES = '写入运行状态 {n}';
+export const RUN_EVALUATED_AT = '数据截止 {at}';
+export const RUN_EVALUATED_NONE = '数据截止：本次窗口无数据';
+export const RUN_MUTATIONS_TITLE = '告警变更明细';
+export const RUN_MUTATIONS_EMPTY = '本次运行无告警变更（数据与规则未变时为预期行为）';
+export const RUN_ACTION_CREATED = '新建';
+export const RUN_ACTION_CLEARED = '清除';
+export const RUN_DONE = '完成';
+export const RUN_FAILED = '检测运行失败：{message}';
+export const RUN_TOAST_DONE = '检测完成：新建 {created} · 清除 {cleared}';
+
+// ---------------------------------------------------------------------------
+// 告警导出（v0.10-R7，/alerts 当前筛选 → CSV 下载）
+// ---------------------------------------------------------------------------
+
+export const ALR_BTN_EXPORT = '导出 CSV';
+export const ALR_EXPORT_WORKING = '导出中…';
+export const ALR_EXPORT_EMPTY = '当前筛选条件下没有告警，无法导出';
+export const ALR_EXPORT_FAILED = '导出失败：{message}';
+export const ALR_EXPORT_TOAST = '已导出 {n} 条告警';
+export const ALR_EXPORT_FILENAME = 'netops-alerts';
+
+// ---------------------------------------------------------------------------
 // 资源详情 · 性能指标页签（v0.9-R2）
 // ---------------------------------------------------------------------------
 
