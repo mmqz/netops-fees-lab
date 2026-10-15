@@ -16,6 +16,7 @@ import {
   BREADCRUMB_LABEL,
   BTN_BACK_HOME,
   NAV_ALERTS,
+  NAV_API,
   NAV_IMPORT,
   NAV_ISSUES,
   NAV_LAB_GROUP,
@@ -49,6 +50,7 @@ import { ResourcesPage } from './pages/Resources';
 import { IssuesPage } from './pages/Issues';
 import { AlertsPage } from './pages/Alerts';
 import { RulesPage } from './pages/Rules';
+import { ApiReferencePage } from './pages/ApiReference';
 import { ReportPage } from './pages/Report';
 import { LabWorkspacesPage } from './pages/LabWorkspaces';
 import { LabWorkspacePage } from './pages/LabWorkspace';
@@ -69,6 +71,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/alerts', label: NAV_ALERTS, icon: <IconAlert /> },
   { to: '/rules', label: NAV_RULES, icon: <IconPencil size={20} /> },
   { to: '/report', label: NAV_REPORT, icon: <IconReport /> },
+  { to: '/dev', label: NAV_API, icon: <IconDoc size={20} /> },
 ];
 
 function routeTitle(pathname: string): string {
@@ -89,6 +92,8 @@ function routeTitle(pathname: string): string {
       return NAV_RULES;
     case '/report':
       return NAV_REPORT;
+    case '/dev':
+      return NAV_API;
     default:
       return NOT_FOUND_TITLE;
   }
@@ -229,6 +234,7 @@ function AppShell() {
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/report" element={<ReportPage />} />
+            <Route path="/dev" element={<ApiReferencePage />} />
             <Route path="/lab" element={<LabWorkspacesPage />} />
             <Route path="/lab/:id" element={<LabWorkspacePage />} />
             <Route path="*" element={<NotFoundPage />} />

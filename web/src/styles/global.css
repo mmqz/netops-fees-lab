@@ -1349,6 +1349,89 @@ a.btn:hover {
   margin-bottom: 12px;
 }
 
+/* API 参考页（v0.10-R9）：方法徽章 + 分组目录 */
+.api-group {
+  margin-bottom: 20px;
+}
+
+.api-group-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-group-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 8px;
+  line-height: 18px;
+}
+
+.api-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.api-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.api-item:last-child {
+  border-bottom: none;
+}
+
+.api-method {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #fff;
+}
+
+.api-method--get {
+  background: #2e7d43;
+}
+
+.api-method--post {
+  background: #1f5fbf;
+}
+
+.api-method--patch {
+  background: #b07a1a;
+}
+
+.api-method--delete {
+  background: #c24141;
+}
+
+.api-path {
+  flex: none;
+  font-size: 12.5px;
+}
+
+.api-summary {
+  color: var(--muted);
+  min-width: 0;
+}
+
 .modal-title {
   font-size: 16px;
   font-weight: 600;

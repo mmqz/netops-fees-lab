@@ -22,6 +22,7 @@ import type {
   RunStateHistoryResponse,
   MetricKeyItem,
   MetricSeriesResult,
+  OpenApiSpec,
   ResourceMetricsResponse,
   TraverseDirection,
   TraverseDocument,
@@ -678,6 +679,11 @@ export function clearAlert(id: string): Promise<AlertClearResponse> {
   return requestJson<AlertClearResponse>(`/alerts/${encodeURIComponent(id)}/clear`, {
     method: 'POST',
   });
+}
+
+/** GET /api/openapi.json — 路由表投影的 OpenAPI 3 文档（发现性入口）。 */
+export function getOpenApiSpec(): Promise<OpenApiSpec> {
+  return requestJson<OpenApiSpec>('/openapi.json');
 }
 
 // ---------------------------------------------------------------------------

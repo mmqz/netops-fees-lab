@@ -1135,3 +1135,33 @@ export interface DetectionRunResponse {
   evaluatedAt: string;
   alerts: AlertMutationSummary[];
 }
+
+// ---------------------------------------------------------------------------
+// 23. OpenAPI 文档（GET /api/openapi.json，v0.10-R9）
+// ---------------------------------------------------------------------------
+
+/** OpenAPI 文档的单个操作（方法级）。 */
+export interface OpenApiOperation {
+  tags: string[];
+  summary: string;
+}
+
+/** OpenAPI 文档的单个路径（本 API 每路径恰一方法）。 */
+export interface OpenApiPathItem {
+  get?: OpenApiOperation;
+  post?: OpenApiOperation;
+  patch?: OpenApiOperation;
+  delete?: OpenApiOperation;
+}
+
+/** GET /api/openapi.json 响应（路由表的忠实投影）。 */
+export interface OpenApiSpec {
+  openapi: string;
+  info: {
+    title: string;
+    version: string;
+    description: string;
+  };
+  tags: Array<{ name: string }>;
+  paths: Record<string, OpenApiPathItem>;
+}

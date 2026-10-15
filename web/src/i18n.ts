@@ -788,6 +788,28 @@ export const ALR_EXPORT_TOAST = '已导出 {n} 条告警';
 export const ALR_EXPORT_FILENAME = 'netops-alerts';
 
 // ---------------------------------------------------------------------------
+// API 参考页（v0.10-R9，/dev，GET /api/openapi.json 的目录视图）
+// ---------------------------------------------------------------------------
+
+export const NAV_API = 'API 参考';
+export const API_REF_HINT =
+  '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
+export const API_REF_ENDPOINTS = '个端点';
+export const API_REF_TAG_GROUPS = '接口分组';
+export const API_REF_EMPTY = '暂无接口文档（/api/openapi.json 不可达）';
+export const API_TAG_LABELS: Record<string, string> = {
+  system: '系统',
+  imports: '导入与批次',
+  resources: '资源',
+  graph: '图查询',
+  metrics: '指标时序',
+  detection: '检测',
+  alerts: '告警',
+  governance: '治理',
+  lab: '仿真工作台',
+};
+
+// ---------------------------------------------------------------------------
 // 资源详情 · 性能指标页签（v0.9-R2）
 // ---------------------------------------------------------------------------
 
