@@ -87,10 +87,12 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdMCP(args[1:], stdout, stderr)
 	case "gc":
 		err = cmdGC(args[1:], stdout, stderr)
+	case "backup":
+		err = cmdBackup(args[1:], stdout, stderr)
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, templates, mcp, gc, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, templates, mcp, gc, backup, testdata", args[0]))
 		return exitUsage
 	}
 
