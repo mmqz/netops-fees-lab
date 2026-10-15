@@ -913,6 +913,22 @@ a.btn:hover {
   min-width: 240px;
 }
 
+/* 筛选栏右侧主操作（v0.10-R6 规则页新建按钮） */
+.filter-push {
+  margin-left: auto;
+}
+
+/* 表单内两列并排字段（v0.10-R6 规则对话框：比较器+阈值 / 窗口+级别） */
+.field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
 .search-box {
   position: relative;
   display: flex;
@@ -1289,6 +1305,13 @@ a.btn:hover {
   width: 100%;
   max-width: 440px;
   animation: pop-in 0.16s ease-out;
+}
+
+/* 表单型对话框（v0.10-R6 规则编辑）：多字段需要更宽版面 */
+.modal--form {
+  max-width: 560px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 .modal-title {

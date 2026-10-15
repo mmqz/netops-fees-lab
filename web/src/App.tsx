@@ -25,6 +25,7 @@ import {
   NAV_OVERVIEW,
   NAV_REPORT,
   NAV_RESOURCES,
+  NAV_RULES,
   NOT_FOUND_DESC,
   NOT_FOUND_TITLE,
 } from './i18n';
@@ -35,6 +36,7 @@ import {
   IconDoc,
   IconFlask,
   IconHome,
+  IconPencil,
   IconReport,
   IconTable,
   IconTopology,
@@ -46,6 +48,7 @@ import { ImportWizardPage } from './pages/ImportWizard';
 import { ResourcesPage } from './pages/Resources';
 import { IssuesPage } from './pages/Issues';
 import { AlertsPage } from './pages/Alerts';
+import { RulesPage } from './pages/Rules';
 import { ReportPage } from './pages/Report';
 import { LabWorkspacesPage } from './pages/LabWorkspaces';
 import { LabWorkspacePage } from './pages/LabWorkspace';
@@ -64,6 +67,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/resources', label: NAV_RESOURCES, icon: <IconTable /> },
   { to: '/issues', label: NAV_ISSUES, icon: <IconWarning /> },
   { to: '/alerts', label: NAV_ALERTS, icon: <IconAlert /> },
+  { to: '/rules', label: NAV_RULES, icon: <IconPencil size={20} /> },
   { to: '/report', label: NAV_REPORT, icon: <IconReport /> },
 ];
 
@@ -81,6 +85,8 @@ function routeTitle(pathname: string): string {
       return NAV_ISSUES;
     case '/alerts':
       return NAV_ALERTS;
+    case '/rules':
+      return NAV_RULES;
     case '/report':
       return NAV_REPORT;
     default:
@@ -221,6 +227,7 @@ function AppShell() {
             <Route path="/resources" element={<ResourcesPage />} />
             <Route path="/issues" element={<IssuesPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/rules" element={<RulesPage />} />
             <Route path="/report" element={<ReportPage />} />
             <Route path="/lab" element={<LabWorkspacesPage />} />
             <Route path="/lab/:id" element={<LabWorkspacePage />} />

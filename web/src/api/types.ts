@@ -1053,3 +1053,85 @@ export interface RunStateHistoryResponse {
   items: RunStateHistoryItem[];
   total: number;
 }
+
+// ---------------------------------------------------------------------------
+// 22. 检测规则 CRUD + 检测运行（v0.10-R6，GET/POST/PATCH/DELETE
+// /api/detection/rules + POST /api/detection/run）
+// ---------------------------------------------------------------------------
+
+/** GET /api/detection/rules 单条规则（含启停与阈值参数）。 */
+export interface DetectionRuleItem {
+  ruleId: string;
+  metricKey: string;
+  comparator: AlertComparator;
+  threshold: number;
+  window: number;
+  severity: Severity;
+  enabled: boolean;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /api/detection/rules 响应（rule_id 顺序，确定性）。 */
+export interface DetectionRulesListResponse {
+  items: DetectionRuleItem[];
+  total: number;
+}
+
+/** POST /api/detection/rules 请求体（ruleId 可选 = 后端自动生成 dr_<uuid>）。 */
+export interface DetectionRuleCreateRequest {
+  ruleId?: string;
+  metricKey: string;
+  comparator: AlertComparator;
+  threshold: number;
+  window?: number;
+  severity: Severity;
+  label?: string;
+  enabled?: boolean;
+}
+
+/**
+ * PATCH /api/detection/rules/{id} 请求体：仅可变字段（部分更新语义）。
+ * metricKey/ruleId 是身份字段不可改（后端 400）。
+ */
+export interface DetectionRulePatchRequest {
+  comparator?: AlertComparator;
+  threshold?: number;
+  window?: number;
+  severity?: Severity;
+  enabled?: boolean;
+  label?: string;
+}
+
+/** DELETE /api/detection/rules/{id} 响应（409 rule_has_alerts = 审计保护）。 */
+export interface DetectionRuleDeleteResponse {
+  ruleId: string;
+  deleted: boolean;
+}
+
+/** POST /api/detection/run 单条告警变更行（created | cleared）。 */
+export interface AlertMutationSummary {
+  alertId: string;
+  ruleId: string;
+  seriesId: string;
+  resourceId: string;
+  metricKey: string;
+  severity: Severity;
+  action: 'created' | 'cleared';
+  state: AlertState;
+  firstSeen: string;
+  firedAt: string;
+  clearedAt: string;
+  lastValue: number;
+}
+
+/** POST /api/detection/run 响应（一次全库扫描的运行回执）。 */
+export interface DetectionRunResponse {
+  findings: number;
+  alertsCreated: number;
+  alertsCleared: number;
+  runStatesWritten: number;
+  evaluatedAt: string;
+  alerts: AlertMutationSummary[];
+}

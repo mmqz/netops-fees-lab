@@ -694,6 +694,65 @@ export const ALR_RESOURCE_LINK_TITLE = '在资源浏览中查看';
 export const ALR_EMPTY = '当前筛选条件下没有告警';
 
 // ---------------------------------------------------------------------------
+// 检测规则管理页（v0.10-R6，/rules）
+// ---------------------------------------------------------------------------
+
+export const NAV_RULES = '检测规则';
+export const RUL_HINT =
+  '阈值规则的唯一权威来源：检测运行只评估启用中的规则；删除被告警引用的规则会被拒绝（告警是审计线索）。';
+export const RUL_EMPTY = '没有规则（首次访问时会播种默认规则集）';
+export const RUL_FILTER_ENABLED = '仅看启用中';
+export const RUL_FILTER_METRIC = '指标';
+export const RUL_COL_ENABLED = '状态';
+export const RUL_COL_SEVERITY = '级别';
+export const RUL_COL_LABEL = '规则标签';
+export const RUL_COL_METRIC = '指标';
+export const RUL_COL_CONDITION = '触发条件';
+export const RUL_COL_WINDOW = '窗口';
+export const RUL_COL_UPDATED = '更新时间';
+export const RUL_COL_ACTIONS = '操作';
+export const RUL_BTN_NEW = '新建规则';
+export const RUL_BTN_ENABLE = '启用';
+export const RUL_BTN_DISABLE = '停用';
+export const RUL_BTN_EDIT = '编辑';
+export const RUL_BTN_DELETE = '删除';
+export const RUL_BTN_SAVE = '保存';
+export const RUL_ENABLED_LABEL = '启用中';
+export const RUL_DISABLED_LABEL = '已停用';
+export const RUL_WINDOW_TEXT = '连续 {n} 点';
+export const RUL_RULE_META = '规则 ID {id} · 创建于 {at}';
+export const RUL_RULE_META_ID = '规则 ID';
+export const RUL_RULE_META_LABEL = '规则标签';
+export const RUL_RULE_CREATED_AT = '创建时间';
+export const RUL_RULE_UPDATED_AT = '更新时间';
+export const RUL_RULE_THRESHOLD_LINE = '完整条件';
+export const RUL_METRIC_UNIT_HINT = '单位：{unit} · 合法区间 {min} ~ {max}';
+export const RUL_METRIC_UNIT_NO_RANGE = '单位：{unit}';
+export const RUL_CREATE_TITLE = '新建检测规则';
+export const RUL_EDIT_TITLE = '编辑检测规则';
+export const RUL_EDIT_IDENTITY_HINT = '指标是规则的身份字段不可修改；换指标请新建规则并停用本条。';
+export const RUL_FIELD_METRIC = '指标（不可改）';
+export const RUL_FIELD_METRIC_NEW = '指标';
+export const RUL_FIELD_COMPARATOR = '比较器';
+export const RUL_FIELD_THRESHOLD = '阈值';
+export const RUL_FIELD_WINDOW = '窗口（连续越限点数）';
+export const RUL_FIELD_SEVERITY = '级别';
+export const RUL_FIELD_LABEL = '规则标签';
+export const RUL_FIELD_LABEL_PLACEHOLDER = '例如：光功率劣化告警';
+export const RUL_FIELD_ENABLED = '启用这条规则';
+export const RUL_THRESHOLD_INVALID = '阈值必须是有限数值';
+export const RUL_WINDOW_INVALID = '窗口必须是 1 ~ 365 的整数';
+export const RUL_METRIC_REQUIRED = '请选择指标';
+export const RUL_DELETE_TITLE = '删除检测规则';
+export const RUL_DELETE_MESSAGE = '将删除规则 {label}（{ruleId}）。已产生告警的规则无法删除，请改用停用。';
+export const RUL_CREATED_TOAST = '规则已创建（{id}）';
+export const RUL_UPDATED_TOAST = '规则已更新（{id}）';
+export const RUL_DELETED_TOAST = '规则已删除（{id}）';
+export const RUL_TOGGLED_ON_TOAST = '规则已启用（{id}）';
+export const RUL_TOGGLED_OFF_TOAST = '规则已停用（{id}）';
+export const RUL_ACTION_FAILED = '操作失败：{message}';
+
+// ---------------------------------------------------------------------------
 // 资源详情 · 性能指标页签（v0.9-R2）
 // ---------------------------------------------------------------------------
 

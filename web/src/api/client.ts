@@ -12,6 +12,12 @@ import type {
   AlertClearResponse,
   AlertItem,
   AlertsQuery,
+  DetectionRuleCreateRequest,
+  DetectionRuleDeleteResponse,
+  DetectionRuleItem,
+  DetectionRulePatchRequest,
+  DetectionRulesListResponse,
+  DetectionRunResponse,
   ImpactDocument,
   RunStateHistoryResponse,
   MetricKeyItem,
@@ -672,6 +678,49 @@ export function clearAlert(id: string): Promise<AlertClearResponse> {
   return requestJson<AlertClearResponse>(`/alerts/${encodeURIComponent(id)}/clear`, {
     method: 'POST',
   });
+}
+
+// ---------------------------------------------------------------------------
+// 检测规则管理（GET/POST/PATCH/DELETE /api/detection/rules，v0.10-R6）
+// ---------------------------------------------------------------------------
+
+/** GET /api/detection/rules — 全量规则（含禁用，rule_id 顺序，懒播种默认规则）。 */
+export function listDetectionRules(): Promise<DetectionRulesListResponse> {
+  return requestJson<DetectionRulesListResponse>('/detection/rules');
+}
+
+/** POST /api/detection/rules — 新建规则（201；重复 rule_id 409）。 */
+export function createDetectionRule(
+  req: DetectionRuleCreateRequest,
+): Promise<DetectionRuleItem> {
+  return postJson<DetectionRuleItem>('/detection/rules', req);
+}
+
+/** PATCH /api/detection/rules/{id} — 部分更新（metricKey 身份不可改，400）。 */
+export function patchDetectionRule(
+  id: string,
+  req: DetectionRulePatchRequest,
+): Promise<DetectionRuleItem> {
+  return requestJson<DetectionRuleItem>(`/detection/rules/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
+/** DELETE /api/detection/rules/{id} — 有告警的规则 409（审计保护）。 */
+export function deleteDetectionRule(id: string): Promise<DetectionRuleDeleteResponse> {
+  return requestJson<DetectionRuleDeleteResponse>(`/detection/rules/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** POST /api/detection/run — 一次全库扫描（from/to 可选 RFC3339 窗口）。 */
+export function runDetection(from?: string, to?: string): Promise<DetectionRunResponse> {
+  const body: Record<string, string> = {};
+  if (from !== undefined && from !== '') body.from = from;
+  if (to !== undefined && to !== '') body.to = to;
+  return postJson<DetectionRunResponse>('/detection/run', body);
 }
 
 // ---------------------------------------------------------------------------
