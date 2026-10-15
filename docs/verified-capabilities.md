@@ -88,7 +88,7 @@
 | 整库备份 CLI | `TestCLIBackup`：快照落盘（自动建目录）→ stdout {out, bytes} → **快照重新打开可读种子行**（可恢复性）→ 缺 --out exit 2 | Online Backup API 的运维面 |
 | 读路径索引（v22） | `TestMigrationV22HotPathIndexes`：**EXPLAIN QUERY PLAN 钉死** alerts 走 idx_alerts_state_fired、metrics 走 WITHOUT ROWID 主键（冗余索引被审计否决并反向钉死防复加） | 审计结论可执行化 |
 | 全量门禁 | `gofmt -l .` 空 · `go vet ./...` 0 · `go test ./... -count=1` **24 包全 ok** · `tsc -b` 0 错误 · `npm run build` ✓；历史回归复跑：r6 26/26 · r7 12/12 · r8 13/13 · r9 13/13 | 新增三脚本共 52 断言 |
-| CI 运行态（推送后补记） | （待推送后按惯例补记 run 号；v0.6.0-v0.10.0 一直为 Actions 配额 0 步模式，预期同型） | 以本地门禁为准 |
+| CI 运行态（推送后补记） | Actions run 38680386206（commit dd60f6b）：go/web/windows 三 job 均 **0 步 failure**——与 v0.6.0-v0.10.0 完全相同的 Actions 分钟配额耗尽模式（基础设施侧非代码侧）；本地门禁集与 CI 定义一致且全绿 | 同 v0.6.0~v0.10.0 惯例：以本地门禁为准 |
 
 ## v0.10.0（2026-10-15）运营闭环补全与 API 可发现性版
 
