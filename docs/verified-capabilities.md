@@ -86,6 +86,7 @@
 | OpenAPI 3 文档 | 单测三件（openapi 3.0.3 + version==health + 每操作有摘要 + 两次读取字节一致）+ **防漂移走查**（65 个文档端点用占位参数逐一探测活服务器，无一落入未注册 fallback）+ `scripts/r9_openapi_regression.sh` 13/13 | 路由表单源：注册与文档同一张表，结构性零漂移 |
 | /dev API 参考页 | 同上脚本 D3 组：9 分组 · 65 端点实时渲染、方法徽章四色、中文摘要列、console 零错误；/alerts 与 /rules 无退化抽检 | /api/openapi.json 的人类孪生 |
 | 全量门禁 | `gofmt -l .` 空 · `go vet ./...` 0 告警 · `go test ./... -count=1` **24 包全 ok**（新增 internal/notify；461 顶层测试）· `tsc -b` 0 错误 · `npm run build` ✓ | 443 → 461 |
+| CI 运行态（推送后补记） | Actions run 38674087819（commit 8916ec0）：go/web/windows 三 job 均 **0 步 failure**——与 v0.6.0-v0.9.0 完全相同的 Actions 分钟配额耗尽模式（job 3s 内终止、零步骤执行，基础设施侧非代码侧）；本地门禁集与 CI 定义一致且全绿 | 同 v0.6.0~v0.9.0 惯例：以本地门禁为准 |
 | 回归脚本工程教训 | （排障实录）bash 内置 `GROUPS` 变量撞名：赋值被吞、读取返回 gid 1001——脚本命名 `API_GROUPS`；`VAR=$(fn)` 在 set -e 下函数返回码杀脚本——`local x=$(...)` + 显式 `return 0` 惯例 | 教训写入脚本注释与 CHANGELOG |
 
 ## v0.9.0（2026-10-14）运营可见性与 AI 分析闭环版
