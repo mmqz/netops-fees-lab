@@ -250,6 +250,32 @@ button {
   padding: 2px 10px;
 }
 
+/* 访问令牌入口（v0.11-R13）：页脚弱化按钮，深色侧栏同色调。 */
+.sidebar-token-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  padding: 2px 10px;
+  border: 1px solid rgba(208, 217, 232, 0.2);
+  border-radius: 999px;
+  background: transparent;
+  color: #93a1b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.sidebar-token-btn:hover {
+  color: #d6e2f2;
+  border-color: rgba(208, 217, 232, 0.4);
+}
+
+.sidebar-token-badge {
+  font-size: 11px;
+  color: #4cc38a;
+}
+
 /* ------------------------------------------------------------------ 顶栏 */
 
 .topbar {

@@ -87,6 +87,11 @@ type Server struct {
 	// v0.10 behavior). Status() is nil-safe, so the health handler never
 	// branches on it either.
 	Schedule *detect.Scheduler
+	// AuthToken is the opt-in write gate (v0.11-R13): non-empty turns
+	// every mutating /api request (POST/PATCH/DELETE/PUT) into a
+	// Bearer-token check; reads, /api/health, /api/openapi.json and the
+	// SPA stay open. Empty = off (the v0.10 behavior).
+	AuthToken string
 }
 
 // New returns a Server wired from svc — the single composition root the
@@ -149,7 +154,7 @@ func (s *Server) Routes() http.Handler {
 	// Everything else: the embedded single-page application.
 	mux.Handle("/", webui.Handler())
 
-	return s.middleware(mux)
+	return s.middleware(s.authMiddleware(mux))
 }
 
 // middleware wraps the mux with panic recovery and request logging. All /api

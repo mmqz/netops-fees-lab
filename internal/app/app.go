@@ -61,6 +61,12 @@ type Config struct {
 	// patrol is strictly opt-in. The serve flag validates the 1s
 	// minimum; values below it are a usage error, not a silent clamp.
 	DetectInterval time.Duration
+	// AuthToken (v0.11-R13) is the opt-in write gate: non-empty requires
+	// Authorization: Bearer <token> on every mutating /api request.
+	// Reads / health / OpenAPI / the SPA stay open (the demo and AI
+	// analysis surface); the gate is where audit identity belongs.
+	// Empty = off.
+	AuthToken string
 }
 
 // defaults fills empty fields with the documented defaults.
@@ -168,6 +174,10 @@ func New(cfg Config) (*App, error) {
 	}
 	a.API = api.New(log, svc, cfg.DataDir)
 	a.API.Webhook = a.Webhook
+	// v0.11-R13: the write gate rides the same server instance — set
+	// BEFORE Routes() is ever called (the middleware reads it per
+	// request, so tests can also flip it on an existing server).
+	a.API.AuthToken = cfg.AuthToken
 	return a, nil
 }
 

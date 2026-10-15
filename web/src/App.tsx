@@ -6,12 +6,23 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { getHealth } from './api/client';
+import { getHealth, getStoredAuthToken, setStoredAuthToken } from './api/client';
+import { useModalA11y } from './hooks/useModalA11y';
 import { useSeq } from './hooks/useSeq';
 import {
   APP_NAME,
   APP_SUBTITLE,
   APP_VERSION,
+  AUTH_TOKEN_BADGE,
+  AUTH_TOKEN_BTN,
+  AUTH_TOKEN_CLEARED_TOAST,
+  AUTH_TOKEN_CLEAR,
+  AUTH_TOKEN_HINT,
+  AUTH_TOKEN_LABEL,
+  AUTH_TOKEN_PLACEHOLDER,
+  AUTH_TOKEN_SAVED_TOAST,
+  AUTH_TOKEN_SAVE,
+  AUTH_TOKEN_TITLE,
   BREADCRUMB_HOME,
   BREADCRUMB_LABEL,
   BTN_BACK_HOME,
@@ -30,7 +41,7 @@ import {
   NOT_FOUND_DESC,
   NOT_FOUND_TITLE,
 } from './i18n';
-import { ToastProvider } from './components/Toast';
+import { ToastProvider, useToast } from './components/Toast';
 import { EmptyState } from './components/EmptyState';
 import {
   IconAlert,
@@ -106,6 +117,8 @@ function Sidebar() {
   // 失败/超时/空值时静默回退本地常量 APP_VERSION；仅请求一次，不轮询。
   const [version, setVersion] = useState<string>(APP_VERSION);
   const healthGuard = useSeq();
+  // 访问令牌设置（v0.11-R13）：入口在侧栏页脚，状态本地自持。
+  const [tokenOpen, setTokenOpen] = useState(false);
 
   useEffect(() => {
     const isCurrent = healthGuard.begin();
@@ -169,9 +182,85 @@ function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-footer">
+        <button
+          type="button"
+          className="sidebar-token-btn"
+          onClick={() => setTokenOpen(true)}
+          title={AUTH_TOKEN_TITLE}
+        >
+          <span aria-hidden="true">●</span>
+          <span>{AUTH_TOKEN_BTN}</span>
+          {getStoredAuthToken() !== '' && <span className="sidebar-token-badge">{AUTH_TOKEN_BADGE}</span>}
+        </button>
         <span className="sidebar-version">{version}</span>
       </div>
+      {tokenOpen && <TokenDialog onClose={() => setTokenOpen(false)} />}
     </aside>
+  );
+}
+
+/** 访问令牌设置对话框（v0.11-R13）：保存/清除 localStorage 的 Bearer 令牌。 */
+function TokenDialog({ onClose }: { onClose: () => void }) {
+  const modalRef = useModalA11y(true);
+  const toast = useToast();
+  const [token, setToken] = useState(getStoredAuthToken());
+
+  function save(): void {
+    setStoredAuthToken(token.trim());
+    toast.show(AUTH_TOKEN_SAVED_TOAST, 'success');
+    onClose();
+  }
+  function clear(): void {
+    setStoredAuthToken('');
+    setToken('');
+    toast.show(AUTH_TOKEN_CLEARED_TOAST, 'info');
+    onClose();
+  }
+  return (
+    <div className="modal-root" role="presentation">
+      <div className="modal-overlay" aria-hidden="true" onClick={onClose} />
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={AUTH_TOKEN_TITLE}
+        tabIndex={-1}
+      >
+        <h3 className="modal-title">{AUTH_TOKEN_TITLE}</h3>
+        <div className="modal-message">{AUTH_TOKEN_HINT}</div>
+        <div className="field">
+          <label className="field-label" htmlFor="auth-token-input">
+            {AUTH_TOKEN_LABEL}
+          </label>
+          <input
+            id="auth-token-input"
+            className="input"
+            type="password"
+            value={token}
+            placeholder={AUTH_TOKEN_PLACEHOLDER}
+            autoFocus
+            onChange={(event) => setToken(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && token.trim() !== '') save();
+            }}
+          />
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            关闭
+          </button>
+          {token !== '' && (
+            <button type="button" className="btn btn--secondary" onClick={clear}>
+              {AUTH_TOKEN_CLEAR}
+            </button>
+          )}
+          <button type="button" className="btn btn--primary" disabled={token.trim() === ''} onClick={save}>
+            {AUTH_TOKEN_SAVE}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

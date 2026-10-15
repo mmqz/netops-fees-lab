@@ -200,7 +200,7 @@ async function parseApiError(res: Response): Promise<ApiError> {
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, init);
+    res = await fetch(`${BASE}${path}`, withAuthHeaders(init));
   } catch {
     throw new ApiError(0, 'network_error', ERR_NETWORK);
   }
@@ -217,7 +217,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 async function requestText(path: string, init?: RequestInit): Promise<string> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, init);
+    res = await fetch(`${BASE}${path}`, withAuthHeaders(init));
   } catch {
     throw new ApiError(0, 'network_error', ERR_NETWORK);
   }
@@ -225,6 +225,44 @@ async function requestText(path: string, init?: RequestInit): Promise<string> {
     throw await parseApiError(res);
   }
   return await res.text();
+}
+
+// ---------------------------------------------------------------------------
+// 访问令牌（v0.11-R13）：serve --auth-token 的写操作网关配套。
+// 令牌存 localStorage（浏览器本地，随每个请求以 Bearer 附着）；
+// 未设置时不发头——未启用网关的服务器不受影响。
+// ---------------------------------------------------------------------------
+
+const AUTH_STORAGE_KEY = 'netops_auth_token';
+
+/** 读取已保存的访问令牌（'' = 未设置）。 */
+export function getStoredAuthToken(): string {
+  try {
+    return window.localStorage.getItem(AUTH_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** 保存 / 清除访问令牌（'' = 清除）。 */
+export function setStoredAuthToken(token: string): void {
+  try {
+    if (token === '') window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    else window.localStorage.setItem(AUTH_STORAGE_KEY, token);
+  } catch {
+    /* localStorage 不可用（隐私模式等）：静默降级为不携带 */
+  }
+}
+
+/** 为请求注入 Authorization: Bearer（已存在 Authorization 头时不覆盖）；
+ *  multipart 上传（无 headers 的 init）同样附着。 */
+function withAuthHeaders(init?: RequestInit): RequestInit | undefined {
+  const token = getStoredAuthToken();
+  if (token === '') return init;
+  const headers = new Headers(init?.headers);
+  if (headers.get('Authorization') !== null) return init;
+  headers.set('Authorization', `Bearer ${token}`);
+  return { ...(init ?? {}), headers };
 }
 
 function buildQuery(params: Record<string, string | number | undefined>): string {
@@ -352,9 +390,9 @@ export function listBatchRows(
 export async function deleteBatch(batchId: string): Promise<RollbackResponse> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}/batches/${encodeURIComponent(batchId)}`, {
+    res = await fetch(`${BASE}/batches/${encodeURIComponent(batchId)}`, withAuthHeaders({
       method: 'DELETE',
-    });
+    }) ?? { method: 'DELETE' });
   } catch {
     throw new ApiError(0, 'network_error', ERR_NETWORK);
   }

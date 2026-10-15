@@ -845,6 +845,22 @@ export const RES_ALERTS_LINK = '去告警中心处置';
 export const RES_ALERTS_MORE = '仅显示最近 {n} 条（共 {total} 条），其余在告警中心查看';
 
 // ---------------------------------------------------------------------------
+// 访问令牌设置（v0.11-R13：serve --auth-token 写网关的浏览器侧配套）
+// ---------------------------------------------------------------------------
+
+export const AUTH_TOKEN_BTN = '访问令牌';
+export const AUTH_TOKEN_TITLE = '访问令牌';
+export const AUTH_TOKEN_HINT =
+  '服务器启用 --auth-token 时，写操作（确认、清除、导入、检测运行等）需要此令牌；只读浏览不受影响。令牌保存在本浏览器。';
+export const AUTH_TOKEN_LABEL = '令牌';
+export const AUTH_TOKEN_PLACEHOLDER = '粘贴 serve --auth-token 的值';
+export const AUTH_TOKEN_SAVE = '保存';
+export const AUTH_TOKEN_CLEAR = '清除';
+export const AUTH_TOKEN_SAVED_TOAST = '访问令牌已保存（本浏览器）';
+export const AUTH_TOKEN_CLEARED_TOAST = '访问令牌已清除';
+export const AUTH_TOKEN_BADGE = '已设置';
+
+// ---------------------------------------------------------------------------
 // 资源详情 · 影响分析页签（v0.9-R3，图查询 traverse/impact）
 // ---------------------------------------------------------------------------
 

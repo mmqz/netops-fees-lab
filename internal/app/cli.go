@@ -208,7 +208,7 @@ func openAppWithWebhook(dbPath, webhookURL string) (*App, error) {
 }
 
 // cmdServe implements `netopslab serve --addr --db --data-dir
-// [--webhook-url U] [--detect-interval D]`.
+// [--webhook-url U] [--detect-interval D] [--auth-token T]`.
 func cmdServe(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("serve")
 	addr := fs.String("addr", ":8080", "HTTP 监听地址")
@@ -216,6 +216,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	dataDir := fs.String("data-dir", "./data", "上传文件存储目录")
 	webhookURL := fs.String("webhook-url", "", "检测运行通知目标 URL（POST JSON 摘要；空 = 不通知，投递失败仅记日志不影响检测）")
 	detectInterval := fs.String("detect-interval", "", "定时巡检间隔（如 15m / 1h；每个间隔执行一次全库检测并落库回执、触发 webhook；空 = 仅显式触发，v0.10 行为；最小 1s）")
+	authToken := fs.String("auth-token", "", "写操作访问令牌（非空则所有 POST/PATCH/DELETE /api 请求需携带 Authorization: Bearer <token>；只读请求与健康检查不受影响；空 = 不启用）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -223,7 +224,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		return &usageError{msg: "serve 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
 	}
 
-	cfg := Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, WebhookURL: *webhookURL}
+	cfg := Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, WebhookURL: *webhookURL, AuthToken: *authToken}
 	if *detectInterval != "" {
 		d, err := time.ParseDuration(*detectInterval)
 		if err != nil {
