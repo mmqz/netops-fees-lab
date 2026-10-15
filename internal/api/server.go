@@ -36,6 +36,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
 	"github.com/mmqz/netops-lab/internal/metrics"
+	"github.com/mmqz/netops-lab/internal/notify"
 	"github.com/mmqz/netops-lab/internal/ptpconfig"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
@@ -77,6 +78,10 @@ type Server struct {
 	// CLI's `netopslab detect` uses — the composition root hands it to
 	// both, no bypass).
 	detect *detect.Engine
+	// Webhook is the outbound detection-run notifier (v0.10-R8): nil
+	// means the notification channel is off (no --webhook-url). The
+	// nil receiver is a no-op, so handlers never branch on it.
+	Webhook *notify.Webhook
 }
 
 // New returns a Server wired from svc — the single composition root the

@@ -196,12 +196,25 @@ func openApp(dbPath string) (*App, error) {
 	return a, nil
 }
 
-// cmdServe implements `netopslab serve --addr --db --data-dir`.
+// openAppWithWebhook opens the app with the detection-run notification
+// channel configured (v0.10-R8): an empty URL leaves the channel off
+// (notify.New returns the nil no-op).
+func openAppWithWebhook(dbPath, webhookURL string) (*App, error) {
+	a, err := New(Config{DBPath: dbPath, WebhookURL: webhookURL})
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// cmdServe implements `netopslab serve --addr --db --data-dir
+// [--webhook-url U]`.
 func cmdServe(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("serve")
 	addr := fs.String("addr", ":8080", "HTTP 监听地址")
 	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
 	dataDir := fs.String("data-dir", "./data", "上传文件存储目录")
+	webhookURL := fs.String("webhook-url", "", "检测运行通知目标 URL（POST JSON 摘要；空 = 不通知，投递失败仅记日志不影响检测）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -209,7 +222,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		return &usageError{msg: "serve 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
 	}
 
-	a, err := New(Config{Addr: *addr, DBPath: *db, DataDir: *dataDir})
+	a, err := New(Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, WebhookURL: *webhookURL})
 	if err != nil {
 		return err
 	}
@@ -693,6 +706,7 @@ func cmdDetect(args []string, stdout, stderr io.Writer) error {
 	from := fs.String("from", "", "评估窗口下界（RFC3339，可选）")
 	to := fs.String("to", "", "评估窗口上界（RFC3339，可选）")
 	rules := fs.Bool("rules", false, "只列出检测规则（不执行检测）")
+	webhookURL := fs.String("webhook-url", "", "检测运行通知目标 URL（POST JSON 摘要；空 = 不通知，投递失败仅记日志不影响检测）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -708,7 +722,7 @@ func cmdDetect(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	a, err := openApp(*db)
+	a, err := openAppWithWebhook(*db, *webhookURL)
 	if err != nil {
 		return err
 	}
@@ -748,6 +762,12 @@ func cmdDetect(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Notification side path (v0.10-R8): deliver synchronously so the
+	// delivery is attempted BEFORE the process exits (the CLI is the
+	// daily-inspection twin of the HTTP trigger). Best-effort: the
+	// notifier logs the failure itself; the run result is unaffected —
+	// the single-JSON-object stdout contract stays.
+	_ = a.Webhook.NotifyDetectionRun(ctx, res)
 	return writeJSON(stdout, res)
 }
 

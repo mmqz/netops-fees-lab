@@ -116,6 +116,10 @@ make build           # bin/netopslab
 # 6) 启动服务并打开界面
 ./bin/netopslab serve --addr :8080 --db ./data/netops.db
 #    浏览器打开 http://localhost:8080（仿真工作台入口：/lab）
+#    可选：检测运行通知——加 --webhook-url http://<接收端>，
+#    每次 POST /api/detection/run 或 `netopslab detect` 完成后向该 URL
+#    POST 一份 JSON 摘要（event=detection.run + 计数 + 告警变更明细，
+#    最多 50 行）。投递尽力而为：失败只记 warn 日志，绝不影响检测结果。
 ```
 
 说明：`make web` 会把 `web/` 构建到 `internal/webui/dist`（该目录不提交，仅保留 `.gitkeep` 占位）；`make build` 嵌入的是**当时 dist 里的内容**——先 `make web` 再 `make build` 才会得到带真实前端的二进制。`make all` = `web + build`。

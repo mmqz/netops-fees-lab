@@ -24,6 +24,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/metrics"
+	"github.com/mmqz/netops-lab/internal/notify"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
 	"github.com/mmqz/netops-lab/internal/repo"
@@ -46,6 +47,13 @@ type Config struct {
 	// workbooks to <DataDir>/uploads. Empty means the caller manages
 	// workbook paths itself (CLI analyze/import pass explicit --file paths).
 	DataDir string
+	// WebhookURL is the outbound detection-run notification target
+	// (v0.10-R8): after every completed detection run (HTTP POST
+	// /api/detection/run or CLI `netopslab detect`), a JSON summary is
+	// delivered to this URL. Empty means the channel is off. Delivery is
+	// best-effort: a failure is logged at warn level and never fails the
+	// run itself.
+	WebhookURL string
 }
 
 // defaults fills empty fields with the documented defaults.
@@ -94,6 +102,11 @@ type App struct {
 	// Detect is the alert detection engine (W23, migration v18 —
 	// ADR-0011 D2/D3): the same instance the HTTP API serves.
 	Detect *detect.Engine
+	// Webhook is the outbound detection-run notifier (v0.10-R8): nil
+	// when Config.WebhookURL is empty (channel off). Shared by the HTTP
+	// API (a.API.Webhook) and the CLI detect command — one notifier,
+	// both trigger channels.
+	Webhook *notify.Webhook
 	// API is the HTTP API server.
 	API *api.Server
 }
@@ -144,8 +157,10 @@ func New(cfg Config) (*App, error) {
 		Report:     svc.Report,
 		Metrics:    svc.Metrics,
 		Detect:     svc.Detect,
+		Webhook:    notify.New(cfg.WebhookURL, 0, log),
 	}
 	a.API = api.New(log, svc, cfg.DataDir)
+	a.API.Webhook = a.Webhook
 	return a, nil
 }
 

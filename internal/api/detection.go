@@ -9,6 +9,7 @@ package api
 // read-only tools (ADR-0011 D5): AI reads alerts via HTTP.
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"math"
@@ -308,6 +309,19 @@ func (s *Server) handleDetectionRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return
+	}
+	// Notification side path (v0.10-R8): the run summary is delivered to
+	// the configured webhook AFTER the 200 is computed, on a background
+	// context — the delivery never blocks the response and never fails
+	// the run (notify logs the failure at warn level itself). The nil
+	// receiver is a no-op (channel off).
+	if s.Webhook != nil {
+		resCopy := res
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = s.Webhook.NotifyDetectionRun(ctx, resCopy)
+		}()
 	}
 	respondJSON(w, http.StatusOK, res)
 }
