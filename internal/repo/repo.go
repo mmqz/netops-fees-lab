@@ -100,6 +100,10 @@ type DB struct {
 	DetectionRules *DetectionRuleRepo
 	Alerts         *AlertRepo
 
+	// Detection run history (migration v21, v0.11-R11): one receipt row
+	// per detection sweep — api / cli / scheduler all land here.
+	DetectionRuns *DetectionRunRepo
+
 	// Mapping templates (migration v19, W24 — §12-B7 方案 A): the confirmed
 	// per-sheet mapping store of the unattended import channel.
 	Templates *TemplateRepo
@@ -160,6 +164,7 @@ func wire(db *DB, q DBTX) {
 	db.ResourceStatus = &ResourceStatusRepo{q: q}
 	db.DetectionRules = &DetectionRuleRepo{q: q}
 	db.Alerts = &AlertRepo{q: q}
+	db.DetectionRuns = &DetectionRunRepo{q: q}
 	db.Templates = &TemplateRepo{q: q}
 }
 
@@ -208,6 +213,9 @@ type Tx struct {
 	// Alert detection model (migration v18, W23).
 	DetectionRules *DetectionRuleRepo
 	Alerts         *AlertRepo
+
+	// Detection run history (migration v21, v0.11-R11).
+	DetectionRuns *DetectionRunRepo
 
 	// Mapping templates (migration v19, W24).
 	Templates *TemplateRepo
@@ -298,6 +306,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		ResourceStatus:   &ResourceStatusRepo{q: sqlTx},
 		DetectionRules:   &DetectionRuleRepo{q: sqlTx},
 		Alerts:           &AlertRepo{q: sqlTx},
+		DetectionRuns:    &DetectionRunRepo{q: sqlTx},
 		Templates:        &TemplateRepo{q: sqlTx},
 	}
 	defer func() {

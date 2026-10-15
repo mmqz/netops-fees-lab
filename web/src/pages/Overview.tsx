@@ -5,15 +5,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import type { BatchListItem, GovernanceSummary, IssueCounts, Paged, StatsResponse } from '../api/types';
+import type {
+  AlertStats,
+  BatchListItem,
+  GovernanceSummary,
+  IssueCounts,
+  Paged,
+  StatsResponse,
+} from '../api/types';
 import {
   ApiError,
   deleteBatch,
   filledIssueCounts,
   formatApiError,
+  getAlertStats,
   getGovernanceSummary,
   getStats,
-  listAlerts,
   listBatches,
   runValidate,
 } from '../api/client';
@@ -61,8 +68,7 @@ import {
   OV_RECENT_BATCHES_MORE,
   OV_ROLLBACK_MESSAGE,
   OV_ROLLBACK_TITLE,
-  OV_ALERTS_NONE_SUB,
-  OV_ALERTS_SUB,
+  OV_ALERTS_SUB_V11,
   OV_STAT_FIRING_ALERTS,
   OV_STAT_LATEST_BATCH,
   OV_STAT_QUALITY_SCORE,
@@ -311,8 +317,8 @@ function OverviewBody() {
   const [govError, setGovError] = useState<string | null>(null);
   const [govErrorDetail, setGovErrorDetail] = useState<string | null>(null);
   const [data, setData] = useState<OverviewData | null>(null);
-  /** v0.9-R5：触发中告警计数（独立容错——取数失败显示 NO_VALUE，不阻塞页面）。 */
-  const [firingAlerts, setFiringAlerts] = useState<number | null>(null);
+  /** v0.11-R11：告警分布（独立容错——取数失败显示 NO_VALUE，不阻塞页面）。 */
+  const [alertStats, setAlertStats] = useState<AlertStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -370,10 +376,11 @@ function OverviewBody() {
     loadGov();
   }, [loadGov]);
 
-  // v0.9-R5：告警计数（pageSize=1 只取 total——列表本身在告警中心页）。
-  listAlerts({ state: 'firing', page: 1, pageSize: 1 })
-    .then((paged) => setFiringAlerts(paged.total))
-    .catch(() => setFiringAlerts(null));
+  // v0.11-R11：告警分布（stats 一次拿到三态计数 + 待处置级别矩阵，
+  // 取代 v0.9 的 listAlerts pageSize=1 探针——更少请求、更全信息）。
+  getAlertStats()
+    .then((stats) => setAlertStats(stats))
+    .catch(() => setAlertStats(null));
 
   function confirmRollback(): void {
     const target = rollbackTarget;
@@ -476,9 +483,19 @@ function OverviewBody() {
         <StatCard label={OV_STAT_QUALITY_SCORE} value={score ?? NO_VALUE} sub={OV_STAT_SCORE_FULL} />
         <StatCard
           label={OV_STAT_FIRING_ALERTS}
-          value={firingAlerts === null ? NO_VALUE : firingAlerts}
-          sub={firingAlerts === null ? undefined : firingAlerts > 0 ? OV_ALERTS_SUB : OV_ALERTS_NONE_SUB}
-          valueClass={firingAlerts !== null && firingAlerts > 0 ? 'stat-value--error' : undefined}
+          value={alertStats === null ? NO_VALUE : alertStats.byState.firing}
+          sub={
+            alertStats === null
+              ? undefined
+              : format(OV_ALERTS_SUB_V11, {
+                  error: alertStats.activeBySeverity.error,
+                  warning: alertStats.activeBySeverity.warning,
+                  acked: alertStats.byState.acked,
+                })
+          }
+          valueClass={
+            alertStats !== null && alertStats.byState.firing > 0 ? 'stat-value--error' : undefined
+          }
         />
         <StatCard
           label={OV_STAT_LATEST_BATCH}

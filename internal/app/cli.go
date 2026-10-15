@@ -208,13 +208,14 @@ func openAppWithWebhook(dbPath, webhookURL string) (*App, error) {
 }
 
 // cmdServe implements `netopslab serve --addr --db --data-dir
-// [--webhook-url U]`.
+// [--webhook-url U] [--detect-interval D]`.
 func cmdServe(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("serve")
 	addr := fs.String("addr", ":8080", "HTTP 监听地址")
 	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
 	dataDir := fs.String("data-dir", "./data", "上传文件存储目录")
 	webhookURL := fs.String("webhook-url", "", "检测运行通知目标 URL（POST JSON 摘要；空 = 不通知，投递失败仅记日志不影响检测）")
+	detectInterval := fs.String("detect-interval", "", "定时巡检间隔（如 15m / 1h；每个间隔执行一次全库检测并落库回执、触发 webhook；空 = 仅显式触发，v0.10 行为；最小 1s）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -222,7 +223,18 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		return &usageError{msg: "serve 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
 	}
 
-	a, err := New(Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, WebhookURL: *webhookURL})
+	cfg := Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, WebhookURL: *webhookURL}
+	if *detectInterval != "" {
+		d, err := time.ParseDuration(*detectInterval)
+		if err != nil {
+			return &usageError{msg: fmt.Sprintf("--detect-interval %q 不是 Go 时长（例 15m / 1h30m / 45s）：%v", *detectInterval, err), usage: usage.String()}
+		}
+		if d < time.Second {
+			return &usageError{msg: fmt.Sprintf("--detect-interval %s 低于最小 1s（更短间隔会连环触发全库扫描）", d), usage: usage.String()}
+		}
+		cfg.DetectInterval = d
+	}
+	a, err := New(cfg)
 	if err != nil {
 		return err
 	}
@@ -758,7 +770,7 @@ func cmdDetect(args []string, stdout, stderr io.Writer) error {
 		}{Items: items, Total: len(items)})
 	}
 
-	res, err := a.Detect.Detect(ctx, a.DB, detect.Options{From: *from, To: *to})
+	res, rec, err := detect.RunAndRecord(ctx, a.DB, a.Detect, detect.Options{From: *from, To: *to}, domain.RunSourceCLI, time.Now)
 	if err != nil {
 		return err
 	}
@@ -768,7 +780,34 @@ func cmdDetect(args []string, stdout, stderr io.Writer) error {
 	// notifier logs the failure itself; the run result is unaffected —
 	// the single-JSON-object stdout contract stays.
 	_ = a.Webhook.NotifyDetectionRun(ctx, res)
-	return writeJSON(stdout, res)
+	// The receipt block (runId/source/startedAt/…) rides along in the
+	// same single JSON object — the HTTP envelope's CLI twin, so a
+	// scripted `netopslab detect` and a POST /api/detection/run leave
+	// identically-shaped evidence.
+	return writeJSON(stdout, cliRunEnvelope{
+		RunResult:  res,
+		RunID:      rec.RunID,
+		Source:     rec.Source.String(),
+		StartedAt:  rec.StartedAt,
+		FinishedAt: rec.FinishedAt,
+		DurationMS: rec.DurationMS,
+		From:       rec.From,
+		To:         rec.To,
+	})
+}
+
+// cliRunEnvelope mirrors the HTTP POST /api/detection/run response shape
+// (api.detectionRunEnvelope): the full RunResult plus the persisted
+// receipt block. One JSON object on stdout, the CLI contract.
+type cliRunEnvelope struct {
+	detect.RunResult
+	RunID      string `json:"runId"`
+	Source     string `json:"source"`
+	StartedAt  string `json:"startedAt"`
+	FinishedAt string `json:"finishedAt"`
+	DurationMS int64  `json:"durationMs"`
+	From       string `json:"from"`
+	To         string `json:"to"`
 }
 
 // cmdExport implements `netopslab export --db <path> --out <file.xlsx>

@@ -865,6 +865,8 @@ export const RES_RUNSTATE_HISTORY_EMPTY = '暂无状态观测记录';
 export const OV_STAT_FIRING_ALERTS = '触发中告警';
 export const OV_ALERTS_SUB = '告警中心待处置队列';
 export const OV_ALERTS_NONE_SUB = '无触发中告警';
+/** v0.11-R11：告警卡副行——待处置级别矩阵 + 已确认数（stats 端点一次取齐）。 */
+export const OV_ALERTS_SUB_V11 = '待处置：错误 {error} · 警告 {warning} · 已确认 {acked}';
 export const BTN_VIEW_ALERTS = '告警中心';
 export const RUN_STATE_LABELS: Record<string, string> = {
   up: '运行',
@@ -1464,6 +1466,50 @@ export const LAB_CP_ERR_LABEL = '请输入检查点标签';
 export const LAB_CP_RESTORE_TITLE = '确认恢复检查点';
 export const LAB_CP_RESTORE_MESSAGE =
   '恢复将把工作台状态回退到该检查点（作为新变更集执行）。确定恢复「{label}」？';
+
+// ---------------------------------------------------------------------------
+// 检测运行历史与定时巡检（v0.11-R11：/alerts 巡检状态条 + 运行历史对话框）
+// ---------------------------------------------------------------------------
+
+/** 运行来源徽章文案（闭集）。 */
+export const RUN_SOURCE_LABELS: Record<'api' | 'cli' | 'scheduler', string> = {
+  api: '手动触发',
+  cli: '命令行',
+  scheduler: '定时调度',
+};
+
+export const PATROL_LAST_LABEL = '上次巡检';
+export const PATROL_LAST_NONE = '尚未巡检';
+export const PATROL_LAST_LINE =
+  '{source} · {time} · 耗时 {duration} · 新增 {created} / 清除 {cleared}';
+export const PATROL_LAST_FAILED = '失败';
+export const PATROL_NEXT_LABEL = '下次自动巡检';
+export const PATROL_NEXT_LINE = '{time}（每 {interval} 一轮）';
+export const PATROL_OFF = '未启用定时巡检（仅手动触发）';
+export const PATROL_BTN_HISTORY = '运行历史';
+export const PATROL_RUNS_TITLE = '检测运行历史';
+export const PATROL_RUNS_HINT =
+  '每次检测扫描（手动 / 命令行 / 定时调度）都会落库一条回执：来源、窗口、计数、耗时与失败原因。';
+export const PATROL_COL_SOURCE = '来源';
+export const PATROL_COL_STARTED = '开始时间';
+export const PATROL_COL_DURATION = '耗时';
+export const PATROL_COL_COUNTS = '发现 / 新增 / 清除';
+export const PATROL_COL_STATUS = '状态';
+export const PATROL_COL_WINDOW = '评估窗口';
+export const PATROL_COL_DATA_TS = '数据截止';
+export const PATROL_STATUS_OK = '成功';
+export const PATROL_STATUS_FAILED = '失败';
+export const PATROL_WINDOW_ALL = '全库';
+export const PATROL_WINDOW_RANGE = '{from} ~ {to}';
+export const PATROL_DURATION_TEXT = '{n} ms';
+export const PATROL_RUNS_EMPTY = '暂无检测运行记录';
+export const PATROL_RUNS_LOAD_FAILED = '运行历史加载失败';
+
+/** 巡检条 CSS：一行的信息密度（只用于 /alerts 顶部条）。 */
+export const PATROL_INTERVAL_SECONDS_TEXT = '{n} 秒';
+export const PATROL_INTERVAL_MINUTES_TEXT = '{n} 分钟';
+export const PATROL_INTERVAL_HOURS_TEXT = '{n} 小时';
+export const PATROL_INTERVAL_COMPOUND_TEXT = '{n} 秒';
 
 // ---------------------------------------------------------------------------
 // 格式化工具

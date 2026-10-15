@@ -12,6 +12,9 @@ import type {
   AlertClearResponse,
   AlertItem,
   AlertsQuery,
+  AlertStats,
+  DetectionRunItem,
+  DetectionRunsQuery,
   DetectionRuleCreateRequest,
   DetectionRuleDeleteResponse,
   DetectionRuleItem,
@@ -679,6 +682,19 @@ export function clearAlert(id: string): Promise<AlertClearResponse> {
   return requestJson<AlertClearResponse>(`/alerts/${encodeURIComponent(id)}/clear`, {
     method: 'POST',
   });
+}
+
+/** GET /api/alerts/stats — 告警分布（三态计数 + 待处置级别矩阵，闭集零填充）。 */
+export function getAlertStats(): Promise<AlertStats> {
+  return requestJson<AlertStats>('/alerts/stats');
+}
+
+/** GET /api/detection/runs — 检测运行历史（每次扫描的落库回执，最新在前）。 */
+export function listDetectionRuns(query: DetectionRunsQuery): Promise<Paged<DetectionRunItem>> {
+  const params = new URLSearchParams();
+  params.set('page', String(query.page));
+  params.set('pageSize', String(query.pageSize));
+  return requestJson<Paged<DetectionRunItem>>(`/detection/runs?${params.toString()}`);
 }
 
 /** GET /api/openapi.json — 路由表投影的 OpenAPI 3 文档（发现性入口）。 */

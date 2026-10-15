@@ -151,6 +151,9 @@ export interface HealthResponse {
   status: string;
   version: string;
   ruleVersion: string;
+  dbPath?: string;
+  /** v0.11-R11：定时巡检状态块（未启用时 enabled=false，键恒在）。 */
+  scheduler?: SchedulerStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -948,6 +951,53 @@ export interface AlertClearResponse {
   alertId: string;
   state: AlertState;
   clearedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// 18-B. 告警统计与检测运行历史（v0.11-R11）
+// ---------------------------------------------------------------------------
+
+/** 检测运行来源（闭集：api / cli / scheduler；MCP 只读红线永不在此）。 */
+export type DetectionRunSource = 'api' | 'cli' | 'scheduler';
+
+/** GET /api/detection/runs 行（每次扫描的落库回执）。 */
+export interface DetectionRunItem {
+  runId: string;
+  source: DetectionRunSource;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  from: string;
+  to: string;
+  evaluatedAt: string;
+  findings: number;
+  alertsCreated: number;
+  alertsCleared: number;
+  runStatesWritten: number;
+  error: string;
+}
+
+/** GET /api/detection/runs 查询参数。 */
+export interface DetectionRunsQuery {
+  page: number;
+  pageSize: number;
+}
+
+/** GET /api/alerts/stats 响应（闭集零填充：三态计数 + 待处置级别矩阵）。 */
+export interface AlertStats {
+  total: number;
+  byState: Record<AlertState, number>;
+  activeBySeverity: Record<Severity, number>;
+}
+
+/** GET /api/health 的 scheduler 块（nil 安全：未启用时全零/false）。 */
+export interface SchedulerStatus {
+  enabled: boolean;
+  intervalSeconds: number;
+  running: boolean;
+  rounds: number;
+  lastRunAt: string;
+  nextRunAt: string;
 }
 
 // ---------------------------------------------------------------------------

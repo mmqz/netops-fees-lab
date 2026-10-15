@@ -305,8 +305,11 @@ func (s *Server) handleDetectionRun(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.To = t.Format(time.RFC3339)
 	}
-	res, err := s.detect.Detect(r.Context(), s.db, opts)
+	res, rec, err := detect.RunAndRecord(r.Context(), s.db, s.detect, opts, domain.RunSourceAPI, time.Now)
 	if err != nil {
+		// RunAndRecord has already persisted the failed run's receipt
+		// (failure auditing is its job); the caller sees the original
+		// error through the normal error path.
 		s.respondErrorFor(w, r, err, "")
 		return
 	}
@@ -323,7 +326,136 @@ func (s *Server) handleDetectionRun(w http.ResponseWriter, r *http.Request) {
 			_ = s.Webhook.NotifyDetectionRun(ctx, resCopy)
 		}()
 	}
-	respondJSON(w, http.StatusOK, res)
+	respondJSON(w, http.StatusOK, detectionRunEnvelope{
+		RunResult:  res,
+		RunID:      rec.RunID,
+		Source:     rec.Source.String(),
+		StartedAt:  rec.StartedAt,
+		FinishedAt: rec.FinishedAt,
+		DurationMS: rec.DurationMS,
+		From:       rec.From,
+		To:         rec.To,
+	})
+}
+
+// detectionRunEnvelope is the POST /api/detection/run response (v0.11-R11):
+// the full RunResult (the v0.10 contract — findings/created/cleared/
+// runStatesWritten/evaluatedAt/alerts) plus the receipt block the run
+// history is built from (runId/source/startedAt/finishedAt/durationMs
+// and the window echo from/to — the SAME row GET /api/detection/runs
+// lists). Additive shape: v0.10 consumers keep working untouched.
+type detectionRunEnvelope struct {
+	detect.RunResult
+	RunID      string `json:"runId"`
+	Source     string `json:"source"`
+	StartedAt  string `json:"startedAt"`
+	FinishedAt string `json:"finishedAt"`
+	DurationMS int64  `json:"durationMs"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+}
+
+// detectionRunItem is one row of the GET /api/detection/runs listing.
+type detectionRunItem struct {
+	RunID            string `json:"runId"`
+	Source           string `json:"source"`
+	StartedAt        string `json:"startedAt"`
+	FinishedAt       string `json:"finishedAt"`
+	DurationMS       int64  `json:"durationMs"`
+	From             string `json:"from"`
+	To               string `json:"to"`
+	EvaluatedAt      string `json:"evaluatedAt"`
+	Findings         int    `json:"findings"`
+	AlertsCreated    int    `json:"alertsCreated"`
+	AlertsCleared    int    `json:"alertsCleared"`
+	RunStatesWritten int    `json:"runStatesWritten"`
+	Error            string `json:"error"`
+}
+
+// handleDetectionRunsList implements GET /api/detection/runs?page=&pageSize=
+// — the run history (v0.11-R11): every sweep's receipt, newest started
+// first, whatever the origin (api / cli / scheduler). The closed source
+// set is enforced upstream (domain parse + migration CHECK); the listing
+// itself applies no filter — the history's value IS the mixed timeline.
+// 200 {items, total, page, pageSize}.
+func (s *Server) handleDetectionRunsList(w http.ResponseWriter, r *http.Request) {
+	page, pageSize, ok := parsePagination(w, r)
+	if !ok {
+		return
+	}
+	runs, total, err := s.db.DetectionRuns.ListRuns(r.Context(), pageSize, (page-1)*pageSize)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	items := make([]detectionRunItem, 0, len(runs))
+	for _, run := range runs {
+		items = append(items, detectionRunItem{
+			RunID:            run.RunID,
+			Source:           run.Source.String(),
+			StartedAt:        run.StartedAt,
+			FinishedAt:       run.FinishedAt,
+			DurationMS:       run.DurationMS,
+			From:             run.From,
+			To:               run.To,
+			EvaluatedAt:      run.EvaluatedAt,
+			Findings:         run.Findings,
+			AlertsCreated:    run.AlertsCreated,
+			AlertsCleared:    run.AlertsCleared,
+			RunStatesWritten: run.RunStatesWritten,
+			Error:            run.Error,
+		})
+	}
+	respondJSON(w, http.StatusOK, struct {
+		Items    []detectionRunItem `json:"items"`
+		Total    int                `json:"total"`
+		Page     int                `json:"page"`
+		PageSize int                `json:"pageSize"`
+	}{Items: items, Total: total, Page: page, PageSize: pageSize})
+}
+
+// alertStatsResponse is the GET /api/alerts/stats contract: the dashboard
+// distribution view of the alert inventory. Closed shapes, zero-filled —
+// every key of every map is ALWAYS present (error/warning/info and
+// firing/acked/cleared), so a browser never branches on missing keys.
+type alertStatsResponse struct {
+	Total            int            `json:"total"`
+	ByState          map[string]int `json:"byState"`
+	ActiveBySeverity map[string]int `json:"activeBySeverity"`
+}
+
+// handleAlertsStats implements GET /api/alerts/stats — the state ×
+// severity distribution over ALL alerts (v0.11-R11): byState counts every
+// lifecycle state (firing/acked/cleared), activeBySeverity counts the
+// OPEN work (firing + acked) per severity (error/warning/info) — the
+// Overview card and the alerts page strip read this one call instead of
+// the pageSize=1 probing of v0.9. 200 with the zero-filled closed shape.
+func (s *Server) handleAlertsStats(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Alerts.AlertStats(r.Context())
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	resp := alertStatsResponse{
+		ByState: map[string]int{
+			domain.AlertStateFiring.String():  0,
+			domain.AlertStateAcked.String():   0,
+			domain.AlertStateCleared.String(): 0,
+		},
+		ActiveBySeverity: map[string]int{
+			domain.SeverityError.String():   0,
+			domain.SeverityWarning.String(): 0,
+			domain.SeverityInfo.String():    0,
+		},
+	}
+	for _, row := range rows {
+		resp.ByState[row.State.String()] += row.Count
+		resp.Total += row.Count
+		if row.State == domain.AlertStateFiring || row.State == domain.AlertStateAcked {
+			resp.ActiveBySeverity[row.Severity.String()] += row.Count
+		}
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // alertItem is one alert of the list / ack / clear responses: the alert

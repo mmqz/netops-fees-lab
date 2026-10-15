@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
@@ -32,16 +33,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			dbPath = abs
 		}
 	}
+	// The scheduler block (v0.11-R11) is ALWAYS present — the nil-safe
+	// Status() of an unset *detect.Scheduler reports the disabled
+	// snapshot, so a browser reads "scheduler.enabled=false" instead of
+	// branching on a missing key (the closed-shape discipline of the
+	// alert stats endpoint).
 	respondJSON(w, http.StatusOK, struct {
-		Status      string `json:"status"`
-		Version     string `json:"version"`
-		RuleVersion string `json:"ruleVersion"`
-		DBPath      string `json:"dbPath"`
+		Status      string                 `json:"status"`
+		Version     string                 `json:"version"`
+		RuleVersion string                 `json:"ruleVersion"`
+		DBPath      string                 `json:"dbPath"`
+		Scheduler   detect.SchedulerStatus `json:"scheduler"`
 	}{
 		Status:      "ok",
 		Version:     domain.AppVersion,
 		RuleVersion: domain.RuleVersion,
 		DBPath:      dbPath,
+		Scheduler:   s.Schedule.Status(),
 	})
 }
 

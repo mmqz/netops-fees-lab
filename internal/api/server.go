@@ -82,6 +82,11 @@ type Server struct {
 	// means the notification channel is off (no --webhook-url). The
 	// nil receiver is a no-op, so handlers never branch on it.
 	Webhook *notify.Webhook
+	// Schedule is the serve-mode detection interval scheduler (v0.11-R11):
+	// nil / unset means the patrol is off (explicit-trigger-only, the
+	// v0.10 behavior). Status() is nil-safe, so the health handler never
+	// branches on it either.
+	Schedule *detect.Scheduler
 }
 
 // New returns a Server wired from svc — the single composition root the

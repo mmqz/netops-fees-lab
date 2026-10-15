@@ -16,8 +16,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { AlertItem, AlertState, Paged, Severity } from '../api/types';
-import { ackAlert, clearAlert, formatApiError, formatApiErrorText, listAlerts } from '../api/client';
+import type {
+  AlertItem,
+  AlertState,
+  DetectionRunItem,
+  Paged,
+  SchedulerStatus,
+  Severity,
+} from '../api/types';
+import {
+  ackAlert,
+  clearAlert,
+  formatApiError,
+  formatApiErrorText,
+  getHealth,
+  listAlerts,
+  listDetectionRuns,
+} from '../api/client';
 import {
   ALERT_STATE_LABELS,
   ALR_ACTION_FAILED,
@@ -67,7 +82,32 @@ import {
   BTN_PROCESSING,
   FILTER_ALL,
   NAV_ALERTS,
+  PATROL_BTN_HISTORY,
+  PATROL_COL_COUNTS,
+  PATROL_COL_DATA_TS,
+  PATROL_COL_DURATION,
+  PATROL_COL_SOURCE,
+  PATROL_COL_STARTED,
+  PATROL_COL_STATUS,
+  PATROL_COL_WINDOW,
+  PATROL_DURATION_TEXT,
+  PATROL_LAST_FAILED,
+  PATROL_LAST_LABEL,
+  PATROL_LAST_LINE,
+  PATROL_LAST_NONE,
+  PATROL_NEXT_LABEL,
+  PATROL_NEXT_LINE,
+  PATROL_OFF,
+  PATROL_RUNS_EMPTY,
+  PATROL_RUNS_HINT,
+  PATROL_RUNS_LOAD_FAILED,
+  PATROL_RUNS_TITLE,
+  PATROL_STATUS_FAILED,
+  PATROL_STATUS_OK,
+  PATROL_WINDOW_ALL,
+  PATROL_WINDOW_RANGE,
   RUN_BTN_LABEL,
+  RUN_SOURCE_LABELS,
   SEVERITY_LABELS,
   format,
   formatDateTime,
@@ -236,6 +276,157 @@ function AckDialog({
   );
 }
 
+/** 巡检调度间隔的人话表达（health.intervalSeconds → 「x 小时 / x 分钟 / x 秒」）。 */
+function patrolIntervalText(seconds: number): string {
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600} 小时`;
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} 分钟`;
+  return `${seconds} 秒`;
+}
+
+/** 评估窗口列文案：空窗口=全库，否则「from ~ to」（缩到日期）。 */
+function patrolWindowText(run: DetectionRunItem): string {
+  if (run.from === '' && run.to === '') return PATROL_WINDOW_ALL;
+  const from = run.from === '' ? '…' : formatDateTime(run.from);
+  const to = run.to === '' ? '…' : formatDateTime(run.to);
+  return format(PATROL_WINDOW_RANGE, { from, to });
+}
+
+/**
+ * 检测运行历史对话框（v0.11-R11）：每次扫描的落库回执列表。
+ * 来源徽章 / 开始时间 / 耗时 / 三计数 / 成功失败 / 窗口 / 数据截止；
+ * 分页拉取（PATROL 页大小 20），关闭即卸载（父组件条件渲染）。
+ */
+function RunHistoryDialog({ onClose }: { onClose: () => void }) {
+  const modalRef = useModalA11y(true);
+  const [data, setData] = useState<Paged<DetectionRunItem> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const seqRef = useRef(0);
+
+  const fetchRuns = useCallback((): void => {
+    const seq = ++seqRef.current;
+    setLoading(true);
+    setError(null);
+    setErrorDetail(null);
+    listDetectionRuns({ page, pageSize: 20 })
+      .then((paged) => {
+        if (seqRef.current !== seq) return;
+        setData(paged);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (seqRef.current !== seq) return;
+        const display = formatApiError(err);
+        setError(PATROL_RUNS_LOAD_FAILED);
+        setErrorDetail(display.detail);
+        setLoading(false);
+      });
+  }, [page]);
+
+  useEffect(() => {
+    fetchRuns();
+  }, [fetchRuns]);
+
+  const columns: TableColumn<DetectionRunItem>[] = useMemo(
+    () => [
+      {
+        key: 'source',
+        header: PATROL_COL_SOURCE,
+        render: (run) => <span className="chip chip--muted">{RUN_SOURCE_LABELS[run.source]}</span>,
+      },
+      {
+        key: 'startedAt',
+        header: PATROL_COL_STARTED,
+        render: (run) => (
+          <span title={formatDateTime(run.startedAt)}>{formatRelativeTime(run.startedAt)}</span>
+        ),
+      },
+      {
+        key: 'duration',
+        header: PATROL_COL_DURATION,
+        render: (run) => <span className="mono">{format(PATROL_DURATION_TEXT, { n: run.durationMs })}</span>,
+      },
+      {
+        key: 'counts',
+        header: PATROL_COL_COUNTS,
+        render: (run) => (
+          <span className="mono">
+            {run.findings} / {run.alertsCreated} / {run.alertsCleared}
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        header: PATROL_COL_STATUS,
+        render: (run) =>
+          run.error === '' ? (
+            <span className="patrol-status patrol-status--ok">{PATROL_STATUS_OK}</span>
+          ) : (
+            <span className="patrol-status patrol-status--failed" title={run.error}>
+              {PATROL_STATUS_FAILED}
+            </span>
+          ),
+      },
+      {
+        key: 'window',
+        header: PATROL_COL_WINDOW,
+        render: (run) => <span className="muted-note">{patrolWindowText(run)}</span>,
+      },
+      {
+        key: 'evaluatedAt',
+        header: PATROL_COL_DATA_TS,
+        render: (run) => (
+          <span className="muted-note">{run.evaluatedAt === '' ? '—' : formatDateTime(run.evaluatedAt)}</span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <div className="modal-root" role="presentation">
+      <div className="modal-overlay" aria-hidden="true" onClick={onClose} />
+      <div
+        ref={modalRef}
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label={PATROL_RUNS_TITLE}
+        tabIndex={-1}
+      >
+        <h3 className="modal-title">{PATROL_RUNS_TITLE}</h3>
+        <div className="muted-note" style={{ marginBottom: 8 }}>
+          {PATROL_RUNS_HINT}
+        </div>
+        {error !== null ? (
+          <ErrorBlock message={error} detail={errorDetail} onRetry={fetchRuns} />
+        ) : (
+          <>
+            <Table
+              columns={columns}
+              rows={data?.items ?? []}
+              rowKey={(run) => run.runId}
+              loading={loading}
+              emptyText={PATROL_RUNS_EMPTY}
+              ariaLabel={PATROL_RUNS_TITLE}
+            />
+            {data !== null && data.total > 20 && (
+              <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />
+            )}
+          </>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            {BTN_CANCEL}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AlertsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlState = searchParams.get('state') ?? '';
@@ -262,6 +453,12 @@ export function AlertsPage() {
   // 立即检测（v0.10-R7）+ CSV 导出
   const [runOpen, setRunOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // 巡检状态条（v0.11-R11）：最近一次回执 + 调度器状态
+  const [lastRun, setLastRun] = useState<DetectionRunItem | null>(null);
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const patrolSeqRef = useRef(0);
 
   const toast = useToast();
 
@@ -301,6 +498,26 @@ export function AlertsPage() {
   useEffect(() => {
     fetchAlerts();
   }, [fetchAlerts]);
+
+  // 巡检条：拉最近一次回执（pageSize=1）+ health 的调度器块。
+  // 失败静默降级（条本身是辅助信息，不与主表争错误面）；
+  // 检测运行完成后会主动重拉（onFinished 钩子）。
+  const fetchPatrol = useCallback((): void => {
+    const seq = ++patrolSeqRef.current;
+    Promise.all([
+      listDetectionRuns({ page: 1, pageSize: 1 }).catch(() => null),
+      getHealth().catch(() => null),
+    ]).then((results) => {
+      if (patrolSeqRef.current !== seq) return;
+      const runs = results[0];
+      setLastRun(runs === null || runs.items.length === 0 ? null : runs.items[0]);
+      setScheduler(results[1]?.scheduler ?? null);
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchPatrol();
+  }, [fetchPatrol]);
 
   function changeState(value: string): void {
     setState(value === '' ? '' : (value as AlertState));
@@ -539,6 +756,61 @@ export function AlertsPage() {
         </button>
       </div>
 
+      {/* 巡检状态条（v0.11-R11）：上次回执 + 下次调度；右侧运行历史入口 */}
+      <div className="patrol-bar">
+        <span className="patrol-bar__label">{PATROL_LAST_LABEL}</span>
+        <span className="patrol-bar__main">
+          {lastRun === null ? (
+            <span className="muted-note">{PATROL_LAST_NONE}</span>
+          ) : lastRun.error !== '' ? (
+            <span className="patrol-bar__value--failed" title={lastRun.error}>
+              {format(PATROL_LAST_LINE, {
+                source: RUN_SOURCE_LABELS[lastRun.source],
+                time: formatRelativeTime(lastRun.startedAt),
+                duration: format(PATROL_DURATION_TEXT, { n: lastRun.durationMs }),
+                created: PATROL_LAST_FAILED,
+                cleared: '—',
+              })}
+            </span>
+          ) : (
+            <span
+              className="patrol-bar__value"
+              title={`${formatDateTime(lastRun.startedAt)} · runId ${lastRun.runId}`}
+            >
+              {format(PATROL_LAST_LINE, {
+                source: RUN_SOURCE_LABELS[lastRun.source],
+                time: formatRelativeTime(lastRun.startedAt),
+                duration: format(PATROL_DURATION_TEXT, { n: lastRun.durationMs }),
+                created: lastRun.alertsCreated,
+                cleared: lastRun.alertsCleared,
+              })}
+            </span>
+          )}
+        </span>
+        <span className="patrol-bar__push" />
+        <span className="patrol-bar__next">
+          {scheduler !== null && scheduler.enabled && scheduler.nextRunAt !== '' ? (
+            <span title={PATROL_NEXT_LABEL}>
+              {PATROL_NEXT_LABEL}：
+              {format(PATROL_NEXT_LINE, {
+                time: formatRelativeTime(scheduler.nextRunAt),
+                interval: patrolIntervalText(scheduler.intervalSeconds),
+              })}
+            </span>
+          ) : (
+            <span>{PATROL_OFF}</span>
+          )}
+          <button
+            type="button"
+            className="btn btn--small"
+            onClick={() => setHistoryOpen(true)}
+            title={PATROL_RUNS_TITLE}
+          >
+            {PATROL_BTN_HISTORY}
+          </button>
+        </span>
+      </div>
+
       <div className="muted-note table-hint">{ALR_HINT}</div>
 
       {error !== null ? (
@@ -627,10 +899,12 @@ export function AlertsPage() {
         open={runOpen}
         onClose={() => setRunOpen(false)}
         onFinished={() => {
-          // 检测运行可能新建/清除了告警：立即刷新当前筛选
+          // 检测运行可能新建/清除了告警：立即刷新当前筛选 + 巡检条
           fetchAlerts();
+          fetchPatrol();
         }}
       />
+      {historyOpen && <RunHistoryDialog onClose={() => setHistoryOpen(false)} />}
       <ConfirmDialog
         open={clearTarget !== null}
         title={ALR_CLEAR_TITLE}

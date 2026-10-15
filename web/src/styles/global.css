@@ -561,6 +561,70 @@ th[aria-sort="descending"] .th-sort-indicator {
   font-size: 12px;
 }
 
+/* 巡检状态条（v0.11-R11）：/alerts 顶部一行——上次巡检回执 + 下次调度时刻，
+   信息密度为一行，弱色为主、失败态用 --error。 */
+.patrol-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.patrol-bar__label {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.patrol-bar__main {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.patrol-bar__value {
+  color: var(--text);
+}
+
+.patrol-bar__value--failed {
+  color: var(--error);
+}
+
+.patrol-bar__push {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.patrol-bar__next {
+  color: var(--muted);
+  text-align: right;
+}
+
+/* 运行历史对话框内的状态对（成功/失败），窄徽章样式 */
+.patrol-status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.patrol-status--ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+
+.patrol-status--failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--error);
+}
+
 .cell-strong {
   font-weight: 600;
   color: var(--text);
@@ -805,6 +869,14 @@ a.btn:hover {
 .btn--danger {
   background: var(--error);
   color: #fff;
+}
+
+/* 小号按钮（v0.11-R11）：巡检条等内联工具入口——行内信息密度场景。 */
+.btn--small {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  gap: 4px;
 }
 
 .btn--danger:not(:disabled):hover {

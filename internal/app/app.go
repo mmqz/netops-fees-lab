@@ -54,6 +54,13 @@ type Config struct {
 	// best-effort: a failure is logged at warn level and never fails the
 	// run itself.
 	WebhookURL string
+	// DetectInterval (v0.11-R11) is the serve-mode scheduled inspection
+	// interval: every tick fires ONE recorded detection sweep (source =
+	// scheduler) and, when WebhookURL is set, the notification. Zero (the
+	// default) keeps the v0.10 explicit-trigger-only behavior — the
+	// patrol is strictly opt-in. The serve flag validates the 1s
+	// minimum; values below it are a usage error, not a silent clamp.
+	DetectInterval time.Duration
 }
 
 // defaults fills empty fields with the documented defaults.
@@ -178,13 +185,34 @@ func (a *App) Close() error {
 	return nil
 }
 
-// Run starts the HTTP server and blocks until SIGINT/SIGTERM arrives (or
-// ctx is cancelled), then shuts down gracefully within 5 seconds.
+// Run starts the HTTP server (and, when Config.DetectInterval > 0, the
+// scheduled-inspection patrol) and blocks until SIGINT/SIGTERM arrives (or
+// ctx is cancelled), then shuts down gracefully within 5 seconds — one
+// signal stops both the listener and the scheduler.
 func (a *App) Run(ctx context.Context) error {
 	srv := &http.Server{
 		Addr:              a.Config.Addr,
 		Handler:           a.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// The signal context is registered BEFORE the listener so the
+	// scheduler (v0.11-R11) can share the SAME cancellation: one Ctrl-C
+	// stops the patrol mid-wait, and a round in flight keeps its ctx.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if a.Config.DetectInterval > 0 {
+		// The patrol reuses the composition root's engine + webhook
+		// method value (no second notifier, no second engine); Run
+		// blocks until ctx.Done, so it lives in its own goroutine.
+		var notifyFn detect.NotifyFunc
+		if a.Webhook != nil {
+			notifyFn = a.Webhook.NotifyDetectionRun
+		}
+		sched := detect.NewScheduler(a.Config.DetectInterval, a.DB, a.Detect, notifyFn, a.Log)
+		a.API.Schedule = sched
+		go sched.Run(ctx)
 	}
 
 	errCh := make(chan error, 1)
@@ -204,9 +232,6 @@ func (a *App) Run(ctx context.Context) error {
 		}
 		errCh <- nil
 	}()
-
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	select {
 	case err := <-errCh:

@@ -68,9 +68,11 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/detection/rules", Tag: "detection", Summary: "新建检测规则（封闭目录校验，ruleId 可自动生成）", Handler: s.handleDetectionRulesCreate},
 		{Method: "PATCH", Pattern: "/api/detection/rules/{id}", Tag: "detection", Summary: "部分更新规则（metricKey 身份不可改）", Handler: s.handleDetectionRulesPatch},
 		{Method: "DELETE", Pattern: "/api/detection/rules/{id}", Tag: "detection", Summary: "删除规则（被告警引用时 409 审计保护）", Handler: s.handleDetectionRulesDelete},
-		{Method: "POST", Pattern: "/api/detection/run", Tag: "detection", Summary: "执行一次全库检测扫描（可选 from/to 窗口；完成后触发 webhook 通知）", Handler: s.handleDetectionRun},
+		{Method: "POST", Pattern: "/api/detection/run", Tag: "detection", Summary: "执行一次全库检测扫描（可选 from/to 窗口；回执落库，完成后触发 webhook 通知）", Handler: s.handleDetectionRun},
+		{Method: "GET", Pattern: "/api/detection/runs", Tag: "detection", Summary: "检测运行历史分页（每双回执：来源 api/cli/scheduler、窗口、计数、时长、失败原因）", Handler: s.handleDetectionRunsList},
 
 		{Method: "GET", Pattern: "/api/alerts", Tag: "alerts", Summary: "告警分页列表（state/severity/resource 过滤）", Handler: s.handleAlertsList},
+		{Method: "GET", Pattern: "/api/alerts/stats", Tag: "alerts", Summary: "告警分布统计（byState 三态计数 + 待处置级别矩阵，闭集零填充）", Handler: s.handleAlertsStats},
 		{Method: "POST", Pattern: "/api/alerts/{id}/ack", Tag: "alerts", Summary: "确认告警（firing→acked，ackedBy 必填审计字段）", Handler: s.handleAlertAck},
 		{Method: "POST", Pattern: "/api/alerts/{id}/clear", Tag: "alerts", Summary: "清除告警（firing|acked→cleared，记录保留审计）", Handler: s.handleAlertClear},
 
