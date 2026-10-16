@@ -155,19 +155,23 @@ type Options struct {
 // NO alert row, so State is "" and AlertID carries the DETERMINISTIC
 // would-be id (same identity the fire gets after the window ends when the
 // violation run extends back across the boundary — correlatable).
+// v0.12-R16: created lines carry the correlation verdict computed by this
+// run ("" on cleared/suppressed lines — their verdicts belong to the
+// rows, not this run's mutations).
 type AlertSummary struct {
-	AlertID    string  `json:"alertId"`
-	RuleID     string  `json:"ruleId"`
-	SeriesID   string  `json:"seriesId"`
-	ResourceID string  `json:"resourceId"`
-	MetricKey  string  `json:"metricKey"`
-	Severity   string  `json:"severity"`
-	Action     string  `json:"action"` // created | cleared | suppressed
-	State      string  `json:"state"`  // the state AFTER the run ("" for suppressed lines)
-	FirstSeen  string  `json:"firstSeen"`
-	FiredAt    string  `json:"firedAt"`
-	ClearedAt  string  `json:"clearedAt"`
-	LastValue  float64 `json:"lastValue"`
+	AlertID         string  `json:"alertId"`
+	RuleID          string  `json:"ruleId"`
+	SeriesID        string  `json:"seriesId"`
+	ResourceID      string  `json:"resourceId"`
+	MetricKey       string  `json:"metricKey"`
+	Severity        string  `json:"severity"`
+	Action          string  `json:"action"`                    // created | cleared | suppressed
+	State           string  `json:"state"`                     // the state AFTER the run ("" for suppressed lines)
+	CorrelationRole string  `json:"correlationRole,omitempty"` // 根因/次生 verdict of created lines (v0.12-R16)
+	FirstSeen       string  `json:"firstSeen"`
+	FiredAt         string  `json:"firedAt"`
+	ClearedAt       string  `json:"clearedAt"`
+	LastValue       float64 `json:"lastValue"`
 }
 
 // RunResult is the response envelope of POST /api/detection/run and the
@@ -388,6 +392,21 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 			return err
 		}
 		res.RunStatesWritten = runStates
+
+		// --- correlation pass (v0.12-R16, migration v25) ---
+		// The 根因/次生 verdicts of the post-sync active alert set,
+		// persisted on the rows and annotated onto this run's created
+		// lines. Observation state, not lifecycle: the three-edge
+		// machine is untouched (see correlation.go).
+		roles, err := correlateAlerts(ctx, tx)
+		if err != nil {
+			return err
+		}
+		for i := range summaries {
+			if summaries[i].Action == "created" {
+				summaries[i].CorrelationRole = string(roles[summaries[i].AlertID])
+			}
+		}
 
 		// Deterministic order of the summary: (ruleId, seriesId, alertId).
 		sort.Slice(summaries, func(i, j int) bool {

@@ -281,6 +281,7 @@ type alertsQueryInput struct {
 	State      string `json:"state,omitempty" jsonschema:"状态过滤：firing（触发中，默认）/ acked（已确认）/ cleared（已清除）"`
 	Severity   string `json:"severity,omitempty" jsonschema:"级别过滤（按规则的级别）：error / warning / info"`
 	ResourceID string `json:"resourceId,omitempty" jsonschema:"只看指定资源的告警（uuid，可选）"`
+	Role       string `json:"role,omitempty" jsonschema:"关联角色过滤：primary（根因嫌疑）/ secondary（疑似次生）——只看根因或只看症状的分诊入口"`
 	Limit      *int   `json:"limit,omitempty" jsonschema:"返回条数上限，缺省 20，最大 100"`
 	Offset     *int   `json:"offset,omitempty" jsonschema:"分页偏移，缺省 0"`
 }
@@ -288,6 +289,8 @@ type alertsQueryInput struct {
 // alertItem mirrors the HTTP GET /api/alerts projection (the §18 wire
 // contract): the alert + joined rule fields + the series → resource
 // projection (the AI reasons over the resource, not the bare series id).
+// v0.12-R16: the correlation verdict + cause link — the AI triage reads
+// 根因/次生 directly instead of re-deriving it via graph_impact.
 type alertItem struct {
 	AlertID    string  `json:"alertId"`
 	RuleID     string  `json:"ruleId"`
@@ -305,7 +308,11 @@ type alertItem struct {
 	AckedAt    string  `json:"ackedAt"`
 	AckedBy    string  `json:"ackedBy"`
 	LastValue  float64 `json:"lastValue"`
-	Resource   struct {
+	// 根因/次生关联裁定（v0.12-R16）："" 未标记 | primary 根因嫌疑 | secondary 疑似次生（带最近告警根因链接）。
+	CorrelationRole      string `json:"correlationRole"`
+	CorrelatedAlertID    string `json:"correlatedAlertId"`    // secondary only
+	CorrelatedResourceID string `json:"correlatedResourceId"` // secondary only
+	Resource             struct {
 		ID         string `json:"id"`
 		Type       string `json:"type"`
 		NaturalKey string `json:"naturalKey"`
@@ -332,6 +339,11 @@ func alertsQuery(ctx context.Context, svc *services.Services, in alertsQueryInpu
 	if in.Severity != "" {
 		if _, err := domain.ParseSeverity(in.Severity); err != nil {
 			return nil, alertsQueryOutput{}, fmt.Errorf("severity 必须是 error/warning/info，收到 %q", in.Severity)
+		}
+	}
+	if in.Role != "" {
+		if _, err := domain.ParseCorrelationRole(in.Role); err != nil {
+			return nil, alertsQueryOutput{}, fmt.Errorf("role 必须是 primary/secondary，收到 %q", in.Role)
 		}
 	}
 	limit := defaultAlertsLimit
@@ -380,6 +392,9 @@ func alertsQuery(ctx context.Context, svc *services.Services, in alertsQueryInpu
 		item.Resource.Type = row.ResourceType
 		item.Resource.NaturalKey = row.NaturalKey
 		item.Resource.Name = row.ResourceName
+		item.CorrelationRole = row.CorrelationRole
+		item.CorrelatedAlertID = row.CorrelatedAlertID
+		item.CorrelatedResourceID = row.CorrelatedResourceID
 		items = append(items, item)
 	}
 	return nil, alertsQueryOutput{Items: items, Total: total, Offset: offset, Limit: limit}, nil
@@ -392,6 +407,7 @@ func alertFilterOf(in alertsQueryInput, limit, offset int) repo.AlertFilter {
 		State:      in.State,
 		Severity:   in.Severity,
 		ResourceID: in.ResourceID,
+		Role:       in.Role,
 		Limit:      limit,
 		Offset:     offset,
 	}

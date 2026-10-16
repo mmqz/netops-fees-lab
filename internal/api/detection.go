@@ -480,7 +480,12 @@ type alertItem struct {
 	AckedAt    string  `json:"ackedAt"`
 	AckedBy    string  `json:"ackedBy"`
 	LastValue  float64 `json:"lastValue"`
-	Resource   struct {
+	// Correlation verdict (v0.12-R16, migration v25): "" | primary (根因嫌疑)
+	// | secondary (疑似次生 — linked to the nearest alerting cause).
+	CorrelationRole      string `json:"correlationRole"`
+	CorrelatedAlertID    string `json:"correlatedAlertId"`    // secondary only
+	CorrelatedResourceID string `json:"correlatedResourceId"` // secondary only
+	Resource             struct {
 		ID         string `json:"id"`
 		Type       string `json:"type"`
 		NaturalKey string `json:"naturalKey"`
@@ -511,6 +516,9 @@ func alertItemOf(row repo.AlertRow) alertItem {
 	item.Resource.Type = row.ResourceType
 	item.Resource.NaturalKey = row.NaturalKey
 	item.Resource.Name = row.ResourceName
+	item.CorrelationRole = row.CorrelationRole
+	item.CorrelatedAlertID = row.CorrelatedAlertID
+	item.CorrelatedResourceID = row.CorrelatedResourceID
 	return item
 }
 
@@ -536,12 +544,21 @@ func (s *Server) handleAlertsList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Correlation verdict filter (v0.12-R16): primary | secondary; the
+	// triage entry — "show me only the roots" or "only the symptoms".
+	role := q.Get("role")
+	if role != "" {
+		if _, err := domain.ParseCorrelationRole(role); err != nil {
+			respondErrorf(w, http.StatusBadRequest, "bad_request", "role %q 不是 primary/secondary", role)
+			return
+		}
+	}
 	page, pageSize, ok := parsePagination(w, r)
 	if !ok {
 		return
 	}
 	rows, total, err := s.db.Alerts.ListAlerts(r.Context(), repo.AlertFilter{
-		State: state, Severity: severity, ResourceID: q.Get("resource_id"),
+		State: state, Severity: severity, ResourceID: q.Get("resource_id"), Role: role,
 		Limit: pageSize, Offset: (page - 1) * pageSize,
 	})
 	if err != nil {

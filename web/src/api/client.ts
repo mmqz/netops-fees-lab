@@ -725,6 +725,7 @@ export function listAlerts(query: AlertsQuery): Promise<Paged<AlertItem>> {
       state: query.state,
       severity: query.severity,
       resource_id: query.resourceId,
+      role: query.role || undefined,
       page: query.page,
       pageSize: query.pageSize,
     })}`,

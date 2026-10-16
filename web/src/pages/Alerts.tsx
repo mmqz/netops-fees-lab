@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
+  AlertCorrelationRole,
   AlertItem,
   AlertState,
   DetectionRunItem,
@@ -50,6 +51,7 @@ import {
   ALR_CLEAR_TITLE,
   ALR_CLEARED_TOAST,
   ALR_COL_ACTIONS,
+  ALR_COL_CORRELATION,
   ALR_COL_FIRED,
   ALR_COL_RESOURCE,
   ALR_COL_RULE,
@@ -62,6 +64,14 @@ import {
   ALR_EXPORT_TOAST,
   ALR_EXPORT_WORKING,
   ALERT_COMPARATOR_LABELS,
+  ALR_CORR_CAUSE_LINE,
+  ALR_CORR_DETAIL_LABEL,
+  ALR_CORR_NONE_LINE,
+  ALR_CORR_PRIMARY,
+  ALR_CORR_PRIMARY_HINT,
+  ALR_CORR_PRIMARY_LINE,
+  ALR_CORR_SECONDARY,
+  ALR_CORR_SECONDARY_HINT,
   ALR_DETAIL_ACK_LINE,
   ALR_DETAIL_CLEARED_LINE,
   ALR_DETAIL_FIRST_SEEN,
@@ -72,6 +82,7 @@ import {
   ALR_DETAIL_TITLE,
   ALR_DETAIL_WINDOW,
   ALR_EMPTY,
+  ALR_FILTER_ROLE,
   ALR_FILTER_SEVERITY,
   ALR_FILTER_STATE,
   ALR_HINT,
@@ -150,6 +161,9 @@ const CSV_COLUMNS = [
   'ackedAt',
   'ackedBy',
   'clearedAt',
+  'correlationRole',
+  'correlatedAlertId',
+  'correlatedResourceId',
 ] as const;
 
 /** CSV 字段转义：含逗号/引号/换行时包引号并双写内部引号。 */
@@ -183,6 +197,9 @@ function alertCsvRow(alert: AlertItem): string {
     alert.ackedAt ?? '',
     alert.ackedBy ?? '',
     alert.clearedAt ?? '',
+    alert.correlationRole,
+    alert.correlatedAlertId,
+    alert.correlatedResourceId,
   ];
   return cells.map(csvCell).join(',');
 }
@@ -435,6 +452,7 @@ export function AlertsPage() {
     urlState === '' ? 'firing' : (urlState as AlertState),
   );
   const [severity, setSeverity] = useState<Severity | ''>('');
+  const [role, setRole] = useState<AlertCorrelationRole | ''>('');
   const [page, setPage] = useState(1);
 
   const [data, setData] = useState<Paged<AlertItem> | null>(null);
@@ -478,6 +496,7 @@ export function AlertsPage() {
     listAlerts({
       state: state === '' ? undefined : state,
       severity: severity === '' ? undefined : severity,
+      role: role === '' ? undefined : role,
       page,
       pageSize: PAGE_SIZE,
     })
@@ -493,7 +512,7 @@ export function AlertsPage() {
         setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, [state, severity, page]);
+  }, [state, severity, role, page]);
 
   useEffect(() => {
     fetchAlerts();
@@ -543,6 +562,7 @@ export function AlertsPage() {
     const filter = {
       state: state === '' ? undefined : (state as AlertState),
       severity: severity === '' ? undefined : (severity as Severity),
+      role: role === '' ? undefined : (role as AlertCorrelationRole),
     };
     const collected: AlertItem[] = [];
     let pageNow = 1;
@@ -622,6 +642,24 @@ export function AlertsPage() {
         key: 'severity',
         header: ALR_COL_SEVERITY,
         render: (row) => <SeverityBadge severity={row.severity} />,
+      },
+      {
+        key: 'correlation',
+        header: ALR_COL_CORRELATION,
+        render: (row) =>
+          row.correlationRole === 'primary' ? (
+            <span className="chip chip--warning" title={ALR_CORR_PRIMARY_HINT}>
+              <span className="chip-dot" aria-hidden="true" />
+              {ALR_CORR_PRIMARY}
+            </span>
+          ) : row.correlationRole === 'secondary' ? (
+            <span className="chip chip--muted" title={ALR_CORR_SECONDARY_HINT}>
+              <span className="chip-dot" aria-hidden="true" />
+              {ALR_CORR_SECONDARY}
+            </span>
+          ) : (
+            <span className="muted-note">—</span>
+          ),
       },
       { key: 'rule', header: ALR_COL_RULE, render: (row) => row.ruleLabel },
       {
@@ -736,6 +774,21 @@ export function AlertsPage() {
                 {SEVERITY_LABELS[value]}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="filter-field">
+          <span className="filter-label">{ALR_FILTER_ROLE}</span>
+          <select
+            className="select"
+            value={role}
+            onChange={(event) => {
+              setRole(event.target.value === '' ? '' : (event.target.value as AlertCorrelationRole));
+              setPage(1);
+            }}
+          >
+            <option value="">{FILTER_ALL}</option>
+            <option value="primary">{ALR_CORR_PRIMARY}</option>
+            <option value="secondary">{ALR_CORR_SECONDARY}</option>
           </select>
         </label>
         <button
@@ -859,6 +912,30 @@ export function AlertsPage() {
                     <tr>
                       <th scope="row">{ALR_DETAIL_LAST_FIRED}</th>
                       <td>{formatDateTime(row.firedAt)}</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">{ALR_CORR_DETAIL_LABEL}</th>
+                      <td>
+                        {row.correlationRole === 'secondary' && row.correlatedResourceId !== '' ? (
+                          <>
+                            {format(ALR_CORR_CAUSE_LINE, {
+                              resource: row.correlatedResourceId,
+                              alertId: row.correlatedAlertId,
+                            })}{' '}
+                            <Link
+                              className="entity-link"
+                              to={`/resources?focus=${encodeURIComponent(row.correlatedResourceId)}`}
+                              title={ALR_RESOURCE_LINK_TITLE}
+                            >
+                              [→]
+                            </Link>
+                          </>
+                        ) : row.correlationRole === 'primary' ? (
+                          ALR_CORR_PRIMARY_LINE
+                        ) : (
+                          ALR_CORR_NONE_LINE
+                        )}
+                      </td>
                     </tr>
                     {row.ackedAt != null && row.ackedAt !== '' && (
                       <tr>

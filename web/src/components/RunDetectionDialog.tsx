@@ -17,6 +17,7 @@ import type { DetectionRunResponse } from '../api/types';
 import { runDetection } from '../api/client';
 import {
   BTN_CANCEL,
+  CORRELATION_ROLE_LABELS,
   RUN_BTN_WORKING,
   RUN_CLEARED,
   RUN_CONFIRM_MESSAGE,
@@ -44,7 +45,8 @@ import { useToast } from './Toast';
 import { useModalA11y } from '../hooks/useModalA11y';
 
 /** 一次告警变更行（回执明细表）。suppressed 行（v0.12-R15）无告警行，
- * 徽标用中性色 + 「抑制」文案与 created/cleared 区分。 */
+ * 徽标用中性色 + 「抑制」文案与 created/cleared 区分；created 行带
+ * 根因/次生裁定徽标（v0.12-R16）。 */
 function MutationRow({ line }: { line: DetectionRunResponse['alerts'][number] }) {
   const actionLabel =
     line.action === 'created'
@@ -72,6 +74,21 @@ function MutationRow({ line }: { line: DetectionRunResponse['alerts'][number] })
       <td>
         <span className="mono">{line.resourceId}</span>
       </td>
+      {line.action === 'created' && line.correlationRole ? (
+        <td>
+          <span
+            className={`chip ${line.correlationRole === 'primary' ? 'chip--warning' : 'chip--muted'}`}
+            title={line.correlationRole}
+          >
+            <span className="chip-dot" aria-hidden="true" />
+            {CORRELATION_ROLE_LABELS[line.correlationRole] ?? line.correlationRole}
+          </span>
+        </td>
+      ) : (
+        <td>
+          <span className="muted-note">—</span>
+        </td>
+      )}
       <td>
         <SeverityBadge severity={line.severity} />
       </td>

@@ -222,31 +222,42 @@ func (r *DetectionRuleRepo) DeleteRule(ctx context.Context, ruleID string) error
 }
 
 // alertColumns is the canonical SELECT column list of alerts.
-const alertColumns = `alert_id, rule_id, series_id, fired_at, cleared_at, acked_at, acked_by, state, last_value, first_seen`
+const alertColumns = `alert_id, rule_id, series_id, fired_at, cleared_at, acked_at, acked_by, state, last_value, first_seen, correlation_role, correlated_alert_id, correlated_resource_id`
 
 // scanAlert scans one alerts row into a domain.Alert.
 func scanAlert(s scanner) (domain.Alert, error) {
 	var (
-		a       domain.Alert
-		state   string
-		cleared sql.NullString
-		acked   sql.NullString
-		ackedBy sql.NullString
-		lastVal sql.NullFloat64
-		firstTS sql.NullString
+		a            domain.Alert
+		state        string
+		cleared      sql.NullString
+		acked        sql.NullString
+		ackedBy      sql.NullString
+		lastVal      sql.NullFloat64
+		firstTS      sql.NullString
+		corrRole     sql.NullString
+		corrAlert    sql.NullString
+		corrResource sql.NullString
 	)
 	if err := s.Scan(&a.AlertID, &a.RuleID, &a.SeriesID, &a.FiredAt, &cleared, &acked, &ackedBy,
-		&state, &lastVal, &firstTS); err != nil {
+		&state, &lastVal, &firstTS, &corrRole, &corrAlert, &corrResource); err != nil {
 		return domain.Alert{}, err
 	}
 	if _, err := domain.ParseAlertState(state); err != nil {
 		return domain.Alert{}, fmt.Errorf("repo: alert %s: %w", a.AlertID, err)
+	}
+	if corrRole.String != "" {
+		if _, err := domain.ParseCorrelationRole(corrRole.String); err != nil {
+			return domain.Alert{}, fmt.Errorf("repo: alert %s: %w", a.AlertID, err)
+		}
 	}
 	a.State = domain.AlertState(state)
 	a.ClearedAt = stringFromNull(cleared)
 	a.AckedAt = stringFromNull(acked)
 	a.AckedBy = stringFromNull(ackedBy)
 	a.FirstSeen = stringFromNull(firstTS)
+	a.CorrelationRole = corrRole.String
+	a.CorrelatedAlertID = corrAlert.String
+	a.CorrelatedResourceID = corrResource.String
 	if lastVal.Valid {
 		a.LastValue = lastVal.Float64
 	}
@@ -289,6 +300,23 @@ func (r *AlertRepo) UpdateFiringEvidence(ctx context.Context, alertID, firedAt s
 		return fmt.Errorf("repo: update alert evidence %s: %w", alertID, err)
 	}
 	return requireUpdated(res, "alert", alertID)
+}
+
+// UpdateAlertCorrelation sets the correlation verdict of one alert
+// (migration v25, v0.12-R16). The verdict is ENGINE-managed observation
+// state — every detect run rewrites it for the active error/warning alerts
+// (idempotent content-wise: same graph + same alerts → same verdict), and
+// cleared alerts simply stop being rewritten (their last verdict is the
+// audit truth). The CHECK constraint on correlation_role is the backstop
+// of the domain parse.
+func (r *AlertRepo) UpdateAlertCorrelation(ctx context.Context, alertID, role, correlatedAlertID, correlatedResourceID string) error {
+	_, err := r.q.ExecContext(ctx,
+		`UPDATE alerts SET correlation_role = ?, correlated_alert_id = ?, correlated_resource_id = ? WHERE alert_id = ?`,
+		role, correlatedAlertID, correlatedResourceID, alertID)
+	if err != nil {
+		return fmt.Errorf("repo: update alert correlation %s: %w", alertID, err)
+	}
+	return nil
 }
 
 // ClearAlert moves a firing OR acked alert to cleared (the engine recovery
@@ -438,6 +466,7 @@ type AlertFilter struct {
 	State      string
 	Severity   string // matches the RULE's severity (JOIN detection_rules)
 	ResourceID string
+	Role       string // correlation verdict filter: primary | secondary ("" = all)
 	Limit      int
 	Offset     int
 }
@@ -478,6 +507,13 @@ func (r *AlertRepo) ListAlerts(ctx context.Context, f AlertFilter) ([]AlertRow, 
 		where = append(where, "s.resource_id = ?")
 		args = append(args, f.ResourceID)
 	}
+	if f.Role != "" {
+		// Correlation verdict filter (v0.12-R16): the engine-managed 根因/
+		// 次生 marks. Validated upstream (domain parse) — the WHERE is a
+		// closed-enum equality, never user text.
+		where = append(where, "a.correlation_role = ?")
+		args = append(args, f.Role)
+	}
 	whereSQL := strings.Join(where, " AND ")
 
 	var total int
@@ -491,6 +527,7 @@ WHERE `+whereSQL, args...).Scan(&total); err != nil {
 
 	query := `
 SELECT a.alert_id, a.rule_id, a.series_id, a.fired_at, a.cleared_at, a.acked_at, a.acked_by, a.state, a.last_value, a.first_seen,
+       a.correlation_role, a.correlated_alert_id, a.correlated_resource_id,
        dr.metric_key, dr.comparator, dr.threshold, dr.window, dr.severity, dr.label,
        s.resource_id, res.resource_type, res.natural_key, res.name
 FROM alerts a
@@ -521,9 +558,12 @@ ORDER BY a.fired_at DESC, a.alert_id ASC`
 			ackedBy    sql.NullString
 			lastVal    sql.NullFloat64
 			firstTS    sql.NullString
+			corrRole   sql.NullString
+			corrAlert  sql.NullString
+			corrRes    sql.NullString
 		)
 		if err := rows.Scan(&row.AlertID, &row.RuleID, &row.SeriesID, &row.FiredAt, &cleared, &acked, &ackedBy,
-			&state, &lastVal, &firstTS,
+			&state, &lastVal, &firstTS, &corrRole, &corrAlert, &corrRes,
 			&row.MetricKey, &comparator, &row.Threshold, &row.Window, &severity, &row.RuleLabel,
 			&row.ResourceID, &row.ResourceType, &row.NaturalKey, &row.ResourceName); err != nil {
 			return nil, 0, fmt.Errorf("repo: scan alert row: %w", err)
@@ -537,6 +577,11 @@ ORDER BY a.fired_at DESC, a.alert_id ASC`
 		if _, err := domain.ParseSeverity(severity); err != nil {
 			return nil, 0, fmt.Errorf("repo: alert row %s rule %s: %w", row.AlertID, row.RuleID, err)
 		}
+		if corrRole.String != "" {
+			if _, err := domain.ParseCorrelationRole(corrRole.String); err != nil {
+				return nil, 0, fmt.Errorf("repo: alert row %s: %w", row.AlertID, err)
+			}
+		}
 		row.State = domain.AlertState(state)
 		row.Comparator = domain.Comparator(comparator)
 		row.Severity = domain.Severity(severity)
@@ -544,6 +589,9 @@ ORDER BY a.fired_at DESC, a.alert_id ASC`
 		row.AckedAt = stringFromNull(acked)
 		row.AckedBy = stringFromNull(ackedBy)
 		row.FirstSeen = stringFromNull(firstTS)
+		row.CorrelationRole = corrRole.String
+		row.CorrelatedAlertID = corrAlert.String
+		row.CorrelatedResourceID = corrRes.String
 		if lastVal.Valid {
 			row.LastValue = lastVal.Float64
 		}

@@ -54,6 +54,30 @@ func (c Comparator) Matches(value, threshold float64) bool {
 	return false
 }
 
+// AlertCorrelationRole is the closed correlation verdict set of migration
+// v25's CHECK: primary (根因嫌疑), secondary (疑似次生), ” (unmarked).
+type AlertCorrelationRole string
+
+// The closed correlation role set.
+const (
+	AlertCorrelationPrimary   AlertCorrelationRole = "primary"
+	AlertCorrelationSecondary AlertCorrelationRole = "secondary"
+)
+
+// ParseCorrelationRole converts s into an AlertCorrelationRole; unknown
+// values are an error (the API filter boundary).
+func ParseCorrelationRole(s string) (AlertCorrelationRole, error) {
+	if s == "" {
+		return "", nil
+	}
+	v := AlertCorrelationRole(s)
+	switch v {
+	case AlertCorrelationPrimary, AlertCorrelationSecondary:
+		return v, nil
+	}
+	return "", fmt.Errorf("domain: invalid correlation role %q (primary/secondary)", s)
+}
+
 // AlertState is the closed alert lifecycle enum of ADR-0011 D3 (migration
 // v18 CHECK): firing | acked | cleared. The state machine has EXACTLY THREE
 // edges — firing→acked (human, POST /api/alerts/{id}/ack), firing→cleared
@@ -114,8 +138,9 @@ type DetectionRule struct {
 }
 
 // Alert is one row of the alerts table (migration v18, ADR-0011 D3 verbatim
-// + last_value/first_seen evidence columns). A (rule, series) pair re-firing
-// after a cleared alert creates a NEW row (fresh first_seen — the UNIQUE
+// + last_value/first_seen evidence columns; v25 adds the correlation
+// observation columns). A (rule, series) pair re-firing after a cleared
+// alert creates a NEW row (fresh first_seen — the UNIQUE
 // (rule_id, series_id, first_seen) identity), never a zombie re-open.
 //
 //   - fired_at: the ts of the newest evidence point when the alert fired
@@ -125,7 +150,14 @@ type DetectionRule struct {
 //   - last_value: the offending point's value (the evidence);
 //   - cleared_at / acked_at / acked_by: the lifecycle bookkeeping columns
 //     (engine clears are data-ts; human ack/clear default to the server
-//     clock — bookkeeping, not data path).
+//     clock — bookkeeping, not data path);
+//   - CorrelationRole/CorrelatedAlertID/CorrelatedResourceID (v0.12-R16,
+//     migration v25): the engine-computed 根因/次生 verdict — 'primary'
+//     (根因嫌疑), 'secondary' (疑似次生, with the nearest alerting cause
+//     linked), ” (unmarked). NOT lifecycle state: the three-edge state
+//     machine is untouched; every detect run recomputes the roles of the
+//     ACTIVE error/warning alerts, and a cleared alert keeps its last
+//     verdict as audit truth.
 type Alert struct {
 	AlertID   string
 	RuleID    string
@@ -137,4 +169,8 @@ type Alert struct {
 	State     AlertState
 	LastValue float64
 	FirstSeen string
+
+	CorrelationRole      string // "" | primary | secondary
+	CorrelatedAlertID    string // the nearest alerting cause (secondary only)
+	CorrelatedResourceID string
 }

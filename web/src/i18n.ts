@@ -659,6 +659,21 @@ export const ALERT_COMPARATOR_LABELS: Record<AlertComparator, string> = {
 
 export const ALR_FILTER_STATE = '状态';
 export const ALR_FILTER_SEVERITY = '级别';
+export const ALR_FILTER_ROLE = '关联';
+export const ALR_COL_CORRELATION = '关联';
+export const ALR_CORR_PRIMARY = '根因嫌疑';
+export const ALR_CORR_SECONDARY = '疑似次生';
+export const ALR_CORR_PRIMARY_HINT = '下游存在疑似次生告警——优先处置这条';
+export const ALR_CORR_SECONDARY_HINT = '上游存在告警中的资源——疑似被波及，先处置根因';
+export const ALR_CORR_PRIMARY_LINE = '下游存在疑似次生告警，本告警优先处置';
+export const ALR_CORR_CAUSE_LINE = '疑似次生：上游资源 {resource} 存在告警中的告警 {alertId}——先处置该根因';
+export const ALR_CORR_DETAIL_LABEL = '根因/次生';
+export const ALR_CORR_NONE_LINE = '未关联（独立告警或同层告警）';
+/** 关联角色 chip/选项文案（闭集）。 */
+export const CORRELATION_ROLE_LABELS: Record<string, string> = {
+  primary: ALR_CORR_PRIMARY,
+  secondary: ALR_CORR_SECONDARY,
+};
 export const ALR_COL_STATE = '状态';
 export const ALR_COL_SEVERITY = '级别';
 export const ALR_COL_RULE = '规则';

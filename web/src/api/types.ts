@@ -1016,6 +1016,11 @@ export interface AlertItem {
   ackedAt?: string | null;
   ackedBy?: string | null;
   lastValue: number;
+  /** v0.12-R16 根因/次生关联裁定：'' 未标记 | primary 根因嫌疑 | secondary 疑似次生。 */
+  correlationRole: AlertCorrelationRole;
+  /** secondary 专用：最近告警根因的告警 id / 资源 id。 */
+  correlatedAlertId: string;
+  correlatedResourceId: string;
   resource: {
     id: string;
     type: string;
@@ -1024,11 +1029,16 @@ export interface AlertItem {
   };
 }
 
-/** GET /api/alerts 查询参数（state/severity/resource_id 可选）。 */
+/** 告警关联角色（v0.12-R16，闭集：primary 根因嫌疑 / secondary 疑似次生；'' = 未标记）。 */
+export type AlertCorrelationRole = '' | 'primary' | 'secondary';
+
+/** GET /api/alerts 查询参数（state/severity/resource_id/role 可选）。 */
 export interface AlertsQuery {
   state?: AlertState;
   severity?: Severity;
   resourceId?: string;
+  /** 只看根因（primary）或只看症状（secondary）；缺省 = 全部。 */
+  role?: AlertCorrelationRole;
   page: number;
   pageSize: number;
 }
@@ -1269,6 +1279,8 @@ export interface AlertMutationSummary {
   action: 'created' | 'cleared' | 'suppressed';
   /** suppressed 行无告警行 → 空串；created/cleared 行为变更后状态。 */
   state: AlertState | '';
+  /** v0.12-R16：created 行带本次运行算出的根因/次生裁定；cleared/suppressed 行为空串。 */
+  correlationRole?: AlertCorrelationRole;
   firstSeen: string;
   firedAt: string;
   clearedAt: string;

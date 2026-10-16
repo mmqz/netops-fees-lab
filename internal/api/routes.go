@@ -75,7 +75,7 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/maintenance/windows", Tag: "maintenance", Summary: "新建维护窗口（RFC3339 起止、可选资源范围，空范围 = 全局）", Handler: s.handleMaintenanceWindowsCreate},
 		{Method: "DELETE", Pattern: "/api/maintenance/windows/{id}", Tag: "maintenance", Summary: "删除维护窗口（历史运行回执不受影响）", Handler: s.handleMaintenanceWindowsDelete},
 
-		{Method: "GET", Pattern: "/api/alerts", Tag: "alerts", Summary: "告警分页列表（state/severity/resource 过滤）", Handler: s.handleAlertsList},
+		{Method: "GET", Pattern: "/api/alerts", Tag: "alerts", Summary: "告警分页列表（state/severity/resource/role 过滤；role=primary/secondary 根因/次生分诊）", Handler: s.handleAlertsList},
 		{Method: "GET", Pattern: "/api/alerts/stats", Tag: "alerts", Summary: "告警分布统计（byState 三态计数 + 待处置级别矩阵，闭集零填充）", Handler: s.handleAlertsStats},
 		{Method: "POST", Pattern: "/api/alerts/{id}/ack", Tag: "alerts", Summary: "确认告警（firing→acked，ackedBy 必填审计字段）", Handler: s.handleAlertAck},
 		{Method: "POST", Pattern: "/api/alerts/{id}/clear", Tag: "alerts", Summary: "清除告警（firing|acked→cleared，记录保留审计）", Handler: s.handleAlertClear},
