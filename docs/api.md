@@ -1029,6 +1029,10 @@ body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用
 - **run_state 联动**（§12-B2 衔接点 3）：firing error → down、firing warning → degraded（source=alert，走历史+快照双写）；全部恢复 → up。**语义**：与人工 manual 写入按 ts 后写优先共存——巡检运行之间的人工状态不会被静默覆盖，但下一次 run 会以最新数据重判。
 - 响应：`{findings, alertsCreated, alertsCleared, runStatesWritten, suppressed, flapHeld, evaluatedAt（来自数据，非服务器钟）, alerts:[逐条 created/cleared/suppressed/flap_held 证据]}`。同数据同规则 → 同结果（确定性）。
 
+### GET /api/detection/runs — 检测运行历史
+
+`?page=&pageSize=`（最新开始时间在前）。每行是一次扫描的落库回执：来源（api/cli/scheduler 闭集，MCP 只读红线永不在此）、时钟区间、耗时、评估窗口回显、数据截止、五计数（findings/created/cleared/suppressed/flapHeld）、失败原因（空 = 成功）。**通知投递裁决**（v0.12-R18，LEFT JOIN webhook_deliveries）：`webhookStatus` 三值——`delivered`（含重试吸收的瞬时失败，`webhookAttempts` 为实际 POST 次数 1..3）、`failed`（全部尝试失败，`webhookError` 为最后原因）、`''`（该次运行未配置 webhook 通道——诚实三值，非伪造的 failed）。
+
 ### GET /api/alerts — 告警列表
 
 `?state=firing|acked|cleared&severity=&resource_id=&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）。fired_at 倒序。

@@ -1084,6 +1084,16 @@ export interface DetectionRunItem {
   /** 抖动抑制的重燃告警数（v0.12-R17；v26 前的回执回填为 0）。 */
   flapHeld: number;
   error: string;
+  /**
+   * v0.12-R18 通知投递裁决（LEFT JOIN webhook_deliveries）：
+   * delivered = 已送达（含重试吸收的瞬时失败）；failed = 全部尝试失败；
+   * '' = 该次运行未配置 webhook 通道（诚实三值，非伪造的 failed）。
+   */
+  webhookStatus: '' | 'delivered' | 'failed';
+  /** 实际发出的 POST 次数（1..3，含重试）。 */
+  webhookAttempts: number;
+  /** failed 时的最后失败原因（delivered/通道关为空串）。 */
+  webhookError: string;
 }
 
 /** GET /api/detection/runs 查询参数。 */

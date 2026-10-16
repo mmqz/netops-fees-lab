@@ -34,7 +34,7 @@ func TestSchedulerFiresAndRecords(t *testing.T) {
 	// The notification callback: recorded but never fails the round.
 	var mu sync.Mutex
 	delivered := 0
-	notifyFn := func(ctx context.Context, res RunResult) error {
+	notifyFn := func(ctx context.Context, res RunResult, runID string) error {
 		mu.Lock()
 		delivered++
 		mu.Unlock()
@@ -205,7 +205,7 @@ func TestSchedulerNilIsOff(t *testing.T) {
 // receipt still lands.
 func TestSchedulerNotifyFailureNotFatal(t *testing.T) {
 	db := newDetectDB(t)
-	notifyFn := func(ctx context.Context, res RunResult) error {
+	notifyFn := func(ctx context.Context, res RunResult, runID string) error {
 		return context.DeadlineExceeded
 	}
 	sched := NewScheduler(20*time.Millisecond, db, New(), notifyFn, testLogger(t))

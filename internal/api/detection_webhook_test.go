@@ -48,7 +48,7 @@ func TestDetectionRunFiresWebhook(t *testing.T) {
 	recv, ch := newWebhookReceiver(t)
 	// The server is already built; the field is set before the first
 	// request, so no handler observes the assignment in flight.
-	a.API.Webhook = notify.New(recv.URL, 0, a.Log)
+	a.API.Webhook = notify.New(recv.URL, 0, a.DB, a.Log)
 
 	resp, body := doRequest(t, srv, http.MethodPost, "/api/detection/rules", []byte(`{"metricKey":"optical_power_rx_avg_dbm","comparator":"lte","threshold":-8.1,"window":1,"severity":"warning","label":"两天劣化触发"}`), "application/json")
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
@@ -113,7 +113,7 @@ func TestDetectionRunWebhookFailureIsNotFatal(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer dead.Close()
-	a.API.Webhook = notify.New(dead.URL, 0, a.Log)
+	a.API.Webhook = notify.New(dead.URL, 0, a.DB, a.Log)
 
 	resp, body := doRequest(t, srv, http.MethodPost, "/api/detection/rules", []byte(`{"metricKey":"optical_power_rx_avg_dbm","comparator":"lte","threshold":-8.1,"window":1,"severity":"warning","label":"两天劣化触发"}`), "application/json")
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {

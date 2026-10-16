@@ -100,7 +100,12 @@ import {
   PATROL_COL_SOURCE,
   PATROL_COL_STARTED,
   PATROL_COL_STATUS,
+  PATROL_COL_WEBHOOK,
   PATROL_COL_WINDOW,
+  WEBHOOK_DELIVERED_LABEL,
+  WEBHOOK_FAILED_LABEL,
+  WEBHOOK_FAILED_ATTEMPTS_TITLE,
+  WEBHOOK_OFF_LABEL,
   PATROL_DURATION_TEXT,
   PATROL_LAST_FAILED,
   PATROL_LAST_LABEL,
@@ -384,6 +389,31 @@ function RunHistoryDialog({ onClose }: { onClose: () => void }) {
             <span className="patrol-status patrol-status--failed" title={run.error}>
               {PATROL_STATUS_FAILED}
             </span>
+          ),
+      },
+      {
+        key: 'webhook',
+        header: PATROL_COL_WEBHOOK,
+        render: (run) =>
+          run.webhookStatus === 'delivered' ? (
+            <span
+              className="patrol-status patrol-status--ok"
+              title={WEBHOOK_DELIVERED_LABEL}
+            >
+              {WEBHOOK_DELIVERED_LABEL}
+            </span>
+          ) : run.webhookStatus === 'failed' ? (
+            <span
+              className="patrol-status patrol-status--failed"
+              title={format(WEBHOOK_FAILED_ATTEMPTS_TITLE, {
+                n: run.webhookAttempts,
+                error: run.webhookError,
+              })}
+            >
+              {WEBHOOK_FAILED_LABEL}
+            </span>
+          ) : (
+            <span className="muted-note">{WEBHOOK_OFF_LABEL}</span>
           ),
       },
       {

@@ -42,7 +42,7 @@ import (
 // (notify imports detect — the callback keeps this package
 // dependency-clean). nil = channel off. Errors are logged, never fail
 // the round (the v0.10-R8 best-effort contract).
-type NotifyFunc func(ctx context.Context, res RunResult) error
+type NotifyFunc func(ctx context.Context, res RunResult, runID string) error
 
 // Scheduler runs the detection sweep on a fixed interval.
 type Scheduler struct {
@@ -116,9 +116,13 @@ func (s *Scheduler) fire(ctx context.Context) {
 		"alertsCleared", res.AlertsCleared,
 		"durationMs", rec.DurationMS)
 	if s.notify != nil {
-		nctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// v0.12-R18: 25s budget — the notify channel's bounded retry
+		// sequence (3 worst-case 5s attempts + backoff) must fit inside
+		// the caller's ctx; a cancelled sequence stops early and records
+		// what it managed.
+		nctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
-		if err := s.notify(nctx, res); err != nil {
+		if err := s.notify(nctx, res, rec.RunID); err != nil {
 			s.log.Warn("scheduled run notification failed", "error", err.Error())
 		}
 	}

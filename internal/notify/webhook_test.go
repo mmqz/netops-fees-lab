@@ -69,14 +69,14 @@ func sampleResult() detect.RunResult {
 // nil and every method on the nil receiver is a safe no-op (call sites
 // never branch on the channel being configured).
 func TestNilChannelIsNoOp(t *testing.T) {
-	if wh := New("", time.Second, nil); wh != nil {
+	if wh := New("", time.Second, nil, nil); wh != nil {
 		t.Fatalf("New(\"\") = %v, want nil (channel off)", wh)
 	}
 	var wh *Webhook
 	if got := wh.URL(); got != "" {
 		t.Fatalf("nil URL() = %q, want \"\"", got)
 	}
-	if err := wh.NotifyDetectionRun(context.Background(), sampleResult()); err != nil {
+	if err := wh.NotifyDetectionRun(context.Background(), sampleResult(), "run_test"); err != nil {
 		t.Fatalf("nil NotifyDetectionRun() error = %v, want nil", err)
 	}
 }
@@ -88,11 +88,11 @@ func TestPayloadContract(t *testing.T) {
 	srv, ch := newReceiver()
 	defer srv.Close()
 
-	wh := New(srv.URL, time.Second, slog.New(slog.DiscardHandler))
+	wh := New(srv.URL, time.Second, nil, slog.New(slog.DiscardHandler))
 	if wh == nil {
 		t.Fatal("New(url) = nil, want a live notifier")
 	}
-	if err := wh.NotifyDetectionRun(context.Background(), sampleResult()); err != nil {
+	if err := wh.NotifyDetectionRun(context.Background(), sampleResult(), "run_test"); err != nil {
 		t.Fatalf("NotifyDetectionRun() error = %v", err)
 	}
 
@@ -158,8 +158,8 @@ func TestPayloadCap(t *testing.T) {
 			AlertID: "al", Severity: "info", Action: "created", State: "firing",
 		})
 	}
-	wh := New(srv.URL, time.Second, slog.New(slog.DiscardHandler))
-	if err := wh.NotifyDetectionRun(context.Background(), res); err != nil {
+	wh := New(srv.URL, time.Second, nil, slog.New(slog.DiscardHandler))
+	if err := wh.NotifyDetectionRun(context.Background(), res, "run_test"); err != nil {
 		t.Fatalf("NotifyDetectionRun() error = %v", err)
 	}
 
@@ -184,8 +184,8 @@ func TestPayloadCap(t *testing.T) {
 // non-2xx receiver (and an unreachable URL) yield an error, but the
 // call itself completes normally — the detection run is never affected.
 func TestReceiverErrorIsReturnedNotFatal(t *testing.T) {
-	wh := New("http://127.0.0.1:1/unreachable", 500*time.Millisecond, slog.New(slog.DiscardHandler))
-	if err := wh.NotifyDetectionRun(context.Background(), sampleResult()); err == nil {
+	wh := New("http://127.0.0.1:1/unreachable", 500*time.Millisecond, nil, slog.New(slog.DiscardHandler))
+	if err := wh.NotifyDetectionRun(context.Background(), sampleResult(), "run_test"); err == nil {
 		t.Fatal("unreachable receiver: error = nil, want the delivery error")
 	}
 
@@ -193,15 +193,17 @@ func TestReceiverErrorIsReturnedNotFatal(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
-	wh = New(srv.URL, time.Second, slog.New(slog.DiscardHandler))
-	if err := wh.NotifyDetectionRun(context.Background(), sampleResult()); err == nil {
+	wh = New(srv.URL, time.Second, nil, slog.New(slog.DiscardHandler))
+	if err := wh.NotifyDetectionRun(context.Background(), sampleResult(), "run_test"); err == nil {
 		t.Fatal("503 receiver: error = nil, want the status error")
 	}
 }
 
 // TestDeliveryTimeout pins the client timeout: a receiver that sleeps
 // past the configured bound aborts with an error instead of hanging the
-// caller (the CLI exit / the API goroutine).
+// caller (the CLI exit / the API goroutine). Since v0.12-R18 the failed
+// attempt RETRIES — the test uses the zero-backoff seam so the bound
+// stays ~one attempt timeout per retry (3 attempts × 300ms + 0 backoff).
 func TestDeliveryTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
@@ -209,14 +211,14 @@ func TestDeliveryTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	wh := New(srv.URL, 300*time.Millisecond, slog.New(slog.DiscardHandler))
+	wh := newWebhook(srv.URL, 300*time.Millisecond, []time.Duration{0, 0}, nil, slog.New(slog.DiscardHandler))
 	start := time.Now()
-	err := wh.NotifyDetectionRun(context.Background(), sampleResult())
+	err := wh.NotifyDetectionRun(context.Background(), sampleResult(), "run_test")
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("sleeping receiver: error = nil, want timeout error")
 	}
 	if elapsed > 2*time.Second {
-		t.Fatalf("delivery took %v, want the ~300ms timeout bound", elapsed)
+		t.Fatalf("delivery took %v, want the ~3x300ms bounded retry sequence", elapsed)
 	}
 }

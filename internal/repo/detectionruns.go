@@ -35,22 +35,35 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return nil
 }
 
+// RunRow is one runs-listing row: the receipt plus its notification
+// verdict projected through the webhook_deliveries LEFT JOIN (v0.12-R18).
+// Delivery.Status "" means the channel was OFF for that run (no audit
+// row) — the honest three-valued read (delivered / failed / off).
+type RunRow struct {
+	domain.DetectionRun
+	Delivery DeliveryJoin
+}
+
 // ListRuns returns the run receipts newest-started first (id ASC as the
 // deterministic tie-break — two runs can share a second-precision
-// started_at), with limit/offset pagination. The second return is the
-// TOTAL count of the unpaginated set (the envelope's total). limit <= 0
-// means unbounded (the CLI/rules listing precedent).
-func (r *DetectionRunRepo) ListRuns(ctx context.Context, limit, offset int) ([]domain.DetectionRun, int, error) {
+// started_at), with limit/offset pagination, each LEFT JOINed with its
+// webhook delivery verdict (the zero join when the channel was off).
+// The second return is the TOTAL count of the unpaginated set (the
+// envelope's total). limit <= 0 means unbounded (the CLI/rules listing
+// precedent).
+func (r *DetectionRunRepo) ListRuns(ctx context.Context, limit, offset int) ([]RunRow, int, error) {
 	var total int
 	if err := r.q.QueryRowContext(ctx, `SELECT COUNT(*) FROM detection_runs`).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("repo: count detection runs: %w", err)
 	}
 
 	query := `
-SELECT id, source, started_at, finished_at, duration_ms, from_ts, to_ts, evaluated_at,
-       findings, alerts_created, alerts_cleared, run_states_written, suppressed, flap_held, error
-FROM detection_runs
-ORDER BY started_at DESC, id ASC`
+SELECT r.id, r.source, r.started_at, r.finished_at, r.duration_ms, r.from_ts, r.to_ts, r.evaluated_at,
+       r.findings, r.alerts_created, r.alerts_cleared, r.run_states_written, r.suppressed, r.flap_held, r.error,
+       wd.status, wd.attempts, wd.http_status, wd.error
+FROM detection_runs r
+LEFT JOIN webhook_deliveries wd ON wd.run_id = r.id
+ORDER BY r.started_at DESC, r.id ASC`
 	l, o := paging(limit, offset)
 	if l >= 0 {
 		query += fmt.Sprintf(" LIMIT %d OFFSET %d", l, o)
@@ -61,7 +74,7 @@ ORDER BY started_at DESC, id ASC`
 		return nil, 0, fmt.Errorf("repo: list detection runs: %w", err)
 	}
 	defer rows.Close()
-	out := make([]domain.DetectionRun, 0, 16)
+	out := make([]RunRow, 0, 16)
 	for rows.Next() {
 		var (
 			run       domain.DetectionRun
@@ -70,10 +83,16 @@ ORDER BY started_at DESC, id ASC`
 			toTS      sql.NullString
 			evaluated sql.NullString
 			runErr    sql.NullString
+			wdStatus  sql.NullString
+			wdErr     sql.NullString
+			wdAtt     sql.NullInt64
+			wdHTTP    sql.NullInt64
+			wd        DeliveryJoin
 		)
 		if err := rows.Scan(&run.RunID, &source, &run.StartedAt, &run.FinishedAt, &run.DurationMS,
 			&fromTS, &toTS, &evaluated,
-			&run.Findings, &run.AlertsCreated, &run.AlertsCleared, &run.RunStatesWritten, &run.Suppressed, &run.FlapHeld, &runErr); err != nil {
+			&run.Findings, &run.AlertsCreated, &run.AlertsCleared, &run.RunStatesWritten, &run.Suppressed, &run.FlapHeld, &runErr,
+			&wdStatus, &wdAtt, &wdHTTP, &wdErr); err != nil {
 			return nil, 0, fmt.Errorf("repo: scan detection run row: %w", err)
 		}
 		run.Source = domain.RunSource(source)
@@ -81,7 +100,11 @@ ORDER BY started_at DESC, id ASC`
 		run.To = toTS.String
 		run.EvaluatedAt = evaluated.String
 		run.Error = runErr.String
-		out = append(out, run)
+		wd.Status = domain.WebhookDeliveryStatus(wdStatus.String)
+		wd.Attempts = int(wdAtt.Int64)
+		wd.HTTPStatus = int(wdHTTP.Int64)
+		wd.Error = wdErr.String
+		out = append(out, RunRow{DetectionRun: run, Delivery: wd})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("repo: iterate detection runs: %w", err)

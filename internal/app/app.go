@@ -170,7 +170,7 @@ func New(cfg Config) (*App, error) {
 		Report:     svc.Report,
 		Metrics:    svc.Metrics,
 		Detect:     svc.Detect,
-		Webhook:    notify.New(cfg.WebhookURL, 0, log),
+		Webhook:    notify.New(cfg.WebhookURL, 0, db, log),
 	}
 	a.API = api.New(log, svc, cfg.DataDir)
 	a.API.Webhook = a.Webhook

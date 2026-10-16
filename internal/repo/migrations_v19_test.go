@@ -222,8 +222,8 @@ VALUES ('tpl_b','other.xlsx','fp_v19','device','{}','设备清单','2026-01-02T0
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 26 {
-		t.Errorf("max schema version after upgrade = %d, want 26", maxV)
+	if maxV != 27 {
+		t.Errorf("max schema version after upgrade = %d, want 27", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op (a second CREATE TABLE
@@ -237,8 +237,8 @@ VALUES ('tpl_b','other.xlsx','fp_v19','device','{}','设备清单','2026-01-02T0
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 26 {
-		t.Errorf("max schema version after reopen = %d, want 26", maxV)
+	if maxV != 27 {
+		t.Errorf("max schema version after reopen = %d, want 27", maxV)
 	}
 	if _, err := db3.Templates.GetTemplate(ctx, "tpl_a"); err != nil {
 		t.Errorf("GetTemplate after reopen: %v", err)

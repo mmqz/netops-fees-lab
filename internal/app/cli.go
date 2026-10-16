@@ -782,7 +782,7 @@ func cmdDetect(args []string, stdout, stderr io.Writer) error {
 	// daily-inspection twin of the HTTP trigger). Best-effort: the
 	// notifier logs the failure itself; the run result is unaffected —
 	// the single-JSON-object stdout contract stays.
-	_ = a.Webhook.NotifyDetectionRun(ctx, res)
+	_ = a.Webhook.NotifyDetectionRun(ctx, res, rec.RunID)
 	// The receipt block (runId/source/startedAt/…) rides along in the
 	// same single JSON object — the HTTP envelope's CLI twin, so a
 	// scripted `netopslab detect` and a POST /api/detection/run leave

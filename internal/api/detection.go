@@ -320,10 +320,14 @@ func (s *Server) handleDetectionRun(w http.ResponseWriter, r *http.Request) {
 	// receiver is a no-op (channel off).
 	if s.Webhook != nil {
 		resCopy := res
+		runIDCopy := rec.RunID
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			// v0.12-R18: 25s budget — the bounded retry sequence (3
+			// worst-case 5s attempts + backoff) fits; the goroutine is
+			// detached from the response either way.
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
-			_ = s.Webhook.NotifyDetectionRun(ctx, resCopy)
+			_ = s.Webhook.NotifyDetectionRun(ctx, resCopy, runIDCopy)
 		}()
 	}
 	respondJSON(w, http.StatusOK, detectionRunEnvelope{
@@ -372,6 +376,12 @@ type detectionRunItem struct {
 	Suppressed       int    `json:"suppressed"`
 	FlapHeld         int    `json:"flapHeld"`
 	Error            string `json:"error"`
+
+	// Webhook notification verdict (v0.12-R18, LEFT JOIN webhook_deliveries):
+	// "" = channel off for that run, "delivered" | "failed" otherwise.
+	WebhookStatus   string `json:"webhookStatus"`
+	WebhookAttempts int    `json:"webhookAttempts"`
+	WebhookError    string `json:"webhookError"`
 }
 
 // handleDetectionRunsList implements GET /api/detection/runs?page=&pageSize=
@@ -408,6 +418,9 @@ func (s *Server) handleDetectionRunsList(w http.ResponseWriter, r *http.Request)
 			Suppressed:       run.Suppressed,
 			FlapHeld:         run.FlapHeld,
 			Error:            run.Error,
+			WebhookStatus:    run.Delivery.Status.String(),
+			WebhookAttempts:  run.Delivery.Attempts,
+			WebhookError:     run.Delivery.Error,
 		})
 	}
 	respondJSON(w, http.StatusOK, struct {

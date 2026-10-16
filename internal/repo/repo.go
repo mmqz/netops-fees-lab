@@ -104,6 +104,10 @@ type DB struct {
 	// per detection sweep — api / cli / scheduler all land here.
 	DetectionRuns *DetectionRunRepo
 
+	// Webhook delivery audit (migration v27, v0.12-R18): the retry
+	// sequence verdict of each attempted run notification.
+	WebhookDeliveries *WebhookDeliveryRepo
+
 	// Maintenance windows (migration v24, v0.12-R15): planned suppression
 	// windows for new alert fires.
 	Maintenance *MaintenanceRepo
@@ -175,6 +179,7 @@ func wire(db *DB, q DBTX) {
 	db.DetectionRules = &DetectionRuleRepo{q: q}
 	db.Alerts = &AlertRepo{q: q}
 	db.DetectionRuns = &DetectionRunRepo{q: q}
+	db.WebhookDeliveries = &WebhookDeliveryRepo{q: q}
 	db.Maintenance = &MaintenanceRepo{q: q}
 	db.LayerNodes = &LayerNodeRepo{q: q}
 	db.LayerLinks = &LayerLinkRepo{q: q}
@@ -229,6 +234,9 @@ type Tx struct {
 
 	// Detection run history (migration v21, v0.11-R11).
 	DetectionRuns *DetectionRunRepo
+
+	// Webhook delivery audit (migration v27, v0.12-R18).
+	WebhookDeliveries *WebhookDeliveryRepo
 
 	// Maintenance windows (migration v24, v0.12-R15).
 	Maintenance *MaintenanceRepo
@@ -307,32 +315,33 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		return err
 	}
 	tx := &Tx{
-		Batches:          &BatchRepo{q: sqlTx},
-		Resources:        &ResourceRepo{q: sqlTx},
-		Relations:        &RelationRepo{q: sqlTx},
-		SourceRefs:       &SourceRefRepo{q: sqlTx},
-		RowResults:       &RowResultRepo{q: sqlTx},
-		Issues:           &IssueRepo{q: sqlTx},
-		AttributeChanges: &AttributeChangeRepo{q: sqlTx},
-		RenameProposals:  &RenameProposalRepo{q: sqlTx},
-		Workspaces:       &WorkspaceRepo{q: sqlTx},
-		Sequences:        &SequenceRepo{q: sqlTx},
-		VirtualDevices:   &VirtualDeviceRepo{q: sqlTx},
-		SimInterfaces:    &SimInterfaceRepo{q: sqlTx},
-		SimLinks:         &SimLinkRepo{q: sqlTx},
-		ChangeSets:       &ChangeSetRepo{q: sqlTx},
-		CheckRuns:        &CheckRunRepo{q: sqlTx},
-		Checkpoints:      &CheckpointRepo{q: sqlTx},
-		MetricBatches:    &MetricBatchRepo{q: sqlTx},
-		Metrics:          &MetricRepo{q: sqlTx},
-		ResourceStatus:   &ResourceStatusRepo{q: sqlTx},
-		DetectionRules:   &DetectionRuleRepo{q: sqlTx},
-		Alerts:           &AlertRepo{q: sqlTx},
-		DetectionRuns:    &DetectionRunRepo{q: sqlTx},
-		Maintenance:      &MaintenanceRepo{q: sqlTx},
-		LayerNodes:       &LayerNodeRepo{q: sqlTx},
-		LayerLinks:       &LayerLinkRepo{q: sqlTx},
-		Templates:        &TemplateRepo{q: sqlTx},
+		Batches:           &BatchRepo{q: sqlTx},
+		Resources:         &ResourceRepo{q: sqlTx},
+		Relations:         &RelationRepo{q: sqlTx},
+		SourceRefs:        &SourceRefRepo{q: sqlTx},
+		RowResults:        &RowResultRepo{q: sqlTx},
+		Issues:            &IssueRepo{q: sqlTx},
+		AttributeChanges:  &AttributeChangeRepo{q: sqlTx},
+		RenameProposals:   &RenameProposalRepo{q: sqlTx},
+		Workspaces:        &WorkspaceRepo{q: sqlTx},
+		Sequences:         &SequenceRepo{q: sqlTx},
+		VirtualDevices:    &VirtualDeviceRepo{q: sqlTx},
+		SimInterfaces:     &SimInterfaceRepo{q: sqlTx},
+		SimLinks:          &SimLinkRepo{q: sqlTx},
+		ChangeSets:        &ChangeSetRepo{q: sqlTx},
+		CheckRuns:         &CheckRunRepo{q: sqlTx},
+		Checkpoints:       &CheckpointRepo{q: sqlTx},
+		MetricBatches:     &MetricBatchRepo{q: sqlTx},
+		Metrics:           &MetricRepo{q: sqlTx},
+		ResourceStatus:    &ResourceStatusRepo{q: sqlTx},
+		DetectionRules:    &DetectionRuleRepo{q: sqlTx},
+		Alerts:            &AlertRepo{q: sqlTx},
+		DetectionRuns:     &DetectionRunRepo{q: sqlTx},
+		WebhookDeliveries: &WebhookDeliveryRepo{q: sqlTx},
+		Maintenance:       &MaintenanceRepo{q: sqlTx},
+		LayerNodes:        &LayerNodeRepo{q: sqlTx},
+		LayerLinks:        &LayerLinkRepo{q: sqlTx},
+		Templates:         &TemplateRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {
