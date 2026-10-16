@@ -24,11 +24,11 @@ func (r *DetectionRunRepo) InsertRun(ctx context.Context, run domain.DetectionRu
 	_, err := r.q.ExecContext(ctx, `
 INSERT INTO detection_runs
   (id, source, started_at, finished_at, duration_ms, from_ts, to_ts, evaluated_at,
-   findings, alerts_created, alerts_cleared, run_states_written, error)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+   findings, alerts_created, alerts_cleared, run_states_written, suppressed, error)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.RunID, run.Source.String(), run.StartedAt, run.FinishedAt, run.DurationMS,
 		run.From, run.To, run.EvaluatedAt,
-		run.Findings, run.AlertsCreated, run.AlertsCleared, run.RunStatesWritten, run.Error)
+		run.Findings, run.AlertsCreated, run.AlertsCleared, run.RunStatesWritten, run.Suppressed, run.Error)
 	if err != nil {
 		return fmt.Errorf("repo: insert detection run %s: %w", run.RunID, err)
 	}
@@ -48,7 +48,7 @@ func (r *DetectionRunRepo) ListRuns(ctx context.Context, limit, offset int) ([]d
 
 	query := `
 SELECT id, source, started_at, finished_at, duration_ms, from_ts, to_ts, evaluated_at,
-       findings, alerts_created, alerts_cleared, run_states_written, error
+       findings, alerts_created, alerts_cleared, run_states_written, suppressed, error
 FROM detection_runs
 ORDER BY started_at DESC, id ASC`
 	l, o := paging(limit, offset)
@@ -73,7 +73,7 @@ ORDER BY started_at DESC, id ASC`
 		)
 		if err := rows.Scan(&run.RunID, &source, &run.StartedAt, &run.FinishedAt, &run.DurationMS,
 			&fromTS, &toTS, &evaluated,
-			&run.Findings, &run.AlertsCreated, &run.AlertsCleared, &run.RunStatesWritten, &runErr); err != nil {
+			&run.Findings, &run.AlertsCreated, &run.AlertsCleared, &run.RunStatesWritten, &run.Suppressed, &runErr); err != nil {
 			return nil, 0, fmt.Errorf("repo: scan detection run row: %w", err)
 		}
 		run.Source = domain.RunSource(source)

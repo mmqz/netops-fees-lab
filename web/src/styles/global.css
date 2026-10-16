@@ -4245,3 +4245,56 @@ body.lab-split-dragging {
   background: #1d3b30;
   border: 1px solid #69b08c;
 }
+
+/* ---------------------------------------------------------------------------
+ * 维护窗口（v0.12-R15，/maintenance）：范围选择器（搜索结果 / 已选 chips）
+ * 与行展开的资源 id 清单。
+ * ------------------------------------------------------------------------- */
+
+.scope-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #d8dee6);
+  border-radius: 6px;
+  padding: 4px;
+  margin-bottom: 8px;
+}
+
+.scope-result-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.scope-result-item:hover {
+  background: var(--bg-hover, #eef2f6);
+}
+
+.scope-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.scope-pick {
+  cursor: pointer;
+  border: 0;
+}
+
+.scope-id {
+  display: inline-block;
+  margin-right: 8px;
+}

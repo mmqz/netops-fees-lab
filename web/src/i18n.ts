@@ -766,15 +766,61 @@ export const RUN_FINDINGS = '发现越限 {n}';
 export const RUN_CREATED = '新建告警 {n}';
 export const RUN_CLEARED = '恢复清除 {n}';
 export const RUN_RUNSTATES = '写入运行状态 {n}';
+export const RUN_SUPPRESSED = '维护抑制 {n}';
 export const RUN_EVALUATED_AT = '数据截止 {at}';
 export const RUN_EVALUATED_NONE = '数据截止：本次窗口无数据';
 export const RUN_MUTATIONS_TITLE = '告警变更明细';
 export const RUN_MUTATIONS_EMPTY = '本次运行无告警变更（数据与规则未变时为预期行为）';
 export const RUN_ACTION_CREATED = '新建';
 export const RUN_ACTION_CLEARED = '清除';
+export const RUN_ACTION_SUPPRESSED = '抑制';
 export const RUN_DONE = '完成';
 export const RUN_FAILED = '检测运行失败：{message}';
 export const RUN_TOAST_DONE = '检测完成：新建 {created} · 清除 {cleared}';
+
+// ---------------------------------------------------------------------------
+// 维护窗口页（v0.12-R15，/maintenance）
+// ---------------------------------------------------------------------------
+
+export const NAV_MAINTENANCE = '维护窗口';
+export const MNT_HINT =
+  '计划内维护期间抑制新告警：窗口时间区间内的新触发不产生告警（已触发的告警生命周期不受影响，恢复清除照常）。判定基准是指标数据时间线，可重放。';
+export const MNT_EMPTY = '没有维护窗口';
+export const MNT_BTN_NEW = '新建窗口';
+export const MNT_BTN_DELETE = '删除';
+export const MNT_COL_LABEL = '事由';
+export const MNT_COL_RANGE = '时间区间';
+export const MNT_COL_SCOPE = '范围';
+export const MNT_COL_STATUS = '状态';
+export const MNT_COL_ACTIONS = '操作';
+export const MNT_SCOPE_GLOBAL = '全部资源';
+export const MNT_SCOPE_RESOURCES = '{n} 个资源';
+export const MNT_STATUS_PLANNED = '计划中';
+export const MNT_STATUS_ACTIVE = '进行中';
+export const MNT_STATUS_ENDED = '已结束';
+export const MNT_STATUS_ACTIVE_HINT = '当前时刻落在窗口内：新告警触发将被抑制';
+export const MNT_CREATE_TITLE = '新建维护窗口';
+export const MNT_FIELD_LABEL = '事由';
+export const MNT_FIELD_LABEL_PLACEHOLDER = '例如：哈大齐干线割接';
+export const MNT_FIELD_START = '开始时间';
+export const MNT_FIELD_END = '结束时间（不含）';
+export const MNT_FIELD_SCOPE = '抑制范围';
+export const MNT_SCOPE_OPTION_GLOBAL = '全部资源（全局）';
+export const MNT_SCOPE_OPTION_SCOPED = '指定资源';
+export const MNT_SCOPE_SEARCH_PLACEHOLDER = '搜索资源（名称 / 自然键）添加到范围';
+export const MNT_SCOPE_EMPTY_HINT = '未指定资源时抑制全部资源的新告警';
+export const MNT_FIELD_NOTE = '备注（可选）';
+export const MNT_FIELD_NOTE_PLACEHOLDER = '例如：计划内光缆割接，预期 2 小时';
+export const MNT_LABEL_REQUIRED = '请填写事由';
+export const MNT_TIMES_REQUIRED = '请填写开始与结束时间';
+export const MNT_TIMES_INVALID = '时间格式不合法（需要日期时间）';
+export const MNT_TIMES_ORDER = '结束时间必须晚于开始时间';
+export const MNT_CREATE_TOAST = '窗口已创建（{id}）';
+export const MNT_DELETE_TITLE = '删除维护窗口';
+export const MNT_DELETE_MESSAGE = '将删除窗口「{label}」。历史运行回执不受影响；下一次检测将恢复新告警触发。';
+export const MNT_DELETED_TOAST = '窗口已删除（{id}）';
+export const MNT_ACTION_FAILED = '操作失败：{message}';
+export const MNT_LOAD_FAILED = '窗口加载失败：{message}';
 
 // ---------------------------------------------------------------------------
 // 告警导出（v0.10-R7，/alerts 当前筛选 → CSV 下载）
@@ -1539,7 +1585,7 @@ export const RUN_SOURCE_LABELS: Record<'api' | 'cli' | 'scheduler', string> = {
 export const PATROL_LAST_LABEL = '上次巡检';
 export const PATROL_LAST_NONE = '尚未巡检';
 export const PATROL_LAST_LINE =
-  '{source} · {time} · 耗时 {duration} · 新增 {created} / 清除 {cleared}';
+  '{source} · {time} · 耗时 {duration} · 新增 {created} / 清除 {cleared} / 抑制 {suppressed}';
 export const PATROL_LAST_FAILED = '失败';
 export const PATROL_NEXT_LABEL = '下次自动巡检';
 export const PATROL_NEXT_LINE = '{time}（每 {interval} 一轮）';
@@ -1551,7 +1597,7 @@ export const PATROL_RUNS_HINT =
 export const PATROL_COL_SOURCE = '来源';
 export const PATROL_COL_STARTED = '开始时间';
 export const PATROL_COL_DURATION = '耗时';
-export const PATROL_COL_COUNTS = '发现 / 新增 / 清除';
+export const PATROL_COL_COUNTS = '发现 / 新增 / 清除 / 抑制';
 export const PATROL_COL_STATUS = '状态';
 export const PATROL_COL_WINDOW = '评估窗口';
 export const PATROL_COL_DATA_TS = '数据截止';

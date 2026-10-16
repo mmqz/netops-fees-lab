@@ -369,6 +369,7 @@ type detectionRunItem struct {
 	AlertsCreated    int    `json:"alertsCreated"`
 	AlertsCleared    int    `json:"alertsCleared"`
 	RunStatesWritten int    `json:"runStatesWritten"`
+	Suppressed       int    `json:"suppressed"`
 	Error            string `json:"error"`
 }
 
@@ -403,6 +404,7 @@ func (s *Server) handleDetectionRunsList(w http.ResponseWriter, r *http.Request)
 			AlertsCreated:    run.AlertsCreated,
 			AlertsCleared:    run.AlertsCleared,
 			RunStatesWritten: run.RunStatesWritten,
+			Suppressed:       run.Suppressed,
 			Error:            run.Error,
 		})
 	}

@@ -26,6 +26,12 @@
 // re-firing after a cleared alert creates a NEW alert row (fresh
 // first_seen). Already-acked alerts never re-fire while acked — the human
 // holds the floor.
+//
+// Maintenance windows (v0.12-R15) sit BEFORE the state machine, not inside
+// it: a NEW fire whose evidence ts falls inside [starts_at, ends_at) on a
+// scoped resource never enters the machine (no alert row, no state write);
+// windows never mutate existing alerts. The alert table's shape and the
+// three-edge doctrine are untouched — suppression is a gate, not an edge.
 package detect
 
 import (
@@ -46,6 +52,37 @@ type Point struct {
 	TS      string
 	Value   float64
 	Quality domain.PointQuality
+}
+
+// SuppressedWindow is the pure-function projection of one maintenance
+// window row (v0.12-R15): only what the suppression verdict needs — the
+// half-open [StartsAfter, EndsAfter) interval (both bounds from the DATA
+// timeline, pre-parsed) and the resource scope (nil = global). Loading
+// the rows and parsing the RFC3339 bounds is the repo/DB concern; the
+// verdict below stays clock-free and DB-free.
+type SuppressedWindow struct {
+	StartsAfter time.Time
+	EndsBefore  time.Time
+	ResourceIDs map[string]bool // nil = the global scope (every resource)
+	Label       string
+}
+
+// Suppresses reports whether a finding on resourceID with evidence
+// timestamp lastTS falls under this window: lastTS ∈ [StartsAfter,
+// EndsBefore) AND the resource is in scope. The interval is half-open on
+// purpose — a fire exactly at EndsBefore belongs to the world AFTER the
+// plan, a fire exactly at StartsAfter belongs to the plan. Two windows
+// overlapping the same ts/resource is fine: the first match wins in the
+// engine's loop, the verdict (suppressed) is the same.
+func (w SuppressedWindow) Suppresses(resourceID, lastTS string) bool {
+	if w.ResourceIDs != nil && !w.ResourceIDs[resourceID] {
+		return false
+	}
+	ts, err := time.Parse(time.RFC3339, lastTS)
+	if err != nil {
+		return false // engine ts strings are RFC3339 by invariant; a parse miss never suppresses
+	}
+	return !ts.Before(w.StartsAfter) && ts.Before(w.EndsBefore)
 }
 
 // Finding is one rule/series violation: the last Window consecutive points
@@ -113,7 +150,11 @@ type Options struct {
 }
 
 // AlertSummary is one alert mutation of a run (created or cleared) — the
-// run envelope's per-alert evidence line.
+// run envelope's per-alert evidence line. v0.12-R15: action="suppressed"
+// lines describe findings held back by a maintenance window — they have
+// NO alert row, so State is "" and AlertID carries the DETERMINISTIC
+// would-be id (same identity the fire gets after the window ends when the
+// violation run extends back across the boundary — correlatable).
 type AlertSummary struct {
 	AlertID    string  `json:"alertId"`
 	RuleID     string  `json:"ruleId"`
@@ -121,8 +162,8 @@ type AlertSummary struct {
 	ResourceID string  `json:"resourceId"`
 	MetricKey  string  `json:"metricKey"`
 	Severity   string  `json:"severity"`
-	Action     string  `json:"action"` // created | cleared
-	State      string  `json:"state"`  // the state AFTER the run
+	Action     string  `json:"action"` // created | cleared | suppressed
+	State      string  `json:"state"`  // the state AFTER the run ("" for suppressed lines)
 	FirstSeen  string  `json:"firstSeen"`
 	FiredAt    string  `json:"firedAt"`
 	ClearedAt  string  `json:"clearedAt"`
@@ -132,15 +173,18 @@ type AlertSummary struct {
 // RunResult is the response envelope of POST /api/detection/run and the
 // CLI `netopslab detect` output. Findings counts ALL violations of the run
 // (including series whose alert already exists); AlertsCreated /
-// AlertsCleared / RunStatesWritten count the run's MUTATIONS; Alerts lists
-// them (ordered rule_id, series_id). EvaluatedAt is the run's evaluation
-// timestamp FROM THE DATA (the newest ts of any evaluated point; "" when
-// no data was in scope).
+// AlertsCleared / RunStatesWritten count the run's MUTATIONS; Suppressed
+// counts the findings held back by maintenance windows (a subset of
+// Findings — the alarm the NOC intentionally chose not to receive);
+// Alerts lists the created/cleared/suppressed lines (ordered rule_id,
+// series_id). EvaluatedAt is the run's evaluation timestamp FROM THE DATA
+// (the newest ts of any evaluated point; "" when no data was in scope).
 type RunResult struct {
 	Findings         int            `json:"findings"`
 	AlertsCreated    int            `json:"alertsCreated"`
 	AlertsCleared    int            `json:"alertsCleared"`
 	RunStatesWritten int            `json:"runStatesWritten"`
+	Suppressed       int            `json:"suppressed"`
 	EvaluatedAt      string         `json:"evaluatedAt"`
 	Alerts           []AlertSummary `json:"alerts"`
 }
@@ -179,6 +223,14 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 	var res RunResult
 	err := db.Do(ctx, func(tx *repo.Tx) error {
 		if err := tx.DetectionRules.SeedDefaultDetectionRules(ctx); err != nil {
+			return err
+		}
+		// Maintenance windows (v0.12-R15): loaded INSIDE the same
+		// transaction as the alert sync — the suppression verdict and
+		// the alert writes see one consistent window set (a window
+		// created mid-sweep cannot half-apply).
+		supWindows, err := loadSuppressionWindows(ctx, tx)
+		if err != nil {
 			return err
 		}
 		rules, err := tx.DetectionRules.ListRules(ctx, true)
@@ -242,6 +294,13 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 			// 1. findings → create (no non-cleared alert) or refresh evidence
 			//    (firing only — an acked alert's evidence is frozen at the
 			//    human's floor; acked alerts never re-fire).
+			//
+			//    v0.12-R15: a NEW fire whose evidence ts falls inside a
+			//    maintenance window covering the resource is SUPPRESSED —
+			//    no alert row, counted, listed with action="suppressed"
+			//    and the deterministic would-be id. Existing alerts keep
+			//    their lifecycle (evidence refresh included): the window
+			//    holds NEW noise, it does not rewrite history.
 			for _, f := range findings {
 				existing, has := activeBySeries[f.SeriesID]
 				if has {
@@ -250,6 +309,23 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 							return err
 						}
 					}
+					continue
+				}
+				if matchSuppressionWindow(supWindows, f.ResourceID, f.LastTS) != nil {
+					res.Suppressed++
+					summaries = append(summaries, AlertSummary{
+						AlertID:    NewAlertID(rule.RuleID, f.SeriesID, f.FirstSeen),
+						RuleID:     rule.RuleID,
+						SeriesID:   f.SeriesID,
+						ResourceID: f.ResourceID,
+						MetricKey:  f.MetricKey,
+						Severity:   rule.Severity.String(),
+						Action:     "suppressed",
+						State:      "",
+						FirstSeen:  f.FirstSeen,
+						FiredAt:    f.LastTS,
+						LastValue:  f.LastValue,
+					})
 					continue
 				}
 				a := domain.Alert{
@@ -331,6 +407,50 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 		return RunResult{}, err
 	}
 	return res, nil
+}
+
+// loadSuppressionWindows reads the maintenance-window rows and projects
+// them into the pure SuppressedWindow form (parsed bounds, scope set).
+// A row whose bounds no longer parse is a HARD error — the API boundary
+// validated them on write, so an unparseable row means direct DB tampering;
+// failing the sweep (and recording the failure in detection_runs) is the
+// honest outcome, not silently ignoring a window that may be suppressing
+// alarms the operator believes are active.
+func loadSuppressionWindows(ctx context.Context, tx *repo.Tx) ([]SuppressedWindow, error) {
+	rows, err := tx.Maintenance.ListWindows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SuppressedWindow, 0, len(rows))
+	for _, row := range rows {
+		start, end, err := domain.ParseMaintenanceWindowTimes(row.StartsAt, row.EndsAt)
+		if err != nil {
+			return nil, fmt.Errorf("detect: maintenance window %s (%s): %w", row.WindowID, row.Label, err)
+		}
+		w := SuppressedWindow{StartsAfter: start, EndsBefore: end, Label: row.Label}
+		if len(row.ResourceIDs) > 0 {
+			scope := make(map[string]bool, len(row.ResourceIDs))
+			for _, id := range row.ResourceIDs {
+				scope[id] = true
+			}
+			w.ResourceIDs = scope
+		}
+		out = append(out, w)
+	}
+	return out, nil
+}
+
+// matchSuppressionWindow returns the FIRST window suppressing the
+// (resource, ts) pair, or nil. Order follows the listing (starts_at DESC)
+// — with overlapping windows the verdict (suppressed) is identical either
+// way; the returned window's label is evidence for the envelope line.
+func matchSuppressionWindow(windows []SuppressedWindow, resourceID, lastTS string) *SuppressedWindow {
+	for i := range windows {
+		if windows[i].Suppresses(resourceID, lastTS) {
+			return &windows[i]
+		}
+	}
+	return nil
 }
 
 // writeRunStates maps the alert table to run-state observations (source=

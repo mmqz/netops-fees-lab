@@ -104,6 +104,10 @@ type DB struct {
 	// per detection sweep — api / cli / scheduler all land here.
 	DetectionRuns *DetectionRunRepo
 
+	// Maintenance windows (migration v24, v0.12-R15): planned suppression
+	// windows for new alert fires.
+	Maintenance *MaintenanceRepo
+
 	// Layer overlay (migration v23, issue #51 / W33): the read-only canvas
 	// projection of the unified graph — virtual_nodes (L0/L4/L5/L6) and
 	// virtual_layer_links (L3/L4/L5/L6).
@@ -171,6 +175,7 @@ func wire(db *DB, q DBTX) {
 	db.DetectionRules = &DetectionRuleRepo{q: q}
 	db.Alerts = &AlertRepo{q: q}
 	db.DetectionRuns = &DetectionRunRepo{q: q}
+	db.Maintenance = &MaintenanceRepo{q: q}
 	db.LayerNodes = &LayerNodeRepo{q: q}
 	db.LayerLinks = &LayerLinkRepo{q: q}
 	db.Templates = &TemplateRepo{q: q}
@@ -224,6 +229,9 @@ type Tx struct {
 
 	// Detection run history (migration v21, v0.11-R11).
 	DetectionRuns *DetectionRunRepo
+
+	// Maintenance windows (migration v24, v0.12-R15).
+	Maintenance *MaintenanceRepo
 
 	// Layer overlay (migration v23, issue #51 / W33): the read-only canvas
 	// projection of the unified graph — virtual_nodes (L0/L4/L5/L6) and
@@ -321,6 +329,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		DetectionRules:   &DetectionRuleRepo{q: sqlTx},
 		Alerts:           &AlertRepo{q: sqlTx},
 		DetectionRuns:    &DetectionRunRepo{q: sqlTx},
+		Maintenance:      &MaintenanceRepo{q: sqlTx},
 		LayerNodes:       &LayerNodeRepo{q: sqlTx},
 		LayerLinks:       &LayerLinkRepo{q: sqlTx},
 		Templates:        &TemplateRepo{q: sqlTx},

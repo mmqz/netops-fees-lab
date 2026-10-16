@@ -51,6 +51,7 @@ func RunAndRecord(ctx context.Context, db *repo.DB, eng *Engine, opts Options, s
 		AlertsCreated:    res.AlertsCreated,
 		AlertsCleared:    res.AlertsCleared,
 		RunStatesWritten: res.RunStatesWritten,
+		Suppressed:       res.Suppressed,
 	}
 	if err != nil {
 		rec.Error = err.Error()

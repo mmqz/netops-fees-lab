@@ -1069,6 +1069,8 @@ export interface DetectionRunItem {
   alertsCreated: number;
   alertsCleared: number;
   runStatesWritten: number;
+  /** 维护窗口抑制的新告警数（v0.12-R15；v24 前的回执回填为 0）。 */
+  suppressed: number;
   error: string;
 }
 
@@ -1255,7 +1257,7 @@ export interface DetectionRuleDeleteResponse {
   deleted: boolean;
 }
 
-/** POST /api/detection/run 单条告警变更行（created | cleared）。 */
+/** POST /api/detection/run 单条告警变更行（created | cleared | suppressed）。 */
 export interface AlertMutationSummary {
   alertId: string;
   ruleId: string;
@@ -1263,8 +1265,10 @@ export interface AlertMutationSummary {
   resourceId: string;
   metricKey: string;
   severity: Severity;
-  action: 'created' | 'cleared';
-  state: AlertState;
+  /** v0.12-R15：suppressed = 被维护窗口抑制的潜在新告警（无告警行，state 为空串）。 */
+  action: 'created' | 'cleared' | 'suppressed';
+  /** suppressed 行无告警行 → 空串；created/cleared 行为变更后状态。 */
+  state: AlertState | '';
   firstSeen: string;
   firedAt: string;
   clearedAt: string;
@@ -1277,8 +1281,53 @@ export interface DetectionRunResponse {
   alertsCreated: number;
   alertsCleared: number;
   runStatesWritten: number;
+  /** v0.12-R15：被维护窗口抑制的新告警数（findings 的子集）。 */
+  suppressed: number;
   evaluatedAt: string;
   alerts: AlertMutationSummary[];
+}
+
+// ---------------------------------------------------------------------------
+// 24. 维护窗口（/api/maintenance/windows，v0.12-R15）
+// ---------------------------------------------------------------------------
+
+/** GET /api/maintenance/windows 行（计划内抑制新告警的时间区间）。 */
+export interface MaintenanceWindow {
+  windowId: string;
+  label: string;
+  /** RFC3339 UTC，半开区间 [startsAt, endsAt)。 */
+  startsAt: string;
+  endsAt: string;
+  /** 空 = 全局 scope（覆盖全部资源）。 */
+  resourceIds: string[];
+  note: string;
+  createdAt: string;
+}
+
+/** POST /api/maintenance/windows 请求体。 */
+export interface MaintenanceWindowRequest {
+  label: string;
+  startsAt: string;
+  endsAt: string;
+  resourceIds?: string[];
+  note?: string;
+}
+
+/** POST /api/maintenance/windows 响应。 */
+export interface MaintenanceWindowCreated {
+  windowId: string;
+  label: string;
+  startsAt: string;
+  endsAt: string;
+  resourceIds: string[];
+  note: string;
+  createdAt: string;
+}
+
+/** DELETE /api/maintenance/windows/{id} 响应。 */
+export interface MaintenanceWindowDeleted {
+  windowId: string;
+  deleted: boolean;
 }
 
 // ---------------------------------------------------------------------------

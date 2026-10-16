@@ -510,3 +510,13 @@ export function IconPencil({ size = 16, className }: IconProps) {
   );
 }
 
+/** 维护窗口（时钟——计划内时间区间语义）。 */
+export function IconClock({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 16 14" />
+    </svg>
+  );
+}
+

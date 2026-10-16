@@ -30,9 +30,11 @@ import {
   RUN_MUTATIONS_EMPTY,
   RUN_MUTATIONS_TITLE,
   RUN_RUNSTATES,
+  RUN_SUPPRESSED,
   RUN_RESULT_TITLE,
   RUN_ACTION_CLEARED,
   RUN_ACTION_CREATED,
+  RUN_ACTION_SUPPRESSED,
   RUN_TOAST_DONE,
   format,
   formatDateTime,
@@ -41,14 +43,27 @@ import { SeverityBadge } from './SeverityBadge';
 import { useToast } from './Toast';
 import { useModalA11y } from '../hooks/useModalA11y';
 
-/** 一次告警变更行（回执明细表）。 */
+/** 一次告警变更行（回执明细表）。suppressed 行（v0.12-R15）无告警行，
+ * 徽标用中性色 + 「抑制」文案与 created/cleared 区分。 */
 function MutationRow({ line }: { line: DetectionRunResponse['alerts'][number] }) {
+  const actionLabel =
+    line.action === 'created'
+      ? RUN_ACTION_CREATED
+      : line.action === 'suppressed'
+        ? RUN_ACTION_SUPPRESSED
+        : RUN_ACTION_CLEARED;
+  const chipClass =
+    line.action === 'created'
+      ? 'chip--error'
+      : line.action === 'suppressed'
+        ? 'chip--warning'
+        : 'chip--muted';
   return (
     <tr>
       <td>
-        <span className={`chip ${line.action === 'created' ? 'chip--error' : 'chip--muted'}`}>
+        <span className={`chip ${chipClass}`}>
           <span className="chip-dot" aria-hidden="true" />
-          {line.action === 'created' ? RUN_ACTION_CREATED : RUN_ACTION_CLEARED}
+          {actionLabel}
         </span>
       </td>
       <td>
@@ -155,6 +170,10 @@ export function RunDetectionDialog({
                 <div className="run-stat-label">
                   {format(RUN_RUNSTATES, { n: result.runStatesWritten })}
                 </div>
+              </div>
+              <div className="run-stat">
+                <div className="run-stat-value">{result.suppressed}</div>
+                <div className="run-stat-label">{format(RUN_SUPPRESSED, { n: result.suppressed })}</div>
               </div>
             </div>
             <div className="muted-note">

@@ -21,6 +21,10 @@ import type {
   DetectionRulePatchRequest,
   DetectionRulesListResponse,
   DetectionRunResponse,
+  MaintenanceWindow,
+  MaintenanceWindowCreated,
+  MaintenanceWindowDeleted,
+  MaintenanceWindowRequest,
   ImpactDocument,
   RunStateHistoryResponse,
   MetricKeyItem,
@@ -801,6 +805,27 @@ export function runDetection(from?: string, to?: string): Promise<DetectionRunRe
   if (from !== undefined && from !== '') body.from = from;
   if (to !== undefined && to !== '') body.to = to;
   return postJson<DetectionRunResponse>('/detection/run', body);
+}
+
+// ---------------------------------------------------------------------------
+// 维护窗口（/api/maintenance/windows，v0.12-R15）
+// ---------------------------------------------------------------------------
+
+/** GET /api/maintenance/windows — 维护窗口全量列表（最新开始时间在前）。 */
+export function listMaintenanceWindows(): Promise<{ items: MaintenanceWindow[]; total: number }> {
+  return requestJson<{ items: MaintenanceWindow[]; total: number }>('/maintenance/windows');
+}
+
+/** POST /api/maintenance/windows — 新建维护窗口（RFC3339 起止，空 resourceIds = 全局）。 */
+export function createMaintenanceWindow(req: MaintenanceWindowRequest): Promise<MaintenanceWindowCreated> {
+  return postJson<MaintenanceWindowCreated>('/maintenance/windows', req);
+}
+
+/** DELETE /api/maintenance/windows/{id} — 删除维护窗口（未知 id 404）。 */
+export function deleteMaintenanceWindow(id: string): Promise<MaintenanceWindowDeleted> {
+  return requestJson<MaintenanceWindowDeleted>(`/maintenance/windows/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ---------------------------------------------------------------------------

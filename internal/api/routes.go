@@ -71,6 +71,10 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/detection/run", Tag: "detection", Summary: "执行一次全库检测扫描（可选 from/to 窗口；回执落库，完成后触发 webhook 通知）", Handler: s.handleDetectionRun},
 		{Method: "GET", Pattern: "/api/detection/runs", Tag: "detection", Summary: "检测运行历史分页（每双回执：来源 api/cli/scheduler、窗口、计数、时长、失败原因）", Handler: s.handleDetectionRunsList},
 
+		{Method: "GET", Pattern: "/api/maintenance/windows", Tag: "maintenance", Summary: "维护窗口列表（计划内抑制新告警的时间区间，最新在前）", Handler: s.handleMaintenanceWindowsList},
+		{Method: "POST", Pattern: "/api/maintenance/windows", Tag: "maintenance", Summary: "新建维护窗口（RFC3339 起止、可选资源范围，空范围 = 全局）", Handler: s.handleMaintenanceWindowsCreate},
+		{Method: "DELETE", Pattern: "/api/maintenance/windows/{id}", Tag: "maintenance", Summary: "删除维护窗口（历史运行回执不受影响）", Handler: s.handleMaintenanceWindowsDelete},
+
 		{Method: "GET", Pattern: "/api/alerts", Tag: "alerts", Summary: "告警分页列表（state/severity/resource 过滤）", Handler: s.handleAlertsList},
 		{Method: "GET", Pattern: "/api/alerts/stats", Tag: "alerts", Summary: "告警分布统计（byState 三态计数 + 待处置级别矩阵，闭集零填充）", Handler: s.handleAlertsStats},
 		{Method: "POST", Pattern: "/api/alerts/{id}/ack", Tag: "alerts", Summary: "确认告警（firing→acked，ackedBy 必填审计字段）", Handler: s.handleAlertAck},
