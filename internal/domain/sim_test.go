@@ -194,8 +194,8 @@ func TestSimSentinelErrors(t *testing.T) {
 func TestAppVersionP2(t *testing.T) {
 	// P2: the version constant is a single pinned fact (the changelog-head
 	// cross-check below guards the other copy).
-	if AppVersion != "v0.11.1" {
-		t.Errorf("AppVersion = %q, want v0.11.1 (v0.11.1 issue-#53 fix round: L3 pure-edge toggle, full-graph fit bbox + letterbox, L0 default-on, cluster member badge, physical-vs-overlay link wording — CHANGELOG 0.11.1)", AppVersion)
+	if AppVersion != "v0.12.0" {
+		t.Errorf("AppVersion = %q, want v0.12.0 (v0.12.0 alarm-quality release: maintenance-window suppression, correlation verdicts, flap damping, webhook retry + audit — CHANGELOG 0.12.0)", AppVersion)
 	}
 }
 

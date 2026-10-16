@@ -22,15 +22,15 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.11.1 is
-// the issue-#53 fix round on top of the autonomous-operations release: the
-// L3 pure-edge layer toggle un-disabled (hasData now counts edges), the fit
-// baseline switched to the full-graph bounding box with a letterbox guard
-// (layer toggles never rescale the view), L0 spatial anchors on by default
-// (the default view fills the canvas width), cluster pills keep their member
-// count at any zoom, and the link-count wording split into physical links
-// versus overlay edges.
-const AppVersion = "v0.11.1"
+// the health endpoint, the MCP server implementation and the CLI. v0.12.0 is
+// the alarm-quality release (four rounds on top of the autonomous-operations
+// line): maintenance windows suppress planned noise (R15), correlation
+// verdicts triage symptoms into 根因嫌疑/疑似次生 (R16), the flap hold-down
+// damps the re-fire churn of threshold-hovering series (R17), and the
+// webhook channel retries transient failures with a durable delivery audit
+// (R18) — the three-edge alert state machine untouched throughout (all four
+// are gates before or beside the machine, never edges; ADR-0011 D3).
+const AppVersion = "v0.12.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.
