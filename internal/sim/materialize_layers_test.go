@@ -593,3 +593,91 @@ func lookupDev(t *testing.T, topo Topology, id string) (TopologyNode, bool) {
 	}
 	return TopologyNode{}, false
 }
+
+// TestLayerOverlayPureEdgeContract pins the #53-A data contract: a pure-edge
+// layer (L3 transmission: nodes=0, edges>0 — both endpoints on canvas
+// devices) is a usable layer. The frontend layer toggle judges "has data"
+// by nodes>0 || edges>0 (TopologyCanvas.tsx #53-A fix: the old "nodes>0"
+// check permanently disabled the L3 switch and hid 207 circuits). This test
+// keeps the payload side honest so that judgement stays sufficient:
+//  1. every layer listed in the summary is usable (nodes>0 || edges>0);
+//  2. every layer edge endpoint resolves to a renderable canvas entity
+//     (device / interface-of-device / layer node) and no device self-loop
+//     (the frontend drops self-loops, which would inflate edge counts);
+//  3. every overlay node's anchor device exists (the frontend derives the
+//     access-uplink edge from anchorDeviceId).
+func TestLayerOverlayPureEdgeContract(t *testing.T) {
+	ctx := context.Background()
+	svc, db := newEngine(t)
+	insertLayersFixture(t, db)
+
+	res, err := svc.Materialize(ctx, "layers-contract", "", []string{"b1"})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	topo := mustTopology(t, svc, res.WorkspaceID)
+	if topo.Layers == nil {
+		t.Fatalf("topology payload lacks layers (issue #51)")
+	}
+
+	// (1) L3 is the canonical pure-edge layer: no nodes of its own, its
+	// edges hang between devices already on the canvas. The shape is load
+	// bearing — if materialization ever starts emitting L3 nodes, the
+	// frontend fix must be revisited, and if L3 loses its edges the layer
+	// must be disabled again (nodes=0 && edges=0).
+	l3 := topo.Layers.Summary.ByLayer["L3"]
+	if l3.Nodes != 0 {
+		t.Errorf("L3 nodes = %d, want 0 (pure-edge layer shape pinned by #53)", l3.Nodes)
+	}
+	if l3.Edges <= 0 {
+		t.Fatalf("L3 edges = %d, want > 0 (transmission circuits must exist)", l3.Edges)
+	}
+	for layer, s := range topo.Layers.Summary.ByLayer {
+		if s.Nodes <= 0 && s.Edges <= 0 {
+			t.Errorf("layer %s in summary with nodes=%d edges=%d — listed layers must be usable (nodes>0 || edges>0)", layer, s.Nodes, s.Edges)
+		}
+	}
+
+	// (2) edge endpoints resolve to canvas-renderable entities.
+	deviceIDs := make(map[string]bool)
+	ifaceIDs := make(map[string]bool)
+	for _, n := range topo.Nodes {
+		deviceIDs[n.ID] = true
+		for _, i := range n.Interfaces {
+			ifaceIDs[i.ID] = true
+		}
+	}
+	layerNodeIDs := make(map[string]bool)
+	for _, n := range topo.Layers.Nodes {
+		layerNodeIDs[n.ID] = true
+	}
+	resolves := func(kind, ref string) bool {
+		switch kind {
+		case domain.LayerEndpointDevice:
+			return deviceIDs[ref]
+		case domain.LayerEndpointInterface:
+			return ifaceIDs[ref]
+		case domain.LayerEndpointNode:
+			return layerNodeIDs[ref]
+		}
+		return false
+	}
+	for _, e := range topo.Layers.Edges {
+		if !resolves(e.AKind, e.ARef) {
+			t.Errorf("edge %s A endpoint %s:%s does not resolve to a canvas entity", e.ID, e.AKind, e.ARef)
+		}
+		if !resolves(e.ZKind, e.ZRef) {
+			t.Errorf("edge %s Z endpoint %s:%s does not resolve to a canvas entity", e.ID, e.ZKind, e.ZRef)
+		}
+		if e.AKind == domain.LayerEndpointDevice && e.ZKind == domain.LayerEndpointDevice && e.ARef == e.ZRef {
+			t.Errorf("edge %s is a device self-loop — the frontend drops it, inflating summary edge counts", e.ID)
+		}
+	}
+
+	// (3) anchors resolve to devices (derived access-uplink edges).
+	for _, n := range topo.Layers.Nodes {
+		if n.AnchorDeviceID != "" && !deviceIDs[n.AnchorDeviceID] {
+			t.Errorf("node %s (%s) anchors at %s — no such device on the canvas", n.ID, n.Kind, n.AnchorDeviceID)
+		}
+	}
+}

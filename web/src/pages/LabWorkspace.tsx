@@ -47,6 +47,10 @@ import {
   LABWS_BACK_LIST,
   LABWS_CHIP_DEVICES,
   LABWS_CHIP_INTERFACES,
+  LABWS_CHIP_LAYER_EDGES,
+  LABWS_CHIP_LAYER_EDGES_TITLE,
+  LABWS_CHIP_LAYER_NODES,
+  LABWS_CHIP_LAYER_NODES_TITLE,
   LABWS_CHIP_LINKS,
   LABWS_DOWN_TITLE,
   LABWS_HASH_LABEL,
@@ -695,9 +699,18 @@ export function LabWorkspacePage() {
           down={counts.interfaces - counts.upInterfaces}
         />
         <CountChip label={LABWS_CHIP_LINKS} total={counts.links} up={counts.upLinks} down={counts.links - counts.upLinks} />
+        {/* #53 附带：链路口径拆分——「物理链路」读 virtual_links 物化表，
+            覆盖层语义边（L3-L6）另计为「图层边」，避免「链路 23」与画布
+            实际边数（物理+图层）对不上的困惑。两个图层 chip 只在有覆盖层
+            数据的工作台（v0.11 后新建）出现。 */}
         {(counts.layerNodes ?? 0) > 0 && (
-          <span className="chip chip--muted" title="图层覆盖层：L0/L4/L5/L6 节点 / L3-L6 语义边（只读投影，#51）">
-            图层 {counts.layerNodes}/{counts.layerLinks}
+          <span className="chip chip--muted" title={LABWS_CHIP_LAYER_NODES_TITLE}>
+            {LABWS_CHIP_LAYER_NODES} {counts.layerNodes}
+          </span>
+        )}
+        {(counts.layerLinks ?? 0) > 0 && (
+          <span className="chip chip--muted" title={LABWS_CHIP_LAYER_EDGES_TITLE}>
+            {LABWS_CHIP_LAYER_EDGES} {counts.layerLinks}
           </span>
         )}
         <Link className="btn btn--secondary lab-tile-back" to="/lab" style={{ marginLeft: 'auto' }}>

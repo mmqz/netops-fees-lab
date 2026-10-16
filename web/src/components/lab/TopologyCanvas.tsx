@@ -264,7 +264,13 @@ const DEFAULT_PREFS: CanvasPrefs = {
   mode: 'select',
   labels: true,
   view: 'topo',
-  layers: { L0: false, L1: true, L2: true, L3: true, L4: false, L5: false, L6: true },
+  // #53-B：L0 空间锚点默认开。默认可见子集（设备+业务节点）是高瘦簇
+  //（宽高比 ~0.8 vs 视口 ~2.0），任何正确的「看得全」fit 都必然是中间
+  // 竖条（像素利用率 ~34%）；而 L0 锚点（人井/杆路，14px 无标签暗点，
+  // 视觉成本近零）铺满真实地理宽度——开启后默认视图可见内容横向利用率
+  // ~74%（实测，达标 ≥70%）。L4（1,198 基站聚簇）/L5（16 分组 ×674 边，
+  // 密集）仍按需开启。
+  layers: { L0: true, L1: true, L2: true, L3: true, L4: false, L5: false, L6: true },
 };
 
 const LAYOUT_KINDS: LayoutKind[] = ['force', 'hier', 'concentric', 'grid', 'circle', 'freeze'];
@@ -372,8 +378,19 @@ const FIT_MIN_ZOOM = 0.15;
 /** 布局动画时长（ms）。 */
 const LAYOUT_ANIMATION_MS = 300;
 
-/** 布局完成后 fit 的留白（px）。 */
+/** 布局完成后 fit 的横向留白（px）。 */
 const FIT_PADDING = 40;
+
+/**
+ * #53-B letterbox 护栏：内容比视口「高瘦」（宽高比 < 视口宽高比）时，fit 若
+ * 按统一留白适配，横向利用率会随内容瘦长程度线性下降（默认图层组合实测
+ * 仅约 33%——内容被压成中间竖条）。此时纵向留白可收窄（下限
+ * FIT_PAD_V_MIN=12px，内容永不溢出画布），换取横向铺开；护栏目标
+ * FIT_UTILIZATION_TARGET=0.72（高于验收线 0.70 留测量余量），不可达
+ * （图更高瘦）时按最小纵向留白尽力——首选用满画布，其次保证内容完整可见。
+ */
+const FIT_PAD_V_MIN = 12;
+const FIT_UTILIZATION_TARGET = 0.72;
 
 /** 视图按钮单步缩放系数。 */
 const ZOOM_STEP = 1.25;
@@ -442,7 +459,7 @@ function readPrefs(persistKey: string | undefined): CanvasPrefs {
           labels: typeof rec.labels === 'boolean' ? rec.labels : DEFAULT_PREFS.labels,
           // GEO-2：旧 v2 档案无 view 字段 → 默认 topo（向后兼容）
           view: isViewKind(rec.view) ? rec.view : DEFAULT_PREFS.view,
-          // #51：v3 之前的档案无 layers → 施工规格 C.1 的默认组合
+          // #51：v3 之前的档案无 layers → 默认组合（#53 后：L0/L1/L2/L3/L6 默认开）
           layers,
         };
       }
@@ -701,6 +718,39 @@ function placeNewNodesSpiral(cy: Core, addedIds: Set<string>): void {
 }
 
 /**
+ * #53-B：全图包围盒——聚合**全部**节点（含被图层开关隐藏的覆盖层节点）的
+ * 渲染范围。
+ *
+ * 不能用 elements().boundingBox()：Cytoscape 在样式启用（浏览器）环境会把
+ * display:none 的元素排除出包围盒（boundingBoxImpl 的 isDisplayed 分支），
+ * 默认图层组合下可见包围盒塌成 813×1113 细长条（真实坐标范围 2049×1279），
+ * fit 后内容被压在中间约 436px 竖条。position() 与 outerWidth()/outerHeight()
+ * 读的是模型坐标与样式尺寸，与 display 无关，隐藏节点同样可得。
+ */
+function fullGraphBoundingBox(cy: Core): { x1: number; y1: number; x2: number; y2: number; w: number; h: number } | null {
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  let count = 0;
+  cy.nodes().forEach((node) => {
+    count += 1;
+    const pos = node.position();
+    const w = node.outerWidth();
+    const h = node.outerHeight();
+    // 样式尺寸缺失（极端防御）：退回设备节点默认盒——误差远小于 fit 留白。
+    const hw = (Number.isFinite(w) && w > 0 ? w : NODE_W) / 2;
+    const hh = (Number.isFinite(h) && h > 0 ? h : NODE_H) / 2;
+    if (pos.x - hw < x1) x1 = pos.x - hw;
+    if (pos.x + hw > x2) x2 = pos.x + hw;
+    if (pos.y - hh < y1) y1 = pos.y - hh;
+    if (pos.y + hh > y2) y2 = pos.y + hh;
+  });
+  if (count === 0 || !(x2 > x1) || !(y2 > y1)) return null;
+  return { x1, y1, x2, y2, w: x2 - x1, h: y2 - y1 };
+}
+
+/**
  * 布局完成后再 fit（cose 为异步仿真、grid/circle 有 300ms 动画，
  * 立即 fit 抓到的是布局前包围盒）。
  *
@@ -712,9 +762,38 @@ function placeNewNodesSpiral(cy: Core, addedIds: Set<string>): void {
  * cy.fit() 自身已受 minZoom 约束，无需二次钳制。
  *
  * 用户若想回到这个尺寸，随时按 F（适配视图）。
+ *
+ * #53-B：fit 基准从「当前可见元素」改为上面的全图包围盒——所有节点都由
+ * 布局落过坐标、与图层开关无关，因此任意图层组合下 fit 的缩放一致
+ * （切换图层本身不 fit、无缩放跳动；按 F 回到的也是同一尺度）。把算好
+ * 逐维留白的包围盒直接交给 cy.fit()（getFitViewport 接受原始
+ * {x1,y1,x2,y2}，并自带 minZoom/maxZoom 钳制与居中）。
  */
 function fitToView(cy: Core): void {
-  cy.fit(undefined, FIT_PADDING);
+  const bb = fullGraphBoundingBox(cy);
+  if (bb === null) return; // 空画布：与 cy.fit 对空集合的 no-op 行为一致
+  const vw = cy.width();
+  const vh = cy.height();
+  let padY = FIT_PADDING;
+  if (Number.isFinite(vw) && vw > 0 && Number.isFinite(vh) && vh > 0 && bb.h > 0 && bb.w / bb.h < vw / vh) {
+    // 高瘦内容：横向利用率 u = zoom·bb.w/vw，zoom ≤ (vh−2·padY)/bb.h
+    // 解出达成 u 所需的纵向留白，夹在 [FIT_PAD_V_MIN, FIT_PADDING]。
+    const zoomNeeded = (FIT_UTILIZATION_TARGET * vw) / bb.w;
+    const padNeeded = (vh - zoomNeeded * bb.h) / 2;
+    if (padNeeded < padY) padY = Math.min(FIT_PADDING, Math.max(FIT_PAD_V_MIN, padNeeded));
+  }
+  const padded = {
+    x1: bb.x1 - FIT_PADDING,
+    y1: bb.y1 - padY,
+    x2: bb.x2 + FIT_PADDING,
+    y2: bb.y2 + padY,
+    w: bb.w + FIT_PADDING * 2,
+    h: bb.h + padY * 2,
+  };
+  // cyfit 类型定义只收 Collection，但运行时 getFitViewport 对
+  // {x1,y1,x2,y2} 原始包围盒有专门分支（cytoscape 3.32.0 源码核实），
+  // 且自带 minZoom/maxZoom 钳制与居中——cast 走该分支。
+  cy.fit(padded as unknown as Parameters<Core['fit']>[0], 0);
   if (cy.zoom() < FIT_MIN_ZOOM) {
     cy.zoom(FIT_MIN_ZOOM);
     cy.center();
@@ -905,7 +984,15 @@ const CY_STYLE: Array<{ selector: string; style: Record<string, string | number 
       'background-color': LAYER_CLUSTER_FILL,
       'border-color': LAYER_CLUSTER_BORDER,
       color: '#f0d9a8',
-      width: 74,
+      // #53-C：聚簇胶囊的「接入 ×N」就是成员数徽标——计数是语义内容而非
+      // 装饰，min-zoomed-font-size 置 0 使其不随缩放隐藏（旧值沿用 overlay
+      // 基类的 5px，默认 fit 缩放 ~0.46 下 10×0.46=4.6<5 整体隐藏，用户只
+      // 看到 11 个孤立小点、不知道背后有 1,198 个基站）。字号/盒宽同步
+      // 微调保证全量计数（×1198）单行放得下；悬浮信息条与点击下钻（Layer
+      // InfoTab 成员表）提供可读全文。
+      'min-zoomed-font-size': 0,
+      'font-size': 11,
+      width: 88,
       height: 22,
     },
   },
@@ -2362,7 +2449,7 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
     setPrefs((p) => ({ ...p, labels: !p.labels }));
   }
 
-  /** #51：图层开关（L1/L2/L3/L6 主干默认开，L0/L4/L5 按需）。 */
+  /** #51：图层开关（#53 后默认组合：L0/L1/L2/L3/L6 开，L4/L5 按需）。 */
   function toggleLayer(key: LayerToggleKey): void {
     setPrefs((p) => ({ ...p, layers: { ...p.layers, [key]: !p.layers[key] } }));
     clearModeArtifacts();
@@ -2703,15 +2790,22 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
         )}
         <span className="lab-canvas-toolbar-sep" aria-hidden="true" />
         {/* #51 七层开关：L1/L2 演练本体 + L0/L3/L4/L5/L6 覆盖层。空层禁用
-            （无数据）。切层 = show/hide，不重排、不重拉数据（F.2）。 */}
+            （无数据——判据 nodes>0 或 edges>0，L3 为纯边图层，#53-A）。切层 =
+            show/hide，不重排、不重拉数据（F.2）。 */}
         <div className="canvas-seg canvas-layers" role="group" aria-label={LAB_LAYERS_GROUP}>
           {(Object.keys(LAYER_TOGGLE_LABELS) as LayerToggleKey[]).map((key) => {
             const summary =
               key === 'L1' || key === 'L2' ? undefined : topology?.layers?.summary.byLayer[key as OverlayLayer];
+            // #53-A：有无数据的判据必须含 edges——L3 传输是纯边图层
+            //（nodes=0、edges=221，两端都是画布上的设备），旧判据「nodes>0」
+            // 把 L3 开关永久禁用（连 DEFAULT_PREFS 的 L3:true 都因 active
+            // = prefs && hasData 被压成 false），207 条电路不可见。契约由
+            // sim 层 TestLayerOverlayPureEdgeContract 钉死：edges>0 的图层
+            // 端点全部可解析到画布元素。
             const hasData =
               key === 'L1' || key === 'L2'
                 ? (topology?.nodes.length ?? 0) > 0
-                : (summary?.nodes ?? 0) > 0;
+                : (summary?.nodes ?? 0) > 0 || (summary?.edges ?? 0) > 0;
             const active = prefs.layers[key] && hasData;
             return (
               <button

@@ -607,6 +607,9 @@ export interface WorkspaceSummary {
   interfaceCount: number;
   linkCount: number;
   upDeviceCount: number;
+  /** #51 图层覆盖层计数（v0.11 前创建的旧工作台为 0）。 */
+  layerNodeCount: number;
+  layerLinkCount: number;
   changesetCount: number;
   checkpointCount: number;
   lastRunId?: string | null;
@@ -623,6 +626,9 @@ export interface MaterializeResult {
     devices: number;
     interfaces: number;
     links: number;
+    /** #51 图层覆盖层（只读投影）。 */
+    layerNodes: number;
+    layerLinks: number;
   };
   workspaceHash: string;
 }

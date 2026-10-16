@@ -32,6 +32,8 @@ import {
   LAB_COL_DESC,
   LAB_COL_DEVICES,
   LAB_COL_INTERFACES,
+  LAB_COL_LAYERS,
+  LAB_COL_LAYERS_TITLE,
   LAB_COL_LAST_RUN,
   LAB_COL_LINKS,
   LAB_COL_NAME,
@@ -253,6 +255,7 @@ function CreateWorkspaceDialog({ open, onClose, onCreated }: CreateWorkspaceDial
             devices: result.counts.devices,
             interfaces: result.counts.interfaces,
             links: result.counts.links,
+            layerLinks: result.counts.layerLinks,
           }),
           'success',
         );
@@ -491,6 +494,25 @@ export function LabWorkspacesPage() {
       render: (row) => row.linkCount,
       align: 'right',
       sortValue: (row) => row.linkCount,
+    },
+    {
+      // #53 附带：列表卡片与头部同样只读 virtual_links（旧「链路」列）。
+      // 加图层列（节点/边）后，旧工作台（—）与新工作台（1,286/1,073）
+      // 在列表即可区分——用户反馈「卡片与旧工作台无差别」的诉求。
+      key: 'layers',
+      header: LAB_COL_LAYERS,
+      render: (row) =>
+        row.layerNodeCount > 0 || row.layerLinkCount > 0 ? (
+          <span title={LAB_COL_LAYERS_TITLE}>
+            {row.layerNodeCount}/{row.layerLinkCount}
+          </span>
+        ) : (
+          <span className="muted-note" title={LAB_COL_LAYERS_TITLE}>
+            —
+          </span>
+        ),
+      align: 'right',
+      sortValue: (row) => row.layerNodeCount * 1000000 + row.layerLinkCount,
     },
     {
       key: 'score',

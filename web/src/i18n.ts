@@ -30,7 +30,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.11.0';
+export const APP_VERSION = 'v0.11.1';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -1000,7 +1000,10 @@ export const LAB_COL_NAME = '名称';
 export const LAB_COL_DESC = '描述';
 export const LAB_COL_DEVICES = '设备';
 export const LAB_COL_INTERFACES = '接口';
-export const LAB_COL_LINKS = '链路';
+export const LAB_COL_LINKS = '物理链路';
+export const LAB_COL_LAYERS = '图层（节点/边）';
+export const LAB_COL_LAYERS_TITLE =
+  '图层覆盖层（#51）节点/语义边计数。v0.11 前创建的旧工作台无覆盖层（显示 —）；带图层的列值可用于区分新旧工作台';
 export const LAB_COL_SCORE = '评分';
 export const LAB_COL_LAST_RUN = '最近检查';
 export const LAB_COL_CREATED_AT = '创建时间';
@@ -1029,7 +1032,7 @@ export const LAB_NO_COMPLETED_BATCHES = '没有已完成的导入批次，请先
 export const LAB_BATCH_OPTION = '{workbook} · 导入 {imported} / 共 {total} 行';
 
 export const TOAST_WORKSPACE_CREATED =
-  '工作台已创建：{name}（设备 {devices} · 接口 {interfaces} · 链路 {links}）';
+  '工作台已创建：{name}（设备 {devices} · 接口 {interfaces} · 物理链路 {links} · 图层边 {layerLinks}）';
 export const TOAST_WORKSPACE_DELETED = '工作台已删除';
 
 export const LAB_DELETE_TITLE = '确认删除工作台';
@@ -1043,9 +1046,21 @@ export const LABWS_BACK_LIST = '返回工作台列表';
 export const LABWS_HASH_LABEL = '状态哈希';
 export const LABWS_CHIP_DEVICES = '设备';
 export const LABWS_CHIP_INTERFACES = '接口';
-export const LABWS_CHIP_LINKS = '链路';
+// #53 附带（口径拆分）：头部/列表的「链路」此前只读 virtual_links 物化表（物理
+// 链路 23），而画布实际渲染 1,140 条边（23 物理 + 1,073 图层语义边）——用户
+// 看到“链路 23”会误以为与拓扑边数不符。拆分口径：物理链路 = virtual_links
+//（设备间物理连接）；图层节点/图层边 = L0-L6 覆盖层只读投影（#51）。
+export const LABWS_CHIP_LINKS = '物理链路';
 export const LABWS_UP_TITLE = '运行中 {n}';
 export const LABWS_DOWN_TITLE = '已停机 {n}';
+export const LABWS_CHIP_LAYER_NODES = '图层节点';
+export const LABWS_CHIP_LAYER_NODES_TITLE =
+  '图层覆盖层（#51）：L0 空间锚点 / L4 接入 / L5 分组 / L6 业务等覆盖层节点（只读投影，不计入物理链路）';
+export const LABWS_CHIP_LAYER_EDGES = '图层边';
+export const LABWS_CHIP_LAYER_EDGES_TITLE =
+  '图层覆盖层（#51）：L3 电路/波道、L4 接入上联、L5 分组归属、L6 业务关联等语义边（只读投影，不计入物理链路）';
+export const LABWS_CHIP_LINKS_TITLE =
+  '物理链路：virtual_links 物化表（设备间物理连接）；覆盖层语义边另计为「图层边」';
 
 export const LAB_BTN_RUN_CHECKS = '运行校验';
 export const LAB_BTN_APPLY_OPS = '执行操作';
