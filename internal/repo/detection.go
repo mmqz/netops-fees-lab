@@ -394,6 +394,25 @@ func (r *AlertRepo) ListActiveAlertsByRule(ctx context.Context, ruleID string) (
 	return out, nil
 }
 
+// CountClearedInSpan counts the pair's CLEARED alert rows whose
+// cleared_at falls in the half-open span (from, to] — one completed
+// fire→clear cycle each, the flap-damping input (v0.12-R17). Only rows
+// the ENGINE cleared count in practice: engine recovery clears stamp the
+// last evaluated data ts (inside the span), human clears stamp the wall
+// clock (typically far ahead of the data timeline, outside the span) —
+// the boundary is honest by construction, no state column needed.
+func (r *AlertRepo) CountClearedInSpan(ctx context.Context, ruleID, seriesID, from, to string) (int, error) {
+	var n int
+	err := r.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM alerts
+WHERE rule_id = ? AND series_id = ? AND state = 'cleared' AND cleared_at > ? AND cleared_at <= ?`,
+		ruleID, seriesID, from, to).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("repo: count cleared alerts of %s/%s: %w", ruleID, seriesID, err)
+	}
+	return n, nil
+}
+
 // ActiveAlertRef is one firing/acked alert joined with the rule's severity
 // and the series's resource — the run-state mapping input (which resources
 // are down/degraded because of alerts).

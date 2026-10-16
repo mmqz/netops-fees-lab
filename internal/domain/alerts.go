@@ -1,6 +1,40 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+// FlapThreshold and FlapSpan define the v0.12-R17 re-fire hold-down
+// (告警抖动治理): a (rule, series) pair that has already completed
+// FlapThreshold fire→clear cycles whose engine recovery clears (data-ts)
+// fall within the trailing FlapSpan of EVIDENCE time before a would-be
+// new fire is oscillating — the 4th fire of a hovering series is HELD
+// (counted in RunResult.FlapHeld, listed with action="flap_held" and the
+// deterministic would-be id), exactly like a maintenance-suppressed
+// finding but derived from the pair's OWN history instead of an operator
+// plan. The hold ages out: as cleared rows exit the trailing span the
+// count drops below the threshold and the next sustained violation fires
+// for real (a hold is bounded by FlapSpan of data time, never forever).
+//
+// Semantics deliberately narrow (all pinned in internal/detect/flap_test.go):
+//   - only ENGINE recovery clears count (cleared_at from the data
+//     timeline); a HUMAN clear writes the wall clock into cleared_at and
+//     is NOT an oscillation of the series — manual decisions are not
+//     flapping;
+//   - only NEW fires are held; existing alerts keep their lifecycle and
+//     recovery clears continue during a hold (good news is never
+//     suppressed — the R15 doctrine);
+//   - the three-edge state machine is untouched: the hold is a gate
+//     BEFORE the machine, never an edge (ADR-0011 D3).
+//
+// Code constants, not per-rule columns: the closed-value pair is engine
+// tuning shared by every rule (the comparator/window precedent — per-rule
+// promotion stays a documented follow-up until a real workload asks for it).
+const (
+	FlapThreshold = 3                   // completed cycles within the span to hold the next fire
+	FlapSpan      = 14 * 24 * time.Hour // trailing evidence-time window counted back from the would-be fire
+)
 
 // Comparator is the closed comparison enum of a detection rule (ADR-0011 D2,
 // migration v18 CHECK): how a measured value relates to the rule threshold

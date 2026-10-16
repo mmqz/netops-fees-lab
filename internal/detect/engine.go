@@ -165,7 +165,7 @@ type AlertSummary struct {
 	ResourceID      string  `json:"resourceId"`
 	MetricKey       string  `json:"metricKey"`
 	Severity        string  `json:"severity"`
-	Action          string  `json:"action"`                    // created | cleared | suppressed
+	Action          string  `json:"action"`                    // created | cleared | suppressed | flap_held
 	State           string  `json:"state"`                     // the state AFTER the run ("" for suppressed lines)
 	CorrelationRole string  `json:"correlationRole,omitempty"` // 根因/次生 verdict of created lines (v0.12-R16)
 	FirstSeen       string  `json:"firstSeen"`
@@ -180,6 +180,9 @@ type AlertSummary struct {
 // AlertsCleared / RunStatesWritten count the run's MUTATIONS; Suppressed
 // counts the findings held back by maintenance windows (a subset of
 // Findings — the alarm the NOC intentionally chose not to receive);
+// FlapHeld counts the would-be re-fires held back by the flap damping
+// of the (rule, series) pair's own fire/clear history (v0.12-R17, also
+// a subset of Findings — the churn the engine chose not to re-create);
 // Alerts lists the created/cleared/suppressed lines (ordered rule_id,
 // series_id). EvaluatedAt is the run's evaluation timestamp FROM THE DATA
 // (the newest ts of any evaluated point; "" when no data was in scope).
@@ -189,6 +192,7 @@ type RunResult struct {
 	AlertsCleared    int            `json:"alertsCleared"`
 	RunStatesWritten int            `json:"runStatesWritten"`
 	Suppressed       int            `json:"suppressed"`
+	FlapHeld         int            `json:"flapHeld"`
 	EvaluatedAt      string         `json:"evaluatedAt"`
 	Alerts           []AlertSummary `json:"alerts"`
 }
@@ -325,6 +329,39 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 						MetricKey:  f.MetricKey,
 						Severity:   rule.Severity.String(),
 						Action:     "suppressed",
+						State:      "",
+						FirstSeen:  f.FirstSeen,
+						FiredAt:    f.LastTS,
+						LastValue:  f.LastValue,
+					})
+					continue
+				}
+				// v0.12-R17: the flap hold-down. A would-be NEW fire of a pair
+				// whose own history shows >= domain.FlapThreshold completed
+				// fire->clear cycles within the trailing domain.FlapSpan of
+				// evidence time is oscillation churn, not news: hold it (no
+				// alert row, no run-state write), count it, list it with the
+				// deterministic would-be id — when the oscillation subsides
+				// the next sustained fire lands that same identity. Order
+				// AFTER the maintenance gate on purpose: an operator's
+				// explicit plan is the stronger signal, a finding under an
+				// active window is "suppressed", never "flap_held". Recovery
+				// clears (branch 2 below) have NO flap gate — good news is
+				// never suppressed.
+				held, err := flapHeld(ctx, tx, rule.RuleID, f.SeriesID, f.LastTS)
+				if err != nil {
+					return err
+				}
+				if held {
+					res.FlapHeld++
+					summaries = append(summaries, AlertSummary{
+						AlertID:    NewAlertID(rule.RuleID, f.SeriesID, f.FirstSeen),
+						RuleID:     rule.RuleID,
+						SeriesID:   f.SeriesID,
+						ResourceID: f.ResourceID,
+						MetricKey:  f.MetricKey,
+						Severity:   rule.Severity.String(),
+						Action:     "flap_held",
 						State:      "",
 						FirstSeen:  f.FirstSeen,
 						FiredAt:    f.LastTS,

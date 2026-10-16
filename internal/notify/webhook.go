@@ -61,6 +61,7 @@ type payload struct {
 	AlertsCleared    int         `json:"alertsCleared"`
 	RunStatesWritten int         `json:"runStatesWritten"`
 	Suppressed       int         `json:"suppressed"`
+	FlapHeld         int         `json:"flapHeld"`
 	EvaluatedAt      string      `json:"evaluatedAt"`
 	Alerts           []alertLine `json:"alerts"`
 	AlertsTruncated  bool        `json:"alertsTruncated"`
@@ -120,6 +121,7 @@ func (w *Webhook) NotifyDetectionRun(ctx context.Context, res detect.RunResult) 
 		AlertsCleared:    res.AlertsCleared,
 		RunStatesWritten: res.RunStatesWritten,
 		Suppressed:       res.Suppressed,
+		FlapHeld:         res.FlapHeld,
 		EvaluatedAt:      res.EvaluatedAt,
 		Alerts:           make([]alertLine, 0, min(len(res.Alerts), maxPayloadAlerts)),
 	}

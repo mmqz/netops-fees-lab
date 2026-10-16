@@ -58,7 +58,9 @@ func ParseRunSource(s string) (RunSource, error) {
 //   - EvaluatedAt: RunResult.EvaluatedAt — the ts of the newest evaluated
 //     data point ("" when the sweep failed before evaluation);
 //   - the four counters mirror RunResult, plus suppressed (migration v24,
-//     v0.12-R15) — the findings held back by maintenance windows;
+//     v0.12-R15) — the findings held back by maintenance windows — and
+//     flapHeld (migration v26, v0.12-R17) — the would-be re-fires held by
+//     the flap damping of the pair's own fire/clear history;
 //   - Error: "" on success, the engine error otherwise (a failed scheduled
 //     round is itself a recordable operational fact).
 type DetectionRun struct {
@@ -76,6 +78,7 @@ type DetectionRun struct {
 	AlertsCleared    int
 	RunStatesWritten int
 	Suppressed       int
+	FlapHeld         int
 
 	Error string // "" = success
 }

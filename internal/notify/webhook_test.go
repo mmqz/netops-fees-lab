@@ -45,6 +45,8 @@ func sampleResult() detect.RunResult {
 		AlertsCreated:    3,
 		AlertsCleared:    1,
 		RunStatesWritten: 2,
+		Suppressed:       4,
+		FlapHeld:         2,
 		EvaluatedAt:      "2026-10-15T08:00:00Z",
 		Alerts: []detect.AlertSummary{
 			{
@@ -109,7 +111,7 @@ func TestPayloadContract(t *testing.T) {
 			t.Error("deliveredAt missing or not a string")
 		}
 		for key, want := range map[string]float64{
-			"findings": 7, "alertsCreated": 3, "alertsCleared": 1, "runStatesWritten": 2,
+			"findings": 7, "alertsCreated": 3, "alertsCleared": 1, "runStatesWritten": 2, "suppressed": 4, "flapHeld": 2,
 		} {
 			if gotv, _ := got.body[key].(float64); gotv != want {
 				t.Errorf("%s = %v, want %v", key, gotv, want)

@@ -370,7 +370,7 @@ function RunHistoryDialog({ onClose }: { onClose: () => void }) {
         header: PATROL_COL_COUNTS,
         render: (run) => (
           <span className="mono">
-            {run.findings} / {run.alertsCreated} / {run.alertsCleared} / {run.suppressed}
+            {run.findings} / {run.alertsCreated} / {run.alertsCleared} / {run.suppressed} / {run.flapHeld}
           </span>
         ),
       },
@@ -824,6 +824,7 @@ export function AlertsPage() {
                 created: PATROL_LAST_FAILED,
                 cleared: '—',
                 suppressed: '—',
+                flapHeld: '—',
               })}
             </span>
           ) : (
@@ -838,6 +839,7 @@ export function AlertsPage() {
                 created: lastRun.alertsCreated,
                 cleared: lastRun.alertsCleared,
                 suppressed: lastRun.suppressed,
+                flapHeld: lastRun.flapHeld,
               })}
             </span>
           )}

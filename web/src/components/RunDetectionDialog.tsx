@@ -28,6 +28,7 @@ import {
   RUN_EVALUATED_NONE,
   RUN_FAILED,
   RUN_FINDINGS,
+  RUN_FLAP_HELD,
   RUN_MUTATIONS_EMPTY,
   RUN_MUTATIONS_TITLE,
   RUN_RUNSTATES,
@@ -35,6 +36,7 @@ import {
   RUN_RESULT_TITLE,
   RUN_ACTION_CLEARED,
   RUN_ACTION_CREATED,
+  RUN_ACTION_FLAP_HELD,
   RUN_ACTION_SUPPRESSED,
   RUN_TOAST_DONE,
   format,
@@ -45,21 +47,27 @@ import { useToast } from './Toast';
 import { useModalA11y } from '../hooks/useModalA11y';
 
 /** 一次告警变更行（回执明细表）。suppressed 行（v0.12-R15）无告警行，
- * 徽标用中性色 + 「抑制」文案与 created/cleared 区分；created 行带
- * 根因/次生裁定徽标（v0.12-R16）。 */
+ * 徽标用中性色 + 「抑制」文案与 created/cleared 区分；flap_held 行
+ * （v0.12-R17）同为无告警行的被拦潜在告警，但成因是序列自身抖动而非
+ * 维护计划——用 info 色 + 「抖动抑制」文案区分两种「没告」；created
+ * 行带根因/次生裁定徽标（v0.12-R16）。 */
 function MutationRow({ line }: { line: DetectionRunResponse['alerts'][number] }) {
   const actionLabel =
     line.action === 'created'
       ? RUN_ACTION_CREATED
       : line.action === 'suppressed'
         ? RUN_ACTION_SUPPRESSED
-        : RUN_ACTION_CLEARED;
+        : line.action === 'flap_held'
+          ? RUN_ACTION_FLAP_HELD
+          : RUN_ACTION_CLEARED;
   const chipClass =
     line.action === 'created'
       ? 'chip--error'
       : line.action === 'suppressed'
         ? 'chip--warning'
-        : 'chip--muted';
+        : line.action === 'flap_held'
+          ? 'chip--info'
+          : 'chip--muted';
   return (
     <tr>
       <td>
@@ -191,6 +199,10 @@ export function RunDetectionDialog({
               <div className="run-stat">
                 <div className="run-stat-value">{result.suppressed}</div>
                 <div className="run-stat-label">{format(RUN_SUPPRESSED, { n: result.suppressed })}</div>
+              </div>
+              <div className="run-stat">
+                <div className="run-stat-value">{result.flapHeld}</div>
+                <div className="run-stat-label">{format(RUN_FLAP_HELD, { n: result.flapHeld })}</div>
               </div>
             </div>
             <div className="muted-note">

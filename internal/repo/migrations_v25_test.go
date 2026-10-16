@@ -174,8 +174,8 @@ func TestMigrationV25AddsAlertCorrelation(t *testing.T) {
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 25 {
-		t.Errorf("max schema version after upgrade = %d, want 25", maxV)
+	if maxV != 26 {
+		t.Errorf("max schema version after upgrade = %d, want 26", maxV)
 	}
 }
 

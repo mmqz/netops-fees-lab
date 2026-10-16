@@ -1024,8 +1024,10 @@ body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用
 - finding 无在案告警 → 建 firing 告警（`first_seen` = 首个越限点 ts，确定性 ID `al_<sha256 前 16>`）
 - 恢复（窗口内不再越限）→ firing/acked → cleared
 - **acked 不重触发**（人工持有话事权）；cleared 后再越限 → 新告警（新 first_seen）
+- **维护窗口抑制**（v0.12-R15）：新燃点落入窗口且资源在范围内 → 不建告警行（计数 `suppressed`，信封行 action=suppressed 携带确定性应燃 id）
+- **抖动抑制**（v0.12-R17）：(rule, series) 对在尾随 14 天证据时间内已有 ≥3 个完整 fire→clear 周期（仅计引擎恢复清除的数据 ts；人工清除的钟表 ts 不算抖动）→ 第 4 次重燃被拦（计数 `flapHeld`，信封行 action=flap_held 携带确定性应燃 id；老告警随周期出窗自动老化释放，序列持续越限时以同一应燃 id 落燃）
 - **run_state 联动**（§12-B2 衔接点 3）：firing error → down、firing warning → degraded（source=alert，走历史+快照双写）；全部恢复 → up。**语义**：与人工 manual 写入按 ts 后写优先共存——巡检运行之间的人工状态不会被静默覆盖，但下一次 run 会以最新数据重判。
-- 响应：`{findings, alertsCreated, alertsCleared, runStatesWritten, evaluatedAt（来自数据，非服务器钟）, alerts:[逐条 created/cleared 证据]}`。同数据同规则 → 同结果（确定性）。
+- 响应：`{findings, alertsCreated, alertsCleared, runStatesWritten, suppressed, flapHeld, evaluatedAt（来自数据，非服务器钟）, alerts:[逐条 created/cleared/suppressed/flap_held 证据]}`。同数据同规则 → 同结果（确定性）。
 
 ### GET /api/alerts — 告警列表
 
