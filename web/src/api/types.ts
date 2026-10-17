@@ -1027,6 +1027,20 @@ export interface AlertItem {
     naturalKey: string;
     name: string;
   };
+  /** v0.13-R19 生命周期通知裁决：本告警最近一次 ack/clear 通知的投递终局。 */
+  lifecycleDelivery: AlertLifecycleDelivery;
+}
+
+/** 告警生命周期通知裁决（v0.13-R19，三值诚实口径；字段永不缺省）。 */
+export interface AlertLifecycleDelivery {
+  /** '' = 从未通知（未 ack/clear 过或当时通道未配置）| delivered | failed。 */
+  status: '' | 'delivered' | 'failed';
+  /** 通知描述的生命周期事件：''（伴随 status ''）| ack | clear。 */
+  event: '' | 'ack' | 'clear';
+  /** 实际 POST 次数（1..3）。 */
+  attempts: number;
+  /** 裁决行的 delivered_at（投递钟表审计字段）。 */
+  ts: string;
 }
 
 /** 告警关联角色（v0.12-R16，闭集：primary 根因嫌疑 / secondary 疑似次生；'' = 未标记）。 */

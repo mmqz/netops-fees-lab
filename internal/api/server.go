@@ -78,9 +78,10 @@ type Server struct {
 	// CLI's `netopslab detect` uses — the composition root hands it to
 	// both, no bypass).
 	detect *detect.Engine
-	// Webhook is the outbound detection-run notifier (v0.10-R8): nil
-	// means the notification channel is off (no --webhook-url). The
-	// nil receiver is a no-op, so handlers never branch on it.
+	// Webhook is the outbound notification channel (v0.10-R8 run
+	// summaries, v0.13-R19 alert lifecycle events): nil means the
+	// channel is off (no --webhook-url). The nil receiver is a no-op,
+	// so handlers never branch on it.
 	Webhook *notify.Webhook
 	// Schedule is the serve-mode detection interval scheduler (v0.11-R11):
 	// nil / unset means the patrol is off (explicit-trigger-only, the

@@ -108,6 +108,11 @@ type DB struct {
 	// sequence verdict of each attempted run notification.
 	WebhookDeliveries *WebhookDeliveryRepo
 
+	// Alert event delivery audit (migration v28, v0.13-R19): the retry
+	// sequence verdict of each attempted lifecycle (ack/clear)
+	// notification.
+	AlertEventDeliveries *AlertEventDeliveryRepo
+
 	// Maintenance windows (migration v24, v0.12-R15): planned suppression
 	// windows for new alert fires.
 	Maintenance *MaintenanceRepo
@@ -180,6 +185,7 @@ func wire(db *DB, q DBTX) {
 	db.Alerts = &AlertRepo{q: q}
 	db.DetectionRuns = &DetectionRunRepo{q: q}
 	db.WebhookDeliveries = &WebhookDeliveryRepo{q: q}
+	db.AlertEventDeliveries = &AlertEventDeliveryRepo{q: q}
 	db.Maintenance = &MaintenanceRepo{q: q}
 	db.LayerNodes = &LayerNodeRepo{q: q}
 	db.LayerLinks = &LayerLinkRepo{q: q}
@@ -237,6 +243,9 @@ type Tx struct {
 
 	// Webhook delivery audit (migration v27, v0.12-R18).
 	WebhookDeliveries *WebhookDeliveryRepo
+
+	// Alert event delivery audit (migration v28, v0.13-R19).
+	AlertEventDeliveries *AlertEventDeliveryRepo
 
 	// Maintenance windows (migration v24, v0.12-R15).
 	Maintenance *MaintenanceRepo
@@ -315,33 +324,34 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		return err
 	}
 	tx := &Tx{
-		Batches:           &BatchRepo{q: sqlTx},
-		Resources:         &ResourceRepo{q: sqlTx},
-		Relations:         &RelationRepo{q: sqlTx},
-		SourceRefs:        &SourceRefRepo{q: sqlTx},
-		RowResults:        &RowResultRepo{q: sqlTx},
-		Issues:            &IssueRepo{q: sqlTx},
-		AttributeChanges:  &AttributeChangeRepo{q: sqlTx},
-		RenameProposals:   &RenameProposalRepo{q: sqlTx},
-		Workspaces:        &WorkspaceRepo{q: sqlTx},
-		Sequences:         &SequenceRepo{q: sqlTx},
-		VirtualDevices:    &VirtualDeviceRepo{q: sqlTx},
-		SimInterfaces:     &SimInterfaceRepo{q: sqlTx},
-		SimLinks:          &SimLinkRepo{q: sqlTx},
-		ChangeSets:        &ChangeSetRepo{q: sqlTx},
-		CheckRuns:         &CheckRunRepo{q: sqlTx},
-		Checkpoints:       &CheckpointRepo{q: sqlTx},
-		MetricBatches:     &MetricBatchRepo{q: sqlTx},
-		Metrics:           &MetricRepo{q: sqlTx},
-		ResourceStatus:    &ResourceStatusRepo{q: sqlTx},
-		DetectionRules:    &DetectionRuleRepo{q: sqlTx},
-		Alerts:            &AlertRepo{q: sqlTx},
-		DetectionRuns:     &DetectionRunRepo{q: sqlTx},
-		WebhookDeliveries: &WebhookDeliveryRepo{q: sqlTx},
-		Maintenance:       &MaintenanceRepo{q: sqlTx},
-		LayerNodes:        &LayerNodeRepo{q: sqlTx},
-		LayerLinks:        &LayerLinkRepo{q: sqlTx},
-		Templates:         &TemplateRepo{q: sqlTx},
+		Batches:              &BatchRepo{q: sqlTx},
+		Resources:            &ResourceRepo{q: sqlTx},
+		Relations:            &RelationRepo{q: sqlTx},
+		SourceRefs:           &SourceRefRepo{q: sqlTx},
+		RowResults:           &RowResultRepo{q: sqlTx},
+		Issues:               &IssueRepo{q: sqlTx},
+		AttributeChanges:     &AttributeChangeRepo{q: sqlTx},
+		RenameProposals:      &RenameProposalRepo{q: sqlTx},
+		Workspaces:           &WorkspaceRepo{q: sqlTx},
+		Sequences:            &SequenceRepo{q: sqlTx},
+		VirtualDevices:       &VirtualDeviceRepo{q: sqlTx},
+		SimInterfaces:        &SimInterfaceRepo{q: sqlTx},
+		SimLinks:             &SimLinkRepo{q: sqlTx},
+		ChangeSets:           &ChangeSetRepo{q: sqlTx},
+		CheckRuns:            &CheckRunRepo{q: sqlTx},
+		Checkpoints:          &CheckpointRepo{q: sqlTx},
+		MetricBatches:        &MetricBatchRepo{q: sqlTx},
+		Metrics:              &MetricRepo{q: sqlTx},
+		ResourceStatus:       &ResourceStatusRepo{q: sqlTx},
+		DetectionRules:       &DetectionRuleRepo{q: sqlTx},
+		Alerts:               &AlertRepo{q: sqlTx},
+		DetectionRuns:        &DetectionRunRepo{q: sqlTx},
+		WebhookDeliveries:    &WebhookDeliveryRepo{q: sqlTx},
+		AlertEventDeliveries: &AlertEventDeliveryRepo{q: sqlTx},
+		Maintenance:          &MaintenanceRepo{q: sqlTx},
+		LayerNodes:           &LayerNodeRepo{q: sqlTx},
+		LayerLinks:           &LayerLinkRepo{q: sqlTx},
+		Templates:            &TemplateRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

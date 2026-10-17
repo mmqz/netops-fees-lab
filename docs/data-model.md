@@ -1,6 +1,6 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自 `internal/repo/migrations.go` / `migrations_v4.go` / `migrations_v5.go`（**实现即规范**）。当前 schema version = **13**（v5 = 仿真工作台表，见文末 DDL v5 一节；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表 `resource_attribute_changes`、v12 改名提案表 `rename_proposals` 与 v13 ptp_port 类型（resources CHECK 扩容）为后续追加节，历史章节保持原貌）。
+> Schema 与代码同步维护：本文 DDL 摘自各 `internal/repo/migrations*.go`（**实现即规范**）。当前 schema version = **28**。v5 = 仿真工作台表；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表、v12 改名提案表、v13 ptp_port 类型为后续追加节；v14–v27（指标表族 / 运行状态 / 检测规则与告警 / 运行回执 / 图层投影 / 模板 / 维护窗口 / 关联列 / 抖动列 / webhook 投递审计）为 v0.7–v0.12 告警运营线的迁移，其表结构散记于 [api.md](api.md) 与 ADR-0011（**本文的历史断层，如实声明**——各迁移文件即权威规范）；v28 起本文恢复逐表记载。历史章节保持原貌。
 
 ## 1. ID 与时间戳约定
 
@@ -622,3 +622,39 @@ FROM resources;
 DROP TABLE resources;
 ALTER TABLE resources_new RENAME TO resources;
 ```
+
+---
+
+# DDL v28 — 告警生命周期投递审计（alert_event_deliveries）
+
+> Migration `28` name `r19_alert_event_delivery_audit`（`internal/repo/migrations_v28.go`，`init()` 自注册直接 append，模式同 v20–v27——v4–v9 的 init 兼带全表 sort，v10–v19 之后的注册写法以最新先例 v27 为准）。**当前 schema version = 28**。纯 `CREATE TABLE` + 一个索引，**无表重建**、无数据搬迁（v0.12 工程卫生教义）；alerts 表零触碰。
+
+## 17. 告警生命周期投递审计（v0.13-R19）
+
+人工 ack/clear 决策的**通知回流审计**：值班渠道收到了告警，操作者的处置动作（谁确认了、何时恢复）也要回流到渠道——每次 ack/clear 通知的重试终局一行，`GET /api/alerts` 经 LEFT JOIN 读回（`lifecycleDelivery`）。v28 全文：
+
+```sql
+CREATE TABLE alert_event_deliveries (
+  id           TEXT PRIMARY KEY,
+  alert_id     TEXT NOT NULL,
+  event        TEXT NOT NULL CHECK (event IN ('ack','clear')),
+  url          TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('delivered','failed')),
+  attempts     INTEGER NOT NULL,
+  http_status  INTEGER NOT NULL DEFAULT 0,
+  error        TEXT NOT NULL DEFAULT '',
+  delivered_at TEXT NOT NULL
+);
+CREATE INDEX idx_alert_event_deliveries_alert ON alert_event_deliveries (alert_id);
+```
+
+### 17.1 设计决策与不变式
+
+- **`alert_id` 刻意非 FK**（v27 `run_id` 先例）：审计行由 notify 侧路径在 ack/clear 转换**提交后**的自有事务写入；通道未配置时该告警无行，读面诚实投 `''`（从未通知），而非悬空引用。告警行是审计数据永不删除（无 DELETE 端点），故实际生命周期内不会出现孤儿——非 FK 是防御性纪律而非日常路径（测试钉死：删除告警后审计行存续）。
+- **`event` CHECK 闭集 ack|clear**：只回流**人工**两条边（ADR-0011 D3 三边状态机的 human edges）；引擎恢复清除是检测运行通知的变更行（v0.10-R8 载荷），不是生命周期事件。`escalate` 之类的值在存储层被拒——**本表绝不承载任何超时/自动动作**（D3 教义：通知是旁路观测，不是状态机的新边）。
+- **`status` CHECK 复用 v27 的闭集**（delivered|failed，无 pending）：同一 notify 通道、同一重试序列的同一套裁决词表——无行 = 通道未配置/从未触发（三值诚实读），行存在即终局（重试序列在最后一次尝试后恰写一行）。
+- **`url` 存脱敏形态**：notify 通道入库前剥离查询串（webhook token 常在查询串）与 userinfo——审计表永不成为凭据堆（`redactURL`，与 v27 同一函数）。
+- **`http_status 0` = 传输层错误**（请求未得到应答）——v27 的哨兵值约定。
+- **`delivered_at` 是投递钟表时间**（bookkeeping），与载荷里的 `ts`（操作时间戳 acked_at/cleared_at）分立——接收方区分「人何时处置」与「通知何时离开」；确定性教义下同操作同数据同载荷，仅 `delivered_at` 允许随投递钟变化。
+- **读面（`GET /api/alerts` 每行）**：`lifecycleDelivery = {status, event, attempts, ts}`——每告警**最近一次**通知终局（先 ack 后 clear → 读 clear 行）；`''` 三值语义见 [api.md](api.md)。实现为 alerts 列表查询的关联子查询 LEFT JOIN，`idx_alert_event_deliveries_alert` 支撑子查询定位。「最近」由**事件的边序**裁定而非任何时钟：每告警至多一行 ack + 一行 clear（转换守卫 409 拒绝重复边），且两行并存时 clear 必为后决策（ack 需 firing、clear 需 firing|acked——状态机保证 ack ≺ clear），故 `ORDER BY CASE event WHEN 'clear' …` 即精确答案。刻意不用 rowid（ack/clear 审计行是并发 goroutine，取 SQLite 写锁次序不定——插入序 ≠ 裁决序）也不用 `delivered_at`（RFC3339Nano 变宽小数 `.41Z` vs `.4125Z` 在亚秒精度上非字典序可比，且投递钟可因调度延迟倒挂）；两者仅作并列数据的人工排序兜底（测试钉死时钟倒挂场景）。
+- **主流程语义零变化**：ack/clear 处理器在转换提交后**异步**触发通知（副本载荷 + 25s 异步预算——与检测运行通知同界），通知失败绝不阻塞或改变处置响应。

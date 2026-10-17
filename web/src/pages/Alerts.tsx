@@ -74,6 +74,7 @@ import {
   ALR_CORR_SECONDARY_HINT,
   ALR_DETAIL_ACK_LINE,
   ALR_DETAIL_CLEARED_LINE,
+  ALR_DETAIL_LIFECYCLE,
   ALR_DETAIL_FIRST_SEEN,
   ALR_DETAIL_LAST_FIRED,
   ALR_DETAIL_METRIC,
@@ -104,6 +105,11 @@ import {
   PATROL_COL_WINDOW,
   WEBHOOK_DELIVERED_LABEL,
   WEBHOOK_FAILED_LABEL,
+  LIFECYCLE_DELIVERED_TITLE,
+  LIFECYCLE_EVENT_ACK_LABEL,
+  LIFECYCLE_EVENT_CLEAR_LABEL,
+  LIFECYCLE_FAILED_TITLE,
+  LIFECYCLE_NONE_TITLE,
   WEBHOOK_FAILED_ATTEMPTS_TITLE,
   WEBHOOK_OFF_LABEL,
   PATROL_DURATION_TEXT,
@@ -665,6 +671,53 @@ export function AlertsPage() {
       });
   }
 
+  /** 生命周期通知 chip（v0.13-R19）：确认/清除动作是否触达值班渠道。 */
+  const lifecycleEventLabel = (event: AlertItem['lifecycleDelivery']['event']): string => {
+    switch (event) {
+      case 'ack':
+        return LIFECYCLE_EVENT_ACK_LABEL;
+      case 'clear':
+        return LIFECYCLE_EVENT_CLEAR_LABEL;
+      default:
+        return '';
+    }
+  };
+
+  function lifecycleNotifyChip(row: AlertItem): React.ReactNode {
+    const lc = row.lifecycleDelivery;
+    if (lc.status === 'delivered') {
+      return (
+        <span
+          className="patrol-status patrol-status--ok"
+          title={format(LIFECYCLE_DELIVERED_TITLE, {
+            event: lifecycleEventLabel(lc.event),
+            n: lc.attempts,
+          })}
+        >
+          {WEBHOOK_DELIVERED_LABEL}
+        </span>
+      );
+    }
+    if (lc.status === 'failed') {
+      return (
+        <span
+          className="patrol-status patrol-status--failed"
+          title={format(LIFECYCLE_FAILED_TITLE, {
+            event: lifecycleEventLabel(lc.event),
+            n: lc.attempts,
+          })}
+        >
+          {WEBHOOK_FAILED_LABEL}
+        </span>
+      );
+    }
+    return (
+      <span className="muted-note" title={LIFECYCLE_NONE_TITLE}>
+        {WEBHOOK_OFF_LABEL}
+      </span>
+    );
+  }
+
   const columns = useMemo<TableColumn<AlertItem>[]>(
     () => [
       { key: 'state', header: ALR_COL_STATE, render: (row) => <AlertStateChip state={row.state} /> },
@@ -986,6 +1039,10 @@ export function AlertsPage() {
                         <td>{format(ALR_DETAIL_CLEARED_LINE, { at: formatDateTime(row.clearedAt) })}</td>
                       </tr>
                     )}
+                    <tr>
+                      <th scope="row">{ALR_DETAIL_LIFECYCLE}</th>
+                      <td>{lifecycleNotifyChip(row)}</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>

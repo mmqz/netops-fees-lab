@@ -47,12 +47,17 @@ type Config struct {
 	// workbooks to <DataDir>/uploads. Empty means the caller manages
 	// workbook paths itself (CLI analyze/import pass explicit --file paths).
 	DataDir string
-	// WebhookURL is the outbound detection-run notification target
-	// (v0.10-R8): after every completed detection run (HTTP POST
-	// /api/detection/run or CLI `netopslab detect`), a JSON summary is
-	// delivered to this URL. Empty means the channel is off. Delivery is
-	// best-effort: a failure is logged at warn level and never fails the
-	// run itself.
+	// WebhookURL is the outbound notification target (v0.10-R8): after
+	// every completed detection run (HTTP POST /api/detection/run or CLI
+	// `netopslab detect`) a JSON summary is delivered to this URL, and
+	// since v0.13-R19 every committed human alert decision (ack/clear
+	// via POST /api/alerts/{id}/ack | /clear) is delivered as its own
+	// single-event payload — the duty channel that received the alert
+	// also learns who confirmed it and when it was closed. Empty means
+	// the channel is off (no delivery, no audit row). Delivery is
+	// best-effort with a bounded retry: a failure is logged at warn
+	// level, audited in its delivery table and never fails the
+	// operation it describes.
 	WebhookURL string
 	// DetectInterval (v0.11-R11) is the serve-mode scheduled inspection
 	// interval: every tick fires ONE recorded detection sweep (source =
@@ -115,10 +120,11 @@ type App struct {
 	// Detect is the alert detection engine (W23, migration v18 —
 	// ADR-0011 D2/D3): the same instance the HTTP API serves.
 	Detect *detect.Engine
-	// Webhook is the outbound detection-run notifier (v0.10-R8): nil
-	// when Config.WebhookURL is empty (channel off). Shared by the HTTP
-	// API (a.API.Webhook) and the CLI detect command — one notifier,
-	// both trigger channels.
+	// Webhook is the outbound notification channel (v0.10-R8 run
+	// summaries, v0.13-R19 alert lifecycle events): nil when
+	// Config.WebhookURL is empty (channel off). Shared by the HTTP API
+	// (a.API.Webhook) and the CLI detect command — one notifier, every
+	// trigger channel.
 	Webhook *notify.Webhook
 	// API is the HTTP API server.
 	API *api.Server

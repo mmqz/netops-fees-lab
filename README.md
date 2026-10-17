@@ -35,6 +35,12 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ## 2. 当前阶段能力清单（Stage 0 + Phase 1 + Phase 2 已交付）
 
+### 告警生命周期通知（v0.13 第一轮 R19，开发中）
+
+- **ack/clear 处置回流**：人工确认/清除落库后，`alert.ack` / `alert.clear` 单事件载荷异步投递到已配置的 webhook（与检测运行通知同一通道、同一条 wire 纪律——有界重试/URL 脱敏/WithoutCancel 审计）；`ts` 取操作时间戳（确定性载荷），尽力而为旁路——投递失败绝不影响处置主流程。
+- **投递审计表 `alert_event_deliveries`（migration v28）**：每次处置通知的重试终局一行（event CHECK 闭集 ack|clear——只回流人工边，引擎恢复清除归运行通知）；`alert_id` 刻意非 FK（v27 run_id 先例）；读面 `GET /api/alerts` 每行 `lifecycleDelivery` 三值诚实块（delivered / failed / `''` 从未通知——字段永不缺省），/alerts 行展开「处置通知」状态行。
+- 三边状态机零变化、无任何超时/自动动作（ADR-0011 D3）——通知只是把已发生的人工决策回流给值班渠道。
+
 ### 告警质量治理（v0.12.0 告警质量治理版）
 
 - **维护窗口（计划内抑制）**：`/maintenance` 页面 + API——割接/升级窗口内的新告警燃点被抑制（不落行、不写运行状态，计数入回执），窗口结束持续越限以同一「应燃 id」落燃（可关联）；在案告警生命周期照常、恢复清除永不抑制。
@@ -317,7 +323,7 @@ netopslab gc       --db ./data/netops.db --data ./data       # 手动清理孤�
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.6.3`），注册**恰好 5 个工具**：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.12.0`），注册**恰好 10 个工具**（5 资源/仿真域 + 5 图分析域，TestMCPToolRegistry 钉死）：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |
@@ -326,8 +332,13 @@ netopslab testdata --out testdata
 | `lab_run_checks` | 只读 | 立即执行五项校验，返回发现行 |
 | `lab_diff_undo` | 读/写 | 两次校验运行的前后对比 / LIFO 撤销（mode 判别） |
 | `lab_checkpoint` | 仿真写 | 检查点 create / list / restore |
+| `graph_traverse` | 只读 | 图遍历（BFS 可达/路径） |
+| `graph_impact` | 只读 | 影响面分析（资源闭包） |
+| `graph_context` | 只读 | 资源关系上下文 |
+| `alerts_query` | 只读 | 质量告警查询（含根因/次生关联裁定，AI 分诊证据通道） |
+| `metrics_query` | 只读 | 指标时序查询（ts/value/quality，劣化趋势证据通道） |
 
-AI 改仿真态只能经这 4 个 lab 工具（每个变更显式携带 workspaceId、走引擎校验）；MCP **无建删工作区工具**、无 SQL/Shell/SSH/文件工具；`restore_*` 引擎内部操作码在 HTTP/MCP/CLI 三边界均被拒。
+AI 改仿真态只能经这 4 个 lab 工具（每个变更显式携带 workspaceId、走引擎校验）；MCP **无建删工作区工具**、无 SQL/Shell/SSH/文件工具；`restore_*` 引擎内部操作码在 HTTP/MCP/CLI 三边界均被拒；图分析域（后 5 个）全部只读。
 
 TeleAgent 集成：MCP 注册方式与 CLI 回退路径（以结构化 JSON 供 Skills 解析）见 **[docs/teleagent-integration.md](docs/teleagent-integration.md)** —— 注意：**部署态 TeleAgent 的 MCP 调用未在本开发环境验证**，接入时请按该文档操作并反馈。
 

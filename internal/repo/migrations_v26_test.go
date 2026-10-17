@@ -111,8 +111,8 @@ VALUES ('run_v26_shape','api','2026-10-17T08:00:00Z','2026-10-17T08:00:01Z',1000
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 27 {
-		t.Errorf("max schema version after upgrade = %d, want 27", maxV)
+	if maxV != 28 {
+		t.Errorf("max schema version after upgrade = %d, want 28", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

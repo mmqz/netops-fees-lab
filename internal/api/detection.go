@@ -19,6 +19,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/metrics"
+	"github.com/mmqz/netops-lab/internal/notify"
 	"github.com/mmqz/netops-lab/internal/repo"
 )
 
@@ -274,6 +275,14 @@ type detectRunRequest struct {
 	To   *string `json:"to"`
 }
 
+// asyncNotifyBudget bounds every background notification goroutine
+// (v0.12-R18 for the run summary, v0.13-R19 for the lifecycle events):
+// 25s — the bounded retry sequence (3 worst-case 5s attempts + the
+// 1s/2s backoff) fits with headroom; the goroutine is detached from
+// the response either way, so the budget only caps the receiver's
+// patience, never the caller's.
+const asyncNotifyBudget = 25 * time.Second
+
 // handleDetectionRun implements POST /api/detection/run: ONE engine sweep
 // over the whole database (the daily-inspection detection half) — seeds
 // default rules when the table is empty, evaluates every enabled rule's
@@ -322,10 +331,7 @@ func (s *Server) handleDetectionRun(w http.ResponseWriter, r *http.Request) {
 		resCopy := res
 		runIDCopy := rec.RunID
 		go func() {
-			// v0.12-R18: 25s budget — the bounded retry sequence (3
-			// worst-case 5s attempts + backoff) fits; the goroutine is
-			// detached from the response either way.
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), asyncNotifyBudget)
 			defer cancel()
 			_ = s.Webhook.NotifyDetectionRun(ctx, resCopy, runIDCopy)
 		}()
@@ -506,6 +512,22 @@ type alertItem struct {
 		NaturalKey string `json:"naturalKey"`
 		Name       string `json:"name"`
 	} `json:"resource"`
+	// Lifecycle notification verdict (v0.13-R19, LEFT JOIN
+	// alert_event_deliveries): the alert's latest ack/clear notification
+	// outcome. status "" = never notified (never acked/cleared through
+	// this system, or the channel was off at the time) — the honest
+	// three-valued read; event "" goes with it. Never omitted.
+	LifecycleDelivery alertLifecycleDelivery `json:"lifecycleDelivery"`
+}
+
+// alertLifecycleDelivery is the lifecycleDelivery block of one alert
+// item: the latest notification verdict of the alert's human lifecycle
+// decisions. Closed shapes, every field always present.
+type alertLifecycleDelivery struct {
+	Status   string `json:"status"`   // "" | delivered | failed
+	Event    string `json:"event"`    // "" | ack | clear
+	Attempts int    `json:"attempts"` // POSTs actually made
+	TS       string `json:"ts"`       // delivered_at of the verdict row
 }
 
 // alertItemOf projects one repo.AlertRow.
@@ -534,7 +556,61 @@ func alertItemOf(row repo.AlertRow) alertItem {
 	item.CorrelationRole = row.CorrelationRole
 	item.CorrelatedAlertID = row.CorrelatedAlertID
 	item.CorrelatedResourceID = row.CorrelatedResourceID
+	item.LifecycleDelivery = alertLifecycleDelivery{
+		Status:   row.Lifecycle.Status.String(),
+		Event:    row.Lifecycle.Event.String(),
+		Attempts: row.Lifecycle.Attempts,
+		TS:       row.Lifecycle.TS,
+	}
 	return item
+}
+
+// notifyAlertEvent is the async lifecycle-notification trigger shared by
+// the ack and clear handlers (v0.13-R19): the transition has COMMITTED,
+// the response data is computed; the notification is a detached
+// best-effort side path that must never block or fail the operation
+// (the R18 doctrine — a receiver being down does not undo a human
+// decision). The alert row (rule/series/resource context) is read
+// synchronously in the handler — one indexed read, on a background
+// context: the notification input must survive a client disconnect
+// right after the decision — and handed to the goroutine as a value
+// copy (the resCopy/runIDCopy precedent; only the POST loop runs
+// async). A read failure logs and skips: no delivery was attempted, so
+// no audit row either. The nil webhook (channel off) skips the whole
+// block: no delivery, no audit row — the honest "" read on the listing.
+func (s *Server) notifyAlertEvent(id string, kind domain.AlertLifecycleEvent, state domain.AlertState, ts, ackedBy string) {
+	if s.Webhook == nil {
+		return
+	}
+	row, err := s.db.Alerts.GetAlertRowByID(context.Background(), id)
+	if err != nil {
+		// The transition is committed; only the notification input is
+		// unreadable (a pathological read failure right after a successful
+		// write). Honest handling: log and skip — no delivery attempt
+		// happened, so no audit row either.
+		s.log.Warn("alert lifecycle notification skipped: alert row unreadable",
+			"alertId", id, "error", err.Error())
+		return
+	}
+	ev := notify.AlertEvent{
+		Event:        kind,
+		AlertID:      row.AlertID,
+		RuleID:       row.RuleID,
+		RuleLabel:    row.RuleLabel,
+		MetricKey:    row.MetricKey,
+		ResourceID:   row.ResourceID,
+		ResourceType: row.ResourceType,
+		NaturalKey:   row.NaturalKey,
+		Severity:     row.Severity.String(),
+		State:        state.String(),
+		AckedBy:      ackedBy,
+		TS:           ts,
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), asyncNotifyBudget)
+		defer cancel()
+		_ = s.Webhook.NotifyAlertLifecycle(ctx, ev)
+	}()
 }
 
 // handleAlertsList implements GET /api/alerts?state=&severity=&resource_id=
@@ -627,6 +703,9 @@ func (s *Server) handleAlertAck(w http.ResponseWriter, r *http.Request) {
 		s.respondErrorFor(w, r, err, "not_firing")
 		return
 	}
+	// The ack decision is backflowed to the duty channel (v0.13-R19) —
+	// async best-effort, never blocking the response.
+	s.notifyAlertEvent(id, domain.AlertLifecycleAck, domain.AlertStateAcked, ts, req.AckedBy)
 	respondJSON(w, http.StatusOK, alertLifecycleResponse{
 		AlertID: id, State: domain.AlertStateAcked.String(), AckedAt: ts, AckedBy: req.AckedBy,
 	})
@@ -666,6 +745,9 @@ func (s *Server) handleAlertClear(w http.ResponseWriter, r *http.Request) {
 		s.respondErrorFor(w, r, err, "already_cleared")
 		return
 	}
+	// The clear decision is backflowed to the duty channel (v0.13-R19) —
+	// async best-effort, never blocking the response.
+	s.notifyAlertEvent(id, domain.AlertLifecycleClear, domain.AlertStateCleared, ts, "")
 	respondJSON(w, http.StatusOK, alertLifecycleResponse{
 		AlertID: id, State: domain.AlertStateCleared.String(), ClearedAt: ts,
 	})

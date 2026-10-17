@@ -1035,15 +1035,45 @@ body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用
 
 ### GET /api/alerts — 告警列表
 
-`?state=firing|acked|cleared&severity=&resource_id=&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）。fired_at 倒序。
+`?state=firing|acked|cleared&severity=&resource_id=&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）+ `lifecycleDelivery` 块（v0.13-R19，LEFT JOIN alert_event_deliveries，**字段永不缺省**）。fired_at 倒序。
+
+`lifecycleDelivery`（本告警最近一次处置通知的投递终局，三值诚实口径）：
+
+- `{status: "delivered", event: "ack"|"clear", attempts: 1..3, ts}`——该告警的一次人工处置（确认/清除）已送达值班渠道；`event` 是通知描述的生命周期事件，`attempts` 为实际 POST 次数（含重试吸收），`ts` 为投递终局的钟表时间（审计字段）；
+- `{status: "failed", …}`——通知全部尝试失败（接收方持续不可达或持续非 2xx），值班渠道没收到这次处置；
+- `{status: "", event: "", attempts: 0, ts: ""}`——该告警**从未触发过**处置通知（未被 ack/clear 过，或当时 webhook 通道未配置）——诚实三值，非伪造的 failed。同一告警先 ack 后 clear 时，读面携带**最新**一次（clear）的终局。
 
 ### POST /api/alerts/{id}/ack — 确认告警
 
-body `{ackedBy: string}`（必填）。仅 firing → acked（200）；非 firing → 409；未知 → 404。
+body `{ackedBy: string}`（必填；可选 `{ts}` RFC3339——确定性历史回放）。仅 firing → acked（200）；非 firing → 409；未知 → 404。
+
+**处置通知（v0.13-R19）**：确认落库后，`alert.ack` 单事件载荷**异步**投递到已配置的 webhook 通道（与检测运行通知同一通道、同一条 wire 纪律：有界重试 1+2 次、5s 单次尝试上限、URL 脱敏入库）。**尽力而为旁路**：投递失败绝不阻塞/改变 ack 主流程（响应先于投递计算）；裁决落 `alert_event_deliveries` 审计行（migration v28，`GET /api/alerts` 的 `lifecycleDelivery` 读回）。通道未配置（`serve --webhook-url` 空）→ 不投递、不落审计行。载荷示例：
+
+```json
+{
+  "event": "alert.ack",
+  "alertId": "al_b13d29a21c27cf8b",
+  "ruleId": "dr_opt_rx_low",
+  "ruleLabel": "接收光功率持续偏低",
+  "metricKey": "optical_power_rx_avg_dbm",
+  "resourceId": "res_9f2c…",
+  "resourceType": "port",
+  "naturalKey": "DEV-001|eth0",
+  "severity": "warning",
+  "state": "acked",
+  "ackedBy": "运维-张三",
+  "ts": "2026-10-18T09:30:00Z",
+  "deliveredAt": "2026-10-18T09:30:00.412Z"
+}
+```
+
+`ts` 是**操作时间戳**（与响应的 `ackedAt` 同源，确定性——同操作同数据同载荷），`deliveredAt` 是投递钟表时间（接收方区分「人何时处置」与「通知何时离开」）。`ackedBy` 在 clear 事件载荷中恒为空串（字段永不缺省，载荷形态跨事件一致）。
 
 ### POST /api/alerts/{id}/clear — 手动恢复
 
 body 可空（可选 `{ts}`）。firing|acked → cleared（200）；已 cleared → 409；未知 → 404。**无 DELETE**（告警是审计数据）。
+
+**处置通知（v0.13-R19）**：与 ack 同构——落库后异步投递 `alert.clear` 单事件载荷（`ackedBy` 为空串、`state: "cleared"`、`ts` 为清除操作时间戳），尽力而为旁路、审计同表。三边状态机零变化：通知只是把**已发生**的人工决策事件回流出去，绝不引入任何超时/自动动作（ADR-0011 D3）。
 
 ### CLI 通道
 

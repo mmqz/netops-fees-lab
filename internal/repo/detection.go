@@ -491,8 +491,11 @@ type AlertFilter struct {
 }
 
 // AlertRow is one alerts listing row: the alert itself plus the joined rule
-// fields (severity, comparator, threshold, window, label) and the series →
-// resource projection (the AI needs the resource, not the bare series_id).
+// fields (severity, comparator, threshold, window, label), the series →
+// resource projection (the AI needs the resource, not the bare series_id)
+// and the latest lifecycle notification verdict (v0.13-R19, LEFT JOIN
+// alert_event_deliveries — the zero LifecycleJoin when the alert was never
+// notified).
 type AlertRow struct {
 	domain.Alert
 	MetricKey    string
@@ -505,6 +508,7 @@ type AlertRow struct {
 	ResourceType string
 	NaturalKey   string
 	ResourceName string
+	Lifecycle    LifecycleJoin
 }
 
 // ListAlerts returns the alerts (newest fired_at first, alert_id ASC as the
@@ -548,11 +552,17 @@ WHERE `+whereSQL, args...).Scan(&total); err != nil {
 SELECT a.alert_id, a.rule_id, a.series_id, a.fired_at, a.cleared_at, a.acked_at, a.acked_by, a.state, a.last_value, a.first_seen,
        a.correlation_role, a.correlated_alert_id, a.correlated_resource_id,
        dr.metric_key, dr.comparator, dr.threshold, dr.window, dr.severity, dr.label,
-       s.resource_id, res.resource_type, res.natural_key, res.name
+       s.resource_id, res.resource_type, res.natural_key, res.name,
+       aed.status, aed.event, aed.attempts, aed.delivered_at
 FROM alerts a
 JOIN detection_rules dr ON dr.rule_id = a.rule_id
 JOIN metric_series s ON s.series_id = a.series_id
 JOIN resources res ON res.id = s.resource_id
+LEFT JOIN alert_event_deliveries aed
+  ON aed.id = (SELECT d2.id FROM alert_event_deliveries d2
+               WHERE d2.alert_id = a.alert_id
+               ORDER BY CASE d2.event WHEN 'clear' THEN 1 ELSE 0 END DESC,
+                        d2.delivered_at DESC, d2.id ASC LIMIT 1)
 WHERE ` + whereSQL + `
 ORDER BY a.fired_at DESC, a.alert_id ASC`
 	limit, offset := paging(f.Limit, f.Offset)
@@ -580,11 +590,16 @@ ORDER BY a.fired_at DESC, a.alert_id ASC`
 			corrRole   sql.NullString
 			corrAlert  sql.NullString
 			corrRes    sql.NullString
+			lcStatus   sql.NullString
+			lcEvent    sql.NullString
+			lcAttempts sql.NullInt64
+			lcTS       sql.NullString
 		)
 		if err := rows.Scan(&row.AlertID, &row.RuleID, &row.SeriesID, &row.FiredAt, &cleared, &acked, &ackedBy,
 			&state, &lastVal, &firstTS, &corrRole, &corrAlert, &corrRes,
 			&row.MetricKey, &comparator, &row.Threshold, &row.Window, &severity, &row.RuleLabel,
-			&row.ResourceID, &row.ResourceType, &row.NaturalKey, &row.ResourceName); err != nil {
+			&row.ResourceID, &row.ResourceType, &row.NaturalKey, &row.ResourceName,
+			&lcStatus, &lcEvent, &lcAttempts, &lcTS); err != nil {
 			return nil, 0, fmt.Errorf("repo: scan alert row: %w", err)
 		}
 		if _, err := domain.ParseAlertState(state); err != nil {
@@ -611,6 +626,7 @@ ORDER BY a.fired_at DESC, a.alert_id ASC`
 		row.CorrelationRole = corrRole.String
 		row.CorrelatedAlertID = corrAlert.String
 		row.CorrelatedResourceID = corrRes.String
+		row.Lifecycle = lifecycleJoinOf(lcStatus.String, lcEvent.String, int(lcAttempts.Int64), lcTS.String)
 		if lastVal.Valid {
 			row.LastValue = lastVal.Float64
 		}
@@ -620,4 +636,70 @@ ORDER BY a.fired_at DESC, a.alert_id ASC`
 		return nil, 0, fmt.Errorf("repo: list alerts: %w", err)
 	}
 	return out, total, nil
+}
+
+// GetAlertRowByID loads one alert with the SAME rule + series + resource
+// join projection as ListAlerts (the alert-listing item minus the
+// lifecycle join — the notification input read of v0.13-R19: after an
+// ack/clear transition committed, the handler reads the row's context
+// to build the lifecycle payload). Unknown id answers domain.ErrNotFound.
+func (r *AlertRepo) GetAlertRowByID(ctx context.Context, alertID string) (AlertRow, error) {
+	row := r.q.QueryRowContext(ctx, `
+SELECT a.alert_id, a.rule_id, a.series_id, a.fired_at, a.cleared_at, a.acked_at, a.acked_by, a.state, a.last_value, a.first_seen,
+       a.correlation_role, a.correlated_alert_id, a.correlated_resource_id,
+       dr.metric_key, dr.comparator, dr.threshold, dr.window, dr.severity, dr.label,
+       s.resource_id, res.resource_type, res.natural_key, res.name
+FROM alerts a
+JOIN detection_rules dr ON dr.rule_id = a.rule_id
+JOIN metric_series s ON s.series_id = a.series_id
+JOIN resources res ON res.id = s.resource_id
+WHERE a.alert_id = ?`, alertID)
+	var (
+		rw         AlertRow
+		state      string
+		comparator string
+		severity   string
+		cleared    sql.NullString
+		acked      sql.NullString
+		ackedBy    sql.NullString
+		lastVal    sql.NullFloat64
+		firstTS    sql.NullString
+		corrRole   sql.NullString
+		corrAlert  sql.NullString
+		corrRes    sql.NullString
+	)
+	if err := row.Scan(&rw.AlertID, &rw.RuleID, &rw.SeriesID, &rw.FiredAt, &cleared, &acked, &ackedBy,
+		&state, &lastVal, &firstTS, &corrRole, &corrAlert, &corrRes,
+		&rw.MetricKey, &comparator, &rw.Threshold, &rw.Window, &severity, &rw.RuleLabel,
+		&rw.ResourceID, &rw.ResourceType, &rw.NaturalKey, &rw.ResourceName); err != nil {
+		return AlertRow{}, notFound("alert row", alertID, err)
+	}
+	if _, err := domain.ParseAlertState(state); err != nil {
+		return AlertRow{}, fmt.Errorf("repo: alert row %s: %w", alertID, err)
+	}
+	if _, err := domain.ParseComparator(comparator); err != nil {
+		return AlertRow{}, fmt.Errorf("repo: alert row %s rule %s: %w", alertID, rw.RuleID, err)
+	}
+	if _, err := domain.ParseSeverity(severity); err != nil {
+		return AlertRow{}, fmt.Errorf("repo: alert row %s rule %s: %w", alertID, rw.RuleID, err)
+	}
+	if corrRole.String != "" {
+		if _, err := domain.ParseCorrelationRole(corrRole.String); err != nil {
+			return AlertRow{}, fmt.Errorf("repo: alert row %s: %w", alertID, err)
+		}
+	}
+	rw.State = domain.AlertState(state)
+	rw.Comparator = domain.Comparator(comparator)
+	rw.Severity = domain.Severity(severity)
+	rw.ClearedAt = stringFromNull(cleared)
+	rw.AckedAt = stringFromNull(acked)
+	rw.AckedBy = stringFromNull(ackedBy)
+	rw.FirstSeen = stringFromNull(firstTS)
+	rw.CorrelationRole = corrRole.String
+	rw.CorrelatedAlertID = corrAlert.String
+	rw.CorrelatedResourceID = corrRes.String
+	if lastVal.Valid {
+		rw.LastValue = lastVal.Float64
+	}
+	return rw, nil
 }
