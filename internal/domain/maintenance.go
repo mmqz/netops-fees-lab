@@ -13,10 +13,20 @@ package domain
 //   - only NEW fires are held: a finding whose would-be alert does not exist
 //     yet is suppressed; an alert that ALREADY fired keeps its lifecycle
 //     (the human holds the floor — ack/clear as usual);
-//   - the verdict is derived from the DATA timeline, not the wall clock:
-//     a finding is suppressed when its evidence timestamp (LastTS) falls in
-//     [StartsAt, EndsAt) and its resource is in scope (empty scope = all
-//     resources). Same data + same windows → same verdict, replayable;
+//   - DUAL time basis (issue #55, v0.12.1): a finding is suppressed when
+//     EITHER clock puts it inside [StartsAt, EndsAt) —
+//     (a) the DATA timeline: the finding's evidence timestamp (LastTS)
+//     falls in the window (replayable, deterministic);
+//     (b) the OPERATIONAL timeline: the sweep's execution moment (the
+//     wall clock injected into detect.Options by the recorder) falls in
+//     the window. Windows are human plans written against the wall clock
+//     ("tonight 22:00 → tomorrow 02:00"); basis (b) keeps a plan
+//     protecting a replay of HISTORICAL data whose evidence ts sits days
+//     away from the plan — before v0.12.1 that combination silently
+//     suppressed nothing. Which basis matched rides the suppressed line
+//     (suppressionBasis) and a silent-failure note explains the runs
+//     where wall-active windows held back nothing (RunResult.
+//     SuppressionNote). The resource scope applies to BOTH bases;
 //   - suppressed findings are NOT alert rows: they are counted (RunResult.
 //     Suppressed, detection_runs.suppressed) and listed in the run envelope
 //     with action="suppressed" (the alertId line carries the DETERMINISTIC

@@ -33,9 +33,14 @@ var labTemplateHTML string
 // (template.Must).
 var labTmpl = template.Must(template.New("labreport").Parse(labTemplateHTML))
 
-// LabDisclaimer is the pinned synthetic-data disclaimer of every lab report
-// (identical to the Phase 1 quality report footer).
-const LabDisclaimer = "本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。"
+// LabDisclaimer is the pinned provenance disclaimer of every lab report
+// (identical to the Phase 1 quality report footer). Issue #57②: the
+// wording is deliberately SOURCE-NEUTRAL — the database may hold the
+// operator's real ledgers, real open data, or synthetic demo batches;
+// the report cannot tell them apart, so it must not claim any of the
+// three. The pre-v0.12.1 "合成测试数据" line asserted a source the
+// report never verified.
+const LabDisclaimer = "本报告基于当前已导入的数据生成，请以实际网络情况为准。"
 
 // labReportChangeSetLimit caps the changeset history section of the report.
 const labReportChangeSetLimit = 10

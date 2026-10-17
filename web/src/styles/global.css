@@ -2068,6 +2068,21 @@ a.btn:hover {
   text-decoration: underline;
 }
 
+/* 告警资源列（issue #57①）：主行 name + 副行 naturalKey 的双行展示——
+   端口名无设备区分度，naturalKey 补上归属；副行不夺主行的视觉权重。 */
+.alert-resource-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.alert-resource-cell .alert-resource-key {
+  font-weight: 400;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 /* ------------------------------------------------------------------ 响应式 */
 
 @media (max-width: 1099px) {

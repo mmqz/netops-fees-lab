@@ -30,7 +30,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.12.0';
+export const APP_VERSION = 'v0.12.1';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -805,7 +805,9 @@ export const RUN_TOAST_DONE = '检测完成：新建 {created} · 清除 {cleare
 
 export const NAV_MAINTENANCE = '维护窗口';
 export const MNT_HINT =
-  '计划内维护期间抑制新告警：窗口时间区间内的新触发不产生告警（已触发的告警生命周期不受影响，恢复清除照常）。判定基准是指标数据时间线，可重放。';
+  '计划内维护期间抑制新告警：窗口时间区间内的新触发不产生告警（已触发的告警生命周期不受影响，恢复清除照常）。';
+export const MNT_TIME_BASIS =
+  '时间基准（双时基判定）：证据时刻（指标数据时间线，可重放）或运行时刻（扫描执行的现实时刻）任一落在窗口内即抑制新告警。当前数据时刻：{dataTime}——若按墙钟排班（如「今晚 22:00」）请按现实时刻填写；若要对历史回放按数据时刻对齐，请让窗口覆盖数据时刻。';
 export const MNT_EMPTY = '没有维护窗口';
 export const MNT_BTN_NEW = '新建窗口';
 export const MNT_BTN_DELETE = '删除';
@@ -987,8 +989,9 @@ export const RUN_STATE_LABELS: Record<string, string> = {
 
 export const RPT_SCOPE = '报告范围';
 export const RPT_SCOPE_ALL = '全部批次';
-export const RPT_DISCLAIMER =
-  '本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。';
+// issue #57②：来源中立的免责声明——数据库里可能是用户的真实台账、
+// 真实公开数据或合成演示数据，页面无法区分，因此不再断言「合成测试数据」。
+export const RPT_DISCLAIMER = '本报告基于当前已导入的数据生成，请以实际网络情况为准。';
 export const RPT_PREVIEW_TITLE = '报告预览';
 export const RPT_LOADING = '正在生成报告…';
 export const RPT_EMPTY = '暂无报告内容';

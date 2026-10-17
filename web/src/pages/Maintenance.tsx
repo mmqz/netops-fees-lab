@@ -21,6 +21,7 @@ import {
   deleteMaintenanceWindow,
   formatApiError,
   formatApiErrorText,
+  listDetectionRuns,
   listMaintenanceWindows,
   listResources,
 } from '../api/client';
@@ -50,6 +51,7 @@ import {
   MNT_FIELD_SCOPE,
   MNT_FIELD_START,
   MNT_HINT,
+  MNT_TIME_BASIS,
   MNT_LABEL_REQUIRED,
   MNT_LOAD_FAILED,
   MNT_SCOPE_EMPTY_HINT,
@@ -378,10 +380,23 @@ export function MaintenancePage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   // 状态列的客户端时钟（每分钟刷新一次「进行中/已结束」判定）
   const [nowMs, setNowMs] = useState(Date.now());
+  // issue #55：最近一次检测的数据时刻（evaluatedAt）——双时基提示里的
+  // 「当前数据时刻」，失败降级为「未知」（提示块不阻塞页面）。
+  const [dataTime, setDataTime] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 60_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    listDetectionRuns({ page: 1, pageSize: 1 })
+      .then((res) => {
+        if (res.items.length > 0) setDataTime(res.items[0].evaluatedAt);
+      })
+      .catch(() => {
+        /* 无运行历史或失败：保持 null，提示显示「未知」 */
+      });
   }, []);
 
   const fetchWindows = useCallback(() => {
@@ -534,6 +549,12 @@ export function MaintenancePage() {
       </div>
 
       <div className="muted-note table-hint">{MNT_HINT}</div>
+
+      <div className="muted-note table-hint">
+        {format(MNT_TIME_BASIS, {
+          dataTime: dataTime !== null ? formatDateTime(dataTime) : '未知（尚未执行过检测）',
+        })}
+      </div>
 
       {error !== null ? (
         <ErrorBlock message={error} detail={errorDetail} onRetry={fetchWindows} />

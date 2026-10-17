@@ -789,8 +789,10 @@ func TestAPIImportFlow(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
 		t.Errorf("report html: content-type = %q, want text/html; charset=utf-8", ct)
 	}
-	if !strings.Contains(string(body), "合成测试数据") {
-		t.Error("report html: synthetic-data disclaimer missing")
+	// issue #57②：免责声明已改为来源中立文案（不再断言「合成测试数据」——
+	// 报告无法验证数据库内容物的来源，断言哪个都是越权）。
+	if !strings.Contains(string(body), "本报告基于当前已导入的数据生成") {
+		t.Error("report html: provenance-neutral disclaimer missing")
 	}
 
 	// GET /api/report?format=json: parses, score 32, inventory 64.

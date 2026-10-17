@@ -92,6 +92,7 @@ type payload struct {
 	Suppressed       int         `json:"suppressed"`
 	FlapHeld         int         `json:"flapHeld"`
 	EvaluatedAt      string      `json:"evaluatedAt"`
+	SuppressionNote  string      `json:"suppressionNote,omitempty"` // issue #55: wall-active windows suppressed nothing — the silent-failure eliminator, forwarded verbatim
 	Alerts           []alertLine `json:"alerts"`
 	AlertsTruncated  bool        `json:"alertsTruncated"`
 }
@@ -312,6 +313,7 @@ func (w *Webhook) NotifyDetectionRun(ctx context.Context, res detect.RunResult, 
 		Suppressed:       res.Suppressed,
 		FlapHeld:         res.FlapHeld,
 		EvaluatedAt:      res.EvaluatedAt,
+		SuppressionNote:  res.SuppressionNote,
 		Alerts:           make([]alertLine, 0, min(len(res.Alerts), maxPayloadAlerts)),
 	}
 	for i, line := range res.Alerts {

@@ -40,6 +40,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -83,6 +84,22 @@ func (w SuppressedWindow) Suppresses(resourceID, lastTS string) bool {
 		return false // engine ts strings are RFC3339 by invariant; a parse miss never suppresses
 	}
 	return !ts.Before(w.StartsAfter) && ts.Before(w.EndsBefore)
+}
+
+// SuppressesAtWall reports whether a fire happening at the OPERATIONAL
+// moment now (issue #55) falls under this window: now ∈ [StartsAfter,
+// EndsBefore) AND the resource is in scope. Maintenance windows are human
+// plans written against the wall clock ("tonight 22:00 → tomorrow 02:00");
+// when the sweep replays historical data whose evidence ts sits days away
+// from the plan, the data-time match alone never fires and the operator's
+// protection silently vanishes — the dual-basis match closes that gap.
+// Same half-open interval, same scope rules; no parsing (the caller owns
+// the time.Time). Used ONLY for gating NEW fires, exactly like Suppresses.
+func (w SuppressedWindow) SuppressesAtWall(resourceID string, now time.Time) bool {
+	if w.ResourceIDs != nil && !w.ResourceIDs[resourceID] {
+		return false
+	}
+	return !now.Before(w.StartsAfter) && now.Before(w.EndsBefore)
 }
 
 // Finding is one rule/series violation: the last Window consecutive points
@@ -144,9 +161,22 @@ func Evaluate(points []Point, rule domain.DetectionRule) (Finding, bool) {
 // bounds of the evaluation window ("" = unbounded on that side) — the
 // daily-inspection sweep scans ALL series of every enabled rule's metric
 // key inside [from, to].
+//
+// WallClock (issue #55) is the OPERATIONAL time of the sweep — when the
+// runner executes NOW. It is an INPUT the caller injects (the recorder
+// stamps it from its injected clock), never a clock the engine reads:
+// pure-function determinism keeps "same (db state, rules, window, input)
+// → same result". Its only use is the maintenance-window dual-basis
+// match (see SuppressedWindow.SuppressesAtWall): a window the OPERATOR
+// planned against the wall clock must also hold back the fires of a
+// replay over HISTORICAL data whose data timeline falls far outside the
+// window. The zero value disables wall-clock matching entirely (pure
+// data-time mode — the pre-v0.12.1 behavior, and the shape the
+// deterministic tests pin).
 type Options struct {
-	From string
-	To   string
+	From      string
+	To        string
+	WallClock time.Time
 }
 
 // AlertSummary is one alert mutation of a run (created or cleared) — the
@@ -159,19 +189,25 @@ type Options struct {
 // run ("" on cleared/suppressed lines — their verdicts belong to the
 // rows, not this run's mutations).
 type AlertSummary struct {
-	AlertID         string  `json:"alertId"`
-	RuleID          string  `json:"ruleId"`
-	SeriesID        string  `json:"seriesId"`
-	ResourceID      string  `json:"resourceId"`
-	MetricKey       string  `json:"metricKey"`
-	Severity        string  `json:"severity"`
-	Action          string  `json:"action"`                    // created | cleared | suppressed | flap_held
-	State           string  `json:"state"`                     // the state AFTER the run ("" for suppressed lines)
-	CorrelationRole string  `json:"correlationRole,omitempty"` // 根因/次生 verdict of created lines (v0.12-R16)
-	FirstSeen       string  `json:"firstSeen"`
-	FiredAt         string  `json:"firedAt"`
-	ClearedAt       string  `json:"clearedAt"`
-	LastValue       float64 `json:"lastValue"`
+	AlertID         string `json:"alertId"`
+	RuleID          string `json:"ruleId"`
+	SeriesID        string `json:"seriesId"`
+	ResourceID      string `json:"resourceId"`
+	MetricKey       string `json:"metricKey"`
+	Severity        string `json:"severity"`
+	Action          string `json:"action"`                    // created | cleared | suppressed | flap_held
+	State           string `json:"state"`                     // the state AFTER the run ("" for suppressed lines)
+	CorrelationRole string `json:"correlationRole,omitempty"` // 根因/次生 verdict of created lines (v0.12-R16)
+	WindowLabel     string `json:"windowLabel,omitempty"`     // suppressed: the window that held the fire (issue #55 observability)
+	// SuppressionBasis (suppressed lines only, issue #55): which clock
+	// matched the window — "data_time" (evidence ts ∈ window) or
+	// "wall_clock" (the sweep's operational moment ∈ window). Omitted on
+	// every other action.
+	SuppressionBasis string  `json:"suppressionBasis,omitempty"`
+	FirstSeen        string  `json:"firstSeen"`
+	FiredAt          string  `json:"firedAt"`
+	ClearedAt        string  `json:"clearedAt"`
+	LastValue        float64 `json:"lastValue"`
 }
 
 // RunResult is the response envelope of POST /api/detection/run and the
@@ -195,6 +231,16 @@ type RunResult struct {
 	FlapHeld         int            `json:"flapHeld"`
 	EvaluatedAt      string         `json:"evaluatedAt"`
 	Alerts           []AlertSummary `json:"alerts"`
+
+	// SuppressionNote (issue #55): a non-empty HUMAN-readable line iff
+	// wall-clock-active maintenance windows exist but nothing was
+	// suppressed this run — the silent-failure eliminator. It names the
+	// active windows, the run's data time, and the gap, so an operator
+	// who built a window against the wall clock can see why replayed
+	// data-time fires still went through (or vice versa). Empty when
+	// suppression actually happened, when no window is wall-active, or
+	// when wall-clock matching was not enabled for the run.
+	SuppressionNote string `json:"suppressionNote,omitempty"`
 }
 
 // Engine is the stateless detection engine — Detect is a pure run over
@@ -319,20 +365,28 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 					}
 					continue
 				}
-				if matchSuppressionWindow(supWindows, f.ResourceID, f.LastTS) != nil {
+				// v0.12-R15 + issue #55: a NEW fire is SUPPRESSED when
+				// EITHER clock matches a window covering the resource —
+				// the data-time match (replayable) or the wall-clock match
+				// (the operator planned "now"; protects replays of
+				// historical data whose ts sits far from the plan). The
+				// basis + window label ride the envelope line.
+				if win, basis := matchSuppressionWindow(supWindows, f.ResourceID, f.LastTS, opts.WallClock); win != nil {
 					res.Suppressed++
 					summaries = append(summaries, AlertSummary{
-						AlertID:    NewAlertID(rule.RuleID, f.SeriesID, f.FirstSeen),
-						RuleID:     rule.RuleID,
-						SeriesID:   f.SeriesID,
-						ResourceID: f.ResourceID,
-						MetricKey:  f.MetricKey,
-						Severity:   rule.Severity.String(),
-						Action:     "suppressed",
-						State:      "",
-						FirstSeen:  f.FirstSeen,
-						FiredAt:    f.LastTS,
-						LastValue:  f.LastValue,
+						AlertID:          NewAlertID(rule.RuleID, f.SeriesID, f.FirstSeen),
+						RuleID:           rule.RuleID,
+						SeriesID:         f.SeriesID,
+						ResourceID:       f.ResourceID,
+						MetricKey:        f.MetricKey,
+						Severity:         rule.Severity.String(),
+						Action:           "suppressed",
+						State:            "",
+						WindowLabel:      win.Label,
+						SuppressionBasis: basis,
+						FirstSeen:        f.FirstSeen,
+						FiredAt:          f.LastTS,
+						LastValue:        f.LastValue,
 					})
 					continue
 				}
@@ -457,6 +511,15 @@ func (e *Engine) Detect(ctx context.Context, db *repo.DB, opts Options) (RunResu
 		})
 		res.Alerts = summaries
 		res.EvaluatedAt = evalTS
+
+		// --- suppression observability (issue #55) ---
+		// The silent-failure eliminator: wall-active windows exist,
+		// yet nothing was suppressed while new alerts WERE created —
+		// either the new fires' resources are out of every active
+		// window's scope, or the operator's mental model of "when"
+		// disagrees with the data timeline. One honest line names
+		// both clocks; empty in every healthy case.
+		res.SuppressionNote = suppressionNote(supWindows, opts.WallClock, res, evalTS)
 		return nil
 	})
 	if err != nil {
@@ -496,17 +559,66 @@ func loadSuppressionWindows(ctx context.Context, tx *repo.Tx) ([]SuppressedWindo
 	return out, nil
 }
 
+// SuppressionBasis values — which clock matched the window (issue #55).
+const (
+	// BasisDataTime: the finding's evidence ts (from the data) fell inside
+	// the window — the replayable, deterministic match.
+	BasisDataTime = "data_time"
+	// BasisWallClock: the sweep's operational moment (Options.WallClock)
+	// fell inside the window — the operator-planned "now" match that also
+	// protects replays of historical data.
+	BasisWallClock = "wall_clock"
+)
+
 // matchSuppressionWindow returns the FIRST window suppressing the
-// (resource, ts) pair, or nil. Order follows the listing (starts_at DESC)
-// — with overlapping windows the verdict (suppressed) is identical either
-// way; the returned window's label is evidence for the envelope line.
-func matchSuppressionWindow(windows []SuppressedWindow, resourceID, lastTS string) *SuppressedWindow {
+// (resource, ts) pair on EITHER clock — data time first, then the
+// sweep's wall clock (issue #55 dual basis) — with the basis that
+// matched, or (nil, ""). Order follows the listing (starts_at DESC);
+// with overlapping windows the verdict (suppressed) is identical either
+// way; the returned window's label and basis are evidence for the
+// envelope line. A zero wallClock skips the wall-clock pass entirely.
+func matchSuppressionWindow(windows []SuppressedWindow, resourceID, lastTS string, wallClock time.Time) (*SuppressedWindow, string) {
 	for i := range windows {
 		if windows[i].Suppresses(resourceID, lastTS) {
-			return &windows[i]
+			return &windows[i], BasisDataTime
 		}
 	}
-	return nil
+	if !wallClock.IsZero() {
+		for i := range windows {
+			if windows[i].SuppressesAtWall(resourceID, wallClock) {
+				return &windows[i], BasisWallClock
+			}
+		}
+	}
+	return nil, ""
+}
+
+// suppressionNote renders the issue-#55 observability line: non-empty
+// iff wall-clock matching was enabled, at least one window is active at
+// the sweep's wall clock, yet the run suppressed nothing while creating
+// new alerts — the "the operator believed a window was protecting them"
+// case. Empty when suppression actually happened, when no window is
+// wall-active, or when the run created nothing new worth gating.
+func suppressionNote(windows []SuppressedWindow, wallClock time.Time, res RunResult, evalTS string) string {
+	if wallClock.IsZero() || res.Suppressed > 0 || res.AlertsCreated == 0 {
+		return ""
+	}
+	active := make([]string, 0, 2)
+	for i := range windows {
+		if !wallClock.Before(windows[i].StartsAfter) && wallClock.Before(windows[i].EndsBefore) {
+			active = append(active, windows[i].Label)
+		}
+	}
+	if len(active) == 0 {
+		return ""
+	}
+	labels := strings.Join(active, "、")
+	if len(active) > 3 {
+		labels = strings.Join(active[:3], "、") + fmt.Sprintf(" 等 %d 个", len(active))
+	}
+	return fmt.Sprintf(
+		"%d 个维护窗口在运行时刻 %s 处于激活期（%s），但本轮未抑制任何告警：新建 %d 条告警的资源不在窗口范围内，数据时刻 %s 也不在任何窗口内——请检查窗口的资源范围或时间基准（窗口按数据时间与运行时刻双时基判定）",
+		len(active), wallClock.UTC().Format(time.RFC3339), labels, res.AlertsCreated, evalTS)
 }
 
 // writeRunStates maps the alert table to run-state observations (source=

@@ -35,6 +35,15 @@ func RunAndRecord(ctx context.Context, db *repo.DB, eng *Engine, opts Options, s
 		return RunResult{}, domain.DetectionRun{}, fmt.Errorf("detect: record run: invalid source %q (api/cli/scheduler)", source)
 	}
 	started := now()
+	// Issue #55: stamp the sweep's operational moment into the options
+	// (zero WallClock = pure data-time mode). The engine stays clock-free
+	// — the recorder OWNS the injected clock, so every trigger origin
+	// (HTTP / CLI / scheduler) gets dual-basis maintenance-window matching
+	// without each caller wiring it, while tests keep their determinism
+	// by calling Detect with an explicit (or zero) WallClock.
+	if opts.WallClock.IsZero() {
+		opts.WallClock = started
+	}
 	res, err := eng.Detect(ctx, db, opts)
 	finished := now()
 

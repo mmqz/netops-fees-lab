@@ -439,11 +439,13 @@ func TestReportHTML(t *testing.T) {
 		}
 	}
 
-	// Disclaimer, verbatim (Chinese + English line).
-	if !strings.Contains(html, "本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。") {
+	// Disclaimer, verbatim (Chinese + English line) — issue #57②:
+	// source-NEUTRAL wording; the report cannot verify what the
+	// database holds, so it must not claim synthetic provenance.
+	if !strings.Contains(html, "本报告基于当前已导入的数据生成，请以实际网络情况为准。") {
 		t.Errorf("HTML must contain the verbatim Chinese disclaimer")
 	}
-	if !strings.Contains(html, "Synthetic data — engineering-method validation only.") {
+	if !strings.Contains(html, "Generated from the currently imported datasets; verify against actual network conditions.") {
 		t.Errorf("HTML must contain the English disclaimer line")
 	}
 

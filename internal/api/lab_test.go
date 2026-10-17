@@ -1140,7 +1140,7 @@ func TestAPILabFullFlow(t *testing.T) {
 	if len(report.Checkpoints) != 1 || report.Checkpoints[0].CheckpointID != "cp-1" {
 		t.Fatalf("lab report checkpoints = %+v, want [cp-1]", report.Checkpoints)
 	}
-	if report.Disclaimer != "本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。" {
+	if report.Disclaimer != "本报告基于当前已导入的数据生成，请以实际网络情况为准。" {
 		t.Fatalf("lab report disclaimer = %q", report.Disclaimer)
 	}
 
@@ -1167,8 +1167,8 @@ func TestAPILabFullFlow(t *testing.T) {
 		"已应用",
 		"已撤销",
 		"失败",
-		"本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。",
-		"Synthetic data — engineering-method validation only.",
+		"本报告基于当前已导入的数据生成，请以实际网络情况为准。",
+		"Generated from the currently imported datasets; verify against actual network conditions.",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("lab report html misses %q", want)

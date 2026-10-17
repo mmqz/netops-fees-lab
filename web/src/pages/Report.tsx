@@ -1,7 +1,7 @@
 /**
  * 质量报告页 /report：
  * - 批次范围选择（全部 / 各批次），支持 ?batchId= 深链；
- * - 常驻琥珀色「合成数据」免责声明横幅；
+ * - 常驻琥珀色来源中立免责声明横幅（issue #57②：不再断言「合成数据」）；
  * - iframe srcdoc 预览 GET /api/report?format=html 的独立 HTML 报告；
  * - 下载 HTML / 下载 JSON（Blob 下载）；刷新 / 重新校验（POST /api/validate）。
  */

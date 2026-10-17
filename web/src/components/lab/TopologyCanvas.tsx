@@ -264,12 +264,13 @@ const DEFAULT_PREFS: CanvasPrefs = {
   mode: 'select',
   labels: true,
   view: 'topo',
-  // #53-B：L0 空间锚点默认开。默认可见子集（设备+业务节点）是高瘦簇
-  //（宽高比 ~0.8 vs 视口 ~2.0），任何正确的「看得全」fit 都必然是中间
-  // 竖条（像素利用率 ~34%）；而 L0 锚点（人井/杆路，14px 无标签暗点，
-  // 视觉成本近零）铺满真实地理宽度——开启后默认视图可见内容横向利用率
-  // ~74%（实测，达标 ≥70%）。L4（1,198 基站聚簇）/L5（16 分组 ×674 边，
-  // 密集）仍按需开启。
+  // #53-B / #54（v0.11.2 修正）：L0 空间锚点默认开——但理由已经换过：
+  // #53-B 的「开 L0 撑宽包围盒 → 横向利用率 74%」推理链被 #54 实测推翻
+  //（包围盒变宽 ≠ 内容铺开，反而把 133 台设备压进左侧 1/4）。现在的
+  // 机制是 #54 的两道防线：布局后锚链收拢进结构盒（保形状等比）+
+  // fit 基准排除 L0——锚点以 14px 无标签暗点伴随结构铺陈，视觉成本
+  // 近零，但不再定义画布尺度。L4（1,198 基站聚簇）/L5（16 分组 ×674
+  // 边，密集）仍按需开启。
   layers: { L0: true, L1: true, L2: true, L3: true, L4: false, L5: false, L6: true },
 };
 
@@ -718,14 +719,19 @@ function placeNewNodesSpiral(cy: Core, addedIds: Set<string>): void {
 }
 
 /**
- * #53-B：全图包围盒——聚合**全部**节点（含被图层开关隐藏的覆盖层节点）的
- * 渲染范围。
+ * #53-B / #54：全图包围盒——聚合**结构层**节点（含被图层开关隐藏的覆盖层节点）
+ * 的渲染范围，**排除 L0 空间锚点**（人井/杆路——地理装饰层，不是拓扑结构）。
  *
  * 不能用 elements().boundingBox()：Cytoscape 在样式启用（浏览器）环境会把
  * display:none 的元素排除出包围盒（boundingBoxImpl 的 isDisplayed 分支），
  * 默认图层组合下可见包围盒塌成 813×1113 细长条（真实坐标范围 2049×1279），
  * fit 后内容被压在中间约 436px 竖条。position() 与 outerWidth()/outerHeight()
  * 读的是模型坐标与样式尺寸，与 display 无关，隐藏节点同样可得。
+ *
+ * #54（v0.11.2）：L0 的 21 个锚点曾被 cose 甩开到 1902 宽（body 133 台设备仅
+ * 447），撑大包围盒 → zoom 0.46 → 真实内容压在左侧 1/4。两道防线：布局后
+ * 把 L0 收拢进结构包围盒（collapseSpatialAnchors，保形状等比）；fit 基准
+ * 再排除 L0——即使收拢失效/手动拖拽，结构层也自己决定视野尺度。
  */
 function fullGraphBoundingBox(cy: Core): { x1: number; y1: number; x2: number; y2: number; w: number; h: number } | null {
   let x1 = Infinity;
@@ -733,7 +739,12 @@ function fullGraphBoundingBox(cy: Core): { x1: number; y1: number; x2: number; y
   let x2 = -Infinity;
   let y2 = -Infinity;
   let count = 0;
+  let anchorCount = 0;
   cy.nodes().forEach((node) => {
+    if (node.data('layer') === 'L0') {
+      anchorCount += 1;
+      return; // 空间锚点是地理装饰，不是结构——#54
+    }
     count += 1;
     const pos = node.position();
     const w = node.outerWidth();
@@ -746,8 +757,76 @@ function fullGraphBoundingBox(cy: Core): { x1: number; y1: number; x2: number; y
     if (pos.y - hh < y1) y1 = pos.y - hh;
     if (pos.y + hh > y2) y2 = pos.y + hh;
   });
+  // 全图只剩 L0 锚点（极端防御）：退回锚点自身范围，fit 仍然可用。
+  if (count === 0 && anchorCount > 0) {
+    return fullLayerBoundingBox(cy, 'L0');
+  }
   if (count === 0 || !(x2 > x1) || !(y2 > y1)) return null;
   return { x1, y1, x2, y2, w: x2 - x1, h: y2 - y1 };
+}
+
+/**
+ * 指定图层的节点坐标包围盒（不含节点盒尺寸——收拢只看坐标范围）。
+ */
+function fullLayerBoundingBox(cy: Core, layer: string): { x1: number; y1: number; x2: number; y2: number; w: number; h: number } | null {
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  let count = 0;
+  cy.nodes(`[layer = "${layer}"]`).forEach((node) => {
+    const pos = node.position();
+    if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+    count += 1;
+    if (pos.x < x1) x1 = pos.x;
+    if (pos.x > x2) x2 = pos.x;
+    if (pos.y < y1) y1 = pos.y;
+    if (pos.y > y2) y2 = pos.y;
+  });
+  if (count === 0 || !(x2 > x1) || !(y2 > y1)) return null;
+  return { x1, y1, x2, y2, w: x2 - x1, h: y2 - y1 };
+}
+
+/**
+ * #54（v0.11.2）：布局后把 L0 空间锚点收拢进结构包围盒——保形状等比缩放。
+ *
+ * 根因：cose 力导向会把弱连通的长链（人井/杆路的走廊锚链）甩到外围，
+ * 实测 L0 21 节点铺开 1902 宽而 body 133 台设备仅 447——L0 单层撑大
+ * 全图包围盒，fit 后真实内容被压小挤偏。收拢语义：L0 是**地理装饰层**
+ * （14px 无标签暗点），它应该伴随结构内容铺陈，而不是反过来定义画布
+ * 尺度。做法是整个 L0 作为一个刚体——统一缩放系数 min(目标宽/源宽,
+ * 目标高/源高) + 居中平移——走廊链的相对形状（跳数拓扑）保真，只把
+ * 绝对尺度对齐到结构层。目标盒取结构包围盒的 92%（锚点贴边观感差）。
+ *
+ * 布局 stop 后、fit 前调用；freeze（手动排布）不调用。防御：任一包围
+ * 盒缺失/退化 → no-op，布局结果原样保留。
+ */
+function collapseSpatialAnchors(cy: Core): void {
+  const source = fullLayerBoundingBox(cy, 'L0');
+  if (source === null) return; // 无 L0 节点：nothing to collapse
+  const structural = fullGraphBoundingBox(cy);
+  if (structural === null) return; // 结构层缺席（纯锚点图）：无处可收
+  const margin = 0.08; // 目标盒 = 结构盒两维各留 8% 边距（防锚点贴边）
+  const tw = structural.w * (1 - margin * 2);
+  const th = structural.h * (1 - margin * 2);
+  if (!(tw > 0) || !(th > 0) || !(source.w > 0) || !(source.h > 0)) return;
+  const scale = Math.min(tw / source.w, th / source.h);
+  if (!(scale > 0) || !Number.isFinite(scale)) return;
+  // 居中：收拢后的 L0 几何中心对齐结构盒中心。
+  const tCx = structural.x1 + structural.w / 2;
+  const tCy = structural.y1 + structural.h / 2;
+  const sCx = source.x1 + source.w / 2;
+  const sCy = source.y1 + source.h / 2;
+  const dx = tCx - sCx * scale;
+  const dy = tCy - sCy * scale;
+  cy.nodes('[layer = "L0"]').forEach((node) => {
+    const pos = node.position();
+    if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+    node.position({
+      x: pos.x * scale + dx,
+      y: pos.y * scale + dy,
+    });
+  });
 }
 
 /**
@@ -763,11 +842,13 @@ function fullGraphBoundingBox(cy: Core): { x1: number; y1: number; x2: number; y
  *
  * 用户若想回到这个尺寸，随时按 F（适配视图）。
  *
- * #53-B：fit 基准从「当前可见元素」改为上面的全图包围盒——所有节点都由
- * 布局落过坐标、与图层开关无关，因此任意图层组合下 fit 的缩放一致
- * （切换图层本身不 fit、无缩放跳动；按 F 回到的也是同一尺度）。把算好
- * 逐维留白的包围盒直接交给 cy.fit()（getFitViewport 接受原始
- * {x1,y1,x2,y2}，并自带 minZoom/maxZoom 钳制与居中）。
+ * #53-B / #54：fit 基准从「当前可见元素」改为上面的结构层包围盒——所有
+ * 节点都由布局落过坐标、与图层开关无关，因此任意图层组合下 fit 的缩放
+ * 一致（切换图层本身不 fit、无缩放跳动；按 F 回到的也是同一尺度）。
+ * #54：基准排除 L0 空间锚点（地理装饰层不定义画布尺度），并在布局
+ * stop 后先行收拢锚链（collapseSpatialAnchors）。把算好逐维留白的
+ * 包围盒直接交给 cy.fit()（getFitViewport 接受原始 {x1,y1,x2,y2}，
+ * 并自带 minZoom/maxZoom 钳制与居中）。
  */
 function fitToView(cy: Core): void {
   const bb = fullGraphBoundingBox(cy);
@@ -1578,6 +1659,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           if (layoutRunRef.current === run) {
             layoutRunRef.current = null;
           }
+          // #54：布局后先把 L0 空间锚点收拢进结构包围盒（保形状等比），
+          // 再 fit——否则被力导向甩开的锚链（实测 1902 宽 vs 设备群 447）
+          // 撑大 fit 基准，真实内容被压小挤偏。freeze 不经此路径（无 stop）。
+          collapseSpatialAnchors(cy);
           fitToView(cy);
           scheduleMinimapRef.current();
         },

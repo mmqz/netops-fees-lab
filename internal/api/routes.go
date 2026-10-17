@@ -68,11 +68,11 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/detection/rules", Tag: "detection", Summary: "新建检测规则（封闭目录校验，ruleId 可自动生成）", Handler: s.handleDetectionRulesCreate},
 		{Method: "PATCH", Pattern: "/api/detection/rules/{id}", Tag: "detection", Summary: "部分更新规则（metricKey 身份不可改）", Handler: s.handleDetectionRulesPatch},
 		{Method: "DELETE", Pattern: "/api/detection/rules/{id}", Tag: "detection", Summary: "删除规则（被告警引用时 409 审计保护）", Handler: s.handleDetectionRulesDelete},
-		{Method: "POST", Pattern: "/api/detection/run", Tag: "detection", Summary: "执行一次全库检测扫描（可选 from/to 窗口；回执落库，完成后触发 webhook 通知）", Handler: s.handleDetectionRun},
+		{Method: "POST", Pattern: "/api/detection/run", Tag: "detection", Summary: "执行一次全库检测扫描（可选 from/to 数据窗口；回执落库，完成后触发 webhook 通知；维护窗口按数据时间+运行时刻双时基判定抑制）", Handler: s.handleDetectionRun},
 		{Method: "GET", Pattern: "/api/detection/runs", Tag: "detection", Summary: "检测运行历史分页（每双回执：来源 api/cli/scheduler、窗口、计数、时长、失败原因）", Handler: s.handleDetectionRunsList},
 
 		{Method: "GET", Pattern: "/api/maintenance/windows", Tag: "maintenance", Summary: "维护窗口列表（计划内抑制新告警的时间区间，最新在前）", Handler: s.handleMaintenanceWindowsList},
-		{Method: "POST", Pattern: "/api/maintenance/windows", Tag: "maintenance", Summary: "新建维护窗口（RFC3339 起止、可选资源范围，空范围 = 全局）", Handler: s.handleMaintenanceWindowsCreate},
+		{Method: "POST", Pattern: "/api/maintenance/windows", Tag: "maintenance", Summary: "新建维护窗口（RFC3339 起止、可选资源范围，空范围 = 全局；窗口按双时基判定：数据时间含证据时刻 或 运行时刻含扫描时刻，其一命中即抑制新告警）", Handler: s.handleMaintenanceWindowsCreate},
 		{Method: "DELETE", Pattern: "/api/maintenance/windows/{id}", Tag: "maintenance", Summary: "删除维护窗口（历史运行回执不受影响）", Handler: s.handleMaintenanceWindowsDelete},
 
 		{Method: "GET", Pattern: "/api/alerts", Tag: "alerts", Summary: "告警分页列表（state/severity/resource/role 过滤；role=primary/secondary 根因/次生分诊）", Handler: s.handleAlertsList},

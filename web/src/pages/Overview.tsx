@@ -313,6 +313,8 @@ function OverviewBody() {
   // 治理聚合是独立取数点（useSeq 单实例单取数点纪律）：失败降级为面板内
   // 错误条，不阻塞页面其余区（主统计/批次表照常渲染）。
   const govGuard = useSeq();
+  /** issue #56：告警统计独立取数点（useSeq 单实例单取数点纪律），挂载时取一次。 */
+  const alertGuard = useSeq();
   const [gov, setGov] = useState<GovernanceSummary | null>(null);
   const [govError, setGovError] = useState<string | null>(null);
   const [govErrorDetail, setGovErrorDetail] = useState<string | null>(null);
@@ -378,9 +380,26 @@ function OverviewBody() {
 
   // v0.11-R11：告警分布（stats 一次拿到三态计数 + 待处置级别矩阵，
   // 取代 v0.9 的 listAlerts pageSize=1 探针——更少请求、更全信息）。
-  getAlertStats()
-    .then((stats) => setAlertStats(stats))
-    .catch(() => setAlertStats(null));
+  // issue #56 修复：原实现把 getAlertStats() 裸写在组件函数体内，
+  // 响应回来 setAlertStats 触发重渲染 -> 组件体再次执行 -> 再发请求，
+  // 形成无限循环（实测 52 QPS）。现纳入与 loadGov 相同的 useSeq 守卫纪律：
+  // useCallback + useEffect 仅在挂载时执行一次，过期响应由 isCurrent 丢弃。
+  const loadAlertStats = useCallback((): void => {
+    const isCurrent = alertGuard.begin();
+    getAlertStats()
+      .then((stats) => {
+        if (!isCurrent()) return;
+        setAlertStats(stats);
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
+        setAlertStats(null);
+      });
+  }, [alertGuard]);
+
+  useEffect(() => {
+    loadAlertStats();
+  }, [loadAlertStats]);
 
   function confirmRollback(): void {
     const target = rollbackTarget;

@@ -748,15 +748,23 @@ export function AlertsPage() {
       {
         key: 'resource',
         header: ALR_COL_RESOURCE,
+        // issue #57① 修复：主行 name（端口名），副行 naturalKey（含设备前缀）。
+        // 端口/板卡类资源的 name 本身无区分度（多台设备同有 xgei-1/1/1），
+        // 只显 name 会让运维无法分辨告警属于哪台设备；副行永远带上
+        // naturalKey（与资源浏览页的双行展示一致），同名端口的行文本不同。
         render: (row) =>
           row.resource.id !== '' ? (
             <Link
-              className="entity-link"
+              className="entity-link alert-resource-cell"
               to={`/resources?focus=${encodeURIComponent(row.resource.id)}`}
               title={ALR_RESOURCE_LINK_TITLE}
               onClick={(event) => event.stopPropagation()}
             >
-              {row.resource.name !== '' ? row.resource.name : row.resource.naturalKey}
+              <span>{row.resource.name !== '' ? row.resource.name : row.resource.naturalKey}</span>
+              {row.resource.naturalKey !== '' &&
+                row.resource.naturalKey !== row.resource.name && (
+                  <span className="muted-note alert-resource-key">{row.resource.naturalKey}</span>
+                )}
             </Link>
           ) : (
             <span className="muted-note">{row.resource.naturalKey}</span>
