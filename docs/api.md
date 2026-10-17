@@ -9,14 +9,14 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.12.0（2026-10-17）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.12.1（2026-10-17）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.12.0",
+  "version": "v0.12.1",
   "ruleVersion": "1.0.0",
   "dbPath": "/abs/path/to/netops.db"
 }
@@ -1024,10 +1024,10 @@ body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用
 - finding 无在案告警 → 建 firing 告警（`first_seen` = 首个越限点 ts，确定性 ID `al_<sha256 前 16>`）
 - 恢复（窗口内不再越限）→ firing/acked → cleared
 - **acked 不重触发**（人工持有话事权）；cleared 后再越限 → 新告警（新 first_seen）
-- **维护窗口抑制**（v0.12-R15）：新燃点落入窗口且资源在范围内 → 不建告警行（计数 `suppressed`，信封行 action=suppressed 携带确定性应燃 id）
+- **维护窗口抑制**（v0.12-R15；**双时基**，issue #55，v0.12.1）：新燃点被抑制的条件是——证据时刻（数据时间线）**或**运行时刻（扫描执行的现实时刻）任一落入窗口且资源在范围内 → 不建告警行（计数 `suppressed`，信封行 action=suppressed 携带确定性应燃 id + `windowLabel` + `suppressionBasis`（`data_time|wall_clock`，命中时基））。窗口是按墙钟做的计划，历史回放时数据时刻与窗口相隔数天，纯数据时刻匹配会静默失效——双时基补上这个缺口；已有告警生命周期不受影响，恢复清除照常
 - **抖动抑制**（v0.12-R17）：(rule, series) 对在尾随 14 天证据时间内已有 ≥3 个完整 fire→clear 周期（仅计引擎恢复清除的数据 ts；人工清除的钟表 ts 不算抖动）→ 第 4 次重燃被拦（计数 `flapHeld`，信封行 action=flap_held 携带确定性应燃 id；老告警随周期出窗自动老化释放，序列持续越限时以同一应燃 id 落燃）
 - **run_state 联动**（§12-B2 衔接点 3）：firing error → down、firing warning → degraded（source=alert，走历史+快照双写）；全部恢复 → up。**语义**：与人工 manual 写入按 ts 后写优先共存——巡检运行之间的人工状态不会被静默覆盖，但下一次 run 会以最新数据重判。
-- 响应：`{findings, alertsCreated, alertsCleared, runStatesWritten, suppressed, flapHeld, evaluatedAt（来自数据，非服务器钟）, alerts:[逐条 created/cleared/suppressed/flap_held 证据]}`。同数据同规则 → 同结果（确定性）。
+- 响应：`{findings, alertsCreated, alertsCleared, runStatesWritten, suppressed, flapHeld, evaluatedAt（来自数据，非服务器钟）, alerts:[逐条 created/cleared/suppressed/flap_held 证据], suppressionNote?}`。suppressed 行携带 `windowLabel`（命中的窗口事由）与 `suppressionBasis`（`data_time|wall_clock`）。**`suppressionNote`（issue #55 静默失败消除器）**：仅当「存在墙钟激活窗口但本轮零抑制且新建了告警」时非空——一行中文说明窗口时段、运行时刻与数据时刻的错位，提示检查资源范围或时基；抑制实际发生/无墙钟激活窗口/无新建时该字段缺省。同数据同规则同 Options（含注入墙钟）→ 同结果（确定性）。
 
 ### GET /api/detection/runs — 检测运行历史
 
@@ -1035,7 +1035,15 @@ body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用
 
 ### GET /api/alerts — 告警列表
 
-`?state=firing|acked|cleared&severity=&resource_id=&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）+ `lifecycleDelivery` 块（v0.13-R19，LEFT JOIN alert_event_deliveries，**字段永不缺省**）。fired_at 倒序。
+`?state=firing|acked|cleared&severity=&resource_id=&role=primary|secondary&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）+ `lifecycleDelivery` 块（v0.13-R19，LEFT JOIN alert_event_deliveries，**字段永不缺省**）+ **告警关联三字段**（v0.12-R16，引擎在每次同步后计算的分诊观察态，不改生命周期）。fired_at 倒序。
+
+`correlationRole` / `correlatedAlertId` / `correlatedResourceId`（v0.12-R16，issue #57③ 补档，`internal/detect/correlation.go`）——引擎每次同步后对活跃 error/warning 告警重算的**观察态分诊**（不改生命周期三边；info 级永不参与）：
+
+- `correlationRole: "secondary"`（疑似次生）：本告警资源的**下游闭包**（更物理方向、严格更低层——设备告警解释电路告警、光缆告警解释段告警）中存在告警资源，即本告警疑似那根因的症状；`correlatedAlertId` 指向被选中的**因告警**（最近因：BFS 深度 → 层 → id，确定性），`correlatedResourceId` 为该因的资源（两字段仅 secondary 行非空）；
+- `correlationRole: "primary"`（根因嫌疑）：下方无告警因，但**上方**（严格更高层）存在有症状的依赖——本告警是它们的候选解释；
+- `correlationRole: ""`：孤立告警（或同层邻居互不标记的防对称守卫——同层互不为因，判定关系按构造是 DAG）。
+
+`role` 查询参数即按 primary/secondary 过滤（分诊视图）。cleared 告警保留其最后判定（存活时的审计真相）。
 
 `lifecycleDelivery`（本告警最近一次处置通知的投递终局，三值诚实口径）：
 
@@ -1078,6 +1086,38 @@ body 可空（可选 `{ts}`）。firing|acked → cleared（200）；已 cleared
 ### CLI 通道
 
 `netopslab detect --db … [--from --to]`（执行检测，输出 run 信封 JSON）；`netopslab detect --rules`（列规则）。**不做定时**——cron 是运维方的职责（确定性哲学：引擎被调用才运行）。
+
+## 维护窗口端点（v0.12-R15 — 计划内告警抑制；双时基 v0.12.1，issue #55）
+
+维护窗口是**计划数据**（与检测规则同先例）：一段时间内、范围内资源的新告警触发被抑制（已触发告警的生命周期不受影响；恢复清除照常——窗口只挡新噪音，不改写历史）。**时间基准（双时基，与 "/api/detection/run" 节一致）**：窗口 `[startsAt, endsAt)` 半开区间，证据时刻（数据时间线）或运行时刻（扫描执行的现实时刻）**任一**落入即抑制；前端创建表单同时展示「当前数据时刻」辅助对齐。无 PATCH——编辑 = 删除 + 重建（窗口是计划不是档案）；删除窗口不影响历史运行回执。POST/DELETE 走 token 写门。
+
+### GET /api/maintenance/windows — 窗口列表
+
+全量（不分页，开着的计划天然有限）：`{items:[{windowId, label, startsAt, endsAt, resourceIds（空数组 = 全局）, note, createdAt}], total}`，startsAt 倒序。服务端无时钟——「计划中/进行中/已结束」由前端按浏览器钟计算。
+
+### POST /api/maintenance/windows — 新建窗口
+
+body `{label（必填，事由）, startsAt, endsAt（RFC3339，ends > starts）, resourceIds?（空 = 全局；含不存在 id → 400 点名）, note?}`。校验：非法 RFC3339 / 逆序/零长窗口 → 400（错误文案中英双说明）；显式范围上限 1000。201 返回窗口对象（scope 排序去重后的存储表示）。
+
+```json
+{
+  "windowId": "mw_8c1f…",
+  "label": "哈大齐干线割接",
+  "startsAt": "2026-10-17T22:00:00Z",
+  "endsAt": "2026-10-18T02:00:00Z",
+  "resourceIds": [],
+  "note": "替换光缆段",
+  "createdAt": "2026-10-17T09:12:33Z"
+}
+```
+
+### DELETE /api/maintenance/windows/{id} — 删除窗口
+
+未知 id → 404；否则 200 `{windowId, deleted: true}`。历史运行回执（含已发生的 suppressed 计数）不受影响。
+
+### CLI 通道
+
+无独立子命令——窗口经 HTTP（或直接 SQL）管理；检测引擎在扫描事务内读取全部窗口（事务一致性：扫描中途建窗口不会半生效）。
 
 ## 静态资源与 SPA
 
@@ -1567,7 +1607,7 @@ GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
   "checkpoints": [
     { "checkpointId": "cp-1", "label": "演示基线", "workspaceHash": "aea27501fa592c3fdf54675a75ef8e0339e296adc8fb70bdb3cb6ecf6081d7fa", "createdAt": "2026-10-09T17:09:08Z" }
   ],
-  "disclaimer": "本报告基于合成测试数据生成，仅用于工程方法验证，不代表真实网络运行情况。"
+  "disclaimer": "本报告基于当前已导入的数据生成，请以实际网络情况为准。"
 }
 ```
 
