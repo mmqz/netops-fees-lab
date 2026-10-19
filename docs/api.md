@@ -26,7 +26,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 ## GET /api/schema — 资源 schema 动态发现（v0.4.0；W19 起含层次/域字段）
 
-返回**全部可导入资源类型的字段规格 + 数据质量规则目录**。响应体由后端 `mapping.BuildSchemaDocument()` 从 `mapping.Specs`（Go 类型规格的唯一事实源）与 domain 规则目录机械投影生成——非手抄快照，后端规格演进时该端点自动同步（mapping 包投影测试逐字段对照 Specs 钉死）。**只读、无参数、不进 MCP 工具面**（MCP 工具恒为 5 个；schema 发现是 HTTP 专属能力）。前端 `web/src/schema.ts` 编译期镜像保留，可用本端点对照校验。
+返回**全部可导入资源类型的字段规格 + 数据质量规则目录**。响应体由后端 `mapping.BuildSchemaDocument()` 从 `mapping.Specs`（Go 类型规格的唯一事实源）与 domain 规则目录机械投影生成——非手抄快照，后端规格演进时该端点自动同步（mapping 包投影测试逐字段对照 Specs 钉死）。**只读、无参数、不进 MCP 工具面**（MCP 工具面 11 个只读工具，清单见 [teleagent-integration.md](teleagent-integration.md) §工具清单；schema 发现是 HTTP 专属能力）。前端 `web/src/schema.ts` 编译期镜像保留，可用本端点对照校验。
 
 - `types[]`（按 Specs 注册序）：`type`（资源类型）、`label`（类型中文名）、`layer`（七层模型层数，§10.2 经 §12-B5 修订：0=空间/1=设备/2=光缆/3=传输/4=接入/5=逻辑/6=业务）、`layerName`（层中文名）、`domain`（专业域：space/device/optical/transport/access/logic/service）——v0.7.0 W19（issue #26）起投影，供消费者做同层/跨层推理、免第二张表）、`sheetHint`（sheet 名建议锚点）、`nameField`（展示名字段——`NameFieldOverride` 优先、否则「first *_name」启发式）、`nameFieldOverride`（显式展示名钉定，仅 port/base_station/machine_room 有）、`naturalKeyFields[]`（主自然键字段，序 = `|` 拼接序）、`keyFallbackFields[]`（条件键兜底字段，v0.4 仅 base_station）、`fields[]`。
 - `fields[]`：`name`（snake_case 字段名，即映射确认的 target key）、`label`（中文列标签）、`required`（必填，E002）、`naturalKey`（入键）、`kind`（string/ipv4/cidr/int/enum/ref/lat/lng/geo）、`enum[]`（enum 字段取值集，W002 语义）、`intMin`（int 字段下界，缺省=无界）、`intMax`（int 字段上界，缺省=无界；v0.5 W9-D 起投影——此前 vlan 上界 4094 对端点消费者不可见）、`refType`（ref 字段的引用目标类型，E003 语义）、`synonyms[]`（建议引擎同义词表）。
@@ -690,7 +690,7 @@ HTTP/1.1 409 Conflict
 
 **web**：概览页「治理总览」区消费本端点（待确认双卡 / 问题分布小表 / 形态小表 / 批次状态行；取数失败降级为面板内错误条，不阻塞页面其余区）。
 
-**MCP 零新增**：工具面冻结在恰 5 个只读工具（治理总览是 HTTP/CLI/web 通道的聚合读，不进 AI 通道）。
+**MCP 零新增**：工具面保持 11 个只读工具不变（治理总览是 HTTP/CLI/web 通道的聚合读，不进 AI 通道；工具面演进史见 teleagent-integration.md）。
 
 ## GET /api/issues?batchId=&severity=&ruleCode=&page=&pageSize= — 问题清单
 
@@ -858,7 +858,7 @@ HTTP/1.1 409 Conflict
 
 仅 pending 可忽略：提案置 `dismissed`（`appliedAt` 保持 null），资源永不触碰，审计线保留 → 200 返回变更后对象；非 pending → 409 `conflict`；未知 id → 404。
 
-> **AI 通道边界**：变更确认是 HTTP/CLI 的人类通道——MCP 工具面冻结为 5 个只读工具，AI 不得经 MCP apply/dismiss（引擎仅仿真态操作，红线见 README）。
+> **AI 通道边界**：变更确认是 HTTP/CLI 的人类通道——MCP 工具面 11 个全部只读（无 apply/dismiss 类变更工具），AI 不得经 MCP apply/dismiss（引擎仅仿真态操作，红线见 README）。
 
 ## GET /api/renames?status=&resource_id=&resource_type=&batch_id=&limit=&offset= — 疑似改名提案列表
 
@@ -900,11 +900,11 @@ HTTP/1.1 409 Conflict
 
 仅 pending 可拒绝：提案置 `rejected` + `decidedAt` 打点，资源零改动——两个资源维持独立（导入的默认结果），提案留作人工决策审计线 → 200 返回提案对象；非 pending → 409 `conflict`；未知 id → 404。CLI 等价：`netopslab renames --db … reject --id <id>`。
 
-> **AI 通道边界（同上）**：改名确认是 HTTP/CLI 的人类通道——MCP 工具面冻结为 5 个只读工具，AI 不得经 MCP 合并身份或改写自然键。
+> **AI 通道边界（同上）**：改名确认是 HTTP/CLI 的人类通道——MCP 工具面 11 个全部只读（无身份合并/改键类工具），AI 不得经 MCP 合并身份或改写自然键。
 
 ## 时序指标端点（v0.7.0 W20 — 数据模型 v1.0 §5/§7.3）
 
-时序存储三表族（migration v14：`metric_keys` 指标目录 / `metric_series` 序列元数据 / `metrics` 窄表测量点，`(series_id, ts)` 主键 + `INSERT OR REPLACE`——**值语义**：同 (series, ts) 重导覆盖，与资源的 skip 语义并存见 ADR-0014）。**MCP 工具面不扩容**（恒 5 个）：AI 经 HTTP 消费时序；写入通道独立于资源导入（`metric_batches` 独立批次表，ADR-0011 D1）。
+时序存储三表族（migration v14：`metric_keys` 指标目录 / `metric_series` 序列元数据 / `metrics` 窄表测量点，`(series_id, ts)` 主键 + `INSERT OR REPLACE`——**值语义**：同 (series, ts) 重导覆盖，与资源的 skip 语义并存见 ADR-0014）。**MCP 工具面不为此扩容**（metrics_query 是既有只读工具之一，共 11 个）：AI 经 HTTP 消费时序；写入通道独立于资源导入（`metric_batches` 独立批次表，ADR-0011 D1）。
 
 ### GET /api/metrics/keys — 指标目录
 
@@ -999,7 +999,7 @@ netopslab query --db <path> nearest  --type base_station --lat 45.80 --lng 126.5
 
 ## 告警与检测端点（v0.7.0 W23 — ADR-0011 D2/D3，issue #23）
 
-检测规则是**配置数据**（不改代码即可新增阈值规则）；告警是**状态机数据**（触发→确认→恢复三边，无自动升级/超时关闭——本地单机系统，状态机每加一条自动边就多一个不可复现的「告警自己消失了」工单来源，ADR-0011 D3）。规则目录与 E/W/I 导入规则**同构不同表、rule_version 不跨域**（防导入回归与检测演进互相锁死）；越限方向复用 `metric_keys.direction`；判定引擎为纯函数核心（`internal/detect`，ts 全来自数据、确定性）。**MCP 工具面冻结不动（恒 5）**——AI 经 HTTP 消费告警（ADR-0011 D5）。
+检测规则是**配置数据**（不改代码即可新增阈值规则）；告警是**状态机数据**（触发→确认→恢复三边，无自动升级/超时关闭——本地单机系统，状态机每加一条自动边就多一个不可复现的「告警自己消失了」工单来源，ADR-0011 D3）。规则目录与 E/W/I 导入规则**同构不同表、rule_version 不跨域**（防导入回归与检测演进互相锁死）；越限方向复用 `metric_keys.direction`；判定引擎为纯函数核心（`internal/detect`，ts 全来自数据、确定性）。**MCP 工具面 11 个只读工具已含 alerts_query，不为此再扩容**——AI 经 alerts_query 只读消费告警（ADR-0011 D5）。
 
 ### GET /api/detection/rules — 规则列表
 

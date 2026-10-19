@@ -548,7 +548,7 @@ CREATE INDEX idx_attr_changes_status ON resource_attribute_changes(status);
 - **old_value 可为空串**：资源原本无该属性（attributes 只存非空值）而新导入带来值时，old_value = ''（约束 `NOT NULL DEFAULT ''`，空串非 NULL）；apply 校验同口径（当前值缺失 == ""）。
 - **diff 归集口径**：参与比较的字段 = 导入行映射后的**非键、非枚举、非空**属性值（与首次导入的 attributes 归集完全一致；ref 字段（如机房的 site_id 属性快照）也在其中——v0.6.0 W13-D 起 apply 对 ref 字段叠加目标解析守卫与派生关系同事务改挂，语义三分支见 [import-and-validation.md](import-and-validation.md) §14：非 ref 只改属性 / ref 有边同步改挂（谱系不动）/ ref 无边只改属性且绝不建边（建边需重导，谱系不变式））。
 - **与撤销红线的零交集**：本表属于**资源域**；lab 三层撤销/检查点属于**仿真域**（仅操作 `virtual_devices`/`sim_links`/变更集等 P2 表），两域无共享表、无代码路径交叉（`internal/sim` 零引用 `resource_attribute_changes`/`resources.attributes`）。
-- **API/CLI 面**：`GET /api/attribute-changes`（status/resource_id/batch_id/limit/offset 过滤）与 `POST …/{id}/apply`、`POST …/{id}/dismiss`（契约见 [api.md](api.md)；v0.6.0 W13-D 起项字段含 `relationRetargeted`，apply 响应为改挂事实、列表为预览，ref 目标解析失败 409 `ref_target_missing`）；CLI `netopslab changes --db … list|apply|dismiss`（输出透传同一字段）。**MCP 工具面 5 个冻结不变**——AI 不得经 MCP 改资源属性（引擎仅仿真态操作）。
+- **API/CLI 面**：`GET /api/attribute-changes`（status/resource_id/batch_id/limit/offset 过滤）与 `POST …/{id}/apply`、`POST …/{id}/dismiss`（契约见 [api.md](api.md)；v0.6.0 W13-D 起项字段含 `relationRetargeted`，apply 响应为改挂事实、列表为预览，ref 目标解析失败 409 `ref_target_missing`）；CLI `netopslab changes --db … list|apply|dismiss`（输出透传同一字段）。**MCP 工具面 11 个全部只读**——AI 不得经 MCP 改资源属性（引擎仅仿真态操作）。
 
 
 # DDL v12 — 疑似改名提案表 rename_proposals
@@ -589,7 +589,7 @@ CREATE INDEX idx_rename_proposals_batch ON rename_proposals(batch_id);
 - **resource_id = 旧资源（身份保留方）**：ON DELETE CASCADE——旧资源被删（含回滚删除链）则其改名史随之消失；`new_resource_id` 刻意**无 FK**（apply 删除它指向的行，id 必须以纯文本活下来作审计）。`batch_id` 刻意**无 cascade**（同 v11 裁决）：回滚只显式删本批 pending 提案，applied/rejected 是与批次生命周期解耦的人工决策审计线。
 - **apply 的合并事务**（单 DB.Do）：关系 retarget（UNIQUE 撞车删新侧边）→ 键分量属性同步（`TypeSpec.KeyComponentNames`，新侧非空者覆写旧资源——防「键换了而 base_station_name 还留旧值」引发的假 W005）→ **展示名 Name 同步**（v0.5 W9-D：`resources.name` 跟随新名——NameField 属性值优先，键类名称字段取新资源自身 name；非空才覆写，与键分量同步同口径）→ 删新资源（其 pending 属性变更随 v11 CASCADE）→ 旧资源换键 + updated_at 刷新 → 提案置 applied。**旧资源代理键 res_x 与 SourceRef 不动**。
 - **与 W005 的对偶**：W005 记「键不变数据变」，本表记「键变数据不变」；两通道都只产生待确认提案，人工确认才生效——「自动合并」在整个身份治理体系里不存在。
-- **API/CLI 面**：`GET /api/renames` + `POST …/{id}/apply|reject`；CLI `netopslab renames … list|apply|reject`。**MCP 工具面 5 个冻结不变**。
+- **API/CLI 面**：`GET /api/renames` + `POST …/{id}/apply|reject`；CLI `netopslab renames … list|apply|reject`。**MCP 工具面 11 个全部只读**（无身份合并/改键类工具）。
 - **与撤销红线的零交集**：本表属**资源域**；`internal/sim` 零引用（同 v11 立场）。
 
 
@@ -702,7 +702,7 @@ CREATE UNIQUE INDEX idx_fee_batches_idem ON fee_batches(sha256, fee_type, fee_ye
 - **`mapping` 列存规范化 JSON**（字段名按字典序、单行紧凑形）——同映射不同键序不产生第二身份。
 - **计数三列** `rows_total / rows_imported / rows_failed`：行失败是**计数而非致命**（快照保留证据，修正后重导）。
 - **CLI 契约**：`netopslab fees --db --data import|list|rollback|query`（单 JSON stdout；幂等重复导入 informational exit 0）；`mapping` 亦可由表头同义词自动识别（识别不到必需列即拒绝）。
-- **AI 通道边界**：查询面是固定预设 + 参数（totals / duplicates）——调用方传不了 SQL；MCP 工具面 5 个冻结不变（阶段 5 才考虑扩展）。
+- **AI 通道边界**：查询面是固定预设 + 参数（totals / duplicates / 六风险场景）——调用方传不了 SQL；MCP 工具面经 #58 阶段 5 扩容后为 **11 个只读工具**（fee_risks 为其一，只跑固定预设、阈值用治理默认值），清单见 [teleagent-integration.md](teleagent-integration.md) §工具清单。
 
 # DDL v30 — 费用-资源关联表 fee_site_links
 

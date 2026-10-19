@@ -187,7 +187,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 **update-on-diff 导入模式**（闭环 R4 裁决「IP 变 = 属性变更事件」，natural-keys.md §2/§6 差距 #1/#2；表结构 `resource_attribute_changes` 见 [data-model.md](data-model.md) §14）：
 
 - **diff-skip 语义**：同键再导入命中库内资源时，取该行映射后的属性字段值（**非键、非枚举、非空**——与首次导入的 attributes 归集同口径），与库内资源逐字段比较。**仅 new 值非空且 ≠ old 的字段**产生一条 pending 变更提案（field/old_value/new_value + sheet/row_number）；行本身**仍走 skip**（row_result 语义不变、rule_code 保持 E001），发一条 **W005** warning issue（evidence：type/natural_key/resource_id/fields/change_count/sheet/row_number），diff 非空才记。diff 为空 → 纯 skip，零 issue 零新提案（TestReimportIdempotent 语义不破坏；W7-D 起 skip 追加一行 source_refs 版本记录，行语义不变，见 §17）。**空新值永不记录**（空值不写属性的既有语义：首轮导入该列为空的字段，再导也带不来空值覆盖）；枚举（status）字段不参与（attrs 本就不含）。
-- **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务；ref 字段还叠加「目标解析 + 派生关系同事务改挂」，见下条重挂语义）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。**Name 同步**（v0.5 W9-D）：apply 的变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时，`resources.name` 一并写成新值——name 是该字段值的投影，不同步则资源列表永远显示旧名；非 NameField 字段的 apply 不触碰 name。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染；引用字段的行附「确认后将同步改挂关系（需目标已存在）」轻提示）。**MCP 工具面 5 个冻结**——AI 不得经 MCP 改资源属性。
+- **人工确认通道（属性才真正生效）**：`POST /api/attribute-changes/{id}/apply`（校验资源当前值 == 提案旧值——不等 → 409 `attribute_conflict`，防「同字段已被其它变更修改后丢失中间变更」；相等 → 新值写入 attributes + updated_at 刷新 + 提案置 applied，同一事务；ref 字段还叠加「目标解析 + 派生关系同事务改挂」，见下条重挂语义）与 `…/{id}/dismiss`（忽略，资源不动）；CLI `netopslab changes --db … list|apply|dismiss`。**Name 同步**（v0.5 W9-D）：apply 的变更字段恰为该类型展示名字段（NameField，如 base_station_name / device_name）时，`resources.name` 一并写成新值——name 是该字段值的投影，不同步则资源列表永远显示旧名；非 NameField 字段的 apply 不触碰 name。前端资源详情抽屉有「待确认属性变更」面板（应用/忽略按钮，无 pending 不渲染；引用字段的行附「确认后将同步改挂关系（需目标已存在）」轻提示）。**MCP 工具面 11 个全部只读**——AI 不得经 MCP 改资源属性。
 - **幂等去重口径**：同一资源同一字段已有 **pending** 且 new 值相同 → 再导不重复记录（也不重记 W005，零痕迹）；new 值又变 → 新提案，多 pending 并存按 `(created_at, rowid)` 入队序，先 apply 的生效、后续同字段提案因旧值不匹配 409。
 - **回滚不对称**：批次回滚删除链删**本批 pending 提案**；applied/dismissed 保留（人工决策与导入批次生命周期解耦的审计线）；提案的资源被本批删除时 FK 级联连带删除其全部记录（含终态）——被审计资源已不存在，正确行为。见 §5 回滚节。
 - **ref 变更的重挂语义（v0.6.0 W13-D，三分支——取代 v0.4「apply 只写属性快照不重建派生关系」的边界声明）**：
@@ -242,7 +242,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 - `POST /api/renames/{id}/reject` / CLI `… reject --id`：提案置 rejected + decided_at，资源零改动（两资源各自独立 = 导入的默认结果）。
 - **回滚不对称（镜像 v11 语义）**：批次回滚显式删除该批 **pending** 提案（新资源随之消失，悬空提案无意义）；applied/rejected 留审计线（人工决策与导入批次生命周期解耦）。例外：旧资源本身被回滚删除 → 提案随 resource_id CASCADE 消失（含终态）——被审计资源已不存在，记录随之消失是正确行为。
-- **MCP 工具面 5 个冻结**：改名确认是 HTTP/CLI 的人类通道，AI 不得经 MCP 合并身份或改键（同 W005 apply 红线）。
+- **MCP 工具面 11 个全部只读**：改名确认是 HTTP/CLI 的人类通道，AI 不得经 MCP 合并身份或改键（同 W005 apply 红线）。
 
 ### 16.5 API / CLI / 前端面
 
@@ -297,7 +297,7 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 ## 19. 资源导出与回源（v0.6.0 W12-D）
 
-**通道面**：`GET /api/exports/resources?types=`（xlsx 下载，Content-Type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、Content-Disposition 固定文件名 `netops-resources.xlsx`）+ `netopslab export --db <path> --out <file.xlsx> [--types a,b]`（stdout 单一 JSON `{"file","types","totalRows"}`；`--out` 必填、已存在则覆盖；非法 `--types` 值 exit 2）+ 资源页「导出资源」按钮（浏览器导航式下载，`window.location.assign`——二进制响应不走 requestJson；当前**类型**筛选进 `types` 参数，搜索关键词与状态筛选不参与导出——导出的是资源集合，不是检索结果子集）。**MCP 工具面冻结不动（恰 5）**。
+**通道面**：`GET /api/exports/resources?types=`（xlsx 下载，Content-Type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、Content-Disposition 固定文件名 `netops-resources.xlsx`）+ `netopslab export --db <path> --out <file.xlsx> [--types a,b]`（stdout 单一 JSON `{"file","types","totalRows"}`；`--out` 必填、已存在则覆盖；非法 `--types` 值 exit 2）+ 资源页「导出资源」按钮（浏览器导航式下载，`window.location.assign`——二进制响应不走 requestJson；当前**类型**筛选进 `types` 参数，搜索关键词与状态筛选不参与导出——导出的是资源集合，不是检索结果子集）。**MCP 工具面不为此新增工具**（11 个只读工具已冻结不动，导出不进 AI 通道）。
 
 **导出语义**：当前状态快照——含 W005 属性确认（§14）与 W006 改名确认（§16）apply 之后的最新值；不是任何源工作簿的重建。形态与导入工作簿同构：每个有资源的类型一个 sheet（Specs 注册序，无资源的类型不出 sheet）、表头 = spec 全部字段 Label、行 = 属性快照、行序 = natural_key 字典序。**字节级确定性**：同库同参数两次导出逐字节一致（excelize zip 条目时间戳为固定常量，无 wall-clock 进入输出；文档属性时间也是常量，真实导出时刻不落盘）。空库导出成功但仅含一个中性占位空 sheet「资源导出」（无类型提示，重导入得 `empty_workbook` 422——诚实拒绝）。
 
@@ -345,4 +345,4 @@ HTTP `POST /api/imports?auto=1`（或 multipart 字段 `auto=1`）/ CLI `netopsl
 
 - **Web 向导仍走人工确认**：分析响应新增的逐 sheet `templateMatched` 只驱动信息横幅「已匹配映射模板（确认于 …）」，不提供自动执行勾选——无人值守是 cron/CLI/HTTP-flag 的运维通道，向导是人的通道。
 - 指标批次回滚的 CLI 收口（api.md 时序节遗留注释）不在本轮范围。
-- MCP 工具面冻结不动（恰 5）：模板生命周期不进 AI 通道。
+- MCP 工具面不为此新增工具（11 个只读工具清单见 teleagent-integration.md）：模板生命周期不进 AI 通道。
