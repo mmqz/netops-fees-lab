@@ -110,7 +110,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **批次管理**：批次列表/详情/行结果查询；已完成批次可回滚（被其他批次引用时报 409 `batch_in_use`）。
 - **site / machine_room 资源类型与 belongs_to 关联（v0.4，migration v10）**：真实机房局站工作簿（样例 `samples/telecom-site-machine-room.xlsx`）同一张 sheet 双读法——先局站后机房，机房ID/局站ID 数字编码作键（前导零即身份），机房可选 局站ID ref 派生 `belongs_to` 关系（E003 钉死导入顺序）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §13、[docs/data-model.md](docs/data-model.md) §13。
 - **属性变更历史与人工确认（v0.4 W4-D，migration v11）**：同键再导不再静默丢弃属性差异——diff 逐字段记为**待确认变更**（`resource_attribute_changes`，W005 issue，行仍 skip 幂等不变），人工经 HTTP API / CLI（`changes` 子命令）apply 后属性才真正生效（旧值校验 + 同事务写入），dismiss 可忽略；v0.6.0 W13-D 起 ref 类字段（机房 site_id、地址池归属设备、电路 a/z 端）的 apply 在同一事务内把对应派生关系改挂到新目标（目标解析不到 → 409 `ref_target_missing`；无边的引用字段只改属性、绝不新建无谱系关系，建边仍需重导）；回滚只删本批 pending，人工决策审计线保留；见 [docs/import-and-validation.md](docs/import-and-validation.md) §14、[docs/data-model.md](docs/data-model.md) §14。
-- **费用-资源分级关联（#63，#58 阶段 3，migration v30）**：费用编码 ↔ 站点类资源（site/machine_room/base_station）三级匹配——**exact** 逐字节自动确认 / **rule** 命名规则（fold 全角折叠、zero_pad 前导零）自动确认 + 规则留痕 / **fuzzy** 相似度 ≥0.8 出 pending 提案，人工 confirm/dismiss（W005/W006 教义——身份关联绝不自动合并）；**人类确认优先于自动扫描**（scan 永不覆写 human 行；数据面消失的编码其自动链接被 dropout 清扫，人工决策寿命超越数据）；编码全集来自活跃 Parquet 的**纯 Go 列投影读取**（默认构建可关联）；HTTP `POST /api/fees/links/scan` + `GET /api/fees/links` + `confirm|dismiss`，CLI `fees link-scan` / `fees links list|confirm|dismiss`，**Web `/fees` 工作台同按钮通道**（v0.15.0：pending 优先缺省筛选即待办队列，驳回走 ConfirmDialog）；DDL v30 见 [docs/data-model.md](docs/data-model.md) §19。
+- **费用-资源分级关联（#63，#58 阶段 3，migration v30）**：费用编码 ↔ 站点类资源（site/machine_room/base_station）三级匹配——**exact** 逐字节自动确认 / **rule** 命名规则（fold 全角折叠、zero_pad 前导零）自动确认 + 规则留痕 / **fuzzy** 相似度 ≥0.8 出 pending 提案，人工 confirm/dismiss（W005/W006 教义——身份关联绝不自动合并）；**人类确认优先于自动扫描**（scan 永不覆写 human 行；已决策配对——confirmed 与 dismissed——永不复提，v0.15.1；数据面消失的编码其自动链接被 dropout 清扫，人工决策寿命超越数据）；编码全集来自活跃 Parquet 的**纯 Go 列投影读取**（默认构建可关联）；HTTP `POST /api/fees/links/scan` + `GET /api/fees/links` + `confirm|dismiss`，CLI `fees link-scan` / `fees links list|confirm|dismiss`，**Web `/fees` 工作台同按钮通道**（v0.15.0：pending 优先缺省筛选即待办队列，驳回走 ConfirmDialog）；DDL v30 见 [docs/data-model.md](docs/data-model.md) §19。
 - **费用分析层（#58/#60/#61 阶段 1/2，migration v29）**：电费/铁塔租费/修理费/综维数据的两层存储落地——**状态层 SQLite**（fee_batches 状态机：幂等键 = 哈希×类型×账期×映射的部分唯一索引、failed/rolled_back 不占键、重试永远干净）+ **快照层**（内容寻址不可变，行号级证据链）+ **分析层 Parquet 分区大表**（`fee_type/year/month` hive 分区，同键多文件**批次共存不合并**——重复结算检测查它们而不是丢它们）。写入纯 Go（全平台可构建）；查询引擎 DuckDB（go-duckdb，`-tags duckdb` CGO 构建，#59 实测 ×2.5–×53）；CLI `netopslab fees import|list|rollback|query`（query 预设 totals/duplicates，固定参数化——调用方传不了 SQL）；设计全貌见 [docs/fees-layer.md](docs/fees-layer.md)、DDL v29 见 [docs/data-model.md](docs/data-model.md) §18。
 - **疑似改名检测与身份合并人工流（v0.5 W6-D，migration v12）**：名称类键类型（ip_pool / base_station / port）的新键导入行与「旧键已从源消失」的库内资源属性全等时，行照常按新资源导入并发 **W006** + pending 改名提案（`rename_proposals`；检测五条件保守判定，绝不自动合并）；人工经 HTTP API / CLI（`renames` 子命令）apply 合并身份——关系改挂旧资源、键分量属性同步、旧资源换键而代理键 `res_x` 与 SourceRef 不动——或 reject 维持独立；回滚不对称语义与 v11 一致（删本批 pending、留终态审计线）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §16、[docs/data-model.md](docs/data-model.md) §15。
 - **来源引用版本化（v0.5 W7-D，零迁移）**：skip 即谱系版本——同键再导入（纯 skip 与 W005 diff-skip）对每批每实体追加一条 `source_refs`（行语义零变化；E001 批内重复不追加），资源详情 API 的 `sourceRefs[]` 按 rowid 版本序展示全史（创建批次在前、`raw` 记录该批工作簿原话），回滚随批消失（`batch_id ON DELETE CASCADE`）；见 [docs/import-and-validation.md](docs/import-and-validation.md) §17。
@@ -134,7 +134,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 ```bash
 # 1) 测试
-make test            # go test -count=1 -timeout 15m ./...（434 个顶层测试 / 23 包 ok，v0.8.1）
+make test            # go test -count=1 -timeout 15m ./...（25 包全绿；顶层测试计数随版本演进，以 CHANGELOG 门禁行为准）
 
 # 2) 构建前端（产物嵌入 internal/webui/dist，供 go:embed 使用）
 make web             # cd web && npm ci && npm run build
@@ -150,11 +150,23 @@ make build           # bin/netopslab
 
 # 6) 启动服务并打开界面
 ./bin/netopslab serve --addr :8080 --db ./data/netops.db
-#    浏览器打开 http://localhost:8080（仿真工作台入口：/lab）
+#    浏览器打开 http://localhost:8080（仿真工作台入口：/lab；费用分析入口：/fees）
 #    可选：检测运行通知——加 --webhook-url http://<接收端>，
 #    每次 POST /api/detection/run 或 `netopslab detect` 完成后向该 URL
 #    POST 一份 JSON 摘要（event=detection.run + 计数 + 告警变更明细，
 #    最多 50 行）。投递尽力而为：失败只记 warn 日志，绝不影响检测结果。
+
+# 7) 费用风险分析（v0.13–v0.15 新域：电费/铁塔租费/修理费/综维）
+#    最小 CLI 旅程（导入 → 分级关联 → 风险线索；样例可直接手写 CSV：
+#    表头 站址编码,电费(元),账期，行级账期如 2024-05）：
+./bin/netopslab fees --db ./data/netops.db --data ./data import \
+    --file 费用样例.csv --type electricity --year 2024 --month 5
+./bin/netopslab fees --db ./data/netops.db --data ./data link-scan
+#    查询（totals/duplicates/六风险场景）需 DuckDB 构建（默认构建诚实报
+#    engine_not_built，导入/关联不受影响）：
+#      CGO_ENABLED=1 go build -tags duckdb -o ./bin/netopslab ./cmd/netopslab
+#    或 Docker（已含引擎）：docker build -t netops-lab:local . — 详见
+#    docs/fees-layer.md §5；端到端回归：scripts/r19_fees_regression.sh（29 断言）
 ```
 
 说明：`make web` 会把 `web/` 构建到 `internal/webui/dist`（该目录不提交，仅保留 `.gitkeep` 占位）；`make build` 嵌入的是**当时 dist 里的内容**——先 `make web` 再 `make build` 才会得到带真实前端的二进制。`make all` = `web + build`。

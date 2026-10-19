@@ -740,7 +740,7 @@ CREATE UNIQUE INDEX idx_fee_site_links_live ON fee_site_links(fee_site_code) WHE
 ### 19.2 设计决策与不变式
 
 - **规则族封闭且命名**：`fold`（全角 ASCII 块 U+FF01–FF5E → 半角 + 空白折叠 + 大小写折叠）/ `zero_pad`（纯数字串前导零剥离）——每条链接记录所用规则（可解释）；先 fold 后 zero_pad，首个命中即止。
-- **fuzzy 提案幂等**：同 (code, resource) 对已有 pending/dismissed 不重复提案、不复活人工驳回；每编码至多 3 候选（相似度降序、键/ID 平局裁决）。
+- **fuzzy 提案幂等**：同 (code, resource) 对已有 **pending / dismissed / confirmed** 不重复提案、不复活人工驳回、不复提人工确认（v0.15.1/#69：确认不是邀请重新提问——此前漏 confirmed 导致每次重扫往已确认关联旁边塞一条永久 pending 噪音）；每编码至多 3 候选（相似度降序、键/ID 平局裁决）。
 - **扫描权威域**：编码全集来自**活跃 Parquet 文件**（completed 批次；纯 Go parquet 列投影读取——默认构建可关联）。数据面消失的编码 → 自动（非 dismissed）行被**dropout 清扫**删除；人工确认与驳回是**决策**，寿命超越数据（W006 教义）。
 - **资源侧 join 展示**：HTTP 列表 join 资源名/状态（悬空引用保留记录键——链接自身字段仍可读）。
 - **AI 通道边界**：confirm/dismiss 是 HTTP/CLI 人类通道；`POST /api/fees/links/scan` 是确定性扫描（机器可触发）；MCP 冻结。
