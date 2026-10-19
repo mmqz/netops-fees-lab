@@ -31,6 +31,13 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Spinner } from '../components/Spinner';
 import {
+  clueKey,
+  centsToYuan,
+  formatRiskMetric,
+  linkGradeLabel,
+  linkStatusLabel,
+} from './fees-format';
+import {
   FEES_501_HINT,
   FEES_BATCHES_ROLLED_BACK,
   FEES_BATCHES_ROLLBACK,
@@ -91,13 +98,7 @@ import {
   RISK_SCENARIO_UNLINKED,
 } from '../i18n';
 
-/** 分 → 元（两位小数；金额契约整数分，展示层 /100） */
-function centsToYuan(cents: number): string {
-  return (cents / 100).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+/** 线索行键与金额展示逻辑见 fees-format.ts（#68 抽出纯函数，表测钉死） */
 
 const FEE_TYPES = [
   { value: 'electricity', label: FEE_TYPE_ELECTRICITY },
@@ -267,11 +268,7 @@ export function FeesPage() {
     }
   }, [dismissTarget, loadLinks, toast]);
 
-  const linkStatusLabel = (s: string): string =>
-    s === 'pending' ? LINKS_STATUS_PENDING : s === 'confirmed' ? LINKS_STATUS_CONFIRMED : LINKS_STATUS_DISMISSED;
-
-  const linkGradeLabel = (g: string): string =>
-    g === 'exact' ? LINKS_GRADE_EXACT : g === 'rule' ? LINKS_GRADE_RULE : LINKS_GRADE_FUZZY;
+  // 标签映射函数 linkStatusLabel / linkGradeLabel 见 fees-format.ts（#68）
 
   // ---- 风险查询 ----
   const [scenario, setScenario] = useState('duplicate-settlement');
@@ -315,9 +312,6 @@ export function FeesPage() {
       setRunning(false);
     }
   }, [scenario, riskType, riskYear, riskMonth, riskLimit]);
-
-  const clueKey = (c: { siteCode: string; year: number; month: number }): string =>
-    `${c.siteCode}|${c.year}|${c.month}`;
 
   return (
     <div className="page">
@@ -395,7 +389,6 @@ export function FeesPage() {
                   {riskResult.clues.map((c) => {
                     const key = clueKey(c);
                     const open = expanded === key;
-                    const isCents = c.metricLabel === 'totalCents' || c.metricLabel === 'deltaCents';
                     return (
                       <Fragment key={key}>
                         <tr
@@ -407,9 +400,7 @@ export function FeesPage() {
                           <td>{c.siteCode}</td>
                           <td>{c.month > 0 ? `${c.year}-${String(c.month).padStart(2, '0')}` : `${c.year} 全年`}</td>
                           <td>
-                            {isCents
-                              ? `¥${centsToYuan(c.metricValue)}（${c.metricLabel}）`
-                              : `${c.metricValue.toFixed(4).replace(/\.?0+$/, '')}（${c.metricLabel}）`}
+                            {formatRiskMetric(c.metricValue, c.metricLabel)}（{c.metricLabel}）
                           </td>
                           <td className="muted">{c.thresholdLabel}</td>
                           <td>{c.evidenceTotal} 行</td>
