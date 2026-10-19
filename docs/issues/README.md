@@ -564,6 +564,83 @@ Math.max(12, -278.2) = 12                     ← 静默钳掉
 | [#62](issue-58-letterbox-unreachable-target.md) | **P2** | #54 遗留：letterbox 护栏在「内容纵向装不下」时静默失效，72% 目标数学不可达（GitHub issue 编号 #62——#58–#61 已被费用分析模块占用） |
 | [env](env-fsync-antivirus-slowdown.md) | 环境 | 本机 fsync 被 Kaspersky 拖慢 200–2000 倍，导致 go test 大面积超时（非代码缺陷） |
 
+## v0.13.0 费用分析层实测（2026-10-19）
+
+来源：对 `12a46ec`（v0.13.0，费用分析层阶段 1/2/3，migration v29/v30）的独立实测。
+方法：读实现 + 最小复现程序量化 + 端到端跑 CLI 导入。
+
+### 实测通过的部分（质量很高）
+
+| 能力 | 实测结果 |
+| --- | --- |
+| CSV 导入 + 自动识别表头 | ✅ `站址编码/电费(元)/账期` 识别成功 |
+| 金额规范化 | ✅ `"1,234.56"` / `¥999.00` / `￥888.88` 全对 |
+| **行级账期拆分** | ✅ 4 行拆成 `month=05`(3 行) + `month=06`(1 行) 两个 Parquet |
+| 内容寻址快照 | ✅ `fee-imports/electricity/2024/05/<sha256>_*.csv` |
+| **幂等重导** | ✅ `skippedDuplicate: true`、`exit 0` |
+| **批次共存** | ✅ 第二文件同站同账期 → **两个 batch 文件共存，绝不合并** |
+| 默认构建诚实降级 | ✅ 查询答 `501 engine_not_built`，错误信息说明原因 |
+
+幂等 + 共存做得尤其好——后者正是"重复结算检测"的数据基础。
+
+### 三处需要决策的缺陷
+
+**① （P1）金额用 `float64` 存储**
+
+`parquet.go:37` / `domain.go:128` / `normalize.go:50` 全是 `float64`。
+最小复现实测：
+
+```
+累加 100 万次 0.01 = 10000.0000001719（应为 10000.00），误差 1.7e-7 元
+不同求和顺序差异 7.5e-9 元
+0.1 + 0.2 = 0.30000000000000004441 ≠ 0.3
+```
+
+单笔无害，但**对账取整到分**、**重复结算金额比对**、**双引擎聚合差**三个场景会暴露
+（#59 发现的 0.07% 计数差正是这个问题的表现）。
+
+值得注意的反差：同文件 `NormalizeSiteCode` 注释明确写"身份字符串，**绝不数值化**"——
+**身份字段刻意不数值化，金额字段却直接 ParseFloat**，两种精度纪律不一致。
+建议改整数分（`int64`）存储。
+
+**② （P1）模糊匹配 O(codes × candidates × len²)，万级站址即超时**
+
+`link.go:174-261` 的 `ScanLinks` 对每个 code 遍历全部 candidates 算 Levenshtein。
+`LinkableResourceTypes` 含 `base_station`（当前库 **1,198 个基站**）。
+
+最小复现实测：
+
+```
+10000 codes × 1364 candidates = 13,640,000 次比较
+实测 100 codes: 155 ms → 外推 10000 codes: 15.5 秒
+外推 50000 codes: 78 秒（1.3 分钟）
+```
+
+若资源库扩到 1 万对象 → 上亿次 Levenshtein → **HTTP `POST /api/fees/links/scan` 必然超时**。
+加重因素：`sweepAutoDropouts` 每次全表加载链接。
+建议：长度差预筛（能省大部分）、前缀分桶、评估 `base_station` 是否该进 fuzzy 候选、扫描改异步。
+
+**③ （P1）Windows 无法构建 duckdb 版本，费用查询永久 501**
+
+实测 `CGO_ENABLED=1 go build -tags duckdb` 在 Windows 链接失败：
+
+```
+ld.exe: cannot find -lrstrtmgr
+```
+
+而 `run.ps1` 与 `Makefile` 都**没有 duckdb 构建路径**（grep 为空）。
+→ Windows 用户（本项目主要使用环境）**没有官方途径**获得可查询的费用功能。
+建议：文档给出 Docker/WSL2 路径、提供 linux 镜像、或评估 duckdb CLI 子进程模式。
+
+**④ （P3）`site_code` 英文表头不在同义词表**
+
+`recognize.go:153` 的 `siteCode` 同义词全中文。实测 `site_code` 表头 → "缺少必需列映射"。
+费用表格来自不同系统导出，英文表头很常见，建议补充 `site_code`/`siteCode`/`station_code` 等。
+
+| # | 优先级 | 标题 |
+| --- | --- | --- |
+| [fees](issue-fees-layer-findings.md) | **P1×3 + P3** | 费用分析层实测：float64 金额、模糊匹配 O(n×m)、Windows 无 duckdb 构建路径、英文表头不识别 |
+
 ## v0.8.1 本地验证（2026-10-14）
 
 来源：[docs/audit-v0.8.1.md](../audit-v0.8.1.md)。v0.8.1 是针对 #38–#45 的修复轮。
