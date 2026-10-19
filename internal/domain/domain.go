@@ -31,7 +31,7 @@ const RuleVersion = "1.0.0"
 // gone (issue #56); the alerts list shows the natural key under the port
 // name (issue #57); the topology fit no longer lets L0 geo anchors define
 // the canvas scale (issue #54).
-const AppVersion = "v0.12.1"
+const AppVersion = "v0.13.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

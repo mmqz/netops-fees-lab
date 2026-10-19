@@ -2,6 +2,30 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.13.0] — 2026-10-19
+
+**费用分析层版**（#58/#60/#61 阶段 1/2 垂直切片 + #62 letterbox 护栏修复 + 仓库首个前端单测门禁。两层存储裁决落地：状态层 SQLite 不动、费用数据本体永不进 SQLite；快照层文件系统内容寻址、分析层 Parquet hive 分区大表 + DuckDB 查询引擎）。
+
+### 新增 — 费用分析层（#58 跟踪 issue 的阶段 1/2，migration v29）
+- **三落地**：①**状态层** `fee_batches`（migration v29）——批次状态机 completed/failed/rolled_back + **幂等键 = (文件哈希 × 费用类型 × 账期 × 列映射) 的部分唯一索引**（`WHERE status='completed'`）——failed/rolled_back 不占键，#61「转换失败重试不产生半写状态」由构造保证，`MarkCompleted` 即提交点；②**快照层** `fee-imports/<type>/<year>/<month>/<sha256>_<原名>` 内容寻址不可变（临时文件+原子 rename 落盘；回滚删分析行但**快照保留**——证据寿命 > 批次寿命，与资源导入器保留工作簿同语义）；③**分析层** `analysis/fees/fee_type=*/year=*/month=*/batch-<id>.parquet` hive 分区大表——分区列只在路径；文件列 = site_code / amount / **source_file + source_row（行号级证据对位）+ import_batch（批次血缘）**；**同键多文件批次共存不合并**（#59 验证的意外发现写入设计：重复行令窗口函数非确定——重复行必须在标准化阶段显式共存，重复结算检测查它们而不是丢它们）。
+- **行级账期**：每行自己的 period/date 列优先于批次声明账期（跨月文件按行拆分区）；垃圾账期 = 行失败（计数非致命），绝不静默回退——分区粒度是整个分析层的前提。金额规范化（¥/￥/千分位/全角数字）；站址编码前导零保留（身份字符串绝不数值化）。
+- **查询引擎 DuckDB（CGO 隔离）**：写入纯 Go（parquet-go，无 CGO，全平台——Windows CI 照常全绿）；查询引擎 go-duckdb v2.4.3（#59 验证：预编译平台绑定 17s 构建静态 68MB）以 `//go:build duckdb` 标签隔离——默认构建查询答 `ErrEngineNotBuilt`（501 `engine_not_built`，诚实契约）而导入/快照/Parquet 写入全功能；发布构建（linux/docker）`-tags duckdb` 全功能。**查询面 = 固定预设 + 参数**（totals 站址汇总 / duplicates 跨批次重复结算候选——**风险线索非结论**：账单存在 ≠ 重复付款认定），调用方传不了 SQL（MCP 红线延续到引擎面）。CI 新增 duckdb job（linux CGO 跑引擎 e2e）。
+- **CLI + HTTP 双面**：`netopslab fees --db --data import|list|rollback|query`（单 JSON stdout；幂等重复导入 informational exit 0）；HTTP 五端点 `POST /api/fees/imports`（201 新导入 / 200 幂等重复 `skippedDuplicate` / 422 行全失败或不可映射——表头同义词自动识别，识别不到必需列即拒绝，人工映射是回退不是猜测）、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`（键释放→同文件可再导入）、`GET /api/fees/query/totals|duplicates`——过 v0.11-R13 令牌写门禁，进 OpenAPI 文档（`fees` tag 路由表生成零漂移）；`GCAnalysis` 清孤儿（无 completed 行背书的 Parquet 文件与过期暂存目录）。
+- **实测**（duckdb 二进制真实旅程，CLI 与 HTTP 数字逐字一致）：导入 2 行 → 同文件重导幂等跳过 → 第二文件同站同期批次共存 → `totals` 跨批聚合 2233.56（= 1234.56 + 999.00）→ `duplicates` 精确返回唯一跨批候选（2 batches / 2 rows / 全血缘）→ 回滚后重导成功。
+- 组合根接入：`fees.Service` 进 `internal/services`（`WithFees` dataDir 选项），App/CLI/HTTP 共享单实例（指针级装配不变）。
+
+### 修复 — letterbox 护栏显式分支（#62，P2）
+- **根因**：内容比 `(vh/vw)/0.72` 更高瘦时，72% 横向利用率数学上不可达成（所需 zoom 令内容高度超画布），但旧代码 `Math.max(FIT_PAD_V_MIN, padNeeded)` **静默钳掉负数**——护栏「看似生效」（padY 40→12）实际退化为普通 fit，无任何信号表明目标已被放弃。
+- **修复**：可达性判定抽为纯函数 `fitGuard.ts` 三态显式分支（plain / utilization / **vertical-bound**——不可达时纵向铺满画布、验收主指标切到纵向利用率）；`data-fit-mode` 埋点挂 cy 容器（浏览器级验证与人工排查直读分支——真实数据集实测 vertical-bound + 零控制台错误）。
+- **数学口径校准**（实现中发现）：旧公式 `(vh − zoomNeeded·bb.h)/2` 是屏幕像素模型，而留白实际按模型单位进 `cy.fit`——可达分支**欠冲**（收窄留白后横向利用率仍达不到 72% 还自以为达标）。改为精确模型单位上界 `padMax = (vh/zoomTarget − bb.h)/2`，可达分支在真实 fit 语义下**精确**达成目标（单测断言 0.72 到 4 位小数）。
+
+### 新增 — 前端单测门禁（vitest，仓库首个）
+- `web` 包新增 `npm test`（vitest run）+ CI web job 加测试步：`fitGuard` 纯函数 6 用例（#62 精确数字钉死不可达分支 + 可达中段/封顶段/边界滑入/非法输入 + 埋点 DOM 断言）。前端从此与 Go 同受「测试钉死」纪律约束。
+
+### 测试
+- Go **549 个顶层测试**全绿（v0.12.1 基线 524 + 本里程碑：费用域 +20【v29 迁移守卫/幂等部分索引/规范化表测/识别器/Parquet 布局回滚/服务幂等共存行失败回滚 GC/CLI e2e/duckdb 引擎 e2e】+ HTTP 面 +5【导入旅程/回滚/引擎契约/OpenAPI 标签/写门禁】）。门禁：gofmt 空 · vet 0（默认 + duckdb 标签双构建）· 25 包 ok · vitest 6/6 · duckdb 二进制 HTTP 冒烟。CI 四 job（go/web/duckdb/windows）因账户 Actions 分钟配额耗尽全部 0-step 失败（v0.6.0 起已知基础设施模式，非代码问题；本地门禁集与 CI 同集全绿——run 39189729436 及此前同模式）。
+- 浏览器级验证：真实数据集（3,468 资源）工作台 fit 埋点 vertical-bound 读取 + 零控制台错误 + 截图存档。
+
 ## [0.12.1] — 2026-10-17
 
 **缺陷修复版**（四个 open issue 闭环：#54 拓扑布局尺度 / #55 维护窗口时基 / #56 概览渲染循环 / #57 三项 UI·文档一致性。全部为缺陷修复与可观测性补强，零契约破坏——`suppressionNote`/`windowLabel`/`suppressionBasis` 为新增可选字段，现有消费者不受影响）。
