@@ -2,6 +2,25 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.15.1] — 2026-10-19
+
+**分级关联复提修复版**（#69 修复 + #67/#68 文档与测试收口；v0.15.0 后三个提交的 patch 发布）。
+
+### 修复 — 人工确认过的配对重扫不再复提（#69，P1 行为缺陷）
+- **现象**（r19 费用域回归脚本首轮 F6b 即抓到）：人工 confirm 过的 (站址编码, 资源) 配对，每次重扫都**再冒一条新 pending 提案**——dismiss 过的配对正确地永不复提，confirm 过的没有。`ConfirmLink` 对重复提案 409（一码一站守卫），重复提案就此永久滞留 pending 队列：每扫一次多一条噪音，躺在人工刚决策过的关联旁边。单元测试只钉了「扫描不覆写人工行」，从未钉「同对不再提案」——v0.13.0 起每轮测试全绿但缺陷在场。
+- **根因**：`PairDecided`（fuzzy 提案过滤）的状态闭集 `IN ('pending','dismissed')` 漏了 `confirmed`。
+- **修复**：闭集 → `('pending','dismissed','confirmed')`——「每个已决策的配对保持已决策：确认不是邀请重新提问」。安全性：PairDecided 只拦 fuzzy 提案路径，exact 命中短路不经过它；auto 行经 dropout 清扫后行已不在表，不产生假阴性。
+- `TestLinkHumanConfirmation` 显式钉死 confirmed-pair 不复提不变式。
+
+### 新增 — 费用域端到端回归脚本 r19（#69 本体）
+- `scripts/r19_fees_regression.sh`：29 断言（F1-F12）——发布二进制驱动：sites 资源导入（真实键 ST1603990225）→ 费用 CSV 导入（行级账期）→ 幂等重导（existingBatch 指向）→ 批次共存 → link-scan 计数（exact=3/fuzzy=2/unlinked=1）→ confirm/dismiss 旅程 → 重扫（humanKept=1 且 pending=0）→ 默认构建诚实拒绝（exit 1 + 真实错误文案）→ duckdb 段（跨批聚合 173456 分/duplicate-settlement 证据 2 行跨 2 批/unlinked 线索；无 CGO 环境显式 SKIP）→ 回滚（Parquet 删 + 快照留 + 键释放重导成功）。**本脚本首轮即抓到上述 P1**——冒烟层与单元测试的分工边界实证（#65 三处 P1 同为真旅程发现）。
+
+### 测试与文档
+- #68：/fees 金额展示纯逻辑抽出 `fees-format.ts` + 34 表测（vitest 6 → 40——同值不同标签的语义分叉钉死：`formatRiskMetric(123456,'totalCents')=¥1,234.56` 而 `(123456,'batches')=123456`）。
+- #67：fees-layer.md 阶段表滞后两个版本收口（§7 补 risks 端点行/§9 阶段 4/5 终局/§8 消费面小节/§10 指针修正/README links 段补 Web 通道）。
+- 门禁：gofmt 空 · vet 0（默认 + duckdb 双构建）· 全包 ok · **r19 PASS=29 FAIL=0**（含 duckdb 段）· vitest 40/40 · tsc 0。
+- 版本事实点 5 处对齐 v0.15.1，`TestAppVersionMatchesChangelogHead` 钉死。
+
 ## [0.15.0] — 2026-10-19
 
 **费用工作台收口版**（#58 阶段 5「MCP 工具面扩展 + 统一工作台入口」全量落地，跟踪 issue 关闭——全阶段路线 0-5 收口）。v0.14.0 把六场景能力建在后端，本版把它交到运营者手里：**AI 通道**（fee_risks 工具）、**浏览器通道**（/fees 工作台：导入/批次/回滚/风险钻取/关联人工确认——模糊提案此前只能 CLI 确认，综维人员实际所在的工作面无入口）、**文档通道**（工具面事实口径统一，#66）。
