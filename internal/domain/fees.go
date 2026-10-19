@@ -1,0 +1,108 @@
+package domain
+
+// The fee-analysis domain types (#58/#60/#61, migration v29): the state
+// layer's record shapes of the fee import pipeline. The fee DATA never
+// lives in SQLite — only these batch bookkeeping rows; snapshots stay on
+// the filesystem (content-addressed) and the normalized rows live in the
+// hive-partitioned Parquet analysis table queried by DuckDB. Types live
+// here (not in internal/fees) for the same reason RenameProposal does:
+// repo needs them, and repo must never import a service package.
+
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// errUnknownFeeType refuses a fee type token outside the closed enum.
+func errUnknownFeeType(raw string) error {
+	return fmt.Errorf("domain: 未知费用类型 %q（可用：%s）", raw, strings.Join(FeeTypes(), "、"))
+}
+
+// FeeType is the closed enum of the fee domains the analysis layer
+// accepts. Values are directory-safe lower-case tokens (hive partition
+// values).
+type FeeType string
+
+const (
+	// FeeTypeElectricity is 电费 (electricity bills of sites).
+	FeeTypeElectricity FeeType = "electricity"
+	// FeeTypeTowerLease is 铁塔租费 (tower lease fees).
+	FeeTypeTowerLease FeeType = "tower_lease"
+	// FeeTypeRepair is 修理费 (repair costs).
+	FeeTypeRepair FeeType = "repair"
+	// FeeTypeMaintenance is 综维费用 (maintenance / ops-efficiency data).
+	FeeTypeMaintenance FeeType = "maintenance"
+)
+
+// ParseFeeType validates a raw token (CLI flag / mapping JSON) against the
+// closed enum.
+func ParseFeeType(raw string) (FeeType, error) {
+	switch FeeType(raw) {
+	case FeeTypeElectricity, FeeTypeTowerLease, FeeTypeRepair, FeeTypeMaintenance:
+		return FeeType(raw), nil
+	default:
+		return "", errUnknownFeeType(raw)
+	}
+}
+
+// FeeTypes lists every fee type value (CLI usage text).
+func FeeTypes() []string {
+	return []string{
+		string(FeeTypeElectricity), string(FeeTypeTowerLease),
+		string(FeeTypeRepair), string(FeeTypeMaintenance),
+	}
+}
+
+// FeeTypeLabel is the Chinese display name of a fee type.
+func FeeTypeLabel(t FeeType) string {
+	switch t {
+	case FeeTypeElectricity:
+		return "电费"
+	case FeeTypeTowerLease:
+		return "铁塔租费"
+	case FeeTypeRepair:
+		return "修理费"
+	case FeeTypeMaintenance:
+		return "综维费用"
+	default:
+		return string(t)
+	}
+}
+
+// FeeStatus is the fee-batch state machine: completed is the only state
+// whose Parquet files are authoritative; failed/rolled_back batches' files
+// (if any survived a crash) are analysis-layer GC orphans by definition.
+type FeeStatus string
+
+const (
+	// FeeStatusCompleted: snapshot + Parquet + batch row all landed.
+	FeeStatusCompleted FeeStatus = "completed"
+	// FeeStatusFailed: the conversion failed before the commit point.
+	FeeStatusFailed FeeStatus = "failed"
+	// FeeStatusRolledBack: a completed batch deliberately reversed
+	// (Parquet files deleted, snapshot kept as the audit trail).
+	FeeStatusRolledBack FeeStatus = "rolled_back"
+)
+
+// FeeBatch is one fee import: the state-layer record of a snapshot +
+// Parquet conversion. Idempotency key = (sha256, fee_type, fee_year,
+// fee_month, mapping), enforced by a partial UNIQUE index over completed
+// batches only — failed/rolled_back attempts never block a clean retry.
+type FeeBatch struct {
+	ID           string
+	WorkbookName string
+	SHA256       string
+	FeeType      FeeType
+	FeeYear      int
+	FeeMonth     int
+	SnapshotPath string // relative to the data dir (content-addressed)
+	Mapping      string // canonical JSON of the column mapping
+	Status       FeeStatus
+	RowsTotal    int
+	RowsImported int
+	RowsFailed   int
+	Error        string
+	CreatedAt    time.Time
+	CompletedAt  *time.Time
+}

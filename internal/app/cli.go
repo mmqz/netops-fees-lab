@@ -49,7 +49,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, templates, mcp, gc, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, fees, lab, templates, mcp, gc, testdata")
 		return exitUsage
 	}
 
@@ -79,6 +79,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdChanges(args[1:], stdout, stderr)
 	case "renames":
 		err = cmdRenames(args[1:], stdout, stderr)
+	case "fees":
+		err = cmdFees(args[1:], stdout, stderr)
 	case "lab":
 		err = cmdLab(args[1:], stdout, stderr)
 	case "templates":
@@ -92,7 +94,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, lab, templates, mcp, gc, backup, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, fees, lab, templates, mcp, gc, backup, testdata", args[0]))
 		return exitUsage
 	}
 

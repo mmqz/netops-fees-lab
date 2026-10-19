@@ -1,0 +1,265 @@
+package app
+
+// The CLI side of the fee analysis layer (#58/#60/#61): import (snapshot +
+// Parquet + batch), list, rollback and the two query presets. All outputs
+// follow the single-JSON-object stdout contract; usage errors exit 2; the
+// idempotent duplicate import is INFORMATIONAL (exit 0, the summary
+// carries skippedDuplicate), never a failure — the same severity doctrine
+// as the resource importer's duplicate skip.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/fees"
+)
+
+// splitFeeArgs parses the leading --db / --data flags of the fees command
+// and splits off the sub-command (splitSubArgs's sibling — the fee
+// pipeline is rooted at a data dir, not only a database).
+func splitFeeArgs(args []string) (dbPath, dataDir, sub string, subArgs []string, err error) {
+	dbPath = "./data/netops.db"
+	dataDir = "./data"
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		switch {
+		case arg == "--db" || arg == "-db":
+			if i+1 >= len(args) {
+				return "", "", "", nil, &usageError{msg: "--db 需要一个路径参数"}
+			}
+			dbPath = args[i+1]
+			i += 2
+		case strings.HasPrefix(arg, "--db="):
+			dbPath = strings.TrimPrefix(arg, "--db=")
+			i++
+		case arg == "--data" || arg == "-data":
+			if i+1 >= len(args) {
+				return "", "", "", nil, &usageError{msg: "--data 需要一个目录参数"}
+			}
+			dataDir = args[i+1]
+			i += 2
+		case strings.HasPrefix(arg, "--data="):
+			dataDir = strings.TrimPrefix(arg, "--data=")
+			i++
+		case strings.HasPrefix(arg, "-"):
+			return "", "", "", nil, &usageError{msg: fmt.Sprintf("fees 不支持参数 %q（仅 --db / --data）", arg)}
+		default:
+			return dbPath, dataDir, arg, args[i+1:], nil
+		}
+	}
+	return "", "", "", nil, &usageError{msg: "缺少 fees 子命令（import / list / rollback / query）"}
+}
+
+// cmdFees implements `netopslab fees --db <path> --data <dir> import|list|rollback|query …`.
+func cmdFees(args []string, stdout, stderr io.Writer) error {
+	dbPath, dataDir, sub, subArgs, err := splitFeeArgs(args)
+	if err != nil {
+		return err
+	}
+	a, err := openApp(dbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	svc := fees.NewService(a.DB, dataDir)
+	ctx := context.Background()
+
+	switch sub {
+	case "import":
+		return cmdFeesImport(ctx, svc, subArgs, stdout, stderr)
+	case "list":
+		return cmdFeesList(ctx, svc, subArgs, stdout, stderr)
+	case "rollback":
+		return cmdFeesRollback(ctx, svc, subArgs, stdout, stderr)
+	case "query":
+		return cmdFeesQuery(ctx, svc, dataDir, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 import、list、rollback 或 query，收到 %q", sub)}
+	}
+}
+
+// cmdFeesImport implements `fees import --file --type --year --month [--map <json>]`.
+func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees import")
+	file := fs.String("file", "", "费用文件路径（.csv / .xlsx / .xls），必填")
+	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
+	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
+	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
+	mapFile := fs.String("map", "", "列映射 JSON 文件路径（可选：{\"columns\":{\"siteCode\":\"站址编码\",\"amount\":\"电费(元)\",\"period\":\"账期\"}}；缺省自动识别）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *file == "" || *feeType == "" || *year == 0 || *month == 0 {
+		return &usageError{msg: "fees import 需要 --file、--type、--year、--month", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees import 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	t, err := fees.ParseFeeType(*feeType)
+	if err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+	var mapping map[string]string
+	if *mapFile != "" {
+		raw, err := os.ReadFile(*mapFile)
+		if err != nil {
+			return fmt.Errorf("读取映射文件 %s: %w", *mapFile, err)
+		}
+		var m struct {
+			Columns map[string]string `json:"columns"`
+		}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("映射文件 %s 不是合法 JSON: %w", *mapFile, err)
+		}
+		mapping = m.Columns
+	}
+	summary, err := svc.Import(ctx, fees.ImportOptions{
+		Path: *file, FeeType: t, Year: *year, Month: *month, Mapping: mapping,
+	})
+	if err != nil {
+		var dup *fees.ErrDuplicateImport
+		if !errors.As(err, &dup) {
+			return err
+		}
+		// the idempotent duplicate is informational: exit 0, the summary
+		// carries skippedDuplicate + the existing batch id.
+	}
+	return writeJSON(stdout, summary)
+}
+
+// cmdFeesList implements `fees list [--status]`.
+func cmdFeesList(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees list")
+	status := fs.String("status", "", "状态过滤：completed / failed / rolled_back（缺省全部）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	var st domain.FeeStatus
+	if *status != "" {
+		switch domain.FeeStatus(*status) {
+		case domain.FeeStatusCompleted, domain.FeeStatusFailed, domain.FeeStatusRolledBack:
+			st = domain.FeeStatus(*status)
+		default:
+			return &usageError{msg: fmt.Sprintf("--status 必须是 completed/failed/rolled_back，收到 %q", *status), usage: usage.String()}
+		}
+	}
+	batches, err := svc.List(ctx, st)
+	if err != nil {
+		return err
+	}
+	items := make([]feesListBatch, 0, len(batches))
+	for _, b := range batches {
+		items = append(items, feesListBatch{
+			ID: b.ID, WorkbookName: b.WorkbookName, FeeType: string(b.FeeType),
+			FeeTypeLabel: fees.FeeTypeLabel(b.FeeType), Period: fees.PeriodLabel(b.FeeYear, b.FeeMonth),
+			Status: string(b.Status), RowsTotal: b.RowsTotal, RowsImported: b.RowsImported,
+			RowsFailed: b.RowsFailed, SnapshotPath: b.SnapshotPath,
+		})
+	}
+	return writeJSON(stdout, feesListResult{Items: items, Total: len(items)})
+}
+
+// feesListBatch is the CLI list item shape.
+type feesListBatch struct {
+	ID           string `json:"id"`
+	WorkbookName string `json:"workbookName"`
+	FeeType      string `json:"feeType"`
+	FeeTypeLabel string `json:"feeTypeLabel"`
+	Period       string `json:"period"`
+	Status       string `json:"status"`
+	RowsTotal    int    `json:"rowsTotal"`
+	RowsImported int    `json:"rowsImported"`
+	RowsFailed   int    `json:"rowsFailed"`
+	SnapshotPath string `json:"snapshotPath"`
+}
+
+type feesListResult struct {
+	Items []feesListBatch `json:"items"`
+	Total int             `json:"total"`
+}
+
+// cmdFeesRollback implements `fees rollback --batch <id>`.
+func cmdFeesRollback(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees rollback")
+	batch := fs.String("batch", "", "要回滚的 fee 批次 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *batch == "" {
+		return &usageError{msg: "fees rollback 需要 --batch", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees rollback 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	b, err := svc.Rollback(ctx, *batch)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, map[string]any{
+		"id": b.ID, "status": string(b.Status), "period": fees.PeriodLabel(b.FeeYear, b.FeeMonth),
+		"feeType": string(b.FeeType), "snapshotKept": b.SnapshotPath,
+	})
+}
+
+// cmdFeesQuery implements `fees query totals|duplicates --type --year [--month] [--limit]`.
+func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees query 需要 totals 或 duplicates 子命令"}
+	}
+	preset, rest := args[0], args[1:]
+	fs, usage := newFlagSet("fees query " + preset)
+	feeType := fs.String("type", "", "费用类型，必填")
+	year := fs.Int("year", 0, "年份（必填）")
+	month := fs.Int("month", 0, "月份（可选：缺省整年）")
+	limit := fs.Int("limit", 20, "totals 返回条数上限（默认 20）")
+	if err := fs.Parse(rest); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *feeType == "" || *year == 0 {
+		return &usageError{msg: "fees query 需要 --type 与 --year", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees query 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	t, err := fees.ParseFeeType(*feeType)
+	if err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+	engine := fees.Query(ctx)
+	if !engine.Available() {
+		return fmt.Errorf("fees: 本二进制未编译分析查询引擎（%w）——发布构建使用 -tags duckdb（CGO）", fees.ErrEngineNotBuilt)
+	}
+	analysis := dataDir + string(os.PathSeparator) + "analysis"
+	switch preset {
+	case "totals":
+		rows, err := engine.Totals(ctx, analysis, t, *year, *month, *limit)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"preset": "totals", "feeType": string(t), "year": *year, "month": *month,
+			"items": rows, "total": len(rows),
+		})
+	case "duplicates":
+		rows, err := engine.Duplicates(ctx, analysis, t, *year, *month)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"preset": "duplicates", "feeType": string(t), "year": *year, "month": *month,
+			"items": rows, "total": len(rows),
+		})
+	default:
+		return &usageError{msg: fmt.Sprintf("fees query 预设必须是 totals 或 duplicates，收到 %q", preset)}
+	}
+}

@@ -140,8 +140,8 @@ VALUES ('wd_bad','run_x','http://h/p','pending',1,'2026-10-17T08:00:00Z')`); err
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 28 {
-		t.Errorf("max schema version after upgrade = %d, want 28", maxV)
+	if maxV != 29 {
+		t.Errorf("max schema version after upgrade = %d, want 29", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

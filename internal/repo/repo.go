@@ -72,9 +72,14 @@ type DB struct {
 	AttributeChanges *AttributeChangeRepo
 
 	// RenameProposals stores the suspected-rename proposals recorded by the
-	// importer's not-exists insert path of name-keyed types (migration v12,
-	// W6-D).
+	// importer's not-exists insert path of name-keyed types (migration
+	// v12, W6-D).
 	RenameProposals *RenameProposalRepo
+
+	// FeeBatches stores the fee import batches of the analysis-layer
+	// pipeline (migration v29, #58/#60/#61) — the SQLite state layer
+	// only; snapshots and Parquet rows never land here.
+	FeeBatches *FeeBatchRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -190,6 +195,7 @@ func wire(db *DB, q DBTX) {
 	db.LayerNodes = &LayerNodeRepo{q: q}
 	db.LayerLinks = &LayerLinkRepo{q: q}
 	db.Templates = &TemplateRepo{q: q}
+	db.FeeBatches = &FeeBatchRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -213,9 +219,14 @@ type Tx struct {
 	AttributeChanges *AttributeChangeRepo
 
 	// RenameProposals stores the suspected-rename proposals recorded by the
-	// importer's not-exists insert path of name-keyed types (migration v12,
-	// W6-D).
+	// importer's not-exists insert path of name-keyed types (migration
+	// v12, W6-D).
 	RenameProposals *RenameProposalRepo
+
+	// FeeBatches stores the fee import batches of the analysis-layer
+	// pipeline (migration v29, #58/#60/#61) — the SQLite state layer
+	// only; snapshots and Parquet rows never land here.
+	FeeBatches *FeeBatchRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -352,6 +363,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		LayerNodes:           &LayerNodeRepo{q: sqlTx},
 		LayerLinks:           &LayerLinkRepo{q: sqlTx},
 		Templates:            &TemplateRepo{q: sqlTx},
+		FeeBatches:           &FeeBatchRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

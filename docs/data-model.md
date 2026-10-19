@@ -658,3 +658,48 @@ CREATE INDEX idx_alert_event_deliveries_alert ON alert_event_deliveries (alert_i
 - **`delivered_at` 是投递钟表时间**（bookkeeping），与载荷里的 `ts`（操作时间戳 acked_at/cleared_at）分立——接收方区分「人何时处置」与「通知何时离开」；确定性教义下同操作同数据同载荷，仅 `delivered_at` 允许随投递钟变化。
 - **读面（`GET /api/alerts` 每行）**：`lifecycleDelivery = {status, event, attempts, ts}`——每告警**最近一次**通知终局（先 ack 后 clear → 读 clear 行）；`''` 三值语义见 [api.md](api.md)。实现为 alerts 列表查询的关联子查询 LEFT JOIN，`idx_alert_event_deliveries_alert` 支撑子查询定位。「最近」由**事件的边序**裁定而非任何时钟：每告警至多一行 ack + 一行 clear（转换守卫 409 拒绝重复边），且两行并存时 clear 必为后决策（ack 需 firing、clear 需 firing|acked——状态机保证 ack ≺ clear），故 `ORDER BY CASE event WHEN 'clear' …` 即精确答案。刻意不用 rowid（ack/clear 审计行是并发 goroutine，取 SQLite 写锁次序不定——插入序 ≠ 裁决序）也不用 `delivered_at`（RFC3339Nano 变宽小数 `.41Z` vs `.4125Z` 在亚秒精度上非字典序可比，且投递钟可因调度延迟倒挂）；两者仅作并列数据的人工排序兜底（测试钉死时钟倒挂场景）。
 - **主流程语义零变化**：ack/clear 处理器在转换提交后**异步**触发通知（副本载荷 + 25s 异步预算——与检测运行通知同界），通知失败绝不阻塞或改变处置响应。
+
+# DDL v29 — 费用导入批次表 fee_batches
+
+> Migration `29` name `fee_batches`（`internal/repo/migrations_v29.go`，`init()` 自注册 + 按版本排序，机制同 v4–v28）。**当前 schema version = 29**。纯 `CREATE TABLE` + 三个索引（其一为**部分唯一索引**），无表重建、无数据搬迁，FK 始终强制。与 `import_batches` **零外键、零耦合**——费用管道与资源管道是两个世界（快照/Parquet/查询的完整分层设计见 [fees-layer.md](fees-layer.md)）。
+
+## 18. 费用导入状态层（#58/#60/#61 阶段 1/2）
+
+`fee_batches` 只承载状态：幂等键、计数、回滚记账。费用数据本体**永不进 SQLite**——不可变快照在文件系统（内容寻址），规范化行在 hive 分区 Parquet 大表（DuckDB 查询）。
+
+### 18.1 DDL v29 全文
+
+```sql
+CREATE TABLE fee_batches (
+  id TEXT PRIMARY KEY,                          -- fee_<uuid>
+  workbook_name TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  fee_type TEXT NOT NULL CHECK (fee_type IN ('electricity','tower_lease','repair','maintenance')),
+  fee_year INTEGER NOT NULL CHECK (fee_year BETWEEN 2000 AND 2100),
+  fee_month INTEGER NOT NULL CHECK (fee_month BETWEEN 1 AND 12),
+  snapshot_path TEXT NOT NULL,                  -- 相对 data 目录（内容寻址快照）
+  mapping TEXT NOT NULL,                        -- 规范化列映射 JSON（幂等键成分）
+  status TEXT NOT NULL CHECK (status IN ('completed','failed','rolled_back')),
+  rows_total INTEGER NOT NULL DEFAULT 0,
+  rows_imported INTEGER NOT NULL DEFAULT 0,
+  rows_failed INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX idx_fee_batches_status ON fee_batches(status);
+CREATE INDEX idx_fee_batches_sha ON fee_batches(sha256);
+-- 幂等键：同一 (文件哈希, 费用类型, 账期, 映射) 至多一个 completed 批次；
+-- failed/rolled_back 不占键（重试通道永远开放）。
+CREATE UNIQUE INDEX idx_fee_batches_idem ON fee_batches(sha256, fee_type, fee_year, fee_month, mapping)
+  WHERE status = 'completed';
+```
+
+### 18.2 设计决策与不变式
+
+- **部分唯一索引 = 幂等键**：`WHERE status='completed'` 使 failed/rolled_back 批次**不占键**——#61「转换失败的批处理重试不产生半写状态」由构造保证（重试永远能成功；提交点 `MarkCompleted` 才触发索引）。
+- **提交点语义**：`completed` 是唯一权威态——其 Parquet 文件是 keep-set；`failed`（转换失败，error 记因）/`rolled_back`（人工回滚，快照保留、Parquet 已删）的文件（若有崩溃残留）是 GC 孤儿。
+- **`mapping` 列存规范化 JSON**（字段名按字典序、单行紧凑形）——同映射不同键序不产生第二身份。
+- **计数三列** `rows_total / rows_imported / rows_failed`：行失败是**计数而非致命**（快照保留证据，修正后重导）。
+- **CLI 契约**：`netopslab fees --db --data import|list|rollback|query`（单 JSON stdout；幂等重复导入 informational exit 0）；`mapping` 亦可由表头同义词自动识别（识别不到必需列即拒绝）。
+- **AI 通道边界**：查询面是固定预设 + 参数（totals / duplicates）——调用方传不了 SQL；MCP 工具面 5 个冻结不变（阶段 5 才考虑扩展）。

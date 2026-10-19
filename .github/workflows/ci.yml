@@ -51,6 +51,24 @@ jobs:
       - name: build (tsc strict + vite)
         run: npm run build
 
+  # The fee analysis engine (issue #58/#60/#61): DuckDB via go-duckdb is
+  # CGO and deliberately NOT part of the default build (engine_std.go
+  # answers ErrEngineNotBuilt) — the windows job and CGO-free environments
+  # keep building/testing the full write path. This linux-only job compiles
+  # with -tags duckdb and runs the engine end-to-end (read_parquet hive
+  # partitioning, the totals/duplicates presets over a real import).
+  duckdb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: go vet (duckdb build)
+        run: CGO_ENABLED=1 go vet -tags duckdb ./internal/fees/
+      - name: go test (duckdb engine e2e)
+        run: CGO_ENABLED=1 go test -count=1 -timeout 10m -tags duckdb ./internal/fees/
+
   # Issue #38: the user's actual environment is Windows, so the test gate
   # must hold there too — the linux job alone let 15 platform failures
   # (TempDir cleanup, POSIX path assertions, chmod semantics) ship through
