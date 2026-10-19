@@ -36,6 +36,13 @@
   .\run.ps1 -SkipWeb -SkipBuild
 
 .NOTES
+  费用分析查询：Windows 原生构建不含 DuckDB 分析引擎（go-duckdb 需链接的
+  rstrtmgr 库 mingw-w64 未提供，go build -tags duckdb 链接失败）——导入/快照/
+  Parquet 写入不受影响，仅费用查询答 501 engine_not_built。需要查询时：
+    ① docker build -t netops-lab:local .   （镜像默认含 duckdb 引擎）
+    ② 或在 WSL2 内 make build-duckdb
+  详见 docs/fees-layer.md §5。
+
   重要：dist 被 go:embed 在【构建时】嵌入二进制。
   顺序必须是「先建前端、再建二进制」——只重建前端而不重建二进制无效，
   会导致新增地图图层静默缺失（GET /mapdata/*.geojson.gz 返回 200 + text/html）。

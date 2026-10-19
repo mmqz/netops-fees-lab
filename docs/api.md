@@ -9,14 +9,14 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.13.0（2026-10-19）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.13.1（2026-10-19）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.13.0",
+  "version": "v0.13.1",
   "ruleVersion": "1.0.0",
   "dbPath": "/abs/path/to/netops.db"
 }
@@ -1133,11 +1133,11 @@ multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricit
 
 ## GET /api/fees/query/totals?feeType=&year=&month=&limit= — 站址费用汇总
 
-**固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,total}],total}`（按 total 降序）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；导入/快照/Parquet 写入不受影响）。
+**固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,totalCents}],total}`（按 totalCents 降序）。**金额为整数分**（`totalCents`，#65 P1-a：金额在解析/存储/聚合/输出全链路走 int64 分，杜绝浮点对账误差；展示层自行 /100）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；Windows 原生无 duckdb 路径——用 Docker/WSL2，见 fees-layer.md §5；导入/快照/Parquet 写入不受影响）。
 
 ## GET /api/fees/query/duplicates?feeType=&year=&month= — 跨批次重复结算候选
 
-同键多批次共存的行（`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/period/批次数/行数/总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。参数与 501 契约同 totals。
+同键多批次共存的行（`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/period/批次数/行数/`totalCents` 整数分总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。整数分保证比对与求和顺序无关（#65 P1-a）。参数与 501 契约同 totals。
 
 ## POST /api/fees/links/scan — 费用-资源分级关联扫描（#63，#58 阶段 3）
 

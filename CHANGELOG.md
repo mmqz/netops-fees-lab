@@ -2,6 +2,31 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.13.1] — 2026-10-19
+
+**费用分析层实测修复版**（issue #65 独立实测三处 P1 + 一处 P3 的闭环）。金额契约换轨整数分、模糊关联扫描换轨有损零算法路径并并行化、Windows 查询路径补官方替代——三处均为对账级正确性 / HTTP 可用性 / 平台可达性的实缺陷，非打磨。
+
+### 修复 — 金额全链路 float64 → 整数分 int64（#65 P1-a）
+- **根因**：金额走 `strconv.ParseFloat` + Parquet `amount` float + DuckDB `sum(amount)` + JSON `total` 浮点链——实测 100 万次 0.01 累加漂移 0.00000017 元、不同求和顺序差异 7.5e-9 元。单笔误差极小，但**对账取整到分差 1 分钱即异常**、重复结算比对可能产出假线索、#59 双引擎 0.07% 计数差同根。与同文件站址编码「前导零保留、刻意不数值化」的精度纪律形成反差。
+- **修复**：`NormalizeAmount` 定点逐位解析（不经 float64；至多两位小数，第三位 = 行失败**绝不静默取整**；科学计数法拒收；逐位溢出守卫，上界 = int64 分精确天花板）；Parquet 列 `amount` → **`amount_cents` int64**；DuckDB `sum(amount_cents)`；JSON `total` → **`totalCents` 整数分契约**（展示层 /100）。**升级注意**：v0.13.0 批次的 Parquet 文件列名为 float `amount`——回滚旧批次重导（快照层保有原件）；文档两处声明。
+- 实测钉死：100 万行 0.01 累加 == 10000.00 **精确**；`TestCentsAccumulationIsExact`；边界（.5 / 5. / 0 / 负值 / 全角混合 / MaxInt64 天花板 / 溢出 / 三位小数拒收）表测。
+
+### 修复 — 模糊关联扫描 O(codes×candidates×len²) 超时风险（#65 P1-b）
+- **根因**：`topFuzzy` 对每个费用编码遍历全部候选算全量 Levenshtein（外推 1 万编码 × 1,364 候选 = 15.5 秒；资源库到 1 万对象 = 1 亿次编辑距离 = 数分钟至十分钟，`POST /api/fees/links/scan` 必然超时）；`sweepAutoDropouts` 全表加载内存过滤；每次写一个 `db.Do` 事务（万级 = 万级单句事务）。
+- **修复（全部无损——接受/拒绝判定与朴素路径逐位一致，等价性测试钉死）**：①**长度预筛**（dist ≥ |lenDiff|，`1−|lenDiff|/maxLen` 用朴素表达式本身求值，阈值不可达即跳过）；②**字符多重集切**（单次编辑改变计数向量 ≤2 → Σ|Δcount| > 2·cap 必拒，ASCII 计数器）；③**带限 Levenshtein**（|i−j| > cap 带外格钳到 cap+1，带宽 2cap+1）+ **行最小值早夭**（行最小非降，超 cap 即终）；④**decide 阶段并行化**（GOMAXPROCS 工人池按索引回收——决定论零破坏，写阶段按序重放）；⑤规则级查找索引化（`linkRules` 改纯键变换 + 首胜确定性索引，替代每码线性扫）；⑥**清扫 SQL 下推**（`DeleteAutoNotIn`：keep 集进连接内 TEMP 表 + 单条 `NOT IN (SELECT…)`——分块 NOT IN 是**错误**而非仅低效：第二块只保护自己那片、会重删前块保留的码；人类决策行幸存语义不变）；⑦写事务分块 500/批。
+- 实测：10,000 编码 × 1,000 **同长度类对抗语料**（长度切全失效，只考验 DP 侧）并行扫描 **1.61 秒**（#65 验收线 2 秒内；朴素外推 15.5 秒，≈10×）；等价性语料（中英文/等长/阈值边缘/空串）逐位一致；race 0（性能断言在 race 插桩下跳过——墙钟无意义）。
+
+### 修复 — Windows 查询路径与指引（#65 P1-c）
+- **根因**：go-duckdb 静态绑定需 Windows Restart Manager（`-lrstrtmgr`），mingw-w64 不提供——Windows 原生 `go build -tags duckdb` 链接失败，run.ps1/Makefile 均无 duckdb 路径，用户无官方途径获得可查询费用构建（实测撞 501）。
+- **修复**：①**Docker 镜像默认含 duckdb 引擎**（golang:bookworm CGO + `-tags duckdb`，运行时补 libstdc++6；`--build-arg BUILD_TAGS=""` 可退化纯 Go）；②`make build-duckdb`（linux/WSL2/macOS）；③fees-layer.md §5.1 Windows 查询路径专节 + `run.ps1` 头部指引；④`ErrEngineNotBuilt` 错误文案直接携带 Docker/WSL2 一行命令（CLI 与 501 响应体即指引）。Windows 原生导入/快照/Parquet 写入/关联扫描本就全功能（纯 Go）。
+
+### 修复 — 站址编码英文表头识别（#65 P3-d）
+- 识别器折叠匹配键（小写 + 去空格/下划线/连字符/全角空格）：`site_code` / `Site Code` / `SITE_CODE` / `siteCode` / `station_code` / `cell_code` / `amount` / `period` / `billing_date` 等英文表头全自动识别；中文同义词保持原序原判定（英文尾项永不夺走已命中的中文建议——混合表头实测正确）。费用类型标记同享折叠匹配。
+
+### 测试
+- Go 顶层测试 549 → **563**（+14：整数分表测/累加精确/溢出边界、等价性语料、性能基准（race 跳过标志文件一对）、清扫语义（503 行为修正为 502 的正确期望 + chunk 边界 500/400 + 空清空集 + 人类决策幸存）、英文表头识别）；门禁：gofmt 空 · vet 0（默认 + duckdb 双构建）· 全包 ok（webui 包 mapdata 两测为**预存环境失败**——dist 需 `make web` 重建后才含 mapdata，与本次改动无关，干净 origin/main 复现一致）· `-race` fees/repo 0 · vitest 6/6。
+- 既有断言零放宽；JSON 契约变更（total→totalCents）与 Parquet schema 变更（amount→amount_cents）在 api.md / fees-layer.md / 错误文案三处同步声明。
+
 ## [0.13.0] — 2026-10-19
 
 **费用分析层版**（#58/#60/#61 阶段 1/2 垂直切片 + #62 letterbox 护栏修复 + 仓库首个前端单测门禁。两层存储裁决落地：状态层 SQLite 不动、费用数据本体永不进 SQLite；快照层文件系统内容寻址、分析层 Parquet hive 分区大表 + DuckDB 查询引擎）。

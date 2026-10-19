@@ -7,6 +7,8 @@
 # 用法：
 #   docker build -t netops-lab:local .
 #   docker run --rm -p 8080:8080 -v netops-data:/data netops-lab:local
+# 默认镜像含 DuckDB 费用分析引擎（-tags duckdb，CGO）；查询不可用可退回纯 Go 构建：
+#   docker build --build-arg BUILD_TAGS="" -t netops-lab:nocgo .
 
 # ---------- 阶段 1：前端 ----------
 FROM node:24-bookworm-slim AS web
@@ -22,7 +24,7 @@ COPY web/ ./
 COPY internal/webui/dist/.gitkeep /src/internal/webui/dist/.gitkeep
 RUN npm run build
 
-# ---------- 阶段 2：Go 二进制 ----------
+# ---------- 阶段 2：Go 二进制（含 DuckDB 分析引擎）----------
 FROM golang:1.27-bookworm AS build
 
 WORKDIR /src
@@ -35,16 +37,26 @@ RUN go mod download
 COPY . .
 COPY --from=web /src/internal/webui/dist ./internal/webui/dist
 
-# 纯 Go，无 CGO（modernc.org/sqlite 为纯 Go 实现）
-ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w" -o /out/netopslab ./cmd/netopslab
+# SQLite 走纯 Go 实现（modernc.org/sqlite）；费用分析查询引擎则编译 DuckDB
+# （go-duckdb，CGO + `-tags duckdb`，#59 已在 linux 验证：预编译平台绑定，
+# ~68MB 二进制）。这是 Windows 用户获得可查询费用功能的官方路径之一
+# （mingw-w64 缺 rstrtmgr，Windows 原生无 duckdb 构建路径，见 issue #65）。
+# BUILD_TAGS= 退化回纯 Go 构建：docker build --build-arg BUILD_TAGS="" .
+ARG BUILD_TAGS=duckdb
+ENV CGO_ENABLED=1 GOOS=linux
+RUN if [ -n "$BUILD_TAGS" ]; then \
+        go build -trimpath -tags "$BUILD_TAGS" -ldflags="-s -w" -o /out/netopslab ./cmd/netopslab; \
+    else \
+        CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/netopslab ./cmd/netopslab; \
+    fi
 
 # ---------- 阶段 3：运行时 ----------
 FROM debian:bookworm-slim
 
 # ca-certificates：地图底图等出站 HTTPS 需要
+# libstdc++6：go-duckdb 的预编译绑定链接 C++ 运行时（duckdb 构建需要）
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

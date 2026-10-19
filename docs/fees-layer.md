@@ -37,7 +37,7 @@ analysis/fees/fee_type=electricity/year=2024/month=05/batch-fee_<uuid>.parquet
 | 列 | 类型 | 语义 |
 | --- | --- | --- |
 | `site_code` | string | 站址编码（规范化：去空白、**前导零保留**——身份字符串，绝不数值化） |
-| `amount` | float | 金额（规范化：¥/￥/，/，/全角数字→半角、元后缀剥离；解析失败 = 行失败，绝不猜测） |
+| `amount_cents` | int64 | 金额（**整数分**，#65 P1-a）：规范化（¥/￥/，/，/全角数字→半角、元后缀剥离）后**定点逐位解析**，不经 float64；至多两位小数（第三位 = 行失败，绝不静默取整）；全链路（解析/存储/sum 聚合/JSON `totalCents`）int64 分，对账到分零误差、比对与求和顺序无关。v0.13.0 及以前导入的批次文件列名为 float `amount`——升级后回滚旧批次重导（快照层保有原件） |
 | `source_file` | string | 快照基名（哈希+原名）——证据锚点 |
 | `source_row` | int32 | 原始文件 1 起行号（Excel 行 2+/CSV 数据行）——行号级对位 |
 | `import_batch` | string | 批次 id（血缘） |
@@ -61,9 +61,25 @@ analysis/fees/fee_type=electricity/year=2024/month=05/batch-fee_<uuid>.parquet
 | 构建 | 命令 | 引擎 |
 | --- | --- | --- |
 | 默认（全平台，含 Windows/CI） | `go build` | `engine_std.go`：查询答 `ErrEngineNotBuilt`；**导入/快照/Parquet 写入全功能**（纯 Go，parquet-go） |
-| 发布（linux/docker） | `CGO_ENABLED=1 go build -tags duckdb` | `engine_duckdb.go`：go-duckdb v2（#59 验证：预编译平台绑定、17s 构建、静态 68MB） |
+| 发布（linux/WSL2/macOS/docker） | `CGO_ENABLED=1 go build -tags duckdb`（或 `make build-duckdb`） | `engine_duckdb.go`：go-duckdb v2（#59 验证：预编译平台绑定、17s 构建、~68MB） |
 
 CI 四个 job：go（默认全量）+ web + **duckdb（linux CGO `-tags duckdb` 跑引擎 e2e）** + windows（默认构建，验证 CGO 不泄漏）。
+
+### 5.1 Windows 查询路径（#65 P1-c）
+
+go-duckdb 静态绑定需要 Windows Restart Manager 库（`rstrtmgr`），mingw-w64 不提供——`CGO_ENABLED=1 go build -tags duckdb` 在 Windows 链接失败（`ld.exe: cannot find -lrstrtmgr`，#65 实测）。因此 **Windows 原生构建没有 duckdb 路径**，费用查询固定答 `501 engine_not_built`（错误体即指引）；两条官方替代路径：
+
+```powershell
+# ① Docker（推荐）：镜像默认含 duckdb 引擎（bookworm + libstdc++6）
+docker build -t netops-lab:local .
+docker run --rm -p 8080:8080 -v netops-data:/data netops-lab:local
+# 退化纯 Go 构建（不要查询引擎）：docker build --build-arg BUILD_TAGS="" .
+
+# ② WSL2 内构建（Ubuntu/Debian 自带 gcc）
+wsl -e bash -lc "cd /mnt/c/<repo> && make build-duckdb"
+```
+
+导入/快照/Parquet 写入与关联扫描在 Windows 默认构建上**全功能可用**（纯 Go）——只有查询预设需要上述路径。`run.ps1` 头部注释与 `ErrEngineNotBuilt` 错误文案同步携带该指引。
 
 ## 6. CLI 面
 
