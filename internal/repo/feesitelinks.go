@@ -266,13 +266,16 @@ func (r *FeeSiteLinkRepo) DeleteByID(ctx context.Context, id string) (bool, erro
 }
 
 // PairDecided reports whether a (code, resource) pair already has a
-// pending proposal or a dismissed rejection — the scan's fuzzy step
-// skips both (no duplicate proposals; a human-rejected pair never
-// resurrects automatically).
+// decided-or-proposed row — pending (no duplicate proposals), dismissed
+// (a human-rejected pair never resurrects automatically), or confirmed
+// (a human-approved pair never re-proposes either — re-proposing an
+// already-confirmed pair would strand a permanent pending row next to
+// its own confirmed row, since ConfirmLink 409s on it; found by the
+// r19 fees regression, #69).
 func (r *FeeSiteLinkRepo) PairDecided(ctx context.Context, code, resourceID string) (bool, error) {
 	var one int
 	err := r.q.QueryRowContext(ctx,
-		`SELECT 1 FROM fee_site_links WHERE fee_site_code = ? AND resource_id = ? AND status IN ('pending','dismissed') LIMIT 1`,
+		`SELECT 1 FROM fee_site_links WHERE fee_site_code = ? AND resource_id = ? AND status IN ('pending','dismissed','confirmed') LIMIT 1`,
 		code, resourceID).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil

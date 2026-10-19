@@ -186,6 +186,21 @@ func TestLinkHumanConfirmation(t *testing.T) {
 	if err != nil || kept.ID != target.ID || kept.Source != domain.LinkSourceHuman {
 		t.Fatalf("human link after re-scan = %+v (err %v) — the scan must not overwrite it", kept, err)
 	}
+	// #69 (found by the r19 fees regression): a CONFIRMED pair never
+	// re-proposes either — the fuzzy step must skip every decided
+	// (code, resource) pair. Before the fix, the re-scan planted a fresh
+	// pending row for the very pair the human just confirmed (and
+	// ConfirmLink 409s on it, so the duplicate would strand forever).
+	afterPending, err := db.FeeSiteLinks.List(ctx, repo.FeeLinkFilter{Status: domain.LinkStatusPending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range afterPending {
+		if p.FeeSiteCode == target.FeeSiteCode && p.ResourceID == target.ResourceID {
+			t.Fatalf("re-scan re-proposed the confirmed pair %s → %s — PairDecided must cover confirmed rows",
+				p.FeeSiteCode, p.ResourceID)
+		}
+	}
 
 	// dismiss journey: dismiss a fresh pending proposal → dismissed,
 	// audit kept, code free.
