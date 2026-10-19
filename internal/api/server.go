@@ -32,6 +32,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/detect"
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/fees"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
@@ -74,6 +75,10 @@ type Server struct {
 	changes    *changes.Service
 	renames    *renames.Service
 	governance *governance.Service
+	// fees is the fee analysis layer service (#58/#60/#61): the same
+	// instance the CLI fee commands use (the composition root's Fees,
+	// rooted at the app's DataDir).
+	fees *fees.Service
 	// detect is the W23 alert detection engine (the SAME instance the
 	// CLI's `netopslab detect` uses — the composition root hands it to
 	// both, no bypass).
@@ -122,6 +127,7 @@ func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 		renames:    svc.Renames,
 		governance: svc.Governance,
 		detect:     svc.Detect,
+		fees:       svc.Fees,
 	}
 }
 

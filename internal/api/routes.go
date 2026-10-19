@@ -96,6 +96,11 @@ func (s *Server) apiRoutes() []route {
 		{Method: "GET", Pattern: "/api/renames", Tag: "governance", Summary: "疑似重名合并提案列表（身份治理）", Handler: s.handleRenamesList},
 		{Method: "POST", Pattern: "/api/renames/{id}/apply", Tag: "governance", Summary: "人工确认合并资源身份", Handler: s.handleRenameApply},
 		{Method: "POST", Pattern: "/api/renames/{id}/reject", Tag: "governance", Summary: "人工驳回身份合并提案", Handler: s.handleRenameReject},
+		{Method: "POST", Pattern: "/api/fees/imports", Tag: "fees", Summary: "费用数据导入（multipart：file + feeType + year + month [+ map]；快照 + Parquet 分区 + 幂等键）", Handler: s.handleFeesImport},
+		{Method: "GET", Pattern: "/api/fees/batches", Tag: "fees", Summary: "费用导入批次列表（status 过滤，最新在前）", Handler: s.handleFeesBatchesList},
+		{Method: "POST", Pattern: "/api/fees/batches/{id}/rollback", Tag: "fees", Summary: "回滚费用批次（删分析行、保快照证据）", Handler: s.handleFeesRollback},
+		{Method: "GET", Pattern: "/api/fees/query/totals", Tag: "fees", Summary: "费用分析：站址汇总（feeType/year[/month]，DuckDB 引擎需 duckdb 构建）", Handler: s.handleFeesQueryTotals},
+		{Method: "GET", Pattern: "/api/fees/query/duplicates", Tag: "fees", Summary: "费用分析：跨批次重复结算候选（风险线索 + 证据锚点）", Handler: s.handleFeesQueryDuplicates},
 
 		{Method: "GET", Pattern: "/api/workspaces", Tag: "lab", Summary: "仿真工作台分页列表", Handler: s.handleWorkspacesList},
 		{Method: "POST", Pattern: "/api/workspaces", Tag: "lab", Summary: "物化新工作台（从已完成批次快照）", Handler: s.handleWorkspacesCreate},

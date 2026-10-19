@@ -21,6 +21,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/api"
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/detect"
+	"github.com/mmqz/netops-lab/internal/fees"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/metrics"
@@ -108,6 +109,10 @@ type App struct {
 	Changes *changes.Service
 	// Renames is the rename confirmation service (W6-D).
 	Renames *renames.Service
+	// Fees is the fee analysis layer service (#58/#60/#61): the CLI fee
+	// commands and the HTTP fee routes share this instance (the
+	// composition root's Fees, rooted at Config.DataDir).
+	Fees *fees.Service
 	// Governance is the governance overview aggregation service (W14-D).
 	Governance *governance.Service
 	// Lab is the simulation workbench engine (Phase 2: materialize, ops,
@@ -160,7 +165,7 @@ func New(cfg Config) (*App, error) {
 	// pre-W9-D dead assembly (the API building its own second service set
 	// from the bare db) is gone. The MCP server consumes it too (cmdMCP
 	// passes a.Services to mcpserver.Run).
-	svc := services.New(db)
+	svc := services.New(db, services.WithFees(cfg.DataDir))
 	a := &App{
 		Config:     cfg,
 		Log:        log,
@@ -171,6 +176,7 @@ func New(cfg Config) (*App, error) {
 		Query:      svc.Query,
 		Changes:    svc.Changes,
 		Renames:    svc.Renames,
+		Fees:       svc.Fees,
 		Governance: svc.Governance,
 		Lab:        svc.Lab,
 		Report:     svc.Report,

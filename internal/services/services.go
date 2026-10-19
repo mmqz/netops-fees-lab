@@ -23,6 +23,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/changes"
 	"github.com/mmqz/netops-lab/internal/detect"
+	"github.com/mmqz/netops-lab/internal/fees"
 	"github.com/mmqz/netops-lab/internal/governance"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/metrics"
@@ -64,6 +65,12 @@ type Services struct {
 	// Metrics is the timeseries metric ingest/query service (W20,
 	// migration v14 — ADR-0011 D1's separate channel).
 	Metrics *metrics.Service
+	// Fees is the fee-data analysis layer service (#58/#60/#61, migration
+	// v29): snapshot + Parquet import pipeline + the query presets. Needs
+	// the data dir (the snapshot and analysis roots live under it) — wired
+	// via WithFees when the app knows it; nil DataDir roots at "./data".
+	Fees *fees.Service
+
 	// Detect is the alert detection engine (W23, migration v18 —
 	// ADR-0011 D2/D3): the rules side whose query cousin is
 	// Metrics.Anomalies. HTTP and CLI call the same instance, no bypass.
@@ -81,11 +88,20 @@ func (s *Services) DB() *repo.DB { return s.db }
 
 // options carries the customizable knobs of New.
 type options struct {
-	clock func() time.Time
+	clock   func() time.Time
+	feesDir string
 }
 
 // Option customizes the assembly performed by New.
 type Option func(*options)
+
+// WithFees wires the fee analysis service with its data-dir root (the
+// snapshot layer and the Parquet analysis tree live under it). The
+// composition root calls this when the app configuration carries a
+// DataDir; the CLI fee command builds its own instance the same way.
+func WithFees(dataDir string) Option {
+	return func(o *options) { o.feesDir = dataDir }
+}
 
 // WithClock sets the deterministic clock hook of the two confirmation
 // services (changes.Service.Now / renames.Service.Now). Production wiring
@@ -109,6 +125,7 @@ func New(db *repo.DB, opts ...Option) *Services {
 	}
 	lab := sim.New(db)
 	s := &Services{
+		Fees:       fees.NewService(db, o.feesDir),
 		db:         db,
 		Importer:   importer.New(db),
 		Validation: validation.New(db),

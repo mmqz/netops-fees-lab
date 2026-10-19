@@ -1119,6 +1119,26 @@ body `{label（必填，事由）, startsAt, endsAt（RFC3339，ends > starts）
 
 无独立子命令——窗口经 HTTP（或直接 SQL）管理；检测引擎在扫描事务内读取全部窗口（事务一致性：扫描中途建窗口不会半生效）。
 
+## POST /api/fees/imports — 费用数据导入（multipart，#58/#60/#61）
+
+multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricity/tower_lease/repair/maintenance）+ `year` + `month`（声明账期）+ 可选 `map`（列映射 JSON：`{"columns":{"siteCode":"站址编码","amount":"电费(元)","period":"账期"}}`，缺省表头自动识别；识别不到必需列 → 422）。管线：快照（内容寻址不可变）→ 规范化（金额/账期/站址编码；行失败计数不致命）→ Parquet 分区大表（`fee_type/year/month` hive 分区，行级账期优先于声明账期）→ 批次行（幂等键 = 哈希×类型×账期×映射）。**幂等**：同文件重导 → **200**（非 201）+ `skippedDuplicate=true` + `existingBatch`（informational，与 CLI 同严重级语义）。新导入 → **201** + 摘要（计数/分区文件清单/行错误）。全部行失败 → 422 `fee_rows_failed`（错误明细在摘要，重试通道开放）。参数非法 → 400；扩展名不支持 → 422 `unsupported_fee_file`。设计全貌见 [fees-layer.md](fees-layer.md)。
+
+## GET /api/fees/batches?status= — 费用导入批次列表
+
+`status=completed/failed/rolled_back`（缺省全部）；最新在前。`feeTypeLabel`（中文）与 `period`（2024-05）为展示字段；`snapshotPath` 是内容寻址快照相对路径（证据锚点）。
+
+## POST /api/fees/batches/{id}/rollback — 回滚费用批次
+
+仅 completed 可回滚（否则 409 `conflict`；未知 id 404）：删除该批次的 Parquet 分析行（空分区目录一并清理），**快照保留**（证据寿命 > 批次寿命），批次行置 `rolled_back`（终态审计）。键随回滚释放——同文件可再导入（201）。
+
+## GET /api/fees/query/totals?feeType=&year=&month=&limit= — 站址费用汇总
+
+**固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,total}],total}`（按 total 降序）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；导入/快照/Parquet 写入不受影响）。
+
+## GET /api/fees/query/duplicates?feeType=&year=&month= — 跨批次重复结算候选
+
+同键多批次共存的行（`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/period/批次数/行数/总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。参数与 501 契约同 totals。
+
 ## 静态资源与 SPA
 
 - `GET /` 与一切非 `/api` 路径 → 嵌入式 React SPA（`go:embed`）；未知子路径回退 `index.html`（客户端路由）。

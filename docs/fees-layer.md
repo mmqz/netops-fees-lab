@@ -78,7 +78,19 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 - `--map` 缺省时自动识别（表头同义词：站址编码/电费(元)/账期…；类型标记：电量/塔租/工单/综维…）；识别不到 siteCode 或 amount → 拒绝（人工映射是回退，不是猜测）。
 - `query` 两个预设：`totals`（站址汇总，分区裁剪验证面）+ `duplicates`（跨批次重复结算候选——**风险线索，非结论**：账单存在 ≠ 重复付款认定，输出待人工核实的差异行）。
 
-## 7. 路线（#58 阶段表）
+## 7. HTTP API 面（与 CLI 同语义）
+
+| 端点 | 语义 |
+| --- | --- |
+| `POST /api/fees/imports` | multipart（file + feeType + year + month [+ map]）；201 新导入 / 200 幂等重复（`skippedDuplicate`）/ 422 行全失败或不可映射 |
+| `GET /api/fees/batches?status=` | 批次列表（最新在前，中文类型标签 + 账期渲染） |
+| `POST /api/fees/batches/{id}/rollback` | 回滚（删分析行保快照；409/404 守卫） |
+| `GET /api/fees/query/totals?feeType=&year=&month=&limit=` | 站址汇总预设 |
+| `GET /api/fees/query/duplicates?feeType=&year=&month=` | 跨批次重复结算候选预设 |
+
+写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。五端点进 OpenAPI 文档（`fees` tag，路由表生成零漂移）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
+
+## 8. 路线（#58 阶段表）
 
 | 阶段 | 状态 |
 | --- | --- |
@@ -89,7 +101,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | 4 六大风险场景规则 + 证据追溯 | 待开（`duplicates` 预设是首个场景的雏形） |
 | 5 MCP 工具面扩展 + 统一工作台入口 | 待开（HTTP API 面待阶段 3 前） |
 
-## 8. 相关文档
+## 9. 相关文档
 
 - [data-model.md](data-model.md) —— v29 DDL（fee_batches）；
 - [api.md](api.md) —— CLI 契约示例（HTTP 面待后续轮次）；
