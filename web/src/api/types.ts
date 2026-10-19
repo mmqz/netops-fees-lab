@@ -1482,3 +1482,43 @@ export interface RiskResult {
   excluded: number;
   note: string;
 }
+
+/** 费用-资源关联（fee_site_links 的 REST 形状；join 展示字段可缺省——资源消失时记录仍自洽） */
+export interface FeeLinkItem {
+  id: string;
+  feeSiteCode: string;
+  resourceId: string;
+  resourceType: string;
+  resourceKey: string;
+  /** 资源侧 join 展示名（资源已删除则缺省，resourceKey 仍完整叙事） */
+  resourceName?: string;
+  resourceStatus?: string;
+  /** exact | rule | fuzzy */
+  grade: string;
+  /** 规则级命中的规则名（rule-<n>） */
+  rule?: string;
+  /** 模糊级相似度 0–1 */
+  similarity?: number;
+  /** pending | confirmed | dismissed */
+  status: string;
+  /** auto | human */
+  source: string;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+/** GET /api/fees/links 信封 */
+export interface FeeLinksList {
+  items: FeeLinkItem[];
+  total: number;
+}
+
+/** POST /api/fees/links/scan 计数回执 */
+export interface FeeLinkScanResult {
+  codes: number;
+  exactLinks: number;
+  ruleLinks: number;
+  fuzzyProposed: number;
+  unlinked: number;
+  humanKept: number;
+}

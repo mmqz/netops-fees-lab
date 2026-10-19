@@ -3,6 +3,8 @@
  * - 导入费用文件（multipart：file + feeType + year + month → POST /api/fees/imports，
  *   201 新导入 / 200 幂等重复双形态提示）；
  * - 费用批次列表（最新在前）+ 回滚（ConfirmDialog：删分析行、保快照证据）；
+ * - 费用-资源关联（#63 分级关联的前端人类通道）：重新扫描 + 状态/级别筛选 +
+ *   模糊提案的确认/驳回（驳回走 ConfirmDialog——审计保留不可撤）；
  * - 风险六场景查询（GET /api/fees/risks/{scenario}）：线索表（站址/账期/触发指标/
  *   显式阈值）+ 行展开证据锚点（sourceFile+sourceRow+importBatch+整数分）+
  *   excluded 计数说明；501 engine_not_built 渲染为引导横幅而非裸错误。
@@ -12,12 +14,16 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import type { RiskResult } from '../api/types';
+import type { FeeLinkItem, FeeLinkScanResult, RiskResult } from '../api/types';
 import {
+  confirmFeeLink,
+  dismissFeeLink,
   fetchFeeBatches,
+  fetchFeeLinks,
   fetchFeeRisks,
   formatApiErrorText,
   rollbackFeeBatch,
+  scanFeeLinks,
   uploadFeeFile,
 } from '../api/client';
 import { useToast } from '../components/Toast';
@@ -38,6 +44,24 @@ import {
   FEES_IMPORT_TITLE,
   FEES_IMPORT_TYPE,
   FEES_IMPORT_YEAR,
+  FEES_LINKS_ACTIONS,
+  FEES_LINKS_ALL,
+  FEES_LINKS_CODE,
+  FEES_LINKS_CONFIRM,
+  FEES_LINKS_CONFIRMED,
+  FEES_LINKS_DESC,
+  FEES_LINKS_DISMISS,
+  FEES_LINKS_DISMISS_CONFIRM,
+  FEES_LINKS_DISMISSED,
+  FEES_LINKS_DISMISSING,
+  FEES_LINKS_EMPTY,
+  FEES_LINKS_GRADE,
+  FEES_LINKS_RESOURCE,
+  FEES_LINKS_SCAN,
+  FEES_LINKS_SCAN_RESULT,
+  FEES_LINKS_SOURCE,
+  FEES_LINKS_STATUS,
+  FEES_LINKS_TITLE,
   FEES_RISKS_EMPTY,
   FEES_RISKS_EVIDENCE,
   FEES_RISKS_EVIDENCE_MORE,
@@ -51,6 +75,14 @@ import {
   FEE_TYPE_MAINTENANCE,
   FEE_TYPE_REPAIR,
   FEE_TYPE_TOWER_LEASE,
+  LINKS_GRADE_EXACT,
+  LINKS_GRADE_FUZZY,
+  LINKS_GRADE_RULE,
+  LINKS_SOURCE_AUTO,
+  LINKS_SOURCE_HUMAN,
+  LINKS_STATUS_CONFIRMED,
+  LINKS_STATUS_DISMISSED,
+  LINKS_STATUS_PENDING,
   RISK_SCENARIO_DUPLICATE_SETTLEMENT,
   RISK_SCENARIO_LEDGER_MISMATCH,
   RISK_SCENARIO_OUTLIER,
@@ -168,6 +200,78 @@ export function FeesPage() {
       setImporting(false);
     }
   }, [importType, importYear, importMonth, loadBatches, toast]);
+
+  // ---- 关联（费用-资源分级关联的人类确认通道）----
+  const [links, setLinks] = useState<FeeLinkItem[] | null>(null);
+  const [linksError, setLinksError] = useState('');
+  const [linkStatus, setLinkStatus] = useState('pending');
+  const [linkGrade, setLinkGrade] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<FeeLinkScanResult | null>(null);
+  const [dismissTarget, setDismissTarget] = useState<FeeLinkItem | null>(null);
+  const [dismissing, setDismissing] = useState(false);
+
+  const loadLinks = useCallback(async () => {
+    setLinksError('');
+    try {
+      const res = await fetchFeeLinks({
+        status: linkStatus === '' ? undefined : linkStatus,
+        grade: linkGrade === '' ? undefined : linkGrade,
+      });
+      setLinks(res.items);
+    } catch (err) {
+      setLinksError(formatApiErrorText(err));
+      setLinks(null);
+    }
+  }, [linkStatus, linkGrade]);
+
+  useEffect(() => {
+    void loadLinks();
+  }, [loadLinks]);
+
+  const doScan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const res = await scanFeeLinks();
+      setScanResult(res);
+      await loadLinks();
+    } catch (err) {
+      toast.show(formatApiErrorText(err), 'error');
+    } finally {
+      setScanning(false);
+    }
+  }, [loadLinks, toast]);
+
+  const doConfirm = useCallback(async (l: FeeLinkItem) => {
+    try {
+      await confirmFeeLink(l.id);
+      toast.show(FEES_LINKS_CONFIRMED(l.feeSiteCode), 'success');
+      await loadLinks();
+    } catch (err) {
+      toast.show(formatApiErrorText(err), 'error');
+    }
+  }, [loadLinks, toast]);
+
+  const doDismiss = useCallback(async () => {
+    if (dismissTarget === null) return;
+    setDismissing(true);
+    try {
+      await dismissFeeLink(dismissTarget.id);
+      toast.show(FEES_LINKS_DISMISSED(dismissTarget.feeSiteCode), 'success');
+      setDismissTarget(null);
+      await loadLinks();
+    } catch (err) {
+      toast.show(formatApiErrorText(err), 'error');
+    } finally {
+      setDismissing(false);
+    }
+  }, [dismissTarget, loadLinks, toast]);
+
+  const linkStatusLabel = (s: string): string =>
+    s === 'pending' ? LINKS_STATUS_PENDING : s === 'confirmed' ? LINKS_STATUS_CONFIRMED : LINKS_STATUS_DISMISSED;
+
+  const linkGradeLabel = (g: string): string =>
+    g === 'exact' ? LINKS_GRADE_EXACT : g === 'rule' ? LINKS_GRADE_RULE : LINKS_GRADE_FUZZY;
 
   // ---- 风险查询 ----
   const [scenario, setScenario] = useState('duplicate-settlement');
@@ -344,6 +448,98 @@ export function FeesPage() {
       </section>
 
       <section className="panel">
+        <h2 className="panel__title">{FEES_LINKS_TITLE}</h2>
+        <p className="page__desc">{FEES_LINKS_DESC}</p>
+        <div className="filters">
+          <label className="field">
+            <span>{FEES_LINKS_STATUS}</span>
+            <select value={linkStatus} onChange={(e) => setLinkStatus(e.target.value)}>
+              <option value="pending">{LINKS_STATUS_PENDING}</option>
+              <option value="confirmed">{LINKS_STATUS_CONFIRMED}</option>
+              <option value="dismissed">{LINKS_STATUS_DISMISSED}</option>
+              <option value="">{FEES_LINKS_ALL}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{FEES_LINKS_GRADE}</span>
+            <select value={linkGrade} onChange={(e) => setLinkGrade(e.target.value)}>
+              <option value="exact">{LINKS_GRADE_EXACT}</option>
+              <option value="rule">{LINKS_GRADE_RULE}</option>
+              <option value="fuzzy">{LINKS_GRADE_FUZZY}</option>
+              <option value="">{FEES_LINKS_ALL}</option>
+            </select>
+          </label>
+          <button className="btn btn--primary" disabled={scanning} onClick={() => void doScan()}>
+            {scanning ? <Spinner /> : FEES_LINKS_SCAN}
+          </button>
+        </div>
+
+        {scanResult !== null && (
+          <p className="muted">
+            {FEES_LINKS_SCAN_RESULT(
+              scanResult.codes, scanResult.exactLinks, scanResult.ruleLinks,
+              scanResult.fuzzyProposed, scanResult.unlinked, scanResult.humanKept,
+            )}
+          </p>
+        )}
+        {linksError !== '' && <ErrorBlock message={linksError} />}
+        <div className="panel__body">
+          {links !== null && links.length === 0 && <p className="empty">{FEES_LINKS_EMPTY}</p>}
+          {links !== null && links.length > 0 && (
+            <table className="table table--interactive">
+              <thead>
+                <tr>
+                  <th>{FEES_LINKS_CODE}</th>
+                  <th>{FEES_LINKS_RESOURCE}</th>
+                  <th>{FEES_LINKS_GRADE}</th>
+                  <th>{FEES_LINKS_STATUS}</th>
+                  <th>{FEES_LINKS_SOURCE}</th>
+                  <th>{FEES_LINKS_ACTIONS}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {links.map((l) => (
+                  <tr key={l.id}>
+                    <td>{l.feeSiteCode}</td>
+                    <td>
+                      {l.resourceName !== undefined ? `${l.resourceName}（` : ''}
+                      {l.resourceKey}
+                      {l.resourceName !== undefined ? '）' : ''}
+                      {l.similarity !== undefined && l.similarity > 0 && (
+                        <span className="chip chip--muted">相似度 {(l.similarity * 100).toFixed(0)}%</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className="chip chip--muted">{linkGradeLabel(l.grade)}</span>
+                      {l.rule !== undefined && l.rule !== '' && <span className="muted"> {l.rule}</span>}
+                    </td>
+                    <td>
+                      <span className={`chip chip--${l.status === 'confirmed' ? 'ok' : l.status === 'pending' ? 'warn' : 'muted'}`}>
+                        {linkStatusLabel(l.status)}
+                      </span>
+                    </td>
+                    <td className="muted">{l.source === 'human' ? LINKS_SOURCE_HUMAN : LINKS_SOURCE_AUTO}</td>
+                    <td>
+                      {l.status === 'pending' && (
+                        <>
+                          <button className="btn btn--ghost" onClick={() => void doConfirm(l)}>
+                            {FEES_LINKS_CONFIRM}
+                          </button>
+                          <button className="btn btn--ghost" onClick={() => setDismissTarget(l)}>
+                            {FEES_LINKS_DISMISS}
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
         <h2 className="panel__title">{FEES_BATCHES_TITLE}</h2>
         <div className="panel__body">
           {batchesError !== '' && <ErrorBlock message={batchesError} />}
@@ -436,6 +632,20 @@ export function FeesPage() {
         onConfirm={() => void doRollback()}
         onCancel={() => {
           setRollbackTarget(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={dismissTarget !== null}
+        title={FEES_LINKS_DISMISS}
+        message={dismissTarget !== null
+          ? FEES_LINKS_DISMISS_CONFIRM(dismissTarget.feeSiteCode, dismissTarget.resourceKey)
+          : ''}
+        confirmLabel={dismissing ? FEES_LINKS_DISMISSING : FEES_LINKS_DISMISS}
+        busy={dismissing}
+        onConfirm={() => void doDismiss()}
+        onCancel={() => {
+          setDismissTarget(null);
         }}
       />
     </div>

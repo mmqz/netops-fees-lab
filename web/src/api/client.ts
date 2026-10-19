@@ -37,6 +37,9 @@ import type {
   FeeBatchItem,
   FeeBatchesList,
   FeeImportSummary,
+  FeeLinkItem,
+  FeeLinkScanResult,
+  FeeLinksList,
   GovernanceSummary,
   HealthResponse,
   ImpactDocument,
@@ -974,5 +977,43 @@ export function fetchFeeRisks(
 ): Promise<RiskResult> {
   return requestJson<RiskResult>(
     `/fees/risks/${encodeURIComponent(scenario)}${buildQuery(params as Record<string, string | number | undefined>)}`,
+  );
+}
+
+/** POST /api/fees/links/scan — 分级扫描（精确/规则自动确认，模糊出提案） */
+export function scanFeeLinks(): Promise<FeeLinkScanResult> {
+  return requestJson<FeeLinkScanResult>('/fees/links/scan', { method: 'POST' });
+}
+
+/** GET /api/fees/links?status=&grade=&code=&resource_id=（最新在前，资源侧 join 展示） */
+export function fetchFeeLinks(params: {
+  status?: string;
+  grade?: string;
+  code?: string;
+  resourceId?: string;
+}): Promise<FeeLinksList> {
+  return requestJson<FeeLinksList>(
+    `/fees/links${buildQuery({
+      status: params.status,
+      grade: params.grade,
+      code: params.code,
+      resource_id: params.resourceId,
+    })}`,
+  );
+}
+
+/** POST /api/fees/links/{id}/confirm — 人工确认模糊提案（pending → confirmed） */
+export function confirmFeeLink(id: string): Promise<FeeLinkItem> {
+  return requestJson<FeeLinkItem>(
+    `/fees/links/${encodeURIComponent(id)}/confirm`,
+    { method: 'POST' },
+  );
+}
+
+/** POST /api/fees/links/{id}/dismiss — 驳回模糊提案（审计保留，配对不再自动复提） */
+export function dismissFeeLink(id: string): Promise<FeeLinkItem> {
+  return requestJson<FeeLinkItem>(
+    `/fees/links/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
   );
 }
