@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xuri/excelize/v2"
+
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/repo"
 )
@@ -328,5 +330,56 @@ func TestEngineAvailabilityDefaultBuild(t *testing.T) {
 	}
 	if _, err := e.Duplicates(context.Background(), t.TempDir(), FeeTypeElectricity, 2024, 0); !errors.Is(err, ErrEngineNotBuilt) {
 		t.Fatalf("Duplicates err = %v, want ErrEngineNotBuilt", err)
+	}
+}
+
+// TestImportXLSX (#70): the xlsx channel through the FULL vertical slice —
+// the recognize tests above pin the reader; this pins that the service's
+// batch/parquet/evidence layers treat an xlsx source identically to a CSV
+// one (rows imported, partition file on disk, the evidence anchor carrying
+// the workbook's own name).
+func TestImportXLSX(t *testing.T) {
+	svc, db, dir := newService(t)
+	ctx := context.Background()
+
+	f := excelize.NewFile()
+	for i, row := range [][]string{
+		{"站址编码", "账期", "电费(元)"},
+		{"SITE-X1", "2024-05", "123.45"},
+		{"SITE-X2", "2024-05", "67.89"},
+	} {
+		for j, cell := range row {
+			ref, err := excelize.CoordinatesToCellName(j+1, i+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.SetCellValue("Sheet1", ref, cell); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	src := filepath.Join(dir, "tower-may.xlsx")
+	if err := f.SaveAs(src); err != nil {
+		t.Fatal(err)
+	}
+
+	sum, err := svc.Import(ctx, ImportOptions{
+		Path: src, FeeType: FeeTypeTowerLease, Year: 2024, Month: 5,
+	})
+	if err != nil {
+		t.Fatalf("import xlsx: %v", err)
+	}
+	if sum.Status != "completed" || sum.RowsImported != 2 || sum.RowsFailed != 0 {
+		t.Fatalf("summary = %+v, want completed/2/0", sum)
+	}
+	if sum.WorkbookName != "tower-may.xlsx" {
+		t.Fatalf("workbookName = %q, want the original file name in the evidence anchor", sum.WorkbookName)
+	}
+	if _, err := db.FeeBatches.GetByID(ctx, sum.BatchID); err != nil {
+		t.Fatalf("batch row: %v", err)
+	}
+	files, err := BatchParquetFiles(filepath.Join(dir, "analysis"), sum.BatchID)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("parquet files = %v (err %v), want the one partition file", files, err)
 	}
 }
