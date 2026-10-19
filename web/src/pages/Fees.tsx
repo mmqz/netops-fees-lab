@@ -1,0 +1,443 @@
+/**
+ * 费用分析页 /fees（#58 阶段 5，前端工作台入口）：
+ * - 导入费用文件（multipart：file + feeType + year + month → POST /api/fees/imports，
+ *   201 新导入 / 200 幂等重复双形态提示）；
+ * - 费用批次列表（最新在前）+ 回滚（ConfirmDialog：删分析行、保快照证据）；
+ * - 风险六场景查询（GET /api/fees/risks/{scenario}）：线索表（站址/账期/触发指标/
+ *   显式阈值）+ 行展开证据锚点（sourceFile+sourceRow+importBatch+整数分）+
+ *   excluded 计数说明；501 engine_not_built 渲染为引导横幅而非裸错误。
+ *
+ * 教义：线索是待核实差异而非认定结论（账单存在 ≠ 重复付款认定）——页面文案
+ * 与 note 字段同源，均由后端契约携带。
+ */
+
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import type { RiskResult } from '../api/types';
+import {
+  fetchFeeBatches,
+  fetchFeeRisks,
+  formatApiErrorText,
+  rollbackFeeBatch,
+  uploadFeeFile,
+} from '../api/client';
+import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ErrorBlock } from '../components/ErrorBlock';
+import { Spinner } from '../components/Spinner';
+import {
+  FEES_501_HINT,
+  FEES_BATCHES_ROLLED_BACK,
+  FEES_BATCHES_ROLLBACK,
+  FEES_BATCHES_TITLE,
+  FEES_DESC,
+  FEES_IMPORT_DUP,
+  FEES_IMPORT_FILE,
+  FEES_IMPORT_MONTH,
+  FEES_IMPORT_OK,
+  FEES_IMPORT_SUBMIT,
+  FEES_IMPORT_TITLE,
+  FEES_IMPORT_TYPE,
+  FEES_IMPORT_YEAR,
+  FEES_RISKS_EMPTY,
+  FEES_RISKS_EVIDENCE,
+  FEES_RISKS_EVIDENCE_MORE,
+  FEES_RISKS_EXCLUDED,
+  FEES_RISKS_LIMIT,
+  FEES_RISKS_RUN,
+  FEES_RISKS_SCENARIO,
+  FEES_RISKS_TITLE,
+  FEES_TITLE,
+  FEE_TYPE_ELECTRICITY,
+  FEE_TYPE_MAINTENANCE,
+  FEE_TYPE_REPAIR,
+  FEE_TYPE_TOWER_LEASE,
+  RISK_SCENARIO_DUPLICATE_SETTLEMENT,
+  RISK_SCENARIO_LEDGER_MISMATCH,
+  RISK_SCENARIO_OUTLIER,
+  RISK_SCENARIO_RETIRED_BILLING,
+  RISK_SCENARIO_SPIKE,
+  RISK_SCENARIO_UNLINKED,
+} from '../i18n';
+
+/** 分 → 元（两位小数；金额契约整数分，展示层 /100） */
+function centsToYuan(cents: number): string {
+  return (cents / 100).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+const FEE_TYPES = [
+  { value: 'electricity', label: FEE_TYPE_ELECTRICITY },
+  { value: 'tower_lease', label: FEE_TYPE_TOWER_LEASE },
+  { value: 'repair', label: FEE_TYPE_REPAIR },
+  { value: 'maintenance', label: FEE_TYPE_MAINTENANCE },
+];
+
+const SCENARIOS = [
+  { value: 'retired-billing', label: RISK_SCENARIO_RETIRED_BILLING },
+  { value: 'duplicate-settlement', label: RISK_SCENARIO_DUPLICATE_SETTLEMENT },
+  { value: 'ledger-mismatch', label: RISK_SCENARIO_LEDGER_MISMATCH },
+  { value: 'spike', label: RISK_SCENARIO_SPIKE },
+  { value: 'outlier', label: RISK_SCENARIO_OUTLIER },
+  { value: 'unlinked', label: RISK_SCENARIO_UNLINKED },
+];
+
+interface FeeBatchRow {
+  id: string;
+  workbookName: string;
+  feeTypeLabel: string;
+  period: string;
+  status: string;
+  rowsTotal: number;
+  rowsImported: number;
+  rowsFailed: number;
+}
+
+export function FeesPage() {
+  const toast = useToast();
+
+  // ---- 批次 ----
+  const [batches, setBatches] = useState<FeeBatchRow[] | null>(null);
+  const [batchesError, setBatchesError] = useState<string>('');
+  const [rollbackTarget, setRollbackTarget] = useState<FeeBatchRow | null>(null);
+  const [rollingBack, setRollingBack] = useState(false);
+
+  const loadBatches = useCallback(async () => {
+    setBatchesError('');
+    try {
+      const res = await fetchFeeBatches();
+      setBatches(res.items);
+    } catch (err) {
+      setBatchesError(formatApiErrorText(err));
+      setBatches(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBatches();
+  }, [loadBatches]);
+
+  const doRollback = useCallback(async () => {
+    if (rollbackTarget === null) return;
+    setRollingBack(true);
+    try {
+      await rollbackFeeBatch(rollbackTarget.id);
+      toast.show(FEES_BATCHES_ROLLED_BACK(rollbackTarget.workbookName), 'success');
+      setRollbackTarget(null);
+      await loadBatches();
+    } catch (err) {
+      toast.show(formatApiErrorText(err), 'error');
+    } finally {
+      setRollingBack(false);
+    }
+  }, [rollbackTarget, loadBatches, toast]);
+
+  // ---- 导入 ----
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [importType, setImportType] = useState('electricity');
+  const [importYear, setImportYear] = useState(String(new Date().getFullYear()));
+  const [importMonth, setImportMonth] = useState(String(new Date().getMonth() + 1));
+  const [importing, setImporting] = useState(false);
+
+  const doImport = useCallback(async () => {
+    const file = fileInput.current?.files?.[0];
+    if (file === undefined) return;
+    const year = Number(importYear);
+    const month = Number(importMonth);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+      toast.show('账期必须是 2000–2100 年的 1–12 月', 'error');
+      return;
+    }
+    setImporting(true);
+    try {
+      const sum = await uploadFeeFile(file, importType, year, month);
+      if (sum.skippedDuplicate) {
+        toast.show(FEES_IMPORT_DUP(sum.existingBatch ?? sum.batchId), 'info');
+      } else {
+        toast.show(FEES_IMPORT_OK(sum.batchId, sum.rowsImported), 'success');
+        if (sum.rowsFailed > 0 && sum.errors !== undefined && sum.errors.length > 0) {
+          toast.show(sum.errors[0], 'info');
+        }
+      }
+      if (fileInput.current !== null) fileInput.current.value = '';
+      await loadBatches();
+    } catch (err) {
+      toast.show(formatApiErrorText(err), 'error');
+    } finally {
+      setImporting(false);
+    }
+  }, [importType, importYear, importMonth, loadBatches, toast]);
+
+  // ---- 风险查询 ----
+  const [scenario, setScenario] = useState('duplicate-settlement');
+  const [riskType, setRiskType] = useState('electricity');
+  const [riskYear, setRiskYear] = useState(String(new Date().getFullYear()));
+  const [riskMonth, setRiskMonth] = useState('');
+  const [riskLimit, setRiskLimit] = useState('50');
+  const [running, setRunning] = useState(false);
+  const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
+  const [riskError, setRiskError] = useState('');
+  const [engineMissing, setEngineMissing] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const runRisks = useCallback(async () => {
+    const year = Number(riskYear);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      setRiskError('年份必须是 2000–2100');
+      return;
+    }
+    setRunning(true);
+    setRiskError('');
+    setEngineMissing(false);
+    setExpanded(null);
+    try {
+      const res = await fetchFeeRisks(scenario, {
+        feeType: riskType,
+        year,
+        month: riskMonth === '' ? undefined : Number(riskMonth),
+        limit: riskLimit === '' ? undefined : Number(riskLimit),
+      });
+      setRiskResult(res);
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? '';
+      if (code === 'engine_not_built') {
+        setEngineMissing(true);
+        setRiskResult(null);
+      } else {
+        setRiskError(formatApiErrorText(err));
+      }
+    } finally {
+      setRunning(false);
+    }
+  }, [scenario, riskType, riskYear, riskMonth, riskLimit]);
+
+  const clueKey = (c: { siteCode: string; year: number; month: number }): string =>
+    `${c.siteCode}|${c.year}|${c.month}`;
+
+  return (
+    <div className="page">
+      <header className="page__header">
+        <div>
+          <h1 className="page__title">{FEES_TITLE}</h1>
+          <p className="page__desc">{FEES_DESC}</p>
+        </div>
+      </header>
+
+      <section className="panel">
+        <h2 className="panel__title">{FEES_RISKS_TITLE}</h2>
+        <div className="filters">
+          <label className="field">
+            <span>{FEES_RISKS_SCENARIO}</span>
+            <select value={scenario} onChange={(e) => setScenario(e.target.value)}>
+              {SCENARIOS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{FEES_IMPORT_TYPE}</span>
+            <select value={riskType} onChange={(e) => setRiskType(e.target.value)}>
+              {FEE_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field field--xs">
+            <span>{FEES_IMPORT_YEAR}</span>
+            <input value={riskYear} onChange={(e) => setRiskYear(e.target.value)} inputMode="numeric" />
+          </label>
+          <label className="field field--xs">
+            <span>{FEES_IMPORT_MONTH}</span>
+            <input
+              value={riskMonth}
+              onChange={(e) => setRiskMonth(e.target.value)}
+              inputMode="numeric"
+              placeholder="整年"
+            />
+          </label>
+          <label className="field field--xs">
+            <span>{FEES_RISKS_LIMIT}</span>
+            <input value={riskLimit} onChange={(e) => setRiskLimit(e.target.value)} inputMode="numeric" />
+          </label>
+          <button className="btn btn--primary" disabled={running} onClick={() => void runRisks()}>
+            {running ? <Spinner /> : FEES_RISKS_RUN}
+          </button>
+        </div>
+
+        {engineMissing && <div className="banner banner--info">{FEES_501_HINT}</div>}
+        {riskError !== '' && <ErrorBlock message={riskError} />}
+        {riskResult !== null && (
+          <div className="panel__body">
+            <p className="muted">
+              {riskResult.scenarioCn} · {riskResult.total} 条线索
+              {riskResult.excluded > 0 && <> · {FEES_RISKS_EXCLUDED(riskResult.excluded)}</>}
+            </p>
+            <p className="muted muted--small">{riskResult.note}</p>
+            {riskResult.clues.length === 0 ? (
+              <p className="empty">{FEES_RISKS_EMPTY}</p>
+            ) : (
+              <table className="table table--interactive">
+                <thead>
+                  <tr>
+                    <th>站址</th>
+                    <th>账期</th>
+                    <th>触发指标</th>
+                    <th>阈值</th>
+                    <th>证据</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {riskResult.clues.map((c) => {
+                    const key = clueKey(c);
+                    const open = expanded === key;
+                    const isCents = c.metricLabel === 'totalCents' || c.metricLabel === 'deltaCents';
+                    return (
+                      <Fragment key={key}>
+                        <tr
+                          className="row--expandable"
+                          onClick={() => {
+                            setExpanded(open ? null : key);
+                          }}
+                        >
+                          <td>{c.siteCode}</td>
+                          <td>{c.month > 0 ? `${c.year}-${String(c.month).padStart(2, '0')}` : `${c.year} 全年`}</td>
+                          <td>
+                            {isCents
+                              ? `¥${centsToYuan(c.metricValue)}（${c.metricLabel}）`
+                              : `${c.metricValue.toFixed(4).replace(/\.?0+$/, '')}（${c.metricLabel}）`}
+                          </td>
+                          <td className="muted">{c.thresholdLabel}</td>
+                          <td>{c.evidenceTotal} 行</td>
+                        </tr>
+                        {open && (
+                          <tr className="row--detail">
+                            <td colSpan={5}>
+                              {c.note !== undefined && c.note !== '' && <p className="muted">{c.note}</p>}
+                              <p className="kv__title">{FEES_RISKS_EVIDENCE}</p>
+                              <ul className="kv">
+                                {c.evidence.map((a, i) => (
+                                  <li key={i} className="kv__item">
+                                    <span className="kv__key">{a.sourceFile}:{a.sourceRow}</span>
+                                    <span className="kv__value">
+                                      ¥{centsToYuan(a.amountCents)} · 批次 {a.importBatch}
+                                    </span>
+                                  </li>
+                                ))}
+                                {c.evidenceTotal > c.evidence.length && (
+                                  <li className="kv__item muted">
+                                    {FEES_RISKS_EVIDENCE_MORE(c.evidenceTotal - c.evidence.length)}
+                                  </li>
+                                )}
+                              </ul>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2 className="panel__title">{FEES_BATCHES_TITLE}</h2>
+        <div className="panel__body">
+          {batchesError !== '' && <ErrorBlock message={batchesError} />}
+          {batches !== null && batches.length === 0 && (
+            <p className="empty">暂无费用批次——先在上方导入费用文件。</p>
+          )}
+          {batches !== null && batches.length > 0 && (
+            <table className="table table--interactive">
+              <thead>
+                <tr>
+                  <th>文件</th>
+                  <th>类型</th>
+                  <th>账期</th>
+                  <th>行数</th>
+                  <th>状态</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {batches.map((b) => (
+                  <tr key={b.id}>
+                    <td title={b.id}>{b.workbookName}</td>
+                    <td>{b.feeTypeLabel}</td>
+                    <td>{b.period}</td>
+                    <td>
+                      {b.rowsImported}/{b.rowsTotal}
+                      {b.rowsFailed > 0 && <span className="chip chip--warn">失败 {b.rowsFailed}</span>}
+                    </td>
+                    <td>
+                      <span className={`chip chip--${b.status === 'completed' ? 'ok' : b.status === 'failed' ? 'error' : 'muted'}`}>
+                        {b.status}
+                      </span>
+                    </td>
+                    <td>
+                      {b.status === 'completed' && (
+                        <button className="btn btn--ghost" onClick={() => setRollbackTarget(b)}>
+                          {FEES_BATCHES_ROLLBACK}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2 className="panel__title">{FEES_IMPORT_TITLE}</h2>
+        <div className="panel__body">
+          <div className="filters">
+            <label className="field">
+              <span>{FEES_IMPORT_TYPE}</span>
+              <select value={importType} onChange={(e) => setImportType(e.target.value)}>
+                {FEE_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field field--xs">
+              <span>{FEES_IMPORT_YEAR}</span>
+              <input value={importYear} onChange={(e) => setImportYear(e.target.value)} inputMode="numeric" />
+            </label>
+            <label className="field field--xs">
+              <span>{FEES_IMPORT_MONTH}</span>
+              <input value={importMonth} onChange={(e) => setImportMonth(e.target.value)} inputMode="numeric" />
+            </label>
+            <label className="field">
+              <span>{FEES_IMPORT_FILE}</span>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+              />
+            </label>
+            <button className="btn btn--primary" disabled={importing} onClick={() => void doImport()}>
+              {importing ? <Spinner /> : FEES_IMPORT_SUBMIT}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <ConfirmDialog
+        open={rollbackTarget !== null}
+        title={FEES_BATCHES_ROLLBACK}
+        message={rollbackTarget !== null ? `回滚批次 ${rollbackTarget.workbookName}（${rollbackTarget.period}）？分析行将删除，快照证据保留，同文件可再导入。` : ''}
+        confirmLabel={rollingBack ? '回滚中…' : FEES_BATCHES_ROLLBACK}
+        busy={rollingBack}
+        onConfirm={() => void doRollback()}
+        onCancel={() => {
+          setRollbackTarget(null);
+        }}
+      />
+    </div>
+  );
+}

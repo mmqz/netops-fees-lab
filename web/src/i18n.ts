@@ -861,6 +861,41 @@ export const ALR_EXPORT_FILENAME = 'netops-alerts';
 // ---------------------------------------------------------------------------
 
 export const NAV_API = 'API 参考';
+export const NAV_FEES = '费用分析';
+
+// 费用分析页（#58 阶段 5）
+export const FEES_TITLE = '费用分析';
+export const FEES_DESC = '费用数据的风险分析入口：导入费用文件（CSV/Excel）→ 分析层 Parquet 分区 → 风险六场景查询。线索是待核实差异而非认定结论（账单存在 ≠ 重复付款认定），每条线索携带行级证据锚点。';
+export const FEES_IMPORT_TITLE = '导入费用文件';
+export const FEES_IMPORT_TYPE = '费用类型';
+export const FEES_IMPORT_YEAR = '年份';
+export const FEES_IMPORT_MONTH = '月份';
+export const FEES_IMPORT_FILE = '文件（.csv / .xlsx / .xls）';
+export const FEES_IMPORT_SUBMIT = '导入';
+export const FEES_IMPORT_OK = (a: string, b: number) => `导入完成：${b} 行入库（批次 ${a}）`;
+export const FEES_IMPORT_DUP = (a: string) => `同一文件已于批次 ${a} 完成导入（幂等跳过，零新数据）`;
+export const FEES_RISKS_TITLE = '风险六场景';
+export const FEES_RISKS_SCENARIO = '场景';
+export const FEES_RISKS_RUN = '查询';
+export const FEES_RISKS_LIMIT = '线索上限';
+export const FEES_RISKS_EMPTY = '该场景在选定范围内无风险线索。';
+export const FEES_RISKS_EXCLUDED = (a: number) => `已排除 ${a} 个跨批次 (站址, 账期)（属于重复结算/金额差异场景的线索域）`;
+export const FEES_RISKS_EVIDENCE = '证据锚点';
+export const FEES_RISKS_EVIDENCE_MORE = (a: number) => `…另有 ${a} 行（快照层可回读原文）`;
+export const FEES_BATCHES_TITLE = '费用批次';
+export const FEES_BATCHES_ROLLBACK = '回滚';
+export const FEES_BATCHES_ROLLED_BACK = (a: string) => `批次 ${a} 已回滚（分析行删除，快照证据保留）`;
+export const FEES_501_HINT = '当前构建不含分析查询引擎（501 engine_not_built）——导入/快照/Parquet 写入不受影响；查询需 DuckDB 构建（Docker 镜像默认含引擎，或 WSL2 内 make build-duckdb，见 docs/fees-layer.md §5）。';
+export const FEE_TYPE_ELECTRICITY = '电费';
+export const FEE_TYPE_TOWER_LEASE = '铁塔租费';
+export const FEE_TYPE_REPAIR = '修理费';
+export const FEE_TYPE_MAINTENANCE = '综维费';
+export const RISK_SCENARIO_RETIRED_BILLING = '退租后仍在计费';
+export const RISK_SCENARIO_DUPLICATE_SETTLEMENT = '跨批次重复结算';
+export const RISK_SCENARIO_LEDGER_MISMATCH = '合同账单金额差异';
+export const RISK_SCENARIO_SPIKE = '电费环比异常上涨';
+export const RISK_SCENARIO_OUTLIER = '同类站单位成本离群';
+export const RISK_SCENARIO_UNLINKED = '零资源计费';
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

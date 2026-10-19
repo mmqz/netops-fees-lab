@@ -34,6 +34,7 @@ import {
   NAV_LAB_TOPOLOGY,
   NAV_LAB_WORKSPACES,
   NAV_MAIN_LABEL,
+  NAV_FEES,
   NAV_MAINTENANCE,
   NAV_OVERVIEW,
   NAV_REPORT,
@@ -47,6 +48,7 @@ import { EmptyState } from './components/EmptyState';
 import {
   IconAlert,
   IconClock,
+  IconCoins,
   IconDoc,
   IconFlask,
   IconHome,
@@ -64,6 +66,7 @@ import { IssuesPage } from './pages/Issues';
 import { AlertsPage } from './pages/Alerts';
 import { RulesPage } from './pages/Rules';
 import { MaintenancePage } from './pages/Maintenance';
+import { FeesPage } from './pages/Fees';
 import { ApiReferencePage } from './pages/ApiReference';
 import { ReportPage } from './pages/Report';
 import { LabWorkspacesPage } from './pages/LabWorkspaces';
@@ -85,6 +88,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/alerts', label: NAV_ALERTS, icon: <IconAlert /> },
   { to: '/rules', label: NAV_RULES, icon: <IconPencil size={20} /> },
   { to: '/maintenance', label: NAV_MAINTENANCE, icon: <IconClock size={20} /> },
+  { to: '/fees', label: NAV_FEES, icon: <IconCoins size={20} /> },
   { to: '/report', label: NAV_REPORT, icon: <IconReport /> },
   { to: '/dev', label: NAV_API, icon: <IconDoc size={20} /> },
 ];
@@ -107,6 +111,8 @@ function routeTitle(pathname: string): string {
       return NAV_RULES;
     case '/maintenance':
       return NAV_MAINTENANCE;
+    case '/fees':
+      return NAV_FEES;
     case '/report':
       return NAV_REPORT;
     case '/dev':
@@ -329,6 +335,7 @@ function AppShell() {
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/maintenance" element={<MaintenancePage />} />
+            <Route path="/fees" element={<FeesPage />} />
             <Route path="/report" element={<ReportPage />} />
             <Route path="/dev" element={<ApiReferencePage />} />
             <Route path="/lab" element={<LabWorkspacesPage />} />

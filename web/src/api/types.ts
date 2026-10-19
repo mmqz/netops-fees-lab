@@ -1403,3 +1403,82 @@ export interface OpenApiSpec {
   tags: Array<{ name: string }>;
   paths: Record<string, OpenApiPathItem>;
 }
+
+// ---------------------------------------------------------------------------
+// 费用分析层（#58 阶段 5，前端工作台入口）
+// ---------------------------------------------------------------------------
+
+/** GET /api/fees/batches 的批次项 */
+export interface FeeBatchItem {
+  id: string;
+  workbookName: string;
+  feeType: string;
+  feeTypeLabel: string;
+  period: string;
+  status: string;
+  rowsTotal: number;
+  rowsImported: number;
+  rowsFailed: number;
+  snapshotPath: string;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+/** GET /api/fees/batches 信封 */
+export interface FeeBatchesList {
+  items: FeeBatchItem[];
+  total: number;
+}
+
+/** POST /api/fees/imports 结果（201 新导入 / 200 幂等重复） */
+export interface FeeImportSummary {
+  batchId: string;
+  status: string;
+  workbookName: string;
+  sha256: string;
+  feeType: string;
+  feeYear: number;
+  feeMonth: number;
+  rowsTotal: number;
+  rowsImported: number;
+  rowsFailed: number;
+  files: string[];
+  errors?: string[];
+  skippedDuplicate: boolean;
+  existingBatch?: string;
+}
+
+/** 风险线索的行级证据锚点（可回读快照原文） */
+export interface RiskEvidenceAnchor {
+  sourceFile: string;
+  sourceRow: number;
+  importBatch: string;
+  amountCents: number;
+}
+
+/** 一条待核实的风险线索（账单存在 ≠ 认定结论） */
+export interface RiskClue {
+  siteCode: string;
+  year: number;
+  month: number;
+  metricValue: number;
+  metricLabel: string;
+  threshold: number | null;
+  thresholdLabel: string;
+  evidence: RiskEvidenceAnchor[];
+  evidenceTotal: number;
+  note?: string;
+}
+
+/** GET /api/fees/risks/{scenario} 信封 */
+export interface RiskResult {
+  scenario: string;
+  scenarioCn: string;
+  feeType: string;
+  year: number;
+  month: number;
+  clues: RiskClue[];
+  total: number;
+  excluded: number;
+  note: string;
+}

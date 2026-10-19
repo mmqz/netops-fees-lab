@@ -11,28 +11,8 @@ import type {
   AlertAckResponse,
   AlertClearResponse,
   AlertItem,
-  AlertsQuery,
   AlertStats,
-  DetectionRunItem,
-  DetectionRunsQuery,
-  DetectionRuleCreateRequest,
-  DetectionRuleDeleteResponse,
-  DetectionRuleItem,
-  DetectionRulePatchRequest,
-  DetectionRulesListResponse,
-  DetectionRunResponse,
-  MaintenanceWindow,
-  MaintenanceWindowCreated,
-  MaintenanceWindowDeleted,
-  MaintenanceWindowRequest,
-  ImpactDocument,
-  RunStateHistoryResponse,
-  MetricKeyItem,
-  MetricSeriesResult,
-  OpenApiSpec,
-  ResourceMetricsResponse,
-  TraverseDirection,
-  TraverseDocument,
+  AlertsQuery,
   ApplyResult,
   AttributeChangeItem,
   AttributeChangeList,
@@ -40,45 +20,69 @@ import type {
   BatchListItem,
   BatchRow,
   ChangeSetItem,
-  CheckpointList,
-  CheckpointResult,
   CheckRunDetail,
   CheckRunItem,
+  CheckpointList,
+  CheckpointResult,
   DeleteWorkspaceResult,
+  DetectionRuleCreateRequest,
+  DetectionRuleDeleteResponse,
+  DetectionRuleItem,
+  DetectionRulePatchRequest,
+  DetectionRulesListResponse,
+  DetectionRunItem,
+  DetectionRunResponse,
+  DetectionRunsQuery,
   DiffResult,
+  FeeBatchItem,
+  FeeBatchesList,
+  FeeImportSummary,
   GovernanceSummary,
   HealthResponse,
+  ImpactDocument,
   ImportAnalysisResponse,
   ImportResultResponse,
   IssueCounts,
   IssueItem,
+  LayerMembersPage,
+  MaintenanceWindow,
+  MaintenanceWindowCreated,
+  MaintenanceWindowDeleted,
+  MaintenanceWindowRequest,
   MappingModel,
   MaterializeResult,
+  MetricKeyItem,
+  MetricSeriesResult,
   OpRequest,
+  OpenApiSpec,
   Paged,
   PartialIssueCounts,
   RelationGraph,
-  RestoreResult,
+  RenameList,
+  RenameProposalItem,
   ResourceDetail,
   ResourceItem,
+  ResourceMetricsResponse,
   ResourceType,
+  RestoreResult,
+  RiskResult,
   RollbackResponse,
   RowStatus,
   RuleCode,
   RunResult,
+  RunStateHistoryResponse,
   Severity,
   SimPathResult,
   SimTopology,
   StatsResponse,
   TopologyCheckResponse,
+  TraverseDirection,
+  TraverseDocument,
   UndoResult,
   ValidateResponse,
   WorkspaceCreateRequest,
   WorkspaceDetail,
   WorkspaceSummary,
-  RenameList,
-  RenameProposalItem,
-  LayerMembersPage,
 } from './types';
 import { ERR_API_CHECKPOINT_MISSING_FILE, ERR_API_CONFLICT, ERR_API_INVALID_REQUEST, ERR_API_NOT_FOUND, ERR_API_NOT_LATEST, ERR_API_OP_FAILED, ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
 
@@ -916,4 +920,59 @@ export interface IssuesQuery {
   ruleCode?: RuleCode;
   page?: number;
   pageSize?: number;
+}
+
+// ---------------------------------------------------------------------------
+// 费用分析层（#58 阶段 5）：导入 / 批次 / 回滚 / 风险六场景
+// ---------------------------------------------------------------------------
+
+/** POST /api/fees/imports（multipart：file + feeType + year + month） */
+export function uploadFeeFile(
+  file: File,
+  feeType: string,
+  year: number,
+  month: number,
+): Promise<FeeImportSummary> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('feeType', feeType);
+  form.append('year', String(year));
+  form.append('month', String(month));
+  return requestJson<FeeImportSummary>('/fees/imports', {
+    method: 'POST',
+    body: form,
+  });
+}
+
+/** GET /api/fees/batches?status=（最新在前） */
+export function fetchFeeBatches(status?: string): Promise<FeeBatchesList> {
+  return requestJson<FeeBatchesList>(`/fees/batches${buildQuery({ status })}`);
+}
+
+/** POST /api/fees/batches/{id}/rollback（删分析行、保快照证据） */
+export function rollbackFeeBatch(batchId: string): Promise<FeeBatchItem> {
+  return requestJson<FeeBatchItem>(
+    `/fees/batches/${encodeURIComponent(batchId)}/rollback`,
+    { method: 'POST' },
+  );
+}
+
+/** GET /api/fees/risks/{scenario}（六场景之一；501 engine_not_built = 默认构建未编译引擎） */
+export function fetchFeeRisks(
+  scenario: string,
+  params: {
+    feeType: string;
+    year: number;
+    month?: number;
+    limit?: number;
+    diffCents?: number;
+    ratio?: number;
+    z?: number;
+    minSites?: number;
+    status?: string;
+  },
+): Promise<RiskResult> {
+  return requestJson<RiskResult>(
+    `/fees/risks/${encodeURIComponent(scenario)}${buildQuery(params as Record<string, string | number | undefined>)}`,
+  );
 }
