@@ -703,3 +703,44 @@ CREATE UNIQUE INDEX idx_fee_batches_idem ON fee_batches(sha256, fee_type, fee_ye
 - **计数三列** `rows_total / rows_imported / rows_failed`：行失败是**计数而非致命**（快照保留证据，修正后重导）。
 - **CLI 契约**：`netopslab fees --db --data import|list|rollback|query`（单 JSON stdout；幂等重复导入 informational exit 0）；`mapping` 亦可由表头同义词自动识别（识别不到必需列即拒绝）。
 - **AI 通道边界**：查询面是固定预设 + 参数（totals / duplicates）——调用方传不了 SQL；MCP 工具面 5 个冻结不变（阶段 5 才考虑扩展）。
+
+# DDL v30 — 费用-资源关联表 fee_site_links
+
+> Migration `30` name `fee_site_links`（`internal/repo/migrations_v30.go`，机制同 v4–v29）。**当前 schema version = 30**。纯 `CREATE TABLE` + 三个索引 + 一个**部分唯一索引**，无表重建。费用侧**刻意无 FK**：费用编码来自 Parquet 分析层而非 SQLite 行——关联是代码空间事实，不是批次事实；资源侧 `ON DELETE CASCADE`（被审计实体消失则关联随之消失）。
+
+## 19. 费用-资源分级关联（#63，#58 阶段 3）
+
+三级匹配（#63 裁决）：**exact**（逐字节相等 → 自动确认）/ **rule**（命名规范化规则下相等 → 自动确认 + 规则留痕）/ **fuzzy**（相似度 ≥ 0.8 → **只出 pending 提案**，人工 confirm/dismiss——W005/W006 人工确认教义，绝不自动合并身份）。生命周期：`pending → confirmed|dismissed`（终态不可再操作，重复操作 409）；**一个费用编码至多一条 confirmed**（部分唯一索引）——**人类确认优先于自动扫描**（扫描永不覆写 source=human 的行，自动行随数据进出而重建/清除）。
+
+### 19.1 DDL v30 全文
+
+```sql
+CREATE TABLE fee_site_links (
+  id TEXT PRIMARY KEY,                          -- fsl_<uuid>
+  fee_site_code TEXT NOT NULL,                  -- 费用侧站址编码（代码空间事实，无费用侧 FK）
+  resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+  resource_type TEXT NOT NULL,
+  resource_key TEXT NOT NULL,                   -- 建链时命中的资源键（审计）
+  grade TEXT NOT NULL CHECK (grade IN ('exact','rule','fuzzy')),
+  rule TEXT,                                    -- rule 级所用规则名；其它级 NULL
+  similarity REAL,                              -- fuzzy 级相似度（审计）；其它级 NULL
+  status TEXT NOT NULL CHECK (status IN ('confirmed','pending','dismissed')),
+  source TEXT NOT NULL CHECK (source IN ('auto','human')),
+  batch_id TEXT,                                -- 产出本提案的费用批次（fuzzy 溯源；可为 NULL）
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+CREATE INDEX idx_fee_site_links_code ON fee_site_links(fee_site_code);
+CREATE INDEX idx_fee_site_links_resource ON fee_site_links(resource_id);
+CREATE INDEX idx_fee_site_links_status ON fee_site_links(status);
+-- 一个费用站址编码至多一条 confirmed 关联（部分唯一：pending/dismissed 不占位）
+CREATE UNIQUE INDEX idx_fee_site_links_live ON fee_site_links(fee_site_code) WHERE status = 'confirmed';
+```
+
+### 19.2 设计决策与不变式
+
+- **规则族封闭且命名**：`fold`（全角 ASCII 块 U+FF01–FF5E → 半角 + 空白折叠 + 大小写折叠）/ `zero_pad`（纯数字串前导零剥离）——每条链接记录所用规则（可解释）；先 fold 后 zero_pad，首个命中即止。
+- **fuzzy 提案幂等**：同 (code, resource) 对已有 pending/dismissed 不重复提案、不复活人工驳回；每编码至多 3 候选（相似度降序、键/ID 平局裁决）。
+- **扫描权威域**：编码全集来自**活跃 Parquet 文件**（completed 批次；纯 Go parquet 列投影读取——默认构建可关联）。数据面消失的编码 → 自动（非 dismissed）行被**dropout 清扫**删除；人工确认与驳回是**决策**，寿命超越数据（W006 教义）。
+- **资源侧 join 展示**：HTTP 列表 join 资源名/状态（悬空引用保留记录键——链接自身字段仍可读）。
+- **AI 通道边界**：confirm/dismiss 是 HTTP/CLI 人类通道；`POST /api/fees/links/scan` 是确定性扫描（机器可触发）；MCP 冻结。

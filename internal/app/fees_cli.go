@@ -15,9 +15,11 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/fees"
+	"github.com/mmqz/netops-lab/internal/repo"
 )
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -54,7 +56,7 @@ func splitFeeArgs(args []string) (dbPath, dataDir, sub string, subArgs []string,
 			return dbPath, dataDir, arg, args[i+1:], nil
 		}
 	}
-	return "", "", "", nil, &usageError{msg: "缺少 fees 子命令（import / list / rollback / query）"}
+	return "", "", "", nil, &usageError{msg: "缺少 fees 子命令（import / list / rollback / query / link-scan / links）"}
 }
 
 // cmdFees implements `netopslab fees --db <path> --data <dir> import|list|rollback|query …`.
@@ -80,8 +82,12 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesRollback(ctx, svc, subArgs, stdout, stderr)
 	case "query":
 		return cmdFeesQuery(ctx, svc, dataDir, subArgs, stdout, stderr)
+	case "link-scan":
+		return cmdFeesLinkScan(ctx, svc, subArgs, stdout, stderr)
+	case "links":
+		return cmdFeesLinks(ctx, svc, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 import、list、rollback 或 query，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 import、list、rollback、query、link-scan 或 links，收到 %q", sub)}
 	}
 }
 
@@ -262,4 +268,140 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 	default:
 		return &usageError{msg: fmt.Sprintf("fees query 预设必须是 totals 或 duplicates，收到 %q", preset)}
 	}
+}
+
+// cmdFeesLinkScan implements `fees link-scan`: run the graded matcher
+// (exact → rule → fuzzy proposals) over the live Parquet code universe.
+func cmdFeesLinkScan(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees link-scan")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees link-scan 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	result, err := svc.ScanLinks(ctx)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cmdFeesLinks implements `fees links list|confirm|dismiss` — the human
+// confirmation channel of the fuzzy proposals (auto exact/rule links are
+// visible via list; their lifecycle is the scan's, not a decision's).
+func cmdFeesLinks(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees links 需要 list、confirm 或 dismiss 子命令"}
+	}
+	sub, subArgs := args[0], args[1:]
+	switch sub {
+	case "list":
+		return cmdFeesLinksList(ctx, svc, subArgs, stdout, stderr)
+	case "confirm":
+		return cmdFeesLinksDecide(ctx, svc, "confirm", subArgs, stdout, stderr)
+	case "dismiss":
+		return cmdFeesLinksDecide(ctx, svc, "dismiss", subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("fees links 子命令必须是 list、confirm 或 dismiss，收到 %q", sub)}
+	}
+}
+
+// cmdFeesLinksList implements `fees links list [--status] [--grade] [--code]`.
+func cmdFeesLinksList(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees links list")
+	status := fs.String("status", "", "状态过滤：confirmed / pending / dismissed（缺省全部）")
+	grade := fs.String("grade", "", "级别过滤：exact / rule / fuzzy（缺省全部）")
+	code := fs.String("code", "", "按费用站址编码过滤")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees links list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	filter := repo.FeeLinkFilter{Code: *code}
+	if *status != "" {
+		switch domain.LinkStatus(*status) {
+		case domain.LinkStatusConfirmed, domain.LinkStatusPending, domain.LinkStatusDismissed:
+			filter.Status = domain.LinkStatus(*status)
+		default:
+			return &usageError{msg: fmt.Sprintf("--status 必须是 confirmed/pending/dismissed，收到 %q", *status), usage: usage.String()}
+		}
+	}
+	if *grade != "" {
+		switch domain.LinkGrade(*grade) {
+		case domain.LinkGradeExact, domain.LinkGradeRule, domain.LinkGradeFuzzy:
+			filter.Grade = domain.LinkGrade(*grade)
+		default:
+			return &usageError{msg: fmt.Sprintf("--grade 必须是 exact/rule/fuzzy，收到 %q", *grade), usage: usage.String()}
+		}
+	}
+	links, err := svc.ListLinks(ctx, filter)
+	if err != nil {
+		return err
+	}
+	items := make([]feeLinkItem, 0, len(links))
+	for _, l := range links {
+		items = append(items, feeLinkItem{
+			ID: l.ID, FeeSiteCode: l.FeeSiteCode, ResourceID: l.ResourceID,
+			ResourceType: string(l.ResourceType), ResourceKey: l.ResourceKey,
+			Grade: string(l.Grade), Rule: l.Rule, Similarity: l.Similarity,
+			Status: string(l.Status), Source: string(l.Source), CreatedAt: l.CreatedAt,
+			DecidedAt: l.DecidedAt,
+		})
+	}
+	return writeJSON(stdout, feeLinksResult{Items: items, Total: len(items)})
+}
+
+// feeLinkItem is the CLI link item shape.
+type feeLinkItem struct {
+	ID           string     `json:"id"`
+	FeeSiteCode  string     `json:"feeSiteCode"`
+	ResourceID   string     `json:"resourceId"`
+	ResourceType string     `json:"resourceType"`
+	ResourceKey  string     `json:"resourceKey"`
+	Grade        string     `json:"grade"`
+	Rule         string     `json:"rule,omitempty"`
+	Similarity   float64    `json:"similarity,omitempty"`
+	Status       string     `json:"status"`
+	Source       string     `json:"source"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	DecidedAt    *time.Time `json:"decidedAt"`
+}
+
+type feeLinksResult struct {
+	Items []feeLinkItem `json:"items"`
+	Total int           `json:"total"`
+}
+
+// cmdFeesLinksDecide implements `fees links confirm|dismiss --id`.
+func cmdFeesLinksDecide(ctx context.Context, svc *fees.Service, op string, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees links " + op)
+	id := fs.String("id", "", "链接提案 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "fees links " + op + " 需要 --id", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees links " + op + " 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	var l domain.FeeSiteLink
+	var err error
+	if op == "confirm" {
+		l, err = svc.ConfirmLink(ctx, *id)
+	} else {
+		l, err = svc.DismissLink(ctx, *id)
+	}
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, feeLinkItem{
+		ID: l.ID, FeeSiteCode: l.FeeSiteCode, ResourceID: l.ResourceID,
+		ResourceType: string(l.ResourceType), ResourceKey: l.ResourceKey,
+		Grade: string(l.Grade), Rule: l.Rule, Similarity: l.Similarity,
+		Status: string(l.Status), Source: string(l.Source), CreatedAt: l.CreatedAt,
+		DecidedAt: l.DecidedAt,
+	})
 }

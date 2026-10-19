@@ -410,3 +410,33 @@ func filePaths(base string, files []partitionFile) []string {
 	}
 	return out
 }
+
+// ListLinks returns the fee-site links (newest first) with the
+// repo-level filters.
+func (s *Service) ListLinks(ctx context.Context, f repo.FeeLinkFilter) ([]domain.FeeSiteLink, error) {
+	return s.db.FeeSiteLinks.List(ctx, f)
+}
+
+// ConfirmLink human-confirms a pending fuzzy proposal (pending →
+// confirmed, source human). The partial unique index fires when another
+// confirmed link already holds the code — ErrConflict semantics.
+func (s *Service) ConfirmLink(ctx context.Context, id string) (domain.FeeSiteLink, error) {
+	now := s.clock()
+	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
+		return tx.FeeSiteLinks.Confirm(ctx, id, now)
+	}); err != nil {
+		return domain.FeeSiteLink{}, fmt.Errorf("fees: 确认关联 %s: %w", id, err)
+	}
+	return s.db.FeeSiteLinks.GetByID(ctx, id)
+}
+
+// DismissLink human-dismisses a pending fuzzy proposal (audit kept).
+func (s *Service) DismissLink(ctx context.Context, id string) (domain.FeeSiteLink, error) {
+	now := s.clock()
+	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
+		return tx.FeeSiteLinks.Dismiss(ctx, id, now)
+	}); err != nil {
+		return domain.FeeSiteLink{}, fmt.Errorf("fees: 驳回关联 %s: %w", id, err)
+	}
+	return s.db.FeeSiteLinks.GetByID(ctx, id)
+}

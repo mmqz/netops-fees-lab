@@ -87,6 +87,9 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/batches/{id}/rollback` | 回滚（删分析行保快照；409/404 守卫） |
 | `GET /api/fees/query/totals?feeType=&year=&month=&limit=` | 站址汇总预设 |
 | `GET /api/fees/query/duplicates?feeType=&year=&month=` | 跨批次重复结算候选预设 |
+| `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
+| `GET /api/fees/links?status=&grade=&code=&resource_id=` | 关联列表（资源侧 join） |
+| `POST /api/fees/links/{id}/confirm \| dismiss` | 人工确认/驳回模糊提案（人类优先于扫描） |
 
 写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。五端点进 OpenAPI 文档（`fees` tag，路由表生成零漂移）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
@@ -97,7 +100,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | 0 技术验证（#59） | ✅ 关闭（双引擎基准 + CGO + Parquet 实测） |
 | 1 分层设计（#60） | ✅ 本切片落地（快照层 + 分区大表 + 血缘 + 批次共存） |
 | 2 导入管道（#61） | ✅ 本切片落地（CSV/Excel → 快照 → Parquet，幂等/重试/回滚/GC） |
-| 3 实体分级关联（站址编码精确 → 规则 → 模糊人工确认） | 待开 |
+| 3 实体分级关联（站址编码精确 → 规则 → 模糊人工确认） | ✅ 落地（#63，migration v30：exact/rule 自动确认 + fuzzy 人工提案流 + dropout 清扫 + 人类优先） |
 | 4 六大风险场景规则 + 证据追溯 | 待开（`duplicates` 预设是首个场景的雏形） |
 | 5 MCP 工具面扩展 + 统一工作台入口 | 待开（HTTP API 面待阶段 3 前） |
 

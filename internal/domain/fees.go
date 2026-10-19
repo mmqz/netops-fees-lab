@@ -106,3 +106,58 @@ type FeeBatch struct {
 	CreatedAt    time.Time
 	CompletedAt  *time.Time
 }
+
+// LinkGrade is the association grade of a fee-site link (#63, #58 stage 3).
+type LinkGrade string
+
+const (
+	// LinkGradeExact: fee code == the resource's natural key, byte-for-byte.
+	LinkGradeExact LinkGrade = "exact"
+	// LinkGradeRule: equality under a named normalization rule (recorded).
+	LinkGradeRule LinkGrade = "rule"
+	// LinkGradeFuzzy: a similarity candidate — pending until a human
+	// confirms (never auto-merged).
+	LinkGradeFuzzy LinkGrade = "fuzzy"
+)
+
+// LinkStatus is the link lifecycle: exact/rule create confirmed (auto);
+// fuzzy creates pending; a human confirms or dismisses. Confirmed and
+// dismissed are terminal (re-confirm/re-dismiss refuse).
+type LinkStatus string
+
+const (
+	// LinkStatusConfirmed: the live association (at most one per code).
+	LinkStatusConfirmed LinkStatus = "confirmed"
+	// LinkStatusPending: a fuzzy proposal awaiting a human decision.
+	LinkStatusPending LinkStatus = "pending"
+	// LinkStatusDismissed: a fuzzy proposal a human rejected (audit kept).
+	LinkStatusDismissed LinkStatus = "dismissed"
+)
+
+// LinkSource tells who created the association: auto (deterministic
+// exact/rule matching) or human (a confirmed fuzzy proposal).
+type LinkSource string
+
+const (
+	// LinkSourceAuto: deterministic matcher output.
+	LinkSourceAuto LinkSource = "auto"
+	// LinkSourceHuman: a human-confirmed fuzzy candidate.
+	LinkSourceHuman LinkSource = "human"
+)
+
+// FeeSiteLink is one fee-site ↔ resource association row (migration v30).
+type FeeSiteLink struct {
+	ID           string
+	FeeSiteCode  string
+	ResourceID   string
+	ResourceType ResourceType
+	ResourceKey  string
+	Grade        LinkGrade
+	Rule         string
+	Similarity   float64 // fuzzy grade only; 0 otherwise
+	Status       LinkStatus
+	Source       LinkSource
+	BatchID      string // the fee batch that produced a fuzzy proposal; "" otherwise
+	CreatedAt    time.Time
+	DecidedAt    *time.Time
+}

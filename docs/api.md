@@ -1139,6 +1139,22 @@ multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricit
 
 同键多批次共存的行（`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/period/批次数/行数/总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。参数与 501 契约同 totals。
 
+## POST /api/fees/links/scan — 费用-资源分级关联扫描（#63，#58 阶段 3）
+
+对活跃 Parquet 编码全集跑三级匹配：**exact**（逐字节 → 自动确认）/ **rule**（fold / zero_pad 命名规则 → 自动确认 + 规则留痕）/ **fuzzy**（相似度 ≥ 0.8 → pending 提案，每编码至多 3 候选）。人类确认的链接**永不**被扫描覆写；数据面消失的编码其自动链接被清扫（人工决策除外）。返回计数信封 `{codes, exactLinks, ruleLinks, fuzzyProposed, unlinked, humanKept}`。幂等：重复扫描同判定、不重复提案。
+
+## GET /api/fees/links?status=&grade=&code=&resource_id= — 关联列表
+
+`status=confirmed/pending/dismissed`、`grade=exact/rule/fuzzy`、`code`、`resource_id` 过滤，最新在前。项含资源侧 join（`resourceName` / `resourceStatus`——资源被回滚删除后为空，记录键仍在）与审计字段（`grade/rule/similarity/source/decidedAt`）。非法参数 400。
+
+## POST /api/fees/links/{id}/confirm — 人工确认模糊提案
+
+仅 pending 可确认：`confirmed` + `source=human` + `decidedAt` 打点。该编码已有 confirmed 关联 → 409（先处理旧的）；非 pending → 409（message 含当前状态）；未知 id 404。**人类确认优先于自动扫描**（后续 scan 不覆写）。
+
+## POST /api/fees/links/{id}/dismiss — 驳回模糊提案
+
+仅 pending 可驳回：`dismissed`（审计保留，编码与资源对不再自动复提）；非 pending → 409；未知 id 404。CLI 等价：`netopslab fees links confirm|dismiss --id <id>`。
+
 ## 静态资源与 SPA
 
 - `GET /` 与一切非 `/api` 路径 → 嵌入式 React SPA（`go:embed`）；未知子路径回退 `index.html`（客户端路由）。

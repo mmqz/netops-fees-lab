@@ -306,8 +306,8 @@ VALUES ('al_bad_s','dr_v18_t',?,'2026-03-05T00:00:00Z',?,-15.2,'2026-03-02T00:00
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 29 {
-		t.Errorf("max schema version after upgrade = %d, want 29", maxV)
+	if maxV != 30 {
+		t.Errorf("max schema version after upgrade = %d, want 30", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op (a second CREATE TABLE
@@ -321,8 +321,8 @@ VALUES ('al_bad_s','dr_v18_t',?,'2026-03-05T00:00:00Z',?,-15.2,'2026-03-02T00:00
 	if err := db3.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version after reopen: %v", err)
 	}
-	if maxV != 29 {
-		t.Errorf("max schema version after reopen = %d, want 29", maxV)
+	if maxV != 30 {
+		t.Errorf("max schema version after reopen = %d, want 30", maxV)
 	}
 	if _, err := db3.Alerts.GetAlertByID(ctx, probe.AlertID); err != nil {
 		t.Errorf("GetAlertByID after reopen: %v", err)

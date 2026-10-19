@@ -22,6 +22,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/fees"
+	"github.com/mmqz/netops-lab/internal/repo"
 )
 
 // handleFeesImport implements POST /api/fees/imports: multipart fields
@@ -377,4 +378,150 @@ func firstString(ss []string, def string) string {
 		}
 	}
 	return def
+}
+
+// handleFeesLinksScan implements POST /api/fees/links/scan: run the
+// graded matcher (exact → rule → fuzzy proposals) over the live Parquet
+// code universe. Returns the scan counters.
+func (s *Server) handleFeesLinksScan(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	result, err := s.fees.ScanLinks(r.Context())
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleFeesLinksList implements GET /api/fees/links?status=&grade=&code=&resource_id=
+// — newest first; the resource join (display name + status) rides the
+// resources repo, mirroring the renames list's join.
+func (s *Server) handleFeesLinksList(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	filter := repo.FeeLinkFilter{Code: q.Get("code"), Resource: q.Get("resource_id")}
+	if raw := q.Get("status"); raw != "" {
+		switch domain.LinkStatus(raw) {
+		case domain.LinkStatusConfirmed, domain.LinkStatusPending, domain.LinkStatusDismissed:
+			filter.Status = domain.LinkStatus(raw)
+		default:
+			respondError(w, http.StatusBadRequest, "bad_request",
+				"status 必须是 confirmed/pending/dismissed，收到 "+strconv.Quote(raw))
+			return
+		}
+	}
+	if raw := q.Get("grade"); raw != "" {
+		switch domain.LinkGrade(raw) {
+		case domain.LinkGradeExact, domain.LinkGradeRule, domain.LinkGradeFuzzy:
+			filter.Grade = domain.LinkGrade(raw)
+		default:
+			respondError(w, http.StatusBadRequest, "bad_request",
+				"grade 必须是 exact/rule/fuzzy，收到 "+strconv.Quote(raw))
+			return
+		}
+	}
+	links, err := s.fees.ListLinks(r.Context(), filter)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	// join the resource side for display (a vanished resource keeps the
+	// recorded key — the link's own fields still tell the story).
+	ids := make([]string, 0, len(links))
+	seen := map[string]struct{}{}
+	for _, l := range links {
+		if _, dup := seen[l.ResourceID]; !dup {
+			seen[l.ResourceID] = struct{}{}
+			ids = append(ids, l.ResourceID)
+		}
+	}
+	byID := map[string]domain.Resource{}
+	for _, id := range ids {
+		if res, err := s.db.Resources.GetByID(r.Context(), id); err == nil {
+			byID[id] = res
+		}
+	}
+	items := make([]feeLinkItem, 0, len(links))
+	for _, l := range links {
+		item := feeLinkItem{
+			ID: l.ID, FeeSiteCode: l.FeeSiteCode, ResourceID: l.ResourceID,
+			ResourceType: string(l.ResourceType), ResourceKey: l.ResourceKey,
+			Grade: string(l.Grade), Rule: l.Rule, Similarity: l.Similarity,
+			Status: string(l.Status), Source: string(l.Source), CreatedAt: l.CreatedAt, DecidedAt: l.DecidedAt,
+		}
+		if res, ok := byID[l.ResourceID]; ok {
+			item.ResourceName = res.Name
+			item.ResourceStatus = res.Status
+		}
+		items = append(items, item)
+	}
+	respondJSON(w, http.StatusOK, feeLinksList{Items: items, Total: len(items)})
+}
+
+// feeLinkItem is the REST shape of one link (joined display fields).
+type feeLinkItem struct {
+	ID             string     `json:"id"`
+	FeeSiteCode    string     `json:"feeSiteCode"`
+	ResourceID     string     `json:"resourceId"`
+	ResourceType   string     `json:"resourceType"`
+	ResourceKey    string     `json:"resourceKey"`
+	ResourceName   string     `json:"resourceName,omitempty"`
+	ResourceStatus string     `json:"resourceStatus,omitempty"`
+	Grade          string     `json:"grade"`
+	Rule           string     `json:"rule,omitempty"`
+	Similarity     float64    `json:"similarity,omitempty"`
+	Status         string     `json:"status"`
+	Source         string     `json:"source"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	DecidedAt      *time.Time `json:"decidedAt"`
+}
+
+type feeLinksList struct {
+	Items []feeLinkItem `json:"items"`
+	Total int           `json:"total"`
+}
+
+// handleFeesLinkConfirm implements POST /api/fees/links/{id}/confirm:
+// pending → confirmed (source human). A confirmed link already holding
+// the code → 409; non-pending or unknown → 409/404.
+func (s *Server) handleFeesLinkConfirm(w http.ResponseWriter, r *http.Request) {
+	s.feesLinkDecide(w, r, "confirm")
+}
+
+// handleFeesLinkDismiss implements POST /api/fees/links/{id}/dismiss:
+// pending → dismissed (audit kept).
+func (s *Server) handleFeesLinkDismiss(w http.ResponseWriter, r *http.Request) {
+	s.feesLinkDecide(w, r, "dismiss")
+}
+
+func (s *Server) feesLinkDecide(w http.ResponseWriter, r *http.Request, op string) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	var (
+		l   domain.FeeSiteLink
+		err error
+	)
+	if op == "confirm" {
+		l, err = s.fees.ConfirmLink(r.Context(), r.PathValue("id"))
+	} else {
+		l, err = s.fees.DismissLink(r.Context(), r.PathValue("id"))
+	}
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, feeLinkItem{
+		ID: l.ID, FeeSiteCode: l.FeeSiteCode, ResourceID: l.ResourceID,
+		ResourceType: string(l.ResourceType), ResourceKey: l.ResourceKey,
+		Grade: string(l.Grade), Rule: l.Rule, Similarity: l.Similarity,
+		Status: string(l.Status), Source: string(l.Source), CreatedAt: l.CreatedAt, DecidedAt: l.DecidedAt,
+	})
 }

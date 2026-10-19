@@ -351,3 +351,150 @@ func TestAPIFeesWritesRideTheAuthGate(t *testing.T) {
 		t.Fatalf("read route must stay open: status = %d", resp2.StatusCode)
 	}
 }
+
+// TestAPIFeesLinkJourney walks the link lifecycle over HTTP: import fee
+// codes + resources (via the resource import API) → scan (auto exact +
+// fuzzy proposal) → links list (resource join) → confirm (human) → 409
+// re-confirm → the scan respects the human link.
+func TestAPIFeesLinkJourney(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	// seed one site-like resource through the real import pipeline: a
+	// base_station whose fallback natural key is the station name.
+	importBaseStationWorkbook(t, srv, "SITE99", "172.7.10.9/30")
+	// fee codes: the exact hit + a near miss (edit distance 1 of 6 →
+	// similarity 0.833, above the 0.8 proposal threshold).
+	resp, body := uploadFeeFile(t, srv, "fees.csv", "站址编码,账期,电费(元)\nSITE99,2024-05,1.00\nSITE9X,2024-05,2.00\n", "electricity", "2024", "5", "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("fee import: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+
+	// scan: exact (SITE99) + fuzzy (SITE9X → SITE99).
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/fees/links/scan", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("scan: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var scan struct {
+		Codes         int `json:"codes"`
+		ExactLinks    int `json:"exactLinks"`
+		RuleLinks     int `json:"ruleLinks"`
+		FuzzyProposed int `json:"fuzzyProposed"`
+		Unlinked      int `json:"unlinked"`
+	}
+	if err := json.Unmarshal(body, &scan); err != nil {
+		t.Fatal(err)
+	}
+	if scan.ExactLinks != 1 || scan.FuzzyProposed != 1 {
+		t.Fatalf("scan = %+v, want exact 1 + fuzzy 1", scan)
+	}
+
+	// links list: the confirmed auto link + the pending proposal; the
+	// resource join carries the display fields.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/links", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("links: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var links struct {
+		Items []struct {
+			ID           string  `json:"id"`
+			FeeSiteCode  string  `json:"feeSiteCode"`
+			Grade        string  `json:"grade"`
+			Status       string  `json:"status"`
+			Source       string  `json:"source"`
+			ResourceName string  `json:"resourceName"`
+			Similarity   float64 `json:"similarity"`
+		} `json:"items"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(body, &links); err != nil {
+		t.Fatal(err)
+	}
+	if links.Total != 2 {
+		t.Fatalf("links total = %d, want 2", links.Total)
+	}
+	var proposalID string
+	for _, l := range links.Items {
+		if l.ResourceName == "" {
+			t.Errorf("link %s: resource join empty (resourceName)", l.ID)
+		}
+		if l.Status == "pending" {
+			proposalID = l.ID
+			if l.Grade != "fuzzy" || l.Similarity < 0.8 {
+				t.Errorf("pending link = %+v, want fuzzy ≥0.8", l)
+			}
+		}
+	}
+	if proposalID == "" {
+		t.Fatal("no pending proposal found")
+	}
+
+	// confirm → 200, source flips human.
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/fees/links/"+proposalID+"/confirm", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirm: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var confirmed struct {
+		Status string `json:"status"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal(body, &confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Status != "confirmed" || confirmed.Source != "human" {
+		t.Fatalf("confirmed = %+v, want confirmed/human", confirmed)
+	}
+	// re-confirm → 409.
+	resp, _ = doRequest(t, srv, http.MethodPost, "/api/fees/links/"+proposalID+"/confirm", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("re-confirm: status = %d, want 409", resp.StatusCode)
+	}
+	// unknown id → 404 (confirm + dismiss).
+	for _, op := range []string{"confirm", "dismiss"} {
+		resp, _ = doRequest(t, srv, http.MethodPost, "/api/fees/links/fsl_nope/"+op, nil, "")
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s unknown: status = %d, want 404", op, resp.StatusCode)
+		}
+	}
+	// the scan keeps the human link.
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/fees/links/scan", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("re-scan: status = %d", resp.StatusCode)
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/links?status=confirmed&source=human", nil, "")
+	_ = resp
+	// (source filter is not a query param — assert via the full list)
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/links?status=confirmed", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirmed list: status = %d", resp.StatusCode)
+	}
+	var confirmedList struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Source string `json:"source"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &confirmedList); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, l := range confirmedList.Items {
+		if l.ID == proposalID && l.Source == "human" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the human-confirmed link must survive the re-scan")
+	}
+
+	// filters: grade / bogus values.
+	resp, _ = doRequest(t, srv, http.MethodGet, "/api/fees/links?grade=fuzzy&status=pending", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("grade filter: status = %d", resp.StatusCode)
+	}
+	for _, q := range []string{"status=bogus", "grade=bogus"} {
+		resp, _ = doRequest(t, srv, http.MethodGet, "/api/fees/links?"+q, nil, "")
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("links %q: status = %d, want 400", q, resp.StatusCode)
+		}
+	}
+}

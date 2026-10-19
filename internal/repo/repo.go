@@ -81,6 +81,11 @@ type DB struct {
 	// only; snapshots and Parquet rows never land here.
 	FeeBatches *FeeBatchRepo
 
+	// FeeSiteLinks stores the graded fee-code ↔ resource associations
+	// (migration v30, #63/#58 stage 3): exact/rule auto-confirmed, fuzzy
+	// proposals with human confirmation.
+	FeeSiteLinks *FeeSiteLinkRepo
+
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
 	Sequences      *SequenceRepo
@@ -196,6 +201,7 @@ func wire(db *DB, q DBTX) {
 	db.LayerLinks = &LayerLinkRepo{q: q}
 	db.Templates = &TemplateRepo{q: q}
 	db.FeeBatches = &FeeBatchRepo{q: q}
+	db.FeeSiteLinks = &FeeSiteLinkRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -227,6 +233,11 @@ type Tx struct {
 	// pipeline (migration v29, #58/#60/#61) — the SQLite state layer
 	// only; snapshots and Parquet rows never land here.
 	FeeBatches *FeeBatchRepo
+
+	// FeeSiteLinks stores the graded fee-code ↔ resource associations
+	// (migration v30, #63/#58 stage 3): exact/rule auto-confirmed, fuzzy
+	// proposals with human confirmation.
+	FeeSiteLinks *FeeSiteLinkRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -364,6 +375,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		LayerLinks:           &LayerLinkRepo{q: sqlTx},
 		Templates:            &TemplateRepo{q: sqlTx},
 		FeeBatches:           &FeeBatchRepo{q: sqlTx},
+		FeeSiteLinks:         &FeeSiteLinkRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {
