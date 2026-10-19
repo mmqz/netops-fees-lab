@@ -1,5 +1,8 @@
 # [P2] #54 遗留：letterbox 护栏在「内容纵向装不下」时静默失效，72% 利用率目标数学上不可达
 
+> GitHub issue 编号：**[#62](https://github.com/mmqz/netops-lab/issues/62)**
+> （仓库内文件名为 issue-58-*.md 是本地序号，GitHub 上 #58–#61 已被费用风险分析模块占用）
+
 来源：v0.12.1（`0a5dc98`）对 #54 修复的复测，2026-10-19
 方法：CDP 读 Cytoscape 实例 + 8×8 像素网格采样 + 手算验证
 

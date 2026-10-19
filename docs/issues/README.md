@@ -561,7 +561,7 @@ Math.max(12, -278.2) = 12                     ← 静默钳掉
 
 | # | 优先级 | 标题 |
 | --- | --- | --- |
-| [58](issue-58-letterbox-unreachable-target.md) | **P2** | #54 遗留：letterbox 护栏在「内容纵向装不下」时静默失效，72% 目标数学不可达 |
+| [#62](issue-58-letterbox-unreachable-target.md) | **P2** | #54 遗留：letterbox 护栏在「内容纵向装不下」时静默失效，72% 目标数学不可达（GitHub issue 编号 #62——#58–#61 已被费用分析模块占用） |
 | [env](env-fsync-antivirus-slowdown.md) | 环境 | 本机 fsync 被 Kaspersky 拖慢 200–2000 倍，导致 go test 大面积超时（非代码缺陷） |
 
 ## v0.8.1 本地验证（2026-10-14）
