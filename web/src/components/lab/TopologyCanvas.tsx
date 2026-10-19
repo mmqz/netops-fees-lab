@@ -75,6 +75,7 @@ import type {
 import { getImpact } from '../../api/client';
 import type { SelectedEntity } from './selection';
 import { isUnconfiguredIPv4 } from './selection';
+import { computeFitPaddings, FIT_PADDING, recordFitMode } from './fitGuard';
 import {
   LAB_CANVAS_CTX_COPY_ID,
   LAB_CANVAS_CTX_COPY_ID_TITLE,
@@ -379,19 +380,10 @@ const FIT_MIN_ZOOM = 0.15;
 /** 布局动画时长（ms）。 */
 const LAYOUT_ANIMATION_MS = 300;
 
-/** 布局完成后 fit 的横向留白（px）。 */
-const FIT_PADDING = 40;
-
 /**
- * #53-B letterbox 护栏：内容比视口「高瘦」（宽高比 < 视口宽高比）时，fit 若
- * 按统一留白适配，横向利用率会随内容瘦长程度线性下降（默认图层组合实测
- * 仅约 33%——内容被压成中间竖条）。此时纵向留白可收窄（下限
- * FIT_PAD_V_MIN=12px，内容永不溢出画布），换取横向铺开；护栏目标
- * FIT_UTILIZATION_TARGET=0.72（高于验收线 0.70 留测量余量），不可达
- * （图更高瘦）时按最小纵向留白尽力——首选用满画布，其次保证内容完整可见。
+ * #53-B/#62 letterbox 护栏：常量与可达性判定抽至 fitGuard.ts（纯函数，
+ * 三态显式分支 + 埋点）——「不可达」不再是被 Math.max 静默钳掉的负数。
  */
-const FIT_PAD_V_MIN = 12;
-const FIT_UTILIZATION_TARGET = 0.72;
 
 /** 视图按钮单步缩放系数。 */
 const ZOOM_STEP = 1.25;
@@ -855,14 +847,12 @@ function fitToView(cy: Core): void {
   if (bb === null) return; // 空画布：与 cy.fit 对空集合的 no-op 行为一致
   const vw = cy.width();
   const vh = cy.height();
-  let padY = FIT_PADDING;
-  if (Number.isFinite(vw) && vw > 0 && Number.isFinite(vh) && vh > 0 && bb.h > 0 && bb.w / bb.h < vw / vh) {
-    // 高瘦内容：横向利用率 u = zoom·bb.w/vw，zoom ≤ (vh−2·padY)/bb.h
-    // 解出达成 u 所需的纵向留白，夹在 [FIT_PAD_V_MIN, FIT_PADDING]。
-    const zoomNeeded = (FIT_UTILIZATION_TARGET * vw) / bb.w;
-    const padNeeded = (vh - zoomNeeded * bb.h) / 2;
-    if (padNeeded < padY) padY = Math.min(FIT_PADDING, Math.max(FIT_PAD_V_MIN, padNeeded));
-  }
+  // #62：护栏可达性判定抽为纯函数（fitGuard.ts，三态显式分支）——
+  // 旧实现 Math.max 静默吞掉负 padNeeded，让「72% 横向目标数学上不可达」
+  // 退化成普通 fit 而不自知。mode 落到容器的 data-fit-mode（埋点）。
+  const fit = computeFitPaddings({ w: bb.w, h: bb.h }, vw, vh);
+  recordFitMode(fit.mode, (cy.container() as HTMLElement | null) ?? null);
+  const padY = fit.padY;
   const padded = {
     x1: bb.x1 - FIT_PADDING,
     y1: bb.y1 - padY,

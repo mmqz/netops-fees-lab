@@ -50,6 +50,8 @@ jobs:
         run: npm ci
       - name: build (tsc strict + vite)
         run: npm run build
+      - name: test (vitest — #62 起的前端纯函数单测)
+        run: npm test
 
   # The fee analysis engine (issue #58/#60/#61): DuckDB via go-duckdb is
   # CGO and deliberately NOT part of the default build (engine_std.go
