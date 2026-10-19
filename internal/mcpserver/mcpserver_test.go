@@ -83,8 +83,9 @@ func startSession(t *testing.T, db *repo.DB) *mcp.ClientSession {
 		// The real entry point the CLI uses — mcpserver.Run over the pipe
 		// ends as its stdin/stdout. W9-D: the session consumes the single
 		// service composition built from this test's db (the same shape
-		// app.New hands to Run).
-		done <- Run(ctx, services.New(db), srvRead, srvWrite)
+		// app.New hands to Run). #58 stage 5: WithFees wires the fee
+		// analysis service (a temp data dir — the fee_risks tool needs it).
+		done <- Run(ctx, services.New(db, services.WithFees(testsupport.TempDir(t))), srvRead, srvWrite)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -250,10 +251,10 @@ func TestMCPToolRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	// The ten contract tools, SORTED for comparison (§8 pins the set, the
-	// registry order is unspecified).
+	// The eleven contract tools, SORTED for comparison (§8 pins the set,
+	// the registry order is unspecified). #58 stage 5 added fee_risks.
 	want := []string{
-		"alerts_query", "graph_context", "graph_impact", "graph_traverse",
+		"alerts_query", "fee_risks", "graph_context", "graph_impact", "graph_traverse",
 		"lab_apply_ops", "lab_checkpoint", "lab_diff_undo", "lab_run_checks",
 		"metrics_query", "resource_search",
 	}
@@ -271,8 +272,8 @@ func TestMCPToolRegistry(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 10 {
-		t.Fatalf("tools/list exposes %d tools (%v), want exactly the ten contract tools %v", len(names), names, want)
+	if len(names) != 11 {
+		t.Fatalf("tools/list exposes %d tools (%v), want exactly the eleven contract tools %v", len(names), names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {
@@ -933,5 +934,44 @@ func TestMCPLabCheckpoint(t *testing.T) {
 	})
 	if !strings.Contains(msg, "not_found") {
 		t.Errorf("list unknown workspace: error message = %q, want the not_found code prefix", msg)
+	}
+}
+
+// TestMCPFeeRisks pins the fee_risks tool (#58 stage 5): the closed
+// parameter validation (scenario/feeType/year) and — on default builds —
+// the honest engine-not-built refusal. The duckdb-tagged fees package
+// tests cover the real preset outputs; this pin holds the TOOL surface.
+func TestMCPFeeRisks(t *testing.T) {
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
+	if err != nil {
+		t.Fatalf("repo.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	session := startSession(t, db)
+
+	// validation: bogus scenario / fee type / missing year (MCP tool
+	// errors — IsError results, not protocol errors)
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"scenario": "bogus", "feeType": "electricity", "year": 2024}, "场景"},
+		{map[string]any{"scenario": "spike", "feeType": "bogus", "year": 2024}, "feeType"},
+		{map[string]any{"scenario": "spike", "feeType": "electricity"}, "year"},
+	} {
+		got := callToolError(t, session, "fee_risks", tc.args)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("fee_risks(%v) error = %q, want it to mention %q", tc.args, got, tc.want)
+		}
+	}
+
+	// default build: the honest engine-not-built refusal, every scenario
+	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked"} {
+		got := callToolError(t, session, "fee_risks", map[string]any{
+			"scenario": sc, "feeType": "electricity", "year": 2024,
+		})
+		if !strings.Contains(got, "分析查询引擎未编译") {
+			t.Errorf("fee_risks(%s) on default build error = %q, want the engine-not-built refusal", sc, got)
+		}
 	}
 }

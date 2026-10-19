@@ -126,6 +126,7 @@ func NewServer(svc *services.Services) *mcp.Server {
 	})
 	addLabTools(server, svc.Lab)
 	addGraphTools(server, svc)
+	addFeeTools(server, svc)
 	return server
 }
 

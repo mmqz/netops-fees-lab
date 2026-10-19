@@ -325,7 +325,7 @@ netopslab gc       --db ./data/netops.db --data ./data       # 手动清理孤�
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.12.0`），注册**恰好 10 个工具**（5 资源/仿真域 + 5 图分析域，TestMCPToolRegistry 钉死）：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.14.0`），注册**恰好 11 个工具**（5 资源/仿真域 + 5 图分析域 + 1 费用风险域，TestMCPToolRegistry 钉死）：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |
@@ -339,8 +339,9 @@ netopslab testdata --out testdata
 | `graph_context` | 只读 | 资源关系上下文 |
 | `alerts_query` | 只读 | 质量告警查询（含根因/次生关联裁定，AI 分诊证据通道） |
 | `metrics_query` | 只读 | 指标时序查询（ts/value/quality，劣化趋势证据通道） |
+| `fee_risks` | 只读 | 费用风险六场景查询（场景+费用类型+账期 → 风险线索 + 行级证据锚点；阈值恒用治理默认值，AI 不可调参；账单存在 ≠ 认定结论） |
 
-AI 改仿真态只能经这 4 个 lab 工具（每个变更显式携带 workspaceId、走引擎校验）；MCP **无建删工作区工具**、无 SQL/Shell/SSH/文件工具；`restore_*` 引擎内部操作码在 HTTP/MCP/CLI 三边界均被拒；图分析域（后 5 个）全部只读。
+AI 改仿真态只能经这 4 个 lab 工具（每个变更显式携带 workspaceId、走引擎校验）；MCP **无建删工作区工具**、无 SQL/Shell/SSH/文件工具；`restore_*` 引擎内部操作码在 HTTP/MCP/CLI 三边界均被拒；图分析域与费用风险域（后 6 个）全部只读。
 
 TeleAgent 集成：MCP 注册方式与 CLI 回退路径（以结构化 JSON 供 Skills 解析）见 **[docs/teleagent-integration.md](docs/teleagent-integration.md)** —— 注意：**部署态 TeleAgent 的 MCP 调用未在本开发环境验证**，接入时请按该文档操作并反馈。
 

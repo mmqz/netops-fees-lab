@@ -25,11 +25,12 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 
 - name：`netops-lab`
 - version：`v0.6.0`（`domain.AppVersion` 常量，MCP initialize 响应报告；v0.3.2 起该常量由 `TestAppVersionMatchesChangelogHead` 与 CHANGELOG 头版本锚定，此示例值随版本演进——以握手实际响应为准）
-- 工具清单（`tools/list`）：**恰好 10 个**（无 SQL/Shell/SSH/文件工具；`TestMCPToolRegistry` 断言排序比较；v0.9 R4 新增 5 个只读分析工具）：
+- 工具清单（`tools/list`）：**恰好 11 个**（无 SQL/Shell/SSH/文件工具；`TestMCPToolRegistry` 断言排序比较；v0.9 R4 新增 5 个只读分析工具，v0.14 新增费用风险查询）：
 
 | 工具 | 类别 | 一句话职责 |
 | --- | --- | --- |
 | `resource_search` | 只读 | 检索导入资源（P1，不变） |
+| `fee_risks` | 只读分析 | 费用风险六场景查询（#58 阶段 5：场景+费用类型+账期→线索+行级证据锚点；阈值恒用治理默认值，AI 不可调参；默认构建未编译引擎时明确报错） |
 | `graph_traverse` | 只读分析 | 纵向穿透（§10.3 层序 BFS，down/up/both） |
 | `graph_impact` | 只读分析 | 根因候选 + 影响面分类（§10.5/§10.6） |
 | `graph_context` | 只读分析 | 一站式分析上下文（详情 + 邻接 + 最新指标 + 异常） |
