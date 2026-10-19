@@ -23,3 +23,35 @@ func (stdQueryEngine) Totals(ctx context.Context, analysisDir string, feeType Fe
 func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]DuplicateRow, error) {
 	return nil, ErrEngineNotBuilt
 }
+
+// ---- the six risk scenarios + cross-layer primitives on the std stub:
+// every method answers the honest 501 contract (#64 acceptance: default
+// builds refuse, duckdb builds answer). ----
+
+func (stdQueryEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {
+	return nil, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) SiteTotalsAll(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SiteTotal, error) {
+	return nil, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
+	return nil, ErrEngineNotBuilt
+}

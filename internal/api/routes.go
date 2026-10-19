@@ -101,6 +101,7 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/fees/batches/{id}/rollback", Tag: "fees", Summary: "回滚费用批次（删分析行、保快照证据）", Handler: s.handleFeesRollback},
 		{Method: "GET", Pattern: "/api/fees/query/totals", Tag: "fees", Summary: "费用分析：站址汇总（feeType/year[/month]，DuckDB 引擎需 duckdb 构建）", Handler: s.handleFeesQueryTotals},
 		{Method: "GET", Pattern: "/api/fees/query/duplicates", Tag: "fees", Summary: "费用分析：跨批次重复结算候选（风险线索 + 证据锚点）", Handler: s.handleFeesQueryDuplicates},
+		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险六场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks},
 		{Method: "POST", Pattern: "/api/fees/links/scan", Tag: "fees", Summary: "费用-资源分级关联扫描（精确→规则自动确认，模糊出提案；人类通道确认）", Handler: s.handleFeesLinksScan},
 		{Method: "GET", Pattern: "/api/fees/links", Tag: "fees", Summary: "费用-资源关联列表（status/grade/code/resource_id 过滤，含资源侧 join）", Handler: s.handleFeesLinksList},
 		{Method: "POST", Pattern: "/api/fees/links/{id}/confirm", Tag: "fees", Summary: "人工确认模糊关联提案（pending→confirmed；人类决策优先于自动扫描）", Handler: s.handleFeesLinkConfirm},

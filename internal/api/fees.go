@@ -525,3 +525,88 @@ func (s *Server) feesLinkDecide(w http.ResponseWriter, r *http.Request, op strin
 		Status: string(l.Status), Source: string(l.Source), CreatedAt: l.CreatedAt, DecidedAt: l.DecidedAt,
 	})
 }
+
+// handleFeesRisks implements GET /api/fees/risks/{scenario}?feeType=&year=
+// [&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=] —
+// the six risk-scenario presets (#64, #58 stage 4). Closed parameter set
+// (every threshold explicit, defaults documented in fees-layer.md §7);
+// default builds answer 501 engine_not_built like every engine preset.
+func (s *Server) handleFeesRisks(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	scenario, err := fees.ParseRiskScenario(r.PathValue("scenario"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	q := r.URL.Query()
+	feeType, err := fees.ParseFeeType(q.Get("feeType"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "feeType 参数必须是 "+
+			strings.Join(fees.FeeTypes(), "/")+"，收到 "+strconv.Quote(q.Get("feeType")))
+		return
+	}
+	year, month, _, err := parseFeesQueryPeriod(q)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	rq := fees.RiskQuery{FeeType: feeType, Year: year, Month: month}
+	if raw := q.Get("status"); raw != "" {
+		rq.Statuses = fees.SplitComma(raw)
+	}
+	if raw := q.Get("diffCents"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v < 0 {
+			respondError(w, http.StatusBadRequest, "bad_request", "diffCents 必须是非负整数（分）")
+			return
+		}
+		rq.DiffCents = v
+	}
+	for _, p := range []struct {
+		name string
+		ptr  *float64
+	}{
+		{"ratio", &rq.Ratio},
+		{"z", &rq.ZScore},
+	} {
+		if raw := q.Get(p.name); raw != "" {
+			v, err := strconv.ParseFloat(raw, 64)
+			if err != nil || v <= 0 {
+				respondError(w, http.StatusBadRequest, "bad_request", p.name+" 必须是正数")
+				return
+			}
+			*p.ptr = v
+		}
+	}
+	for _, p := range []struct {
+		name string
+		ptr  *int
+	}{
+		{"minSites", &rq.MinSites},
+		{"limit", &rq.Limit},
+		{"maxEvidence", &rq.MaxEvidence},
+	} {
+		if raw := q.Get(p.name); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v < 1 {
+				respondError(w, http.StatusBadRequest, "bad_request", p.name+" 必须是正整数")
+				return
+			}
+			*p.ptr = v
+		}
+	}
+	engine := fees.Query(r.Context())
+	if !engine.Available() {
+		respondError(w, http.StatusNotImplemented, "engine_not_built", fees.ErrEngineNotBuilt.Error())
+		return
+	}
+	result, err := s.fees.Risks(r.Context(), engine, scenario, rq)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}

@@ -46,6 +46,24 @@ type DuplicateRow struct {
 	TotalCents int64  `json:"totalCents"`
 }
 
+// SitePeriodTotal is one (site, period) aggregate of the fee side (the
+// cross-layer scenarios' fee half).
+type SitePeriodTotal struct {
+	SiteCode   string
+	Year       int
+	Month      int
+	Rows       int
+	TotalCents int64
+}
+
+// SiteTotal is one site's aggregate across the query scope (scenario 6's
+// fee half — period-agnostic).
+type SiteTotal struct {
+	SiteCode   string
+	Rows       int
+	TotalCents int64
+}
+
 // QueryEngine answers the fee analysis presets over the Parquet table at
 // analysisDir. Implementations MUST be safe for concurrent use (the HTTP
 // surface shares one instance).
@@ -60,6 +78,44 @@ type QueryEngine interface {
 	// of one fee type (month 0 = the whole year): every (site, period)
 	// whose rows span more than one import batch.
 	Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]DuplicateRow, error)
+
+	// ---- the six risk scenarios (#64, #58 stage 4) ----
+	// The four pure-Parquet presets return BARE clues (no evidence
+	// anchors — the service fetches those uniformly); the second return
+	// is the excluded multi-batch (site, period) count (scenarios 4/5;
+	// 0 for 2/3).
+
+	// RiskDuplicatesPreset (scenario 2): (site, period) pairs billed
+	// by more than one batch. Metric = batch count.
+	RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
+	// RiskLedgerMismatchPreset (scenario 3): (site, period) pairs
+	// whose per-batch totals differ by more than DiffCents. Metric =
+	// max-min of the per-batch totals (cents).
+	RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
+	// RiskSpikePreset (scenario 4): single-batch (site, period)
+	// totals whose month-over-period rise ratio reaches Ratio.
+	// Metric = the rise ratio.
+	RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
+	// RiskOutlierPreset (scenario 5): single-batch (site, period)
+	// totals whose z-score against the same-period peers reaches
+	// ZScore (two-sided; metric = the signed z). Requires at least
+	// MinSites peers in the period.
+	RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
+
+	// ---- the cross-layer scenarios' fee-side primitives ----
+
+	// SitePeriodTotals returns every (site, period) total of the fee
+	// type within the scope (month 0 = the whole year) — scenario 1's
+	// fee half.
+	SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error)
+	// SiteTotalsAll returns every site's total across the scope
+	// (month 0 = the whole year) — scenario 6's fee half.
+	SiteTotalsAll(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SiteTotal, error)
+	// EvidenceFor returns up to maxPer row-level evidence anchors per
+	// key (site + period; key Month 0 = all months of the key's
+	// year). Deterministic anchor order: (import_batch, source_row,
+	// amount_cents).
+	EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error)
 }
 
 // Query is the package-level engine entry: NewQueryEngine returns the

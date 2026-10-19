@@ -7,8 +7,10 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -127,5 +129,51 @@ func TestCLIFeesFlow(t *testing.T) {
 	}
 	if code == 0 {
 		t.Log("this e2e binary was built with -tags duckdb: the query succeeded")
+	}
+}
+
+// TestCLIFeesRisksContract pins the six-scenario CLI surface on the
+// default build (#64): usage errors exit 2, the missing --type/--year
+// exit 2, and every valid scenario answers the honest engine-unavailable
+// failure (exit 1) — the duckdb-tagged fees package tests cover the real
+// outputs end to end.
+func TestCLIFeesRisksContract(t *testing.T) {
+	if e2eBin == "" {
+		t.Skip("netopslab binary was not built (go tool unavailable)")
+	}
+	tmp := t.TempDir()
+	db := filepath.Join(tmp, "netops.db")
+
+	// usage errors: no scenario, bogus scenario, missing --type/--year.
+	for _, args := range [][]string{
+		{"fees", "--db", db, "--data", tmp, "risks"},
+		{"fees", "--db", db, "--data", tmp, "risks", "bogus", "--type", "electricity", "--year", "2024"},
+		{"fees", "--db", db, "--data", tmp, "risks", "spike"},
+		{"fees", "--db", db, "--data", tmp, "risks", "spike", "--type", "electricity"},
+		{"fees", "--db", db, "--data", tmp, "risks", "spike", "--type", "bogus", "--year", "2024"},
+	} {
+		_, code := runCLI(t, args...)
+		if code != 2 {
+			t.Errorf("%v: exit = %d, want 2 (usage)", args, code)
+		}
+	}
+
+	// every valid scenario: the engine-unavailable failure carries the
+	// duckdb build hint (exit 1, single JSON error object).
+	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked"} {
+		stdout, code := runCLI(t, "fees", "--db", db, "--data", tmp,
+			"risks", sc, "--type", "electricity", "--year", "2024")
+		if code != 1 {
+			t.Errorf("risks %s: exit = %d, want 1 (engine not built)\nstdout: %s", sc, code, stdout)
+			continue
+		}
+		var errOut map[string]any
+		if err := json.Unmarshal([]byte(stdout), &errOut); err != nil {
+			t.Fatalf("risks %s: stdout not a JSON error object: %v\n%s", sc, err, stdout)
+		}
+		errBody, _ := errOut["error"].(map[string]any)
+		if !strings.Contains(fmt.Sprint(errBody["message"]), "duckdb") {
+			t.Errorf("risks %s error message must carry the duckdb hint: %v", sc, errBody["message"])
+		}
 	}
 }

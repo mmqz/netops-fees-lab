@@ -16,6 +16,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mmqz/netops-lab/internal/fees"
 )
 
 // uploadFeeFile posts the fee import multipart (file + feeType + year +
@@ -495,6 +497,54 @@ func TestAPIFeesLinkJourney(t *testing.T) {
 		resp, _ = doRequest(t, srv, http.MethodGet, "/api/fees/links?"+q, nil, "")
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("links %q: status = %d, want 400", q, resp.StatusCode)
+		}
+	}
+}
+
+// TestFeesRisksEndpoint pins the six-scenario surface's HTTP contract on
+// default builds: the closed scenario/parameter validation (400s, firing
+// before the engine gate) and the honest 501 engine_not_built across all
+// six scenarios (#64 acceptance) — the duckdb-tagged fees package tests
+// cover the real preset outputs.
+func TestFeesRisksEndpoint(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	// unknown scenario / bad parameters → 400 (validation precedes the engine gate)
+	for _, tc := range []struct {
+		url  string
+		want string
+	}{
+		{"/api/fees/risks/bogus?feeType=electricity&year=2024", "场景"},
+		{"/api/fees/risks/spike?feeType=bogus&year=2024", "feeType"},
+		{"/api/fees/risks/spike?feeType=electricity&year=1899", "year 必须是 2000"},
+		{"/api/fees/risks/spike?feeType=electricity&year=2024&ratio=abc", "ratio"},
+		{"/api/fees/risks/spike?feeType=electricity&year=2024&z=-1", "z"},
+		{"/api/fees/risks/spike?feeType=electricity&year=2024&limit=0", "limit"},
+		{"/api/fees/risks/spike?feeType=electricity&year=2024&minSites=x", "minSites"},
+		{"/api/fees/risks/spike?feeType=electricity&year=2024&diffCents=-5", "diffCents"},
+	} {
+		resp, body := doRequest(t, srv, http.MethodGet, tc.url, nil, "")
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), tc.want) {
+			t.Errorf("GET %s = %d, want 400 mentioning %q\nbody: %s", tc.url, resp.StatusCode, tc.want, body)
+		}
+	}
+
+	// valid parameters on the default build → 501 engine_not_built (all six)
+	for _, sc := range fees.RiskScenarios() {
+		resp, body := doRequest(t, srv, http.MethodGet,
+			"/api/fees/risks/"+sc+"?feeType=electricity&year=2024", nil, "")
+		var errOut struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &errOut); err != nil {
+			t.Fatalf("scenario %s: decode: %v\n%s", sc, err, body)
+		}
+		if resp.StatusCode != http.StatusNotImplemented ||
+			errOut.Error.Code != "engine_not_built" || !strings.Contains(errOut.Error.Message, "duckdb") {
+			t.Errorf("scenario %s on default build = %d %+v, want 501 engine_not_built", sc, resp.StatusCode, errOut.Error)
 		}
 	}
 }

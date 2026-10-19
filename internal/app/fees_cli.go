@@ -86,9 +86,66 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesLinkScan(ctx, svc, subArgs, stdout, stderr)
 	case "links":
 		return cmdFeesLinks(ctx, svc, subArgs, stdout, stderr)
+	case "risks":
+		return cmdFeesRisks(ctx, svc, dataDir, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 import、list、rollback、query、link-scan 或 links，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 import、list、rollback、query、link-scan、links 或 risks，收到 %q", sub)}
 	}
+}
+
+// cmdFeesRisks implements `fees risks <scenario>` — the six risk-scenario
+// presets of #64 (#58 stage 4): retired-billing / duplicate-settlement /
+// ledger-mismatch / spike / outlier / unlinked. Every threshold flag maps
+// to a RiskQuery field with a documented default; the output is the
+// single-JSON RiskResult envelope (clues carry row-level evidence
+// anchors pointing back into the snapshot layer).
+func cmdFeesRisks(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees risks 需要场景参数：" + strings.Join(fees.RiskScenarios(), " / ")}
+	}
+	scenario, rest := args[0], args[1:]
+	fs, usage := newFlagSet("fees risks " + scenario)
+	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
+	year := fs.Int("year", 0, "年份（必填）")
+	month := fs.Int("month", 0, "月份（可选：缺省整年各月）")
+	status := fs.String("status", fees.DefaultRetiredStatuses, "retired-billing：视为退用/停用的资源状态（逗号分隔；默认 停用,退网）")
+	diffCents := fs.Int64("diff-cents", 0, "ledger-mismatch：各批次合计差额阈值（分；默认 0 = 任何差异）")
+	ratio := fs.Float64("ratio", fees.DefaultSpikeRatio, "spike：环比涨幅阈值（默认 0.30 = 30%）")
+	z := fs.Float64("z", fees.DefaultOutlierZ, "outlier：|z-score| 阈值（默认 3.0）")
+	minSites := fs.Int("min-sites", fees.DefaultMinSites, "outlier：同期最小同类站数（默认 8，不足则该期不出线索）")
+	limit := fs.Int("limit", 100, "线索条数上限（默认 100，最大 1000）")
+	maxEvidence := fs.Int("max-evidence", fees.DefaultMaxEvidence, "每条线索的证据锚点上限（默认 10，最大 50）")
+	if err := fs.Parse(rest); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *feeType == "" || *year == 0 {
+		return &usageError{msg: "fees risks 需要 --type 与 --year", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees risks 不接受额外位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	sc, err := fees.ParseRiskScenario(scenario)
+	if err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+	t, err := fees.ParseFeeType(*feeType)
+	if err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+	engine := fees.Query(ctx)
+	if !engine.Available() {
+		return fmt.Errorf("fees: 本二进制未编译分析查询引擎（%w）——发布构建使用 -tags duckdb（CGO）", fees.ErrEngineNotBuilt)
+	}
+	result, err := svc.Risks(ctx, engine, sc, fees.RiskQuery{
+		FeeType: t, Year: *year, Month: *month,
+		Statuses: fees.SplitComma(*status), DiffCents: *diffCents,
+		Ratio: *ratio, ZScore: *z, MinSites: *minSites,
+		Limit: *limit, MaxEvidence: *maxEvidence,
+	})
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
 }
 
 // cmdFeesImport implements `fees import --file --type --year --month [--map <json>]`.
