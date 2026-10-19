@@ -106,8 +106,9 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
 | `GET /api/fees/links?status=&grade=&code=&resource_id=` | 关联列表（资源侧 join） |
 | `POST /api/fees/links/{id}/confirm \| dismiss` | 人工确认/驳回模糊提案（人类优先于扫描） |
+| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=` | 风险六场景（#64/阶段 4；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501） |
 
-写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。五端点进 OpenAPI 文档（`fees` tag，路由表生成零漂移）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
+写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 10 条路由，路由表生成零漂移）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
 ## 8. 风险六场景（#64，#58 阶段 4）
 
@@ -135,19 +136,26 @@ netopslab fees --db <path> --data <dir> risks <scenario> --type <t> --year <Y> [
 ### HTTP
 `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=`（契约见 api.md；过 v0.11-R13 令牌写门禁只拦写方法，本端点为 GET 只读）。
 
-## 9. 路线（#58 阶段表）
+### 消费面（阶段 5，v0.15.0——三通道同契约）
+
+- **Web 工作台 `/fees`**（嵌入式 UI 导航「费用分析」）：导入（multipart，201/200 双形态 toast）/ 批次列表 / 回滚（ConfirmDialog）；风险六场景钻取（线索表 + 行展开证据锚点 + `excluded` 计数，整数分自动 /100 展示；501 `engine_not_built` 渲染为 Docker/WSL2 引导横幅）；**关联人工确认通道**（重新扫描六计数回执 + 状态/级别筛选 pending 优先 + 确认/驳回——驳回走 ConfirmDialog，配对不再自动复提 + 审计保留）。
+- **MCP `fee_risks`**（tool #11，只读）：跑同一固定预设，但阈值恒用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网）——**AI 不可调统计阈值**（调参是人类通道 HTTP/CLI）；场景/费用类型/账期/条数（≤50）四参数；wire shape = HTTP shape（`fees.RiskResult` 原样透传）。工具清单见 [teleagent-integration.md](teleagent-integration.md)。
+- **CLI**：见 §6/§8 CLI 段。
+
+## 9. 路线（#58 阶段表 —— 终局，跟踪 issue 已关闭）
 
 | 阶段 | 状态 |
 | --- | --- |
-| 0 技术验证（#59） | ✅ 关闭（双引擎基准 + CGO + Parquet 实测） |
-| 1 分层设计（#60） | ✅ 本切片落地（快照层 + 分区大表 + 血缘 + 批次共存） |
-| 2 导入管道（#61） | ✅ 本切片落地（CSV/Excel → 快照 → Parquet，幂等/重试/回滚/GC） |
-| 3 实体分级关联（站址编码精确 → 规则 → 模糊人工确认） | ✅ 落地（#63，migration v30：exact/rule 自动确认 + fuzzy 人工提案流 + dropout 清扫 + 人类优先） |
-| 4 六大风险场景规则 + 证据追溯 | 待开（`duplicates` 预设是首个场景的雏形） |
-| 5 MCP 工具面扩展 + 统一工作台入口 | 待开（HTTP API 面待阶段 3 前） |
+| 0 技术验证（#59） | ✅ v0.13.0 前（双引擎基准 + CGO + Parquet 实测） |
+| 1 分层设计（#60） | ✅ v0.13.0（快照层 + 分区大表 + 血缘 + 批次共存） |
+| 2 导入管道（#61） | ✅ v0.13.0（CSV/Excel → 快照 → Parquet，幂等/重试/回滚/GC） |
+| 3 实体分级关联（#63） | ✅ v0.13.0 + v0.13.1（migration v30：exact/rule 自动确认 + fuzzy 人工提案流 + dropout 清扫 + 人类优先） |
+| 4 六大风险场景规则 + 证据追溯（#64） | ✅ v0.14.0（六场景预设 + 行级证据锚点 + excluded 确定性裁决） |
+| 5 MCP 工具面扩展 + 统一工作台入口 | ✅ v0.15.0（MCP `fee_risks` + Web `/fees` 工作台含关联人工确认，见 §8 消费面） |
 
 ## 10. 相关文档
 
-- [data-model.md](data-model.md) —— v29 DDL（fee_batches）；
-- [api.md](api.md) —— CLI 契约示例（HTTP 面待后续轮次）；
-- #59 关闭评论 —— 引擎基准数字与设计纠偏（重复行共存裁决的来源）。
+- [data-model.md](data-model.md) —— v29（fee_batches）/ v30（fee_site_links）DDL；
+- [api.md](api.md) —— 费用域 HTTP 契约全量（导入/批次/回滚/查询预设/关联/风险六场景端点）与 CLI 等价物；
+- [teleagent-integration.md](teleagent-integration.md) —— MCP 工具清单（含 fee_risks）；
+- #59 关闭评论 —— 引擎基准数字与设计纠偏（重复行共存裁决的来源）；#58 关闭评论 —— 阶段 0-5 全量收口记录。
