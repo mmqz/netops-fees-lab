@@ -2,6 +2,28 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.15.0] — 2026-10-19
+
+**费用工作台收口版**（#58 阶段 5「MCP 工具面扩展 + 统一工作台入口」全量落地，跟踪 issue 关闭——全阶段路线 0-5 收口）。v0.14.0 把六场景能力建在后端，本版把它交到运营者手里：**AI 通道**（fee_risks 工具）、**浏览器通道**（/fees 工作台：导入/批次/回滚/风险钻取/关联人工确认——模糊提案此前只能 CLI 确认，综维人员实际所在的工作面无入口）、**文档通道**（工具面事实口径统一，#66）。
+
+### 新增 — MCP `fee_risks` 只读工具（#58 阶段 5，tool #11）
+- 固定预设 + **治理默认阈值**（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网）——AI 只可选场景/费用类型/账期/条数上限（缺省 20、上限 50，工具面比 HTTP 更紧），**不可调统计阈值**（调参是人类通道 HTTP/CLI——「AI 不可自行放宽离群线」是治理红线，非技术限制）。
+- 线索携带行级证据锚点（sourceFile + sourceRow + importBatch 可回读快照原文）；MCP wire shape = HTTP shape（`fees.RiskResult` 原样透传，一契约两传输）。
+- `TestMCPToolRegistry` 断言 **11 工具封闭集**（5 资源/仿真域 + 5 图分析域 + 1 费用风险域）；默认构建报 `ErrEngineNotBuilt`（诚实契约，导入/快照/Parquet 不受影响）。
+
+### 新增 — Web 费用工作台 `/fees`（阶段 5 的统一入口承诺）
+- **导入/批次/回滚**：multipart 上传（201 新导入 / 200 幂等重复双形态 toast）；批次列表（类型/账期/行数/状态 chip）+ 回滚 ConfirmDialog（删分析行、保快照证据文案同 CLI 教义）。
+- **风险六场景钻取**：场景/费用类型/账期/上限 → 线索表（站址/账期/触发指标——整数分金额自动 /100 展示/显式阈值）+ 行展开证据锚点清单（sourceFile:sourceRow + 金额 + 批次，超量「另有 N 行」）；`excluded` 跨批次排除计数明示；501 `engine_not_built` 渲染为 Docker/WSL2 引导横幅而非裸错误（运营者可自救，不需要读后端日志）。
+- **费用-资源关联人类确认通道**（阶段 3 能力的工作台补全，f5974d5）：重新扫描（六计数回执 codes/exact/rule/fuzzy/unlinked/humanKept）+ 状态/级别筛选（pending 优先缺省——打开页面即待办队列）+ 确认（直接执行 + toast）/ 驳回（ConfirmDialog——配对不再自动复提 + 审计保留，值得二次确认）；相似度百分比 chip、规则名标注、来源（自动/人工）列。
+
+### 修复 — 文档漂移（#66）
+- **14 处「MCP 工具面冻结恒 5 个」过时表述清零**（api.md ×6 / import-and-validation.md ×4 / data-model.md ×3 / verified-capabilities.md v0.6.0 历史行保留原文 + 演进注记）：v0.9 扩容 +5、v0.14 +fee_risks 后实际 11 个。数量冻结声明改为**「11 个全部只读」属性声明**——冻结红线本义是「无 SQL/Shell/SSH/文件等越权工具」而非「数量恒定」，数量冻结句子是个自我贬值的句子（每加一个工具就多一处撒谎的文档）。
+
+### 测试与门禁
+- f51a7c2：`TestMCPFeeRisks`（场景/类型校验错误词汇表、year 必填、默认构建 engine-not-built refusal）；工具面封闭集断言 10 → 11。
+- 门禁：gofmt 空 · vet 0（默认 + duckdb 双构建）· 25 包全 ok · 顶层测试默认构建 566 + duckdb 构建 fees 33 · vitest 6/6 · tsc 0。
+- 版本事实点 5 处对齐 v0.15.0（domain.AppVersion / web APP_VERSION / README MCP 版本行 / api.md 契约基线行 + health 示例），`TestAppVersionMatchesChangelogHead` 钉死。
+
 ## [0.14.0] — 2026-10-19
 
 **费用风险六场景版**（#64 = #58 阶段 4 全量落地；需求驱动为架构讨论中确定的六大风险场景原始清单）。六场景全部升为**风险规则 + 证据追溯**的正式输出——每条线索携带触发数值、显式阈值与**行级证据锚点**（source_file + source_row + import_batch，可回读快照原文），输出恒为待核实线索、绝不作认定结论（账单存在 ≠ 重复付款认定）。
