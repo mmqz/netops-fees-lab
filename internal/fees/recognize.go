@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -148,12 +149,18 @@ func trimAll(cells []string) []string {
 
 // coreFieldSynonyms maps the canonical core target fields to the header
 // synonyms real fee files use. The recognizer scores every synonym hit;
-// the suggested mapping is the best synonym per field.
+// coreFieldSynonyms maps the canonical core target fields to the header
+// synonyms real fee files use. The recognizer scores every synonym hit;
+// the suggested mapping is the best synonym per field. Chinese synonyms
+// stay first in list order (files with Chinese headers keep the exact
+// suggestions they always had); the English tail covers the other-system
+// exports (#65 P3-d: site_code / Site Code / SITE_CODE / station_code /
+// cell_code / amount / period … all auto-recognize now).
 var coreFieldSynonyms = map[string][]string{
-	"siteCode": {"站址编码", "站址编号", "站址ID", "站点编码", "站点编号", "站点代码", "资源编码", "资源ID", "机房编码", "基站编码", "局站编码", "局站ID"},
-	"amount":   {"电费", "铁塔租费", "塔租费", "租费", "修理费", "维修费", "综维费", "费用金额", "金额", "应付金额", "实付金额", "含税金额", "费用"},
-	"period":   {"账期", "所属账期", "所属期间", "费用期间", "账单期间", "月份", "所属月份", "计费周期", "账务期间", "年月"},
-	"date":     {"日期", "计费日期", "账单日期", "结算日期", "费用日期", "发生日期", "扣费日期"},
+	"siteCode": {"站址编码", "站址编号", "站址ID", "站点编码", "站点编号", "站点代码", "资源编码", "资源ID", "机房编码", "基站编码", "局站编码", "局站ID", "sitecode", "siteid", "stationcode", "cellcode"},
+	"amount":   {"电费", "铁塔租费", "塔租费", "租费", "修理费", "维修费", "综维费", "费用金额", "金额", "应付金额", "实付金额", "含税金额", "费用", "amount"},
+	"period":   {"账期", "所属账期", "所属期间", "费用期间", "账单期间", "月份", "所属月份", "计费周期", "账务期间", "年月", "period", "billingperiod", "month"},
+	"date":     {"日期", "计费日期", "账单日期", "结算日期", "费用日期", "发生日期", "扣费日期", "date", "billingdate"},
 }
 
 // feeTypeMarkers scores a header set against each fee type: type-specific
@@ -167,20 +174,46 @@ var feeTypeMarkers = map[FeeType][]string{
 	FeeTypeMaintenance: {"综维", "驻场", "巡检", "代维", "维护费", "人员"},
 }
 
+// headerMatchKey folds a header (or synonym) into its comparison key:
+// lower-cased, with spaces, underscores, hyphens and full-width spaces
+// removed — "Site Code" / "site_code" / "SITE-CODE" / "sitecode" share
+// one key. Chinese text is untouched (lower-casing is a no-op), so every
+// Chinese-only header decision is identical to the previous exact
+// matcher (#65 P3-d added English/ mixed-form headers; it changed
+// nothing for the forms that already matched).
+func headerMatchKey(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case ' ', '_', '-', '　':
+			continue
+		default:
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+	return b.String()
+}
+
 // Recognize inspects the headers and returns (suggested fee type, "" when
 // no marker hits; suggested core column mapping target→source header, ""
 // for fields without a hit). Pure scoring on trimmed headers — no
 // mutation, no I/O; deterministic (first synonym wins ties in header
 // order, synonym list order).
 func Recognize(headers []string) (FeeType, map[string]string) {
-	// core fields: exact header match first, then a contains fallback —
-	// real headers carry unit suffixes (电费(元), 金额(含税)…), and the
-	// synonym is the semantic core of the header, not its full text.
+	keys := make([]string, len(headers))
+	for i, h := range headers {
+		keys[i] = headerMatchKey(h)
+	}
+	// core fields: key match first, then a contains fallback —
+	// real headers carry unit suffixes (电费(元), 金额(含税), amount(Yuan)…),
+	// and the synonym is the semantic core of the header, not its full text.
 	cols := make(map[string]string, 4)
 	for field, syns := range coreFieldSynonyms {
 		for _, syn := range syns {
-			for _, h := range headers {
-				if h == syn {
+			k := headerMatchKey(syn)
+			for i, h := range headers {
+				if keys[i] == k {
 					cols[field] = h
 					break
 				}
@@ -191,8 +224,9 @@ func Recognize(headers []string) (FeeType, map[string]string) {
 		}
 		if cols[field] == "" {
 			for _, syn := range syns {
-				for _, h := range headers {
-					if strings.Contains(h, syn) {
+				k := headerMatchKey(syn)
+				for i, h := range headers {
+					if strings.Contains(keys[i], k) {
 						cols[field] = h
 						break
 					}
@@ -210,8 +244,9 @@ func Recognize(headers []string) (FeeType, map[string]string) {
 	for typ, markers := range feeTypeMarkers {
 		score := 0
 		for _, m := range markers {
+			mk := headerMatchKey(m)
 			for _, h := range headers {
-				if strings.Contains(h, m) {
+				if strings.Contains(headerMatchKey(h), mk) {
 					score++
 					break
 				}

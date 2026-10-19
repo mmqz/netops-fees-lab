@@ -16,10 +16,10 @@ import (
 func TestWriteParquetPartitionsLayout(t *testing.T) {
 	dir := t.TempDir()
 	rows := []NormalizedRow{
-		{SiteCode: "S1", Amount: 100.5, Year: 2024, Month: 5, SourceFile: "h_f.csv", SourceRow: 2, ImportBatch: "fee_b1"},
-		{SiteCode: "S2", Amount: 200, Year: 2024, Month: 5, SourceFile: "h_f.csv", SourceRow: 3, ImportBatch: "fee_b1"},
-		{SiteCode: "S1", Amount: 300.25, Year: 2024, Month: 6, SourceFile: "h_f.csv", SourceRow: 4, ImportBatch: "fee_b1"},
-		{SiteCode: "S3", Amount: 50, Year: 2023, Month: 12, SourceFile: "h_f.csv", SourceRow: 5, ImportBatch: "fee_b1"},
+		{SiteCode: "S1", AmountCents: 10050, Year: 2024, Month: 5, SourceFile: "h_f.csv", SourceRow: 2, ImportBatch: "fee_b1"},
+		{SiteCode: "S2", AmountCents: 20000, Year: 2024, Month: 5, SourceFile: "h_f.csv", SourceRow: 3, ImportBatch: "fee_b1"},
+		{SiteCode: "S1", AmountCents: 30025, Year: 2024, Month: 6, SourceFile: "h_f.csv", SourceRow: 4, ImportBatch: "fee_b1"},
+		{SiteCode: "S3", AmountCents: 5000, Year: 2023, Month: 12, SourceFile: "h_f.csv", SourceRow: 5, ImportBatch: "fee_b1"},
 	}
 	files, err := writeParquetPartitions(dir, FeeTypeElectricity, "fee_b1", rows)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("read %d rows, want 2", n)
 	}
-	if got[0].SiteCode != "S1" || got[0].Amount != 100.5 || got[0].SourceRow != 2 ||
+	if got[0].SiteCode != "S1" || got[0].AmountCents != 10050 || got[0].SourceRow != 2 ||
 		got[0].SourceFile != "h_f.csv" || got[0].ImportBatch != "fee_b1" {
 		t.Errorf("row[0] = %+v, want S1 100.5 with full lineage", got[0])
 	}
@@ -91,8 +91,8 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 // files.
 func TestBatchParquetFilesAndRemove(t *testing.T) {
 	dir := t.TempDir()
-	rowsB1 := []NormalizedRow{{SiteCode: "S1", Amount: 1, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b1"}}
-	rowsB2 := []NormalizedRow{{SiteCode: "S1", Amount: 2, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b2"}}
+	rowsB1 := []NormalizedRow{{SiteCode: "S1", AmountCents: 100, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b1"}}
+	rowsB2 := []NormalizedRow{{SiteCode: "S1", AmountCents: 200, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b2"}}
 	if _, err := writeParquetPartitions(dir, FeeTypeRepair, "fee_b1", rowsB1); err != nil {
 		t.Fatalf("write b1: %v", err)
 	}

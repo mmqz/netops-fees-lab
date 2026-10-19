@@ -23,23 +23,27 @@ import (
 // the `duckdb` build tag. Default builds carry the std stub answering
 // ErrEngineNotBuilt — the import/write path is unaffected.
 
-// TotalsRow is one site's aggregate of a period.
+// TotalsRow is one site's aggregate of a period. TotalCents is INTEGER
+// CENTS (#65 P1-a): the JSON contract keeps money integral — the display
+// layer divides by 100, the data layer never multiplies by a float.
 type TotalsRow struct {
-	SiteCode string  `json:"siteCode"`
-	Rows     int     `json:"rows"`
-	Total    float64 `json:"total"`
+	SiteCode   string `json:"siteCode"`
+	Rows       int    `json:"rows"`
+	TotalCents int64  `json:"totalCents"`
 }
 
 // DuplicateRow is one duplicate-settlement candidate: the same site billed
 // in the same period by DIFFERENT import batches, with the per-batch
-// amounts and the evidence anchors (batch ids + row numbers).
+// evidence anchors (batch ids + row numbers). TotalCents: integer-cents
+// contract (#65 P1-a) — a duplicate comparison must never depend on the
+// summation order.
 type DuplicateRow struct {
-	SiteCode string  `json:"siteCode"`
-	Year     int     `json:"year"`
-	Month    int     `json:"month"`
-	Batches  int     `json:"batches"`
-	Rows     int     `json:"rows"`
-	Total    float64 `json:"total"`
+	SiteCode   string `json:"siteCode"`
+	Year       int    `json:"year"`
+	Month      int    `json:"month"`
+	Batches    int    `json:"batches"`
+	Rows       int    `json:"rows"`
+	TotalCents int64  `json:"totalCents"`
 }
 
 // QueryEngine answers the fee analysis presets over the Parquet table at

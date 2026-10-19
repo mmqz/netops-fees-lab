@@ -31,13 +31,19 @@ import (
 // feeParquetRow is the on-disk schema of one analysis row. Column names
 // are the query surface (DuckDB reads them verbatim); source_row is the
 // 1-based row number in the ORIGINAL file — the snapshot layer's evidence
-// coordinate.
+// coordinate. amount_cents is the money value as INTEGER CENTS (#65 P1-a):
+// float64 sums drift across aggregation orders and poison reconciliation;
+// int64 cents are exact. NOTE: batches imported by pre-#65 builds carry a
+// float `amount` column instead — re-import them after upgrading (the
+// snapshot layer keeps the originals; a re-import is the same file, same
+// idempotency key… delete the old batch first: the key blocks a second
+// import of the same file).
 type feeParquetRow struct {
-	SiteCode    string  `parquet:"site_code"`
-	Amount      float64 `parquet:"amount"`
-	SourceFile  string  `parquet:"source_file"`
-	SourceRow   int32   `parquet:"source_row"`
-	ImportBatch string  `parquet:"import_batch"`
+	SiteCode    string `parquet:"site_code"`
+	AmountCents int64  `parquet:"amount_cents"`
+	SourceFile  string `parquet:"source_file"`
+	SourceRow   int32  `parquet:"source_row"`
+	ImportBatch string `parquet:"import_batch"`
 }
 
 // partitionFile is the per-partition manifest entry: the live (relative)
@@ -65,7 +71,7 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 		key := [2]int{r.Year, r.Month}
 		byPeriod[key] = append(byPeriod[key], feeParquetRow{
 			SiteCode:    r.SiteCode,
-			Amount:      r.Amount,
+			AmountCents: r.AmountCents,
 			SourceFile:  r.SourceFile,
 			SourceRow:   int32(r.SourceRow),
 			ImportBatch: r.ImportBatch,

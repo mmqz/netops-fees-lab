@@ -54,11 +54,11 @@ func (duckQueryEngine) Totals(ctx context.Context, analysisDir string, feeType F
 	}
 	defer func() { _ = db.Close() }()
 	query := fmt.Sprintf(`
-SELECT site_code, count(*) AS rows, sum(amount) AS total
+SELECT site_code, count(*) AS rows, sum(amount_cents) AS total_cents
 FROM read_parquet('%s', hive_partitioning = true)
 WHERE fee_type = '%s' %s
 GROUP BY site_code
-ORDER BY total DESC, site_code
+ORDER BY total_cents DESC, site_code
 LIMIT %d`,
 		feeTableGlob(analysisDir), string(feeType), periodFilter(year, month), normalizeLimit(limit))
 	rows, err := db.QueryContext(ctx, query)
@@ -69,7 +69,7 @@ LIMIT %d`,
 	var out []TotalsRow
 	for rows.Next() {
 		var r TotalsRow
-		if err := rows.Scan(&r.SiteCode, &r.Rows, &r.Total); err != nil {
+		if err := rows.Scan(&r.SiteCode, &r.Rows, &r.TotalCents); err != nil {
 			return nil, fmt.Errorf("fees: 读取汇总行: %w", err)
 		}
 		out = append(out, r)
@@ -84,12 +84,12 @@ func (duckQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeTy
 	}
 	defer func() { _ = db.Close() }()
 	query := fmt.Sprintf(`
-SELECT site_code, year, month, count(DISTINCT import_batch) AS batches, count(*) AS rows, sum(amount) AS total
+SELECT site_code, year, month, count(DISTINCT import_batch) AS batches, count(*) AS rows, sum(amount_cents) AS total_cents
 FROM read_parquet('%s', hive_partitioning = true)
 WHERE fee_type = '%s' %s
 GROUP BY site_code, year, month
 HAVING count(DISTINCT import_batch) > 1
-ORDER BY total DESC, site_code, year, month`,
+ORDER BY total_cents DESC, site_code, year, month`,
 		feeTableGlob(analysisDir), string(feeType), periodFilter(year, month))
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -99,7 +99,7 @@ ORDER BY total DESC, site_code, year, month`,
 	var out []DuplicateRow
 	for rows.Next() {
 		var r DuplicateRow
-		if err := rows.Scan(&r.SiteCode, &r.Year, &r.Month, &r.Batches, &r.Rows, &r.Total); err != nil {
+		if err := rows.Scan(&r.SiteCode, &r.Year, &r.Month, &r.Batches, &r.Rows, &r.TotalCents); err != nil {
 			return nil, fmt.Errorf("fees: 读取重复结算行: %w", err)
 		}
 		out = append(out, r)

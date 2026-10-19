@@ -48,15 +48,15 @@ func TestDuckEngineTotalsAndDuplicates(t *testing.T) {
 	if len(totals) != 2 {
 		t.Fatalf("totals = %+v, want 2 sites", totals)
 	}
-	if totals[0].SiteCode != "S1" || totals[0].Rows != 2 || totals[0].Total != 400 {
+	if totals[0].SiteCode != "S1" || totals[0].Rows != 2 || totals[0].TotalCents != 40000 {
 		t.Errorf("S1 totals = %+v, want 2 rows / 400.00", totals[0])
 	}
-	if totals[1].SiteCode != "S2" || totals[1].Total != 50 {
+	if totals[1].SiteCode != "S2" || totals[1].TotalCents != 5000 {
 		t.Errorf("S2 totals = %+v, want 50.00", totals[1])
 	}
 	// year scope (month 0): includes June.
 	totals, err = e.Totals(ctx, analysis, FeeTypeElectricity, 2024, 0, 0)
-	if err != nil || len(totals) != 2 || totals[0].Total != 470 {
+	if err != nil || len(totals) != 2 || totals[0].TotalCents != 47000 {
 		t.Fatalf("year totals = %+v (err %v), want S1 = 470.00", totals, err)
 	}
 
@@ -70,7 +70,7 @@ func TestDuckEngineTotalsAndDuplicates(t *testing.T) {
 		t.Fatalf("duplicates = %+v, want exactly the S1@2024-05 pair", dups)
 	}
 	d := dups[0]
-	if d.SiteCode != "S1" || d.Year != 2024 || d.Month != 5 || d.Batches != 2 || d.Rows != 2 || d.Total != 400 {
+	if d.SiteCode != "S1" || d.Year != 2024 || d.Month != 5 || d.Batches != 2 || d.Rows != 2 || d.TotalCents != 40000 {
 		t.Errorf("duplicate row = %+v, want S1 2024-05 / 2 batches / 2 rows / 400.00", d)
 	}
 }

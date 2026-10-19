@@ -254,7 +254,7 @@ func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dat
 		return NormalizedRow{}, &ImportError{Row: row.Number, Field: "siteCode", Raw: cellAt(row, siteIdx), Reason: "站址编码为空"}
 	}
 	amountRaw := cellAt(row, amountIdx)
-	amount, err := NormalizeAmount(amountRaw)
+	amountCents, err := NormalizeAmount(amountRaw)
 	if err != nil {
 		return NormalizedRow{}, &ImportError{Row: row.Number, Field: "amount", Raw: amountRaw, Reason: err.Error()}
 	}
@@ -281,7 +281,7 @@ func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dat
 		return NormalizedRow{}, &ImportError{Row: row.Number, Field: "period", Raw: fmt.Sprintf("%04d-%02d", year, month), Reason: "账期越界"}
 	}
 	return NormalizedRow{
-		SiteCode: code, Amount: amount, Year: year, Month: month,
+		SiteCode: code, AmountCents: amountCents, Year: year, Month: month,
 		SourceFile: sourceFile, SourceRow: row.Number, ImportBatch: batchID,
 	}, nil
 }

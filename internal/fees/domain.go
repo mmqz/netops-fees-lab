@@ -78,7 +78,7 @@ func (e *ErrDuplicateImport) Error() string {
 // ErrEngineNotBuilt reports that the DuckDB query engine is not compiled
 // into this binary (release builds use -tags duckdb; CGO required). The
 // import/write path is unaffected — only queries answer this.
-var ErrEngineNotBuilt = errors.New("fees: 分析查询引擎未编译进本二进制（需要 -tags duckdb 与 CGO 构建；导入/快照/Parquet 写入不受影响）")
+var ErrEngineNotBuilt = errors.New("fees: 分析查询引擎未编译进本二进制（需要 -tags duckdb 与 CGO 构建；导入/快照/Parquet 写入不受影响）。Windows 原生构建暂不可用（go-duckdb 链接的 rstrtmgr 库 mingw-w64 未提供）——请用 Docker 镜像（docker build -t netops-lab:local . ，已含 duckdb 引擎）或 WSL2 内 CGO_ENABLED=1 go build -tags duckdb 获得 Linux 查询构建；详见 docs/fees-layer.md §5")
 
 // FeeMapping is the confirmed column mapping of one fee file: target
 // field → source header. siteCode and amount are mandatory; the period
@@ -119,13 +119,15 @@ func (m FeeMapping) CanonicalMapping() string {
 
 // NormalizedRow is one analysis-layer row: the identity key parts of every
 // risk scenario (site × period × amount) plus the row-level evidence
-// chain. Year/month are ALSO the hive partition values (path, not file
-// columns). Extra source columns stay in the snapshot — the evidence
-// principle: the analysis table carries the standard core, the snapshot
-// carries the full original row.
+// chain. AmountCents is the money value as INTEGER CENTS (#65 P1-a) — the
+// reconciliation-grade contract: parse, storage, aggregation and JSON all
+// carry int64 cents, never a float. Year/month are ALSO the hive partition
+// values (path, not file columns). Extra source columns stay in the
+// snapshot — the evidence principle: the analysis table carries the
+// standard core, the snapshot carries the full original row.
 type NormalizedRow struct {
 	SiteCode    string
-	Amount      float64
+	AmountCents int64
 	Year        int
 	Month       int
 	SourceFile  string

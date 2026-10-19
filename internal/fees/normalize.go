@@ -2,6 +2,7 @@ package fees
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -14,12 +15,24 @@ import (
 // partition, and both poison the analysis. Raw values stay in the
 // snapshot; only provably-normalized values reach the analysis table.
 
-// NormalizeAmount parses a fee amount: strips currency marks (¥/￥/$),
-// thousands separators (half- and full-width commas), spaces (half- and
-// full-width) and trailing 元; accepts a leading minus and full-width
-// digits/dot. Refuses anything else (empty, trailing garbage, double
-// dots).
-func NormalizeAmount(raw string) (float64, error) {
+// NormalizeAmount parses a fee amount into INTEGER CENTS (#65 P1-a): money
+// is stored, summed and compared as int64 cents end-to-end (parquet
+// amount_cents, sum() in DuckDB, JSON totalCents) — a float64 anywhere in
+// that chain leaks binary-representation error into reconciliation
+// (accumulating 0.01 a million times drifts, and two batch sums of the
+// same rows in different orders differ), which is exactly the class of
+// false signal the risk module must never emit. The parse is therefore
+// FIXED-POINT digit-by-digit: the value never passes through a float.
+//
+// Accepted shapes: the currency/separator stripping of the old parser
+// (¥/￥/$, half/full-width commas, spaces, trailing 元, parentheses,
+// full-width digits and dot), then [−]?digits[.digits] with AT MOST TWO
+// fraction digits — a third fraction digit is refused (never silently
+// rounded: a mangled amount is a false risk signal, the normalize layer
+// refuses rather than guesses). Scientific notation is refused as well
+// (real fee files never carry it; ParseFloat's acceptance of 1e3 was an
+// accident of the float path, not a contract).
+func NormalizeAmount(raw string) (int64, error) {
 	s := strings.TrimSpace(raw)
 	s = strings.NewReplacer(
 		"¥", "", "￥", "", "$", "",
@@ -32,7 +45,7 @@ func NormalizeAmount(raw string) (float64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("空金额")
 	}
-	// full-width digits and dot to half-width
+	// full-width digits, dot and minus to half-width
 	var b strings.Builder
 	for _, r := range s {
 		switch {
@@ -47,11 +60,60 @@ func NormalizeAmount(raw string) (float64, error) {
 		}
 	}
 	s = b.String()
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+
+	neg := false
+	if strings.HasPrefix(s, "-") {
+		neg = true
+		s = s[1:]
+		if s == "" {
+			return 0, fmt.Errorf("数值 %q 无法解析", raw)
+		}
+	}
+	intPart, fracPart := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		intPart, fracPart = s[:i], s[i+1:]
+		if strings.ContainsRune(fracPart, '.') {
+			return 0, fmt.Errorf("数值 %q 无法解析", raw)
+		}
+	}
+	if len(fracPart) > 2 {
+		return 0, fmt.Errorf("金额 %q 精度超过分（最多两位小数）——拒绝静默取整", raw)
+	}
+	if intPart == "" && fracPart == "" {
 		return 0, fmt.Errorf("数值 %q 无法解析", raw)
 	}
-	return v, nil
+
+	const maxCents = math.MaxInt64
+	cents := int64(0)
+	for _, r := range intPart {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("数值 %q 无法解析", raw)
+		}
+		d := int64(r - '0')
+		if cents > (maxCents-d)/10 {
+			return 0, fmt.Errorf("金额 %q 超出可表示范围", raw)
+		}
+		cents = cents*10 + d
+	}
+	// fraction: scale to exactly two digits (".5" → 50, ".56" → 56)
+	for i := 0; i < 2; i++ {
+		var d int64
+		if i < len(fracPart) {
+			r := fracPart[i]
+			if r < '0' || r > '9' {
+				return 0, fmt.Errorf("数值 %q 无法解析", raw)
+			}
+			d = int64(r - '0')
+		}
+		if cents > (maxCents-d)/10 {
+			return 0, fmt.Errorf("金额 %q 超出可表示范围", raw)
+		}
+		cents = cents*10 + d
+	}
+	if neg {
+		cents = -cents
+	}
+	return cents, nil
 }
 
 // NormalizeSiteCode trims and collapses internal whitespace of a site

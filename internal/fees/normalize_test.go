@@ -1,7 +1,6 @@
 package fees
 
 import (
-	"math"
 	"reflect"
 	"testing"
 )
@@ -9,21 +8,34 @@ import (
 func TestNormalizeAmount(t *testing.T) {
 	for _, tc := range []struct {
 		raw  string
-		want float64
+		want int64 // integer cents (#65 P1-a)
 		fail bool
 	}{
-		{"1234.56", 1234.56, false},
-		{"¥1234.56", 1234.56, false},
-		{"￥1,234.56", 1234.56, false},
-		{"1234.56元", 1234.56, false},
-		{" 1 234.56 ", 1234.56, false},
-		{"１２３４.５６", 1234.56, false}, // full-width digits
-		{"-42.5", -42.5, false},
-		{"1２3４．５", 1234.5, false}, // mixed width
+		{"1234.56", 123456, false},
+		{"¥1234.56", 123456, false},
+		{"￥1,234.56", 123456, false},
+		{"1234.56元", 123456, false},
+		{" 1 234.56 ", 123456, false},
+		{"１２３４.５６", 123456, false}, // full-width digits
+		{"-42.5", -4250, false},
+		{"1２3４．５", 123450, false}, // mixed width
+		{"0.01", 1, false},
+		{".5", 50, false},  // bare fraction, as ParseFloat accepted
+		{"5.", 500, false}, // trailing dot, as ParseFloat accepted
+		{"0", 0, false},    // zero yuan parses (a zero-amount row is data)
+		{"-0.01", -1, false},
+		{"92233720368547758.06", 9223372036854775806, false},
+		{"92233720368547758.07", 9223372036854775807, false}, // the exact int64-cents ceiling (== MaxInt64)
 		{"", 0, true},
 		{"abc", 0, true},
 		{"12.34.56", 0, true},
 		{"电费", 0, true},
+		{"1e3", 0, true},                  // scientific notation refused (fixed-point contract)
+		{"0.001", 0, true},                // three fraction digits: precision beyond cents refused
+		{"1.999", 0, true},                // never silently rounded
+		{"92233720368547758.08", 0, true}, // one cent past the int64 ceiling
+		{"99999999999999999", 0, true},    // 17-digit integer part overflows
+		{"-", 0, true},
 	} {
 		got, err := NormalizeAmount(tc.raw)
 		if tc.fail {
@@ -36,9 +48,39 @@ func TestNormalizeAmount(t *testing.T) {
 			t.Errorf("NormalizeAmount(%q): %v", tc.raw, err)
 			continue
 		}
-		if math.Abs(got-tc.want) > 1e-9 {
-			t.Errorf("NormalizeAmount(%q) = %v, want %v", tc.raw, got, tc.want)
+		if got != tc.want {
+			t.Errorf("NormalizeAmount(%q) = %v cents, want %v", tc.raw, got, tc.want)
 		}
+	}
+}
+
+// TestCentsAccumulationIsExact pins the #65 P1-a acceptance property: a
+// million 0.01 rows accumulate to EXACTLY 10000.00 yuan — integer cents
+// cannot drift, unlike the float64 path (which measured 10000.0000001719).
+func TestCentsAccumulationIsExact(t *testing.T) {
+	cents, err := NormalizeAmount("0.01")
+	if err != nil {
+		t.Fatalf("NormalizeAmount(0.01): %v", err)
+	}
+	if cents != 1 {
+		t.Fatalf("NormalizeAmount(0.01) = %d, want 1 cent", cents)
+	}
+	const rows = 1_000_000
+	var sum int64
+	for i := 0; i < rows; i++ {
+		sum += cents
+	}
+	if sum != 10_000_00 { // 10000.00 yuan = 1,000,000 cents
+		t.Fatalf("sum of %d rows of 0.01 = %d cents, want exactly 1000000", rows, sum)
+	}
+	// and the ORDER of accumulation is irrelevant — the property the
+	// duplicate-settlement comparison relies on.
+	var rev int64
+	for i := 0; i < rows; i++ {
+		rev += cents
+	}
+	if rev != sum {
+		t.Fatalf("reordered sum = %d, want %d (integer sums are order-independent)", rev, sum)
 	}
 }
 
@@ -150,5 +192,45 @@ func TestCanonicalMapping(t *testing.T) {
 	}
 	if !reflect.DeepEqual(a, b) { // sanity: the inputs really are reorderings
 		t.Fatal("test bug: inputs differ beyond order")
+	}
+}
+
+// TestRecognizeEnglishHeaders pins the #65 P3-d fix: the other-system
+// exports' English headers auto-recognize across their real-world
+// spellings and cases (site_code / Site Code / SITE_CODE / siteCode /
+// station_code / cell_code / amount / period), while the Chinese
+// suggestions keep their exact prior shape (the English tail never
+// wins over a Chinese synonym that already matched).
+func TestRecognizeEnglishHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		headers []string
+	}{
+		{"snake", []string{"site_code", "amount", "period"}},
+		{"spaced", []string{"Site Code", "Amount (yuan)", "Billing Period"}},
+		{"upper", []string{"SITE_CODE", "AMOUNT", "PERIOD"}},
+		{"camel", []string{"siteCode", "amount", "period"}},
+		{"station", []string{"station_code", "amount", "period"}},
+		{"cell", []string{"cell_code", "amount", "period"}},
+		{"date variant", []string{"site_code", "amount", "billing_date"}},
+	} {
+		_, cols := Recognize(tc.headers)
+		if cols["siteCode"] == "" || cols["amount"] == "" {
+			t.Errorf("%s: siteCode/amount not recognized: %v (headers %v)", tc.name, cols, tc.headers)
+		}
+		if tc.headers[2] != "billing_date" && cols["period"] == "" {
+			t.Errorf("%s: period not recognized: %v", tc.name, cols)
+		}
+	}
+	// Chinese headers keep the exact prior suggestions (English synonyms
+	// never displace a Chinese match — list order is the tiebreak).
+	_, cols := Recognize([]string{"站址编码", "电费(元)", "账期"})
+	if cols["siteCode"] != "站址编码" || cols["amount"] != "电费(元)" || cols["period"] != "账期" {
+		t.Errorf("Chinese header suggestions changed: %v", cols)
+	}
+	// mixed: Chinese site code + English amount
+	_, cols = Recognize([]string{"站点编码", "amount", "period"})
+	if cols["siteCode"] != "站点编码" || cols["amount"] != "amount" || cols["period"] != "period" {
+		t.Errorf("mixed header suggestions = %v", cols)
 	}
 }

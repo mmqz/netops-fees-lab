@@ -3,8 +3,13 @@ package fees
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -253,4 +258,192 @@ func TestLinkScanRollbackDropout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "analysis", "fees")); !os.IsNotExist(err) {
 		t.Logf("analysis tree state after full rollback: %v", err)
 	}
+}
+
+// TestSimilarityAtLeastEquivalence pins the #65 P1-b fast path's central
+// property: similarityAtLeast accepts EXACTLY the pairs the naive
+// Similarity >= threshold comparison accepts, and returns the SAME
+// similarity value — the length pre-filter, the banded DP and the early
+// abort are lossless cuts, never behavior changes. The corpus mixes
+// realistic telecom shapes (15-18 digit codes, Chinese name keys) with
+// adversarial boundaries (equal lengths, one-off lengths, threshold-edge
+// distances, empty keys).
+func TestSimilarityAtLeastEquivalence(t *testing.T) {
+	corpus := []string{
+		"", "0123456789012345", "012345678901234A", "0123456789ABCDEF",
+		"2301010ABCDE00001", "2301010abcde00001", "２３０１ＡＢＣ", "2301",
+		"动力机房2", "动力机房2新", "学府路", "学府路2", "SITE-001", "site-001",
+		"12345", "123456", "1234567", "aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaa",
+		"汉", "汉语", "语汉", "01234567890123456", "01234567890123",
+	}
+	for _, a := range corpus {
+		for _, b := range corpus {
+			naive := Similarity(a, b)
+			wantOK := naive >= FUZZY_THRESHOLD
+			got, ok := similarityAtLeast(a, b, FUZZY_THRESHOLD)
+			if ok != wantOK {
+				t.Errorf("similarityAtLeast(%q, %q) ok = %v, naive %v → %v", a, b, ok, naive, wantOK)
+				continue
+			}
+			if ok && got != naive {
+				t.Errorf("similarityAtLeast(%q, %q) = %v, want the naive value %v", a, b, got, naive)
+			}
+		}
+	}
+}
+
+// TestFuzzyScanPerformance pins the #65 acceptance bound: a 10,000-code ×
+// 1,000-candidate topFuzzy sweep finishes under the budget on this
+// class of machine (the naive path extrapolated to 15.5s+ at the same
+// shape; the pre-filter + banded DP brings it under a second). The
+// generated corpus is deliberately adversarial for the length cut: all
+// candidates share the codes' length class, so only the DP-side cuts
+// (band + early abort) can deliver the speedup.
+func TestFuzzyScanPerformance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("performance smoke skipped in -short mode")
+	}
+	if raceEnabled {
+		t.Skip("wall-time bounds are meaningless under the race detector's instrumentation")
+	}
+	const nCodes, nCands = 10_000, 1_000
+	cands := make([]resourceCandidate, nCands)
+	for i := range cands {
+		cands[i] = resourceCandidate{id: "res_" + strconv.Itoa(i), key: codeOf(i, 18)}
+	}
+	// The scan's real shape (#65 P1-b): the decide phase runs a worker
+	// pool over the codes — this test mirrors it exactly so the measured
+	// wall time is the time a ScanLinks caller actually waits.
+	start := time.Now()
+	proposed := make([]bool, nCodes)
+	var (
+		wg   sync.WaitGroup
+		next atomic.Int32
+	)
+	workers := runtime.GOMAXPROCS(0)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= nCodes {
+					return
+				}
+				proposed[i] = len(topFuzzy(cands, codeOf(i*7+3, 18))) > 0
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+	n := 0
+	for _, p := range proposed {
+		if p {
+			n++
+		}
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("10k×1k parallel fuzzy sweep took %v, want < 2s (issue #65 acceptance; naive extrapolation was 15.5s)", elapsed)
+	}
+	t.Logf("10k codes × 1k same-length-class candidates (parallel, %d workers): %v, %d codes had proposals", workers, elapsed, n)
+	if n == 0 {
+		t.Fatalf("no proposals at all — the corpus must contain near-matches for the sweep to be meaningful")
+	}
+}
+
+// codeOf renders a deterministic 18-character site code of n (digits +
+// one letter block): codes of nearby n differ in a few characters — the
+// realistic near-miss density of telecom site-code universes.
+func codeOf(n int, length int) string {
+	const alphabet = "0123456789ABCDEFGH"
+	b := make([]byte, length)
+	for i := 0; i < length; i++ {
+		b[i] = alphabet[uint(n+i*3+((n>>uint(i%8))%7))%uint(len(alphabet))]
+	}
+	// force a shared prefix (realistic regional prefixes defeat no cut —
+	// the band does the work)
+	b[0], b[1], b[2] = '2', '3', '0'
+	return string(b)
+}
+
+// TestSweepAutoNotInRepo pins the SQL-pushed dropout sweep's semantics
+// directly (#65 P1-b): auto links of dropped codes die (confirmed AND
+// pending), human-confirmed links and dismissed proposals are decisions
+// and survive, the >400-code chunking boundary behaves identically, and
+// an empty keep-set sweeps every auto non-dismissed link.
+func TestSweepAutoNotInRepo(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	seedSiteResource(t, db, "res_x", "site", "X-KEY", "局站X")
+	seedLink := func(id, code string, status domain.LinkStatus, source domain.LinkSource) {
+		t.Helper()
+		if err := db.Do(ctx, func(tx *repo.Tx) error {
+			return tx.FeeSiteLinks.InsertProposal(ctx, domain.FeeSiteLink{
+				ID: id, FeeSiteCode: code, ResourceID: "res_x", ResourceType: domain.ResourceTypeSite,
+				ResourceKey: code, Grade: domain.LinkGradeFuzzy, Status: status, Source: source,
+				CreatedAt: simTSLink,
+			})
+		}); err != nil {
+			t.Fatalf("seed link %s: %v", id, err)
+		}
+	}
+	seedLink("fsl_auto_kept", "KEPT1", domain.LinkStatusConfirmed, domain.LinkSourceAuto)
+	seedLink("fsl_auto_dropped", "GONE1", domain.LinkStatusConfirmed, domain.LinkSourceAuto)
+	seedLink("fsl_auto_pending_dropped", "GONE2", domain.LinkStatusPending, domain.LinkSourceAuto)
+	seedLink("fsl_human_dropped", "GONE3", domain.LinkStatusConfirmed, domain.LinkSourceHuman)
+	seedLink("fsl_dismissed_dropped", "GONE4", domain.LinkStatusDismissed, domain.LinkSourceAuto)
+	// 500 dropped codes: crosses the 400-parameter chunk boundary.
+	for i := 0; i < 500; i++ {
+		seedLink(domain.NewID("fsl"), fmt.Sprintf("BULK%04d", i), domain.LinkStatusConfirmed, domain.LinkSourceAuto)
+	}
+
+	keep := []string{"KEPT1"}
+	for i := 0; i < 400; i++ { // pad the keep-set across the chunk boundary too
+		keep = append(keep, fmt.Sprintf("PAD%04d", i))
+	}
+	var n int64
+	if err := db.Do(ctx, func(tx *repo.Tx) error {
+		var err error
+		n, err = tx.FeeSiteLinks.DeleteAutoNotIn(ctx, keep)
+		return err
+	}); err != nil {
+		t.Fatalf("DeleteAutoNotIn: %v", err)
+	}
+	if n != 502 { // 500 bulk + GONE1 + GONE2; the human-confirmed and dismissed rows are decisions and stay
+		t.Fatalf("DeleteAutoNotIn deleted %d, want 502 (auto confirmed+pending of dropped codes only)", n)
+	}
+	for _, tc := range []struct {
+		id       string
+		wantGone bool
+	}{
+		{"fsl_auto_kept", false},
+		{"fsl_auto_dropped", true},
+		{"fsl_auto_pending_dropped", true},
+		{"fsl_human_dropped", false}, // a decision outlives the data
+		{"fsl_dismissed_dropped", false},
+	} {
+		_, err := db.FeeSiteLinks.GetByID(ctx, tc.id)
+		if tc.wantGone && !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("link %s after sweep = %v, want gone", tc.id, err)
+		}
+		if !tc.wantGone && err != nil {
+			t.Errorf("link %s must survive the sweep: %v", tc.id, err)
+		}
+	}
+
+	// empty keep-set: everything auto non-dismissed goes, decisions stay.
+	if err := db.Do(ctx, func(tx *repo.Tx) error {
+		var err error
+		n, err = tx.FeeSiteLinks.DeleteAutoNotIn(ctx, nil)
+		return err
+	}); err != nil {
+		t.Fatalf("DeleteAutoNotIn(empty): %v", err)
+	}
+	if n != 1 { // only fsl_auto_kept remains auto+live
+		t.Fatalf("empty-keep sweep deleted %d, want 1", n)
+	}
+	if _, err := db.FeeSiteLinks.GetByID(ctx, "fsl_human_dropped"); err != nil {
+		t.Errorf("human link must survive the empty-universe sweep: %v", err)
+	}
+	_ = svc // the service handle is part of the fixture contract; the sweep is repo-level
 }

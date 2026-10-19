@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -280,4 +281,69 @@ func (r *FeeSiteLinkRepo) PairDecided(ctx context.Context, code, resourceID stri
 		return false, fmt.Errorf("repo: pair decided %s/%s: %w", code, resourceID, err)
 	}
 	return true, nil
+}
+
+// DeleteAutoNotIn removes the AUTO links (confirmed or pending) whose
+// fee_site_code is NOT in keep — the scan's dropout sweep, pushed down to
+// SQL (#65 P1-b: the sweep used to load the whole link table and filter
+// in memory, which at link counts proportional to a 10k+ code universe
+// is both a large allocation and a slow per-row delete loop). Dismissed
+// proposals and human-sourced links are DECISIONS — they outlive the
+// data and are never deleted here (the W006 doctrine). An empty keep
+// sweeps every auto non-dismissed link (the empty-universe case).
+//
+// CONTRACT: must run inside ONE DB.Do transaction (the caller's — the
+// scan wraps its sweep). The keep-set lands in a per-connection TEMP
+// table and the deletion is one NOT IN (SELECT …) statement; a chunked
+// NOT IN over the parameter ceiling would be WRONG, not just slow —
+// every chunk after the first only protects its own slice and would
+// re-delete the codes the earlier chunks kept. The transaction both
+// pins the temp table to one connection and keeps the sweep atomic.
+// Returns the number of deleted rows.
+func (r *FeeSiteLinkRepo) DeleteAutoNotIn(ctx context.Context, keep []string) (int64, error) {
+	if len(keep) == 0 {
+		res, err := r.q.ExecContext(ctx,
+			`DELETE FROM fee_site_links WHERE source = 'auto' AND status != 'dismissed'`)
+		if err != nil {
+			return 0, fmt.Errorf("repo: sweep auto fee site links: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("repo: sweep auto fee site links: rows affected: %w", err)
+		}
+		return n, nil
+	}
+	if _, err := r.q.ExecContext(ctx,
+		`CREATE TEMP TABLE IF NOT EXISTS fee_link_keep(code TEXT PRIMARY KEY)`); err != nil {
+		return 0, fmt.Errorf("repo: sweep keep table: %w", err)
+	}
+	if _, err := r.q.ExecContext(ctx, `DELETE FROM fee_link_keep`); err != nil {
+		return 0, fmt.Errorf("repo: sweep keep table reset: %w", err)
+	}
+	const chunk = 400 // host-parameter inserts stay under every SQLite ceiling
+	for lo := 0; lo < len(keep); lo += chunk {
+		hi := lo + chunk
+		if hi > len(keep) {
+			hi = len(keep)
+		}
+		query := `INSERT OR IGNORE INTO fee_link_keep(code) VALUES ` +
+			strings.TrimRight(strings.Repeat("(?),", hi-lo), ",")
+		args := make([]any, 0, hi-lo)
+		for _, c := range keep[lo:hi] {
+			args = append(args, c)
+		}
+		if _, err := r.q.ExecContext(ctx, query, args...); err != nil {
+			return 0, fmt.Errorf("repo: sweep keep table fill (chunk %d-%d): %w", lo, hi, err)
+		}
+	}
+	res, err := r.q.ExecContext(ctx,
+		`DELETE FROM fee_site_links WHERE source = 'auto' AND status != 'dismissed' AND fee_site_code NOT IN (SELECT code FROM fee_link_keep)`)
+	if err != nil {
+		return 0, fmt.Errorf("repo: sweep auto fee site links: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("repo: sweep auto fee site links: rows affected: %w", err)
+	}
+	return n, nil
 }
