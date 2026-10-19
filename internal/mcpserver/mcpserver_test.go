@@ -24,6 +24,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/fees"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/services"
@@ -965,7 +966,15 @@ func TestMCPFeeRisks(t *testing.T) {
 		}
 	}
 
-	// default build: the honest engine-not-built refusal, every scenario
+	// default build: the honest engine-not-built refusal, every scenario.
+	// On a -tags duckdb build the engine IS available, so the refusal half
+	// cannot assert here — the call would run a real preset against the
+	// empty temp analysis dir and come back with a DuckDB IO error instead.
+	// Skip explicitly (never silently pass): the fees package's
+	// duckdb-tagged tests own the engine-built behavior.
+	if fees.Query(context.Background()).Available() {
+		t.Skip("engine built into this binary (-tags duckdb) — the engine-not-built refusal half belongs to the default build; engine behavior is owned by the duckdb-tagged fees tests")
+	}
 	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked"} {
 		got := callToolError(t, session, "fee_risks", map[string]any{
 			"scenario": sc, "feeType": "electricity", "year": 2024,

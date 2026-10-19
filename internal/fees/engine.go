@@ -3,6 +3,7 @@ package fees
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 )
 
 // The QUERY surface (#58's stage-5 preview, the vertical slice's proof):
@@ -141,4 +142,17 @@ func normalizeLimit(limit int) int {
 // caller strings.
 func feeTableGlob(analysisDir string) string {
 	return fmt.Sprintf("%s/fees/*/*/*/*.parquet", analysisDir)
+}
+
+// analysisEmpty reports whether the analysis dir carries no Parquet files
+// at all (fresh install, nothing imported yet). The engines answer EMPTY
+// results for that case — no data is not an engine failure — instead of
+// letting DuckDB's glob throw an IO error at the caller (#71 review
+// follow-up: the MCP/API engine-state tests run against empty dirs and
+// the duckdb build answered 500-IO instead of an honest empty list).
+// A glob error reads as NON-empty: the real query then surfaces the
+// underlying problem, we never mask it here.
+func analysisEmpty(analysisDir string) bool {
+	matches, _ := filepath.Glob(feeTableGlob(analysisDir))
+	return len(matches) == 0
 }

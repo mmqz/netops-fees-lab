@@ -9,6 +9,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -529,7 +530,14 @@ func TestFeesRisksEndpoint(t *testing.T) {
 		}
 	}
 
-	// valid parameters on the default build → 501 engine_not_built (all six)
+	// valid parameters on the default build → 501 engine_not_built (all six).
+	// On a -tags duckdb build the engine answers the real preset — empty
+	// results against the empty test dir (the analysisEmpty guard), never
+	// the refusal — so this half skips explicitly; the duckdb-tagged fees
+	// tests own the engine-built behavior.
+	if fees.Query(context.Background()).Available() {
+		t.Skip("engine built into this binary (-tags duckdb) — the 501 refusal half belongs to the default build")
+	}
 	for _, sc := range fees.RiskScenarios() {
 		resp, body := doRequest(t, srv, http.MethodGet,
 			"/api/fees/risks/"+sc+"?feeType=electricity&year=2024", nil, "")

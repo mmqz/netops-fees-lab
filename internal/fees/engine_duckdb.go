@@ -48,6 +48,9 @@ func periodFilter(year, month int) string {
 }
 
 func (duckQueryEngine) Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, err
@@ -78,6 +81,9 @@ LIMIT %d`,
 }
 
 func (duckQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]DuplicateRow, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, err

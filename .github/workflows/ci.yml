@@ -66,10 +66,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
-      - name: go vet (duckdb build)
-        run: CGO_ENABLED=1 go vet -tags duckdb ./internal/fees/
-      - name: go test (duckdb engine e2e)
-        run: CGO_ENABLED=1 go test -count=1 -timeout 10m -tags duckdb ./internal/fees/
+      - name: go vet (duckdb build, all packages)
+        run: CGO_ENABLED=1 go vet -tags duckdb ./...
+      - name: go test (duckdb build, all packages — #72: the fees-only scope
+          was a gate blind spot; the engine-built build must run every
+          package's tests, engine-availability branches skip explicitly)
+        run: CGO_ENABLED=1 go test -count=1 -timeout 15m -tags duckdb ./...
 
   # Issue #38: the user's actual environment is Windows, so the test gate
   # must hold there too — the linux job alone let 15 platform failures

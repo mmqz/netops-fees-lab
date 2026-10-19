@@ -54,6 +54,9 @@ WITH per AS (
 // RiskDuplicatesPreset implements scenario 2: multi-batch (site, period)
 // pairs; metric = the batch count, threshold = >1 batches.
 func (duckQueryEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, 0, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, 0, err
@@ -96,6 +99,9 @@ ORDER BY total_cents DESC, site_code, year, month`,
 // any delta). The batch-level aggregation first, then min/max across
 // batches — split bills inside one batch never false-fire.
 func (duckQueryEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, 0, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, 0, err
@@ -150,6 +156,9 @@ ORDER BY delta DESC, site_code, year, month`,
 // The excluded count reports the multi-batch pairs left out (#59's
 // determinism ruling — they are scenarios 2/3's clues).
 func (duckQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, 0, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, 0, err
@@ -221,6 +230,9 @@ ORDER BY ratio DESC, site_code, year, month`,
 // totals whose z-score against the same-period single-batch peers
 // crosses |ZScore| (two-sided, the sign stays in the metric).
 func (duckQueryEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, 0, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, 0, err
@@ -283,6 +295,9 @@ ORDER BY abs(z) DESC, c.site_code, c.year, c.month`,
 // in the scope, largest first (the composition filters by resource
 // status; the order only shapes deterministic iteration).
 func (duckQueryEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, err
@@ -318,6 +333,9 @@ ORDER BY total_cents DESC, site_code, year, month`,
 // SiteTotalsAll — scenario 6's fee half: every site's total across the
 // scope (period-agnostic), largest first.
 func (duckQueryEngine) SiteTotalsAll(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SiteTotal, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, nil
+	}
 	db, err := openAnalysis()
 	if err != nil {
 		return nil, err
@@ -358,6 +376,9 @@ ORDER BY total_cents DESC, site_code`,
 // (4 placeholders each) keep every SQLite-era habit irrelevant — DuckDB
 // has no such ceiling, the chunk bounds statement size only.
 func (duckQueryEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
+	if analysisEmpty(analysisDir) {
+		return map[EvidenceKey][]EvidenceAnchor{}, nil
+	}
 	out := make(map[EvidenceKey][]EvidenceAnchor, len(keys))
 	if len(keys) == 0 || maxPer <= 0 {
 		return out, nil
