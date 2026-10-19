@@ -109,7 +109,33 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 
 写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。五端点进 OpenAPI 文档（`fees` tag，路由表生成零漂移）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
-## 8. 路线（#58 阶段表）
+## 8. 风险六场景（#64，#58 阶段 4）
+
+**输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，可回读快照原文，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, note}`。
+
+| 场景 id | 名称 | 判定口径 | 参数（默认值） |
+| --- | --- | --- | --- |
+| `retired-billing` | 退租后仍在计费 | 已确认关联的资源状态 ∈ 退用集合且该站址有费用记录（跨层：Go 侧组合 SQLite 状态 + 引擎费用面） | `status`（默认 `停用,退网`） |
+| `duplicate-settlement` | 跨批次重复结算 | 同 (站址, 账期) 计费批次 >1（metric=batches） | 无阈值 |
+| `ledger-mismatch` | 合同账单金额差异 | 同 (站址, 账期) 各批次合计之差超阈值（先按批次聚合再比——批次内拆分账单不误报） | `diffCents`（默认 0 = 任何差异） |
+| `spike` | 电费环比异常上涨 | 单批次口径月度合计环比涨幅达阈值（上期 = 上一个有账单的月份） | `ratio`（默认 0.30） |
+| `outlier` | 同类站单位成本离群 | 同期同费用类型单批次站址集合的 z-score（双侧，符号在 metric） | `z`（默认 3.0）、`minSites`（默认 8） |
+| `unlinked` | 零资源计费 | 费用编码既无 confirmed 关联也无 pending 提案（dismissed 视为无匹配；跨层组合） | 无阈值 |
+
+**确定性裁决（#59 落地）**：`spike`/`outlier` 只在**单批次** (站址, 账期) 口径上计算——重复行令窗口函数与分布统计非确定；跨批次对被**排除并在信封 `excluded` 计数**（它们是 duplicate-settlement/ledger-mismatch 的线索域），绝不静默丢弃。`spike` 的单月查询收窄**线索窗口**不收窄环比基期（上期恒取全年序列的上一个有账单月）。z-score 用 `stddev_samp` 且同期同类站数 < `minSites` 时该期不出线索（小样本不产统计结论；数学上 n≤11 时单点 |z| 无法达 3，`minSites` 默认 8 + 场景内其余站址会抬高 n，仍以参数为门槛诚实声明）；**指标输出的跨运行稳定性**：DuckDB 向量化多项聚合按块序求和、原始浮点在末位 ULP 摆动——线索集恒确定，z 在 SQL 内取整到 10 位小数使输出字节稳定（比价类单次除法无此问题，不取整）（小样本不产统计结论；数学上 n≤11 时单点 |z| 无法达 3，`minSites` 默认 8 + 场景内其余站址会抬高 n，仍以参数为门槛诚实声明）。
+
+**默认构建诚实契约**：六场景与查询预设同走引擎面——未编译（默认构建）一律 501 `engine_not_built`（CLI exit 1 + 文案携带 Docker/WSL2 指引）；参数校验先于引擎检查（坏场景/坏类型/坏阈值 → 400/exit 2）。
+
+### CLI
+```
+netopslab fees --db <path> --data <dir> risks <scenario> --type <t> --year <Y> [--month <M>]
+    [--status 停用,退网] [--diff-cents 0] [--ratio 0.30] [--z 3.0] [--min-sites 8] [--limit 100] [--max-evidence 10]
+```
+
+### HTTP
+`GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=`（契约见 api.md；过 v0.11-R13 令牌写门禁只拦写方法，本端点为 GET 只读）。
+
+## 9. 路线（#58 阶段表）
 
 | 阶段 | 状态 |
 | --- | --- |
@@ -120,7 +146,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | 4 六大风险场景规则 + 证据追溯 | 待开（`duplicates` 预设是首个场景的雏形） |
 | 5 MCP 工具面扩展 + 统一工作台入口 | 待开（HTTP API 面待阶段 3 前） |
 
-## 9. 相关文档
+## 10. 相关文档
 
 - [data-model.md](data-model.md) —— v29 DDL（fee_batches）；
 - [api.md](api.md) —— CLI 契约示例（HTTP 面待后续轮次）；

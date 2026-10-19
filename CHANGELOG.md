@@ -2,6 +2,20 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.14.0] — 2026-10-19
+
+**费用风险六场景版**（#64 = #58 阶段 4 全量落地；需求驱动为架构讨论中确定的六大风险场景原始清单）。六场景全部升为**风险规则 + 证据追溯**的正式输出——每条线索携带触发数值、显式阈值与**行级证据锚点**（source_file + source_row + import_batch，可回读快照原文），输出恒为待核实线索、绝不作认定结论（账单存在 ≠ 重复付款认定）。
+
+### 新增 — 六大风险场景（#64，CLI `fees risks` + HTTP `GET /api/fees/risks/{scenario}`）
+- **场景与判定口径**（全为固定预设 + 显式参数，调用方传不了 SQL）：`retired-billing` 退租后仍在计费（已确认关联的资源状态 ∈ 退用集合且费用仍流入——**跨层 Go 组合**：SQLite 状态 × 引擎费用面，无跨引擎 ATTACH，默认状态集 `停用,退网` 参数化）；`duplicate-settlement` 跨批次重复结算（同 (站,期) 批次 >1，metric=batches）；`ledger-mismatch` 合同账单金额差异（各批次**合计**之差超 `diffCents`——先按批次聚合再比，批次内拆分账单不误报；合同/账单两类台账作为不同批次导入即为此形态，口径文档诚实声明）；`spike` 电费环比异常上涨（单批次口径月合计环比涨幅 ≥ `ratio`，上期 = 上一个有账单的月份）；`outlier` 同类站单位成本离群（同期同费用类型单批次集合 z-score 双侧离群 ≥ `z`，样本数 ≥ `minSites` 才出线索）；`unlinked` 零资源计费（费用编码 confirmed+pending 关联面为空；dismissed 视为无匹配）。
+- **确定性裁决（#59 落地）**：`spike`/`outlier` 只在单批次 (站,期) 口径上计算——重复行令窗口函数与分布统计非确定；跨批次对**排除并在信封 `excluded` 计数**（它们是场景 2/3 的线索域），绝不静默丢弃；`spike` 单月查询收窄线索窗口不收窄环比基期。z 用 `stddev_samp`（确定性聚合）。复跑字节一致由 duckdb 引擎测试钉死。
+- **输出契约**：`RiskClue{siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`（金额整数分——0.13.1 契约延续）；证据锚点默认每线索 ≤10（上限 50），`evidenceTotal` 全量行数；信封含 `scenario/scenarioCn/note` 口径声明与 `excluded`。
+- **诚实契约**：六场景与查询预设同走引擎面——默认构建一律 501 `engine_not_built`（CLI exit 1 + 指引文案）；参数校验先于引擎检查（400/exit 2）。阈值默认值全文档化（fees-layer.md §8），零魔数。
+- **修复过程中发现的实现缺陷**（均在本轮内修）：hive 分区列 DuckDB 按字符串读出——算术/过滤需显式转型（`year*12+month` 排序与单月过滤加 `::BIGINT`）；`spike` 首版把单月过滤误作用于环比基期（per-CTE 恒取全年，月份只收窄线索窗）；`outlier` JOIN 双侧同名列需限定。
+
+### 测试
+- Go 顶层测试 563 → **576**（+13：场景枚举/默认值钉死、默认构建六场景诚实契约、跨层组合（状态过滤/关联语义/证据管道）fake 引擎测试、duckdb 引擎六场景端到端（线索集/整数分指标/显式阈值/排除计数/证据锚点/复跑确定性）、HTTP 契约（8 组 400 + 六场景 501）、CLI e2e（usage ×5 + 六场景 exit 1 + 指引文案））。门禁：gofmt 空 · vet 0（默认 + duckdb 双构建）· 全包 ok · vitest 6/6 · tsc 0。
+
 ## [0.13.1] — 2026-10-19
 
 **费用分析层实测修复版**（issue #65 独立实测三处 P1 + 一处 P3 的闭环）。金额契约换轨整数分、模糊关联扫描换轨有损零算法路径并并行化、Windows 查询路径补官方替代——三处均为对账级正确性 / HTTP 可用性 / 平台可达性的实缺陷，非打磨。

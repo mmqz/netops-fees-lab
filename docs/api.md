@@ -9,14 +9,14 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.13.1（2026-10-19）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.14.0（2026-10-19）。**
 
 ## GET /api/health
 
 ```json
 {
   "status": "ok",
-  "version": "v0.13.1",
+  "version": "v0.14.0",
   "ruleVersion": "1.0.0",
   "dbPath": "/abs/path/to/netops.db"
 }
@@ -1154,6 +1154,43 @@ multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricit
 ## POST /api/fees/links/{id}/dismiss — 驳回模糊提案
 
 仅 pending 可驳回：`dismissed`（审计保留，编码与资源对不再自动复提）；非 pending → 409；未知 id 404。CLI 等价：`netopslab fees links confirm|dismiss --id <id>`。
+
+## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence= — 费用风险六场景（#58 阶段 4）
+
+**固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨）/ `outlier`（同类站单位成本离群）/ `unlinked`（零资源计费）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
+
+返回 `RiskResult`（金额均为整数分；线索按 metric 降序、(站址, 账期) 升序确定序；`evidence` 为行级证据锚点，可回读快照原文）：
+
+```json
+{
+  "scenario": "duplicate-settlement",
+  "scenarioCn": "跨批次重复结算",
+  "feeType": "electricity",
+  "year": 2024,
+  "month": 5,
+  "clues": [
+    {
+      "siteCode": "S-DUP",
+      "year": 2024,
+      "month": 5,
+      "metricValue": 2,
+      "metricLabel": "batches",
+      "threshold": 1,
+      "thresholdLabel": ">1 批次",
+      "evidence": [
+        {"sourceFile": "<sha256>_dup-a.csv", "sourceRow": 2, "importBatch": "fee_…", "amountCents": 10000},
+        {"sourceFile": "<sha256>_dup-b.csv", "sourceRow": 2, "importBatch": "fee_…", "amountCents": 10000}
+      ],
+      "evidenceTotal": 2
+    }
+  ],
+  "total": 1,
+  "excluded": 0,
+  "note": "线索口径：同一 (站址, 账期) 存在多个导入批次的计费记录——批次按设计共存不合并，账单存在不构成重复付款认定，请人工核实"
+}
+```
+
+阈值默认值（显式参数化，见 fees-layer.md §8）：`status=停用,退网`、`diffCents=0`、`ratio=0.30`、`z=3.0`、`minSites=8`、`limit=100`（上限 1000）、`maxEvidence=10`（上限 50）。`spike`/`outlier` 的 `excluded` 为被排除的跨批次 (站址, 账期) 数——重复行令窗口/分布非确定（#59），跨批次对属 duplicate-settlement/ledger-mismatch 的线索域，排除即声明。
 
 ## 静态资源与 SPA
 
