@@ -113,14 +113,14 @@ if [[ "$SECTION" == *"真实网络数据"* ]]; then ok "D1 图层面板出现新
 CABLE_CHK="$(jeval "[...document.querySelectorAll('.geo-layerpanel-opt')].find(l => l.textContent.includes('光缆干线')) ? 'yes' : 'no'")"
 if [[ "$CABLE_CHK" == "yes" ]]; then ok "D2 光缆干线开关系存在"; else bad "D2 光缆干线开关系缺失"; fi
 BS_CHK_STATE="$(jeval "[...document.querySelectorAll('.geo-layerpanel-opt')].find(l => l.textContent.includes('无线基站'))?.querySelector('input')?.checked ?? 'none'")"
-if [[ "$BS_CHK_STATE" == "true" ]]; then ok "D3 无线基站开关初始开（预置偏好）"; else bad "D3 无线基站初始态 = $BS_CHK_STATE"; fi
+if [[ "$BS_CHK_STATE" == "false" ]]; then ok "D3 无线基站开关初始关（默认关一键开——README 声明，#77 校准：脚本原断言 v0.8.0 时点的初始开，产品意图已改为默认关）"; else bad "D3 无线基站初始态 = $BS_CHK_STATE（应为 false——默认关）"; fi
 
-# E. 开关真切换（关闭基站 → visibility none）
+# E. 开关真切换（默认关 → 开启 → visible；再关闭恢复默认 → none）
 agent-browser eval "(() => { const l=[...document.querySelectorAll('.geo-layerpanel-opt')].find(x => x.textContent.includes('无线基站')); l.querySelector('input').click(); return 'ok'; })()" >/dev/null
 agent-browser wait 800 >/dev/null
 BS_VIS="$(jeval "window.__geomap.getLayoutProperty('basestation-pts', 'visibility')")"
-if [[ "$BS_VIS" == "none" ]]; then ok "E1 关闭开关 → basestation-pts visibility=none"; else bad "E1 visibility = $BS_VIS"; fi
-# 重新打开（恢复）
+if [[ "$BS_VIS" == "visible" ]]; then ok "E1 开启开关 → basestation-pts visibility=visible"; else bad "E1 visibility = $BS_VIS"; fi
+# 再关闭（恢复默认态，供后续断言与 3D 段不被基站点云干扰）
 agent-browser eval "(() => { const l=[...document.querySelectorAll('.geo-layerpanel-opt')].find(x => x.textContent.includes('无线基站')); l.querySelector('input').click(); return 'ok'; })()" >/dev/null
 agent-browser wait 800 >/dev/null
 
