@@ -260,7 +260,7 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		note = "线索口径：同一 (站址, 账期) 的各批次合计金额不一致（合同台账与账单台账作为不同批次导入时的差异形态）——差异金额供核对，非认定结论"
 	case RiskSpike:
 		clues, excluded, err = engine.RiskSpikePreset(ctx, s.analysisDir(), q)
-		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；跨批次 (站址, 账期) 已排除（那属于重复结算/金额差异场景），排除数见 excluded"
+		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；跨批次 (站址, 账期) 已排除（那属于重复结算/金额差异场景），排除数为全年口径（环比链跨全年，排除影响整链），月份参数只收窄显示的线索窗口（#83）"
 	case RiskOutlier:
 		clues, excluded, err = engine.RiskOutlierPreset(ctx, s.analysisDir(), q)
 		note = "线索口径：同期同类（同费用类型）单批次站址集合的 z-score 离群（双侧，符号在 metricValue）——统计线索，非认定结论；跨批次 (站址, 账期) 已排除，排除数见 excluded"

@@ -153,10 +153,16 @@ func TestRiskPresetsDuck(t *testing.T) {
 	if err != nil || resM.Total != 1 || resM.Clues[0].SiteCode != "S-SPIKE" {
 		t.Fatalf("spike month=6 = %+v (err %v)", resM.Clues, err)
 	}
-	// custom ratio above 1.5 → silent
+	// custom ratio above 1.5 → silent, but the honest envelope must survive
+	// the empty clue set (#83: the old first-row capture fell back to 0
+	// exactly here — misreporting "nothing was excluded" while the year
+	// still holds 3 multi-batch pairs).
 	resHi, err := svc.Risks(ctx, engine, RiskSpike, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Ratio: 1.6})
 	if err != nil || resHi.Total != 0 {
 		t.Fatalf("spike ratio=1.6 must be silent, got %+v (err %v)", resHi.Clues, err)
+	}
+	if resHi.Excluded != 3 {
+		t.Errorf("spike ratio=1.6 excluded = %d, want 3 — the envelope must stay truthful on an empty clue set (#83)", resHi.Excluded)
 	}
 
 	// ---- scenario 5: outlier ----
@@ -178,15 +184,21 @@ func TestRiskPresetsDuck(t *testing.T) {
 	if res.Clues[0].MetricLabel != "zScore" || res.Excluded != 2 {
 		t.Errorf("outlier labels/excluded = %q / %d", res.Clues[0].MetricLabel, res.Excluded)
 	}
-	// a z bar above the max attainable → silent
+	// a z bar above the max attainable → silent, envelope still truthful (#83)
 	resZ, err := svc.Risks(ctx, engine, RiskOutlier, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5, ZScore: 5})
 	if err != nil || resZ.Total != 0 {
 		t.Fatalf("outlier z=5 must be silent, got %+v (err %v)", resZ.Clues, err)
+	}
+	if resZ.Excluded != 2 {
+		t.Errorf("outlier z=5 excluded = %d, want 2 — the envelope must stay truthful on an empty clue set (#83)", resZ.Excluded)
 	}
 	// a min-sites bar above the period's peer count → silent (small samples)
 	resN, err := svc.Risks(ctx, engine, RiskOutlier, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5, MinSites: 100})
 	if err != nil || resN.Total != 0 {
 		t.Fatalf("outlier minSites=100 must be silent, got %+v (err %v)", resN.Clues, err)
+	}
+	if resN.Excluded != 2 {
+		t.Errorf("outlier minSites=100 excluded = %d, want 2 (#83)", resN.Excluded)
 	}
 
 	// ---- scenario 1: retired-billing (cross-layer) ----
