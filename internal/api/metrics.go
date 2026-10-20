@@ -200,7 +200,7 @@ func (s *Server) handleMetricAnomalies(w http.ResponseWriter, r *http.Request) {
 	}
 	direction := strings.TrimSpace(q.Get("direction"))
 
-	items, err := s.metrics.Anomalies(r.Context(), metricKey, from, to, threshold, direction)
+	items, err := s.metrics.Anomalies(r.Context(), "", metricKey, from, to, threshold, direction)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return

@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -712,7 +713,38 @@ type AnomalyItem struct {
 // DefaultAnomalyThreshold when 0), optionally filtered by trend direction
 // ("declining" = delta < 0, "rising" = delta > 0, "" = both). Ordered by
 // (resource, metricKey) — deterministic.
-func (s *Service) Anomalies(ctx context.Context, metricKey, from, to string,
+// SeriesLatest is one series with its newest point — graph_context's
+// consumption shape (#95): the LAST reading per metric, not the history.
+type SeriesLatest struct {
+	SeriesID  string
+	MetricKey string
+	Unit      string
+	Last      *domain.MetricPoint // nil when the series exists but has no points
+}
+
+// LatestOfResource returns each of the resource's series with only its
+// NEWEST point — one indexed tail seek per series (#95: ResourceSeries
+// materialized every raw point of every series just so the caller could
+// keep the last one; a 12-month series cost 365 rows per call per metric).
+func (s *Service) LatestOfResource(ctx context.Context, resourceID string, keys []string) ([]SeriesLatest, error) {
+	series, err := s.db.Metrics.SeriesOfResource(ctx, resourceID, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SeriesLatest, 0, len(series))
+	for _, se := range series {
+		row := SeriesLatest{SeriesID: se.Series.SeriesID, MetricKey: se.Series.MetricKey, Unit: se.Unit}
+		if p, err := s.db.Metrics.LatestPointOfSeries(ctx, se.Series.SeriesID); err == nil {
+			row.Last = &p
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (s *Service) Anomalies(ctx context.Context, resourceID, metricKey, from, to string,
 	threshold float64, direction string) ([]AnomalyItem, error) {
 	if threshold <= 0 {
 		threshold = DefaultAnomalyThreshold
@@ -738,7 +770,7 @@ func (s *Service) Anomalies(ctx context.Context, metricKey, from, to string,
 	for _, k := range catalogRows {
 		catalog[k.Key] = k
 	}
-	rows, err := s.db.Metrics.Anomalies(ctx, metricKey, from, to, threshold, trend)
+	rows, err := s.db.Metrics.Anomalies(ctx, resourceID, metricKey, from, to, threshold, trend)
 	if err != nil {
 		return nil, err
 	}

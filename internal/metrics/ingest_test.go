@@ -631,7 +631,7 @@ func TestServiceAnomalies(t *testing.T) {
 
 	}
 
-	items, err := s.Anomalies(ctx, "optical_power_rx_avg_dbm", "", "", 1.0, "")
+	items, err := s.Anomalies(ctx, "", "optical_power_rx_avg_dbm", "", "", 1.0, "")
 	if err != nil {
 		t.Fatalf("anomalies: %v", err)
 	}
@@ -659,15 +659,15 @@ func TestServiceAnomalies(t *testing.T) {
 	}
 
 	// The declining direction filter keeps it; the rising filter drops it.
-	if items, _ := s.Anomalies(ctx, "optical_power_rx_avg_dbm", "", "", 1.0, "declining"); len(items) != 1 {
+	if items, _ := s.Anomalies(ctx, "", "optical_power_rx_avg_dbm", "", "", 1.0, "declining"); len(items) != 1 {
 		t.Errorf("direction=declining items = %d, want 1", len(items))
 	}
-	if items, _ := s.Anomalies(ctx, "optical_power_rx_avg_dbm", "", "", 1.0, "rising"); len(items) != 0 {
+	if items, _ := s.Anomalies(ctx, "", "optical_power_rx_avg_dbm", "", "", 1.0, "rising"); len(items) != 0 {
 		t.Errorf("direction=rising items = %d, want 0", len(items))
 	}
 	// Window bound: scanning from 01-04 shrinks the delta to -1.0 (first
 	// of window -9.5, last -10.5 — still >= the 1.0 threshold).
-	if items, _ := s.Anomalies(ctx, "optical_power_rx_avg_dbm", "2026-01-04T00:00:00Z", "", 1.0, ""); len(items) != 1 {
+	if items, _ := s.Anomalies(ctx, "", "optical_power_rx_avg_dbm", "2026-01-04T00:00:00Z", "", 1.0, ""); len(items) != 1 {
 		t.Errorf("windowed items = %d, want 1", len(items))
 	}
 	// A lower_is_better rising trend (packet loss creeping up) is
@@ -683,7 +683,7 @@ func TestServiceAnomalies(t *testing.T) {
 	if _, err := s.Ingest(ctx, file2, m, "perf-loss.xlsx"); err != nil {
 		t.Fatalf("ingest loss: %v", err)
 	}
-	lossItems, err := s.Anomalies(ctx, "packet_loss_rx_pct", "", "", 1.0, "")
+	lossItems, err := s.Anomalies(ctx, "", "packet_loss_rx_pct", "", "", 1.0, "")
 	if err != nil {
 		t.Fatalf("anomalies (loss): %v", err)
 	}

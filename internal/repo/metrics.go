@@ -225,6 +225,29 @@ func (r *MetricRepo) PointsOfSeries(ctx context.Context, seriesID, from, to stri
 	return r.scanPoints(ctx, query, args...)
 }
 
+// LatestPointOfSeries returns the newest point of one series — a single
+// seek on the (series_id, ts) WITHOUT ROWID key (#95: graph_context used
+// to materialize EVERY raw point of EVERY series just to keep the last
+// one; months of points per series per call). ErrNotFound when the
+// series has no points at all (an initialized-but-empty series).
+func (r *MetricRepo) LatestPointOfSeries(ctx context.Context, seriesID string) (domain.MetricPoint, error) {
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT series_id, ts, value, quality, batch_id FROM metrics WHERE series_id = ? ORDER BY ts DESC LIMIT 1`,
+		seriesID)
+	if err != nil {
+		return domain.MetricPoint{}, fmt.Errorf("repo: latest point of series %s: %w", seriesID, err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return domain.MetricPoint{}, fmt.Errorf("%w: repo: series %s has no points", domain.ErrNotFound, seriesID)
+	}
+	var p domain.MetricPoint
+	if err := rows.Scan(&p.SeriesID, &p.TS, &p.Value, &p.Quality, &p.BatchID); err != nil {
+		return domain.MetricPoint{}, fmt.Errorf("repo: scan latest point of series %s: %w", seriesID, err)
+	}
+	return p, rows.Err()
+}
+
 // AggKind selects the daily aggregation of DailyPointsOfSeries.
 type AggKind string
 
@@ -332,13 +355,13 @@ const (
 // (resource_id, metric_key) — deterministic. First/last are the window's
 // extremes (MIN(ts)/MAX(ts)); series with a single point have delta 0 and
 // only match threshold <= 0. Resource name/type come from the join.
-func (r *MetricRepo) Anomalies(ctx context.Context, metricKey, from, to string, threshold float64, trend DeltaTrend) ([]AnomalyRow, error) {
+func (r *MetricRepo) Anomalies(ctx context.Context, resourceID, metricKey, from, to string, threshold float64, trend DeltaTrend) ([]AnomalyRow, error) {
 	query := `SELECT s.resource_id, r.name, r.resource_type, s.metric_key, c.n, f.ts, f.value, l.ts, l.value
 FROM metric_series s
 JOIN (
   SELECT series_id, COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx
   FROM metrics WHERE 1=1`
-	args := make([]any, 0, 8)
+	args := make([]any, 0, 9)
 	if from != "" {
 		query += ` AND ts >= ?`
 		args = append(args, from)
@@ -363,6 +386,14 @@ WHERE ABS(l.value - f.value) >= ?`
 	if metricKey != "" {
 		query += ` AND s.metric_key = ?`
 		args = append(args, metricKey)
+	}
+	// #95: the single-resource pushdown — graph_context used to scan the
+	// WHOLE anomaly universe (every series of every resource) and filter
+	// to one resource in Go; the predicate now rides the same indexed
+	// series_id/resource_id column the metric_series table carries.
+	if resourceID != "" {
+		query += ` AND s.resource_id = ?`
+		args = append(args, resourceID)
 	}
 	query += ` ORDER BY s.resource_id, s.metric_key`
 

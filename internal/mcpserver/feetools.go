@@ -44,11 +44,11 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 
 // feeRisksInput is the typed input: scenario + scope + size only.
 type feeRisksInput struct {
-	Scenario string `json:"scenario" jsonschema:"风险场景（必填）：" `
+	Scenario string `json:"scenario" jsonschema:"风险场景（必填）：retired-billing（退用仍计费）/ duplicate-settlement（跨批次重复）/ ledger-mismatch（台账金额差异）/ spike（环比突增）/ outlier（同批离群）/ unlinked（零资源计费）"`
 	FeeType  string `json:"feeType" jsonschema:"费用类型（必填）：electricity（电费）/ tower_lease（铁塔租费）/ repair（修理费）/ maintenance（综维费）"`
 	Year     *int   `json:"year" jsonschema:"年份（必填，2000–2100）"`
 	Month    *int   `json:"month,omitempty" jsonschema:"月份（可选 1–12，缺省整年各月）"`
-	Limit    *int   `json:"limit,omitempty" jsonschema:"线索条数上限，缺省 20，最大 50（工具面比 HTTP 更紧——AI 消费面不需要千条）"`
+	Limit    *int   `json:"limit,omitempty" jsonschema:"线索条数上限，缺省 20，最大 50（工具面比 HTTP 更紧——AI 消费面不需要千条）；必须 ≥ 1"`
 }
 
 // feeRisksOutput passes the fees RiskResult contract through verbatim —
@@ -72,7 +72,14 @@ func feeRisks(ctx context.Context, svc *services.Services, in feeRisksInput) (*m
 		return nil, feeRisksOutput{}, fmt.Errorf("year 必填（2000–2100）")
 	}
 	limit := 20
-	if in.Limit != nil && *in.Limit > 0 {
+	if in.Limit != nil {
+		// #91: explicit over silent — resource_search/alerts_query answer a
+		// negative limit with a validation error; this tool used to silently
+		// clamp it to the default 20, one tool contradicting the surface's
+		// own contract.
+		if *in.Limit < 1 {
+			return nil, feeRisksOutput{}, fmt.Errorf("limit 必须是 ≥ 1 的整数，收到 %d", *in.Limit)
+		}
 		limit = *in.Limit
 	}
 	if limit > 50 {

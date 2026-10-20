@@ -103,35 +103,35 @@ func (s *Services) GraphContext(ctx context.Context, id string, depth int, withM
 		Metrics:        make([]GraphContextMetric, 0),
 	}
 	if withMetrics {
-		series, err := s.Metrics.ResourceSeries(ctx, id, nil, "", "", metrics.AggRaw)
+		// #95: the tail seek — one indexed LatestPointOfSeries per series,
+		// instead of materializing every raw point of every series just to
+		// keep the last one (a 12-month series cost 365 rows per metric).
+		latest, err := s.Metrics.LatestOfResource(ctx, id, nil)
 		if err != nil {
 			return nil, err
 		}
-		resp.Metrics = make([]GraphContextMetric, 0, len(series))
-		for _, sr := range series {
-			if len(sr.Points) == 0 {
+		resp.Metrics = make([]GraphContextMetric, 0, len(latest))
+		for _, sr := range latest {
+			if sr.Last == nil {
 				continue
 			}
-			last := sr.Points[len(sr.Points)-1]
 			resp.Metrics = append(resp.Metrics, GraphContextMetric{
-				MetricKey: sr.MetricKey, Unit: sr.Unit, TS: last.TS, Value: last.Value,
-				Quality: string(last.Quality),
+				MetricKey: sr.MetricKey, Unit: sr.Unit, TS: sr.Last.TS, Value: sr.Last.Value,
+				Quality: string(sr.Last.Quality),
 			})
 		}
 	}
 	// The anomalies scan with default parameters (metricKey="", unbounded
-	// window, default threshold, any direction) filtered to this resource —
-	// "the /api/metrics/anomalies result filtered to this resource".
+	// window, default threshold, any direction) SCOPED TO THIS RESOURCE in
+	// SQL (#95: the scan used to read the whole anomaly universe — every
+	// series of every resource — and filter in Go; graph_context is the AI
+	// root-cause entry point, high-frequency by design).
 	// Initialized (not nil) so the empty case serializes as [] (audit §2.6).
 	resp.RecentAnomalies = make([]metrics.AnomalyItem, 0)
-	items, err := s.Metrics.Anomalies(ctx, "", "", "", 0, "")
+	items, err := s.Metrics.Anomalies(ctx, id, "", "", "", 0, "")
 	if err != nil {
 		return nil, err
 	}
-	for _, it := range items {
-		if it.ResourceID == id {
-			resp.RecentAnomalies = append(resp.RecentAnomalies, it)
-		}
-	}
+	resp.RecentAnomalies = append(resp.RecentAnomalies, items...)
 	return resp, nil
 }

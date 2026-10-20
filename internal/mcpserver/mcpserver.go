@@ -64,7 +64,7 @@ const (
 // reserved and rejected).
 type searchInput struct {
 	Q      string `json:"q,omitempty" jsonschema:"搜索关键词：natural_key/name/attributes 不区分大小写的包含匹配"`
-	Type   string `json:"type,omitempty" jsonschema:"资源类型过滤：device、ip_pool、circuit、port、base_station、site、machine_room 或 ptp_port"`
+	Type   string `json:"type,omitempty" jsonschema:"资源类型过滤：注册资源类型之一（完整闭集在 type 校验错误信息里自动列出——注册表驱动，不手抄，不随演进漂移）"`
 	Limit  *int   `json:"limit,omitempty" jsonschema:"返回条数上限，缺省 20，最大 100"`
 	Offset *int   `json:"offset,omitempty" jsonschema:"返回起始偏移，缺省 0"`
 }

@@ -161,7 +161,7 @@ func TestSynthFilesFeedsBothChannels(t *testing.T) {
 			t.Fatalf("ingest %s: %v", name, err)
 		}
 	}
-	items, err := s.Anomalies(ctx, "optical_power_rx_avg_dbm", "", "", 0, "")
+	items, err := s.Anomalies(ctx, "", "optical_power_rx_avg_dbm", "", "", 0, "")
 	if err != nil {
 		t.Fatalf("anomalies: %v", err)
 	}

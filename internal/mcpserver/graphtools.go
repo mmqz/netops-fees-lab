@@ -421,6 +421,9 @@ func alertFilterOf(in alertsQueryInput, limit, offset int) repo.AlertFilter {
 type metricsQueryInput struct {
 	ResourceID string `json:"resourceId" jsonschema:"目标资源 id（uuid；端口/设备类资源有性能序列）"`
 	Keys       string `json:"keys,omitempty" jsonschema:"指标键过滤，逗号列表（如 optical_power_rx_avg_dbm,packet_loss_rx_pct），缺省返回全部序列"`
+	From       string `json:"from,omitempty" jsonschema:"窗口起点（ISO 日期，如 2024-05-01；缺省不设下界）"`
+	To         string `json:"to,omitempty" jsonschema:"窗口终点（ISO 日期；缺省不设上界；长窗口建议配 agg 降载荷）"`
+	Agg        string `json:"agg,omitempty" jsonschema:"聚合粒度：raw（原始点，缺省）/ daily_avg / daily_min / daily_max（按自然日聚合，长窗口首选）"`
 }
 
 // metricsQueryOutput mirrors the HTTP GET /api/resources/{id}/metrics
@@ -446,7 +449,25 @@ func metricsQuery(ctx context.Context, svc *services.Services, in metricsQueryIn
 			keys = append(keys, part)
 		}
 	}
-	series, err := svc.Metrics.ResourceSeries(ctx, in.ResourceID, keys, "", "", "")
+	// #91: explicit agg validation — an unknown AggKind would hit no switch
+	// case and silently answer empty points; the HTTP twin (parseAgg)
+	// answers a 400 instead. Same closed set, same explicitness.
+	var agg metrics.AggKind
+	switch in.Agg {
+	case "":
+		agg = metrics.AggRaw
+	case "raw":
+		agg = metrics.AggRaw
+	case "daily_avg":
+		agg = metrics.AggDailyAvg
+	case "daily_min":
+		agg = metrics.AggDailyMin
+	case "daily_max":
+		agg = metrics.AggDailyMax
+	default:
+		return nil, metricsQueryOutput{}, fmt.Errorf("agg 参数 %q 不是 raw/daily_avg/daily_min/daily_max", in.Agg)
+	}
+	series, err := svc.Metrics.ResourceSeries(ctx, in.ResourceID, keys, in.From, in.To, agg)
 	if err != nil {
 		return nil, metricsQueryOutput{}, fmt.Errorf("指标查询失败：%w", err)
 	}
