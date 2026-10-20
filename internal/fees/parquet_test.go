@@ -145,11 +145,21 @@ func TestSnapshotLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join("fee-imports", "electricity", "2024", "05", sha+"_bill.csv")
+	// The snapshot manifest path is the LOGICAL ('/') contract (#75,
+	// #79): a string constant, NOT filepath.Join — the expectation
+	// must not flip with the test platform's separator. 3377762 (#75)
+	// converted every other fees test expectation; this line was the
+	// one missed spot, stable-failing TestSnapshotLayer on Windows.
+	want := "fee-imports/electricity/2024/05/" + sha + "_bill.csv"
 	if rel != want {
 		t.Fatalf("snapshot path = %q, want %q", rel, want)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, want))
+	if strings.Contains(rel, `\`) {
+		t.Fatalf("snapshot path %q contains a backslash — logical paths are always '/'", rel)
+	}
+	// reading back crosses the FromSlash boundary: disk paths are
+	// native, the persisted contract is not.
+	got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(want)))
 	if err != nil || string(got) != string(content) {
 		t.Fatalf("snapshot bytes = %q (err %v), want verbatim copy", got, err)
 	}
