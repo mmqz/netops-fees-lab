@@ -68,9 +68,15 @@ jobs:
           go-version: '1.27.x'
       - name: go vet (duckdb build, all packages)
         run: CGO_ENABLED=1 go vet -tags duckdb ./...
-      - name: go test (duckdb build, all packages — #72: the fees-only scope
-          was a gate blind spot; the engine-built build must run every
-          package's tests, engine-availability branches skip explicitly)
+      # NOTE: never put a bare "#NN" or a "colon+space" inside a step name —
+      # YAML reads " #" as a comment start and ": " as a mapping separator;
+      # either one makes the WHOLE workflow file stop parsing (issue #76:
+      # every push since 389fc10 produced an empty failure run with zero
+      # jobs because the name below contained "#72:").
+      # The duckdb build must vet and test ALL packages — the fees-only
+      # scope (pre-issue-72) was a gate blind spot; engine-availability
+      # branches in other packages' tests skip explicitly.
+      - name: go test (duckdb build, all packages)
         run: CGO_ENABLED=1 go test -count=1 -timeout 15m -tags duckdb ./...
 
   # Issue #38: the user's actual environment is Windows, so the test gate
