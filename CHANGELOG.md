@@ -18,9 +18,12 @@
 ### 文档 — 三处漂移修复（#71）
 - §19.2 幂等键集合停在 v0.15.1 前、README 快速开始计数停在 v0.8.1、onboarding 缺费用域——26521ee。
 
+### 修复 — CI 静默断档（#76，工程发现）
+- 发布前核对发现 **runs 30–134 全部 failure**：两段叠加——①2026-10-12 起 Actions 分钟配额耗尽（v0.4–v0.6 迭代烧光当月额度，run 有 job 壳但 runner_id=0 三秒死，v0.6.x–v0.14.0 全部"CI 验证"实为空转）；②389fc10 起 duckdb job 的 step name 写了 `#72:`——YAML 把 plain scalar 中的 ` #` 当注释起点，**整个 workflow 文件解析失败**（之后每次 push 连 job 壳都没有）。②已修（step name 无 `#` 无 `: `，文件内 NOTE 防回归；修复后 run 恢复 4 job）；①待 owner 充值/等配额刷新（本版以本地门禁为准：25 包 ok / 0 FAIL、gofmt 空、vet 0、tsc 0、vitest 40/40）。诊断全程证据链见 issue #76。
+
 ### 修复 — 发布断档第二轮（#74，发布工程）
 - **现象**：Release 下载渠道停在 v0.8.0——v0.9.0 Release 空壳（有正文零资产）、v0.10.0–v0.14.0 八个 tag 无 Release、v0.15.0/v0.15.1 连 tag 都没打。费用风险六场景整个里程碑对"只下载产物"的运营者不可见。
-- **修复**（七项）：①本 v0.15.2 patch 收口 main 全部未发布修复；②`scripts/release.sh` 参数化发布（TAG/名称/正文文件/资产清单，取代 TAG 硬编码 v0.8.0 的一次性 w29 脚本——不可复用正是断档根因之一）；③v0.15.2 Release 三资产：source + linux-amd64 默认构建 + **linux-amd64 duckdb 构建**（费用引擎首次随渠道分发——此前 fee_risks 在所有下载产物上 501 engine_not_built）；④下载产物核对（`serve` + `/api/health` 实报 v0.15.2，duckdb 产物另核 fee_risks 应答）；⑤v0.9.0 空壳补齐双资产；⑥v0.15.0/v0.15.1 补 tag（b5c96cb / 231e0a1）+ v0.10.0–v0.15.1 十个 tag 各建 source-only Release（历史版二进制不回补——#14 先例）；⑦verified-capabilities 增"发布断档修复（#74）"行 + README 快速开始增 Release 下载入口。
+- **修复**（七项）：①本 v0.15.2 patch 收口 main 全部未发布修复；②`scripts/release.sh` 参数化发布（TAG/名称/正文文件/资产清单，取代 TAG 硬编码 v0.8.0 的一次性 w29 脚本——不可复用正是断档根因之一）；③v0.15.2 Release 三资产：source + linux-amd64 默认构建 + **linux-amd64 duckdb 构建**（费用引擎首次随渠道分发——此前 fee_risks 在所有下载产物上 501 engine_not_built）；④下载产物核对（`serve` + `/api/health` 实报 v0.15.2，duckdb 产物另核 fee_risks 应答）；⑤v0.9.0 空壳补齐双资产；⑥v0.15.0/v0.15.1 补 tag（b5c96cb / 231e0a1）+ v0.10.0–v0.15.1 十个 tag 各建 source-only Release，另顺带补齐 #14 时代遗留的 v0.4.0–v0.6.2 五个空洞与缺失的 v0.6.1/v0.6.2 tag——**渠道自 v0.1.0 起 27 个版本零空洞**（历史版二进制不回补——#14 先例）；⑦verified-capabilities 增"发布断档修复（#74）"行 + README 快速开始增 Release 下载入口。
 
 ## [0.15.1] — 2026-10-19
 

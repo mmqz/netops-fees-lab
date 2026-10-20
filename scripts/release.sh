@@ -33,6 +33,14 @@ REPO="mmqz/netops-lab"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Toolchain probe: the sandbox keeps Go outside the default PATH — pick up
+# /home/z/.local/go/bin when present (the local dev layout), else rely on PATH.
+if ! command -v go >/dev/null 2>&1; then
+  for CAND in /home/z/.local/go/bin /usr/local/go/bin "$HOME/go/bin"; do
+    if [ -x "$CAND/go" ]; then export PATH="$CAND:$PATH"; break; fi
+  done
+fi
+
 TAG="${1:?usage: release.sh TAG NAME BODY_FILE [--with-duckdb] [--binary TAG_REF]}"
 NAME="${2:?release name}"
 BODY_FILE="${3:?release body file}"
