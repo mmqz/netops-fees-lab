@@ -1,5 +1,7 @@
 # [P1] #75 修复遗留：`parquet_test.go:148` 漏改，`TestSnapshotLayer` 在 Windows 上稳定失败
 
+> GitHub issue：[#79](https://github.com/mmqz/netops-lab/issues/79)
+
 来源：v0.15.2（`ab9c71b`）Windows 全量测试，2026-10-20
 关联：#75（同一跨平台路径契约问题）
 
