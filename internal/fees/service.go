@@ -54,11 +54,18 @@ func (s *Service) analysisDir() string {
 // well-formed files); a suggestion missing siteCode or amount refuses —
 // the human mapping channel is the fallback, never a guess.
 type ImportOptions struct {
-	Path    string
-	FeeType FeeType
-	Year    int
-	Month   int
-	Mapping map[string]string // optional; nil = auto
+	Path string
+	// OriginalName is the USER's file name for the batch's display identity
+	// and the evidence anchors (WorkbookName / sourceFile). The HTTP channel
+	// stages uploads content-addressed (#88: <sha256>_<name>), so deriving
+	// the name from the staged path would pollute both; the caller passes
+	// the multipart header's name here. Empty = derive from Path (the CLI's
+	// channel, where the path IS the user's file).
+	OriginalName string
+	FeeType      FeeType
+	Year         int
+	Month        int
+	Mapping      map[string]string // optional; nil = auto
 }
 
 // ImportSummary is the outcome: batch identity, counts, the per-partition
@@ -111,7 +118,10 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if err != nil {
 		return ImportSummary{}, err
 	}
-	name := filepath.Base(opts.Path)
+	name := opts.OriginalName
+	if name == "" {
+		name = filepath.Base(opts.Path)
+	}
 	if _, err := SnapshotExt(name); err != nil {
 		return ImportSummary{}, err
 	}

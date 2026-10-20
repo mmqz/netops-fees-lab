@@ -9,6 +9,8 @@ package api
 // tag) — the import path itself works everywhere.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,7 +115,7 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary, err := s.fees.Import(r.Context(), fees.ImportOptions{
-		Path: staged, FeeType: feeType, Year: year, Month: month, Mapping: mapping,
+		Path: staged, OriginalName: name, FeeType: feeType, Year: year, Month: month, Mapping: mapping,
 	})
 	if err != nil {
 		var dup *fees.ErrDuplicateImport
@@ -140,11 +142,16 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 var errUnsupportedFeeExt = errors.New("仅支持 .csv / .xlsx / .xls 费用文件")
 
 // stageFeeUpload writes the uploaded fee file under
-// <dataDir>/uploads/fees/<name> and returns its path (the caller's name
-// is kept — the snapshot layer content-addresses its own copy, this
-// staging copy only bridges the multipart stream to the path-based
-// importer; same name re-upload overwrites, which is safe: the
-// idempotency key is the CONTENT hash).
+// <dataDir>/uploads/fees/<sha256>_<name> and returns its path —
+// content-addressed, the same pattern as the resource and metrics
+// channels (#88). The importer later opens this staging path three
+// times (HashFile → ReadFeeFile → WriteSnapshot); under the old
+// name-addressed staging, two concurrent same-name uploads with
+// different contents interleaved those opens and a batch could record
+// a SHA256 that does not match the bytes it actually imported or
+// snapshotted — the evidence hash must never be able to lie. Content
+// addressing removes the window: identical content shares one path,
+// different content never collides.
 func stageFeeUpload(dataDir string, file io.Reader, name string) (string, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 	switch ext {
@@ -152,20 +159,20 @@ func stageFeeUpload(dataDir string, file io.Reader, name string) (string, error)
 	default:
 		return "", fmt.Errorf("%w（收到 .%s）", errUnsupportedFeeExt, ext)
 	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("读取上传文件: %w", err)
+	}
+	sum := sha256.Sum256(data)
 	dir := filepath.Join(dataDir, "uploads", "fees")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("创建费用上传目录: %w", err)
 	}
-	path := filepath.Join(dir, name)
-	out, err := os.Create(path)
-	if err != nil {
+	path := filepath.Join(dir, hex.EncodeToString(sum[:])+"_"+name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return "", fmt.Errorf("保存上传文件: %w", err)
 	}
-	defer func() { _ = out.Close() }()
-	if _, err := io.Copy(out, file); err != nil {
-		return "", fmt.Errorf("写入上传文件: %w", err)
-	}
-	return path, out.Close()
+	return path, nil
 }
 
 // handleFeesBatchesList implements GET /api/fees/batches?status= — the
