@@ -2,6 +2,7 @@ package fees
 
 import (
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -9,6 +10,10 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/xuri/excelize/v2"
+
+	"github.com/mmqz/netops-lab/internal/domain"
 )
 
 // The SNAPSHOT LAYER (#60): every imported fee file is copied, byte for
@@ -124,4 +129,116 @@ func WriteSnapshot(dataDir, srcPath string, feeType FeeType, year, month int, sh
 // immutable bytes, not at the operator's local path.
 func SnapshotSourceFile(originalName, sha256 string) string {
 	return sha256 + "_" + originalName
+}
+
+// ---- evidence read-back (#86) ----
+
+// RowEvidence is one snapshot row read back: the header row's trimmed cells
+// plus the requested row's raw (untrimmed) cells.
+type RowEvidence struct {
+	Header []string
+	Cells  []string
+}
+
+// ReadSnapshotRow streams the snapshot at path up to the requested row and
+// returns it (#86): the third tier of the evidence chain — the conclusion
+// cites an anchor (source_file + source_row), the anchor resolves HERE to
+// the original text. The row number is the SOURCE FILE's own numbering
+// (row 1 = the header; blank rows keep their numbers) — exactly the
+// numbering readCSV/readXLSX stamp onto every SourceRow, i.e. the
+// source_row value every clue anchor and import-error detail carries.
+// A row past the end of the file answers an error wrapping
+// domain.ErrNotFound (a 404 at the API).
+//
+// The read is streaming and bounded by the target row: a 100k-row
+// snapshot's row 42 costs 42 records, never the whole file.
+func ReadSnapshotRow(path string, row int) (RowEvidence, error) {
+	if row < 1 {
+		return RowEvidence{}, fmt.Errorf("fees: 行号必须 ≥ 1（源文件自身编号，表头 = 1）")
+	}
+	ext, err := SnapshotExt(path)
+	if err != nil {
+		return RowEvidence{}, err
+	}
+	switch ext {
+	case "csv":
+		return readSnapshotRowCSV(path, row)
+	default: // "xlsx" / "xls" — the only other SnapshotExt outputs
+		return readSnapshotRowXLSX(path, row)
+	}
+}
+
+func readSnapshotRowCSV(path string, row int) (RowEvidence, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return RowEvidence{}, fmt.Errorf("fees: 打开快照 %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	r := csv.NewReader(f)
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+	r.TrimLeadingSpace = true
+	var ev RowEvidence
+	recNo := 0
+	for {
+		rec, rerr := r.Read()
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return RowEvidence{}, fmt.Errorf("fees: 读取快照 %s 第 %d 行: %w", path, recNo+1, rerr)
+		}
+		recNo++
+		if ev.Header == nil && !isBlankRow(rec) {
+			ev.Header = trimAll(rec)
+		}
+		if recNo == row {
+			ev.Cells = rec
+			return ev, nil
+		}
+	}
+	return RowEvidence{}, fmt.Errorf("%w: fees: 快照 %s 共 %d 行，第 %d 行不存在",
+		domain.ErrNotFound, filepath.Base(path), recNo, row)
+}
+
+func readSnapshotRowXLSX(path string, row int) (RowEvidence, error) {
+	f, err := excelize.OpenFile(path)
+	if err != nil {
+		return RowEvidence{}, fmt.Errorf("fees: 打开快照 %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return RowEvidence{}, fmt.Errorf("fees: 快照 %s 没有工作表", path)
+	}
+	it, err := f.Rows(sheets[0])
+	if err != nil {
+		return RowEvidence{}, fmt.Errorf("fees: 读取快照工作表 %s: %w", sheets[0], err)
+	}
+	defer func() { _ = it.Close() }()
+	var ev RowEvidence
+	rowNum := 0
+	for it.Next() {
+		rowNum++
+		cells, cerr := it.Columns()
+		if cerr != nil {
+			return RowEvidence{}, fmt.Errorf("fees: 读取快照 %s 第 %d 行: %w", path, rowNum, cerr)
+		}
+		strs := make([]string, len(cells))
+		for i, c := range cells {
+			strs[i] = c
+		}
+		if ev.Header == nil && !isBlankRow(strs) {
+			ev.Header = trimAll(strs)
+		}
+		if rowNum == row {
+			ev.Cells = strs
+			return ev, nil
+		}
+	}
+	if ierr := it.Error(); ierr != nil {
+		return RowEvidence{}, fmt.Errorf("fees: 读取快照 %s: %w", path, ierr)
+	}
+	return RowEvidence{}, fmt.Errorf("%w: fees: 快照 %s 共 %d 行，第 %d 行不存在",
+		domain.ErrNotFound, filepath.Base(path), rowNum, row)
 }

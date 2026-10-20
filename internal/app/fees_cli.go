@@ -81,6 +81,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesList(ctx, svc, subArgs, stdout, stderr)
 	case "rollback":
 		return cmdFeesRollback(ctx, svc, subArgs, stdout, stderr)
+	case "evidence":
+		return cmdFeesEvidence(ctx, svc, subArgs, stdout, stderr)
 	case "query":
 		return cmdFeesQuery(ctx, svc, dataDir, subArgs, stdout, stderr)
 	case "link-scan":
@@ -272,6 +274,33 @@ func cmdFeesRollback(ctx context.Context, svc *fees.Service, args []string, stdo
 	return writeJSON(stdout, map[string]any{
 		"id": b.ID, "status": string(b.Status), "period": fees.PeriodLabel(b.FeeYear, b.FeeMonth),
 		"feeType": string(b.FeeType), "snapshotKept": b.SnapshotPath,
+	})
+}
+
+// cmdFeesEvidence implements `fees evidence --batch <id> --row <n>`: the CLI
+// twin of GET /api/fees/batches/{id}/evidence (#86) — resolves a clue's
+// (sourceFile, sourceRow) anchor to the snapshot's original row.
+func cmdFeesEvidence(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees evidence")
+	batch := fs.String("batch", "", "费用批次 id，必填")
+	row := fs.Int("row", 0, "源文件行号（源文件自身编号，表头 = 1），必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *batch == "" || *row < 1 {
+		return &usageError{msg: "fees evidence 需要 --batch 与 --row（行号 ≥ 1，表头 = 1）", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees evidence 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	ev, err := svc.EvidenceRow(ctx, *batch, *row)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, map[string]any{
+		"batchId": ev.BatchID, "sourceFile": ev.SourceFile, "originalName": ev.OriginalName,
+		"feeType": ev.FeeType, "year": ev.Year, "month": ev.Month, "row": ev.Row,
+		"header": ev.Header, "cells": ev.Cells,
 	})
 }
 

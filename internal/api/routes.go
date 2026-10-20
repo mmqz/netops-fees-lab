@@ -99,6 +99,7 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/fees/imports", Tag: "fees", Summary: "费用数据导入（multipart：file + feeType + year + month [+ map]；快照 + Parquet 分区 + 幂等键）", Handler: s.handleFeesImport},
 		{Method: "GET", Pattern: "/api/fees/batches", Tag: "fees", Summary: "费用导入批次列表（status 过滤，最新在前）", Handler: s.handleFeesBatchesList},
 		{Method: "POST", Pattern: "/api/fees/batches/{id}/rollback", Tag: "fees", Summary: "回滚费用批次（删分析行、保快照证据）", Handler: s.handleFeesRollback},
+		{Method: "GET", Pattern: "/api/fees/batches/{id}/evidence", Tag: "fees", Summary: "费用证据回读：快照第 N 行原文（row=源文件自身编号，表头=1；source_row 锚点的第三级证据，回滚批次仍可读）", Handler: s.handleFeesEvidence},
 		{Method: "GET", Pattern: "/api/fees/query/totals", Tag: "fees", Summary: "费用分析：站址汇总（feeType/year[/month]，DuckDB 引擎需 duckdb 构建）", Handler: s.handleFeesQueryTotals},
 		{Method: "GET", Pattern: "/api/fees/query/duplicates", Tag: "fees", Summary: "费用分析：跨批次重复结算候选（风险线索 + 证据锚点）", Handler: s.handleFeesQueryDuplicates},
 		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险六场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks},

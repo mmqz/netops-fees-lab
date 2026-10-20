@@ -255,6 +255,31 @@ func (s *Server) handleFeesRollback(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleFeesEvidence implements GET /api/fees/batches/{id}/evidence?row=N
+// (#86): reads one row of the batch's immutable snapshot back — the third
+// tier of the evidence chain (conclusion → source_file+source_row anchor →
+// the original text). row is the source file's own numbering (header = 1),
+// the exact value every clue anchor and import-error detail carries. Works
+// for rolled-back batches too (the snapshot survives rollback by design).
+func (s *Server) handleFeesEvidence(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	row, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("row")))
+	if err != nil || row < 1 {
+		respondError(w, http.StatusBadRequest, "bad_request",
+			"row 参数必须是 ≥ 1 的整数（源文件自身编号，表头 = 1）")
+		return
+	}
+	ev, err := s.fees.EvidenceRow(r.Context(), r.PathValue("id"), row)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, ev)
+}
+
 // handleFeesQueryTotals implements GET /api/fees/query/totals?
 // feeType=&year=&month=&limit= — the per-site totals preset (month 0 =
 // whole year). 501 engine_not_built on default builds.

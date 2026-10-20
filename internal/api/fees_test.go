@@ -272,7 +272,7 @@ func TestAPIFeesQueryEngineState(t *testing.T) {
 	}
 }
 
-// TestAPIFeesRoutesInOpenAPI pins the anti-drift contract: the five fee
+// TestAPIFeesRoutesInOpenAPI pins the anti-drift contract: the fee
 // routes exist in the generated OpenAPI document under the fees tag (the
 // route table is the single source of truth — see routes.go).
 func TestAPIFeesRoutesInOpenAPI(t *testing.T) {
@@ -291,6 +291,7 @@ func TestAPIFeesRoutesInOpenAPI(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/api/fees/imports", "/api/fees/batches", "/api/fees/batches/{id}/rollback",
+		"/api/fees/batches/{id}/evidence",
 		"/api/fees/query/totals", "/api/fees/query/duplicates",
 	} {
 		ops, ok := doc.Paths[path]
@@ -554,5 +555,115 @@ func TestFeesRisksEndpoint(t *testing.T) {
 			errOut.Error.Code != "engine_not_built" || !strings.Contains(errOut.Error.Message, "duckdb") {
 			t.Errorf("scenario %s on default build = %d %+v, want 501 engine_not_built", sc, resp.StatusCode, errOut.Error)
 		}
+	}
+}
+
+// TestAPIFeesEvidenceReadback pins #86: the evidence chain's third tier.
+// A clue / import error cites (sourceFile, sourceRow); GET
+// /api/fees/batches/{id}/evidence?row=N resolves that anchor to the
+// snapshot's original row — header + raw cells — for AI and human consumers
+// who have no filesystem access. The snapshot survives rollback by design,
+// so a rolled-back batch stays readable.
+func TestAPIFeesEvidenceReadback(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	csv := "站址编码,账期,电费(元)\n0230101ABCDEFG01,2024-05,1234.56\n0230101ABCDEFG02,2024-05,654.00\n"
+	resp, body := uploadFeeFile(t, srv, "may.csv", csv, "electricity", "2024", "5", "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("import: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var sum feeImportSummary
+	if err := json.Unmarshal(body, &sum); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	get := func(row string) (*http.Response, []byte) {
+		return doRequest(t, srv, http.MethodGet, "/api/fees/batches/"+sum.BatchID+"/evidence?row="+row, nil, "")
+	}
+
+	// row=1 → the header row reads back as itself.
+	resp, body = get("1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("evidence row=1: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var ev struct {
+		BatchID      string   `json:"batchId"`
+		SourceFile   string   `json:"sourceFile"`
+		OriginalName string   `json:"originalName"`
+		FeeType      string   `json:"feeType"`
+		Year         int      `json:"year"`
+		Month        int      `json:"month"`
+		Row          int      `json:"row"`
+		Header       []string `json:"header"`
+		Cells        []string `json:"cells"`
+	}
+	if err := json.Unmarshal(body, &ev); err != nil {
+		t.Fatalf("decode evidence: %v", err)
+	}
+	if len(ev.Header) != 3 || ev.Header[0] != "站址编码" || ev.Header[2] != "电费(元)" {
+		t.Fatalf("evidence header = %v", ev.Header)
+	}
+	if len(ev.Cells) != 3 || ev.Cells[0] != "站址编码" {
+		t.Fatalf("row 1 must read back the header row, cells = %v", ev.Cells)
+	}
+	if ev.SourceFile == "" || !strings.Contains(ev.SourceFile, "may.csv") {
+		t.Fatalf("sourceFile = %q, want <sha256>_may.csv (the anchor every clue carries)", ev.SourceFile)
+	}
+	if ev.OriginalName != "may.csv" || ev.FeeType != "electricity" || ev.Year != 2024 || ev.Month != 5 || ev.Row != 1 {
+		t.Fatalf("evidence envelope = %+v", ev)
+	}
+
+	// row=2 → the first data row, header still attached (the two anchors a
+	// clue actually carries: the row + the header to read it against).
+	resp, body = get("2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("evidence row=2: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	if err := json.Unmarshal(body, &ev); err != nil {
+		t.Fatalf("decode evidence row 2: %v", err)
+	}
+	if len(ev.Cells) != 3 || ev.Cells[0] != "0230101ABCDEFG01" || ev.Cells[2] != "1234.56" {
+		t.Fatalf("row 2 cells = %v, want the original data row verbatim", ev.Cells)
+	}
+	if ev.Header == nil || ev.Header[0] != "站址编码" {
+		t.Fatalf("row 2 must carry the header, got %v", ev.Header)
+	}
+	if ev.Row != 2 {
+		t.Fatalf("row echo = %d, want 2", ev.Row)
+	}
+
+	// beyond the file → 404 (the anchor is explicit, not invented).
+	resp, body = get("99")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("evidence row=99: status = %d, want 404\nbody: %s", resp.StatusCode, body)
+	}
+	// garbage / non-positive row → 400.
+	resp, body = get("abc")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("evidence row=abc: status = %d, want 400", resp.StatusCode)
+	}
+	resp, body = get("0")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("evidence row=0: status = %d, want 400", resp.StatusCode)
+	}
+	// missing row param → 400.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/batches/"+sum.BatchID+"/evidence", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("evidence without row: status = %d, want 400", resp.StatusCode)
+	}
+	// unknown batch → 404.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/batches/fee_nope/evidence?row=1", nil, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("evidence unknown batch: status = %d, want 404", resp.StatusCode)
+	}
+
+	// rollback keeps the evidence readable — the snapshot is the survivor
+	// by design (#60), and the read-back must honor that (#86's acceptance).
+	resp, body = doRequest(t, srv, http.MethodPost, "/api/fees/batches/"+sum.BatchID+"/rollback", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rollback: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	resp, body = get("2")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("evidence after rollback: status = %d, want 200 — the snapshot survives rollback\nbody: %s", resp.StatusCode, body)
 	}
 }

@@ -320,6 +320,66 @@ func (s *Service) Rollback(ctx context.Context, id string) (FeeBatch, error) {
 	return s.db.FeeBatches.GetByID(ctx, id)
 }
 
+// EvidenceRow is the API-facing read-back of one source row from a batch's
+// immutable snapshot (#86) — the third tier of the evidence chain: a clue or
+// import-error cites an anchor (sourceFile + sourceRow), and THIS resolves
+// the anchor to the original text without any filesystem access by the
+// operator or AI.
+type EvidenceRow struct {
+	BatchID      string   `json:"batchId"`
+	SourceFile   string   `json:"sourceFile"`
+	OriginalName string   `json:"originalName"`
+	FeeType      string   `json:"feeType"`
+	Year         int      `json:"year"`
+	Month        int      `json:"month"`
+	Row          int      `json:"row"`
+	Header       []string `json:"header"`
+	Cells        []string `json:"cells"`
+}
+
+// EvidenceRow reads one row of a batch's snapshot back (#86). row is the
+// source file's own numbering (header = 1) — exactly the source_row anchors
+// every clue and import-error detail carries, so an operator (or the MCP
+// fee_risks consumer) can go from anchor to original text in one call. The
+// snapshot survives rollback by design, so evidence stays readable for
+// rolled-back batches too. Works on every build (pure file read, no engine).
+func (s *Service) EvidenceRow(ctx context.Context, batchID string, row int) (EvidenceRow, error) {
+	b, err := s.db.FeeBatches.GetByID(ctx, batchID)
+	if err != nil {
+		return EvidenceRow{}, fmt.Errorf("fees: 批次 %s: %w", batchID, err)
+	}
+	if row < 1 {
+		return EvidenceRow{}, fmt.Errorf("fees: 行号必须 ≥ 1（源文件自身编号，表头 = 1）")
+	}
+	if b.SnapshotPath == "" {
+		return EvidenceRow{}, fmt.Errorf("fees: 批次 %s 没有快照路径: %w", batchID, domain.ErrNotFound)
+	}
+	ev, err := ReadSnapshotRow(filepath.Join(s.dir, filepath.FromSlash(b.SnapshotPath)), row)
+	if err != nil {
+		return EvidenceRow{}, err
+	}
+	// Arrays are never null (the repo discipline): a header row read back
+	// before the header exists (a blank row 1), or a blank target row,
+	// still answers [] arrays.
+	if ev.Header == nil {
+		ev.Header = []string{}
+	}
+	if ev.Cells == nil {
+		ev.Cells = []string{}
+	}
+	return EvidenceRow{
+		BatchID:      b.ID,
+		SourceFile:   SnapshotSourceFile(b.WorkbookName, b.SHA256),
+		OriginalName: b.WorkbookName,
+		FeeType:      string(b.FeeType),
+		Year:         b.FeeYear,
+		Month:        b.FeeMonth,
+		Row:          row,
+		Header:       ev.Header,
+		Cells:        ev.Cells,
+	}, nil
+}
+
 // GCAnalysis removes the analysis layer's orphans: Parquet files whose
 // batch-id is not a completed batch (crash leftovers, rolled-back
 // relicts), and stale staging dirs. Returns the counts. The keep-set is

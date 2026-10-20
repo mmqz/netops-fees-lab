@@ -21,7 +21,7 @@
 ## 2. 快照层（证据链）
 
 - **内容寻址**：`fee-imports/<fee_type>/<year>/<month>/<sha256>_<原始文件名>.<ext>`。目录成分 = 批次声明的账期（操作者对「这文件覆盖什么」的陈述）；同内容 → 同路径（幂等，临时文件 + 原子 rename 落盘）。
-- **永不修改**：快照是每条分析行的回读源（`source_file + source_row` 行号级对位）；原始文件改名/重导不改变证据锚点。
+- **永不修改**：快照是每条分析行的回读源（`source_file + source_row` 行号级对位）；原始文件改名/重导不改变证据锚点。回读通道（#86）：`GET /api/fees/batches/{id}/evidence?row=N` 与 `netopslab fees evidence --batch <id> --row <n>`（行号 = 源文件自身编号，表头 = 1；回滚批次仍可读——快照按设计存活）。
 - **回滚保留**：批次回滚删 Parquet（分析行消失）但**快照保留**——与资源导入器回滚保留工作簿的同一不对称语义（证据寿命 > 批次寿命）。
 
 ## 3. 分析层（分区大表）
@@ -112,7 +112,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 
 ## 8. 风险六场景（#64，#58 阶段 4）
 
-**输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，可回读快照原文，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, note}`。
+**输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，经 `GET /api/fees/batches/{id}/evidence?row=N` 可回读快照原文——#86 起该承诺有通道兑现，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, note}`。
 
 | 场景 id | 名称 | 判定口径 | 参数（默认值） |
 | --- | --- | --- | --- |
