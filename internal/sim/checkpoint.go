@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 
@@ -70,8 +71,13 @@ func (s *Service) CreateCheckpoint(ctx context.Context, workspaceID, label strin
 		return CheckpointResult{}, fmt.Errorf("sim: create checkpoint: %w", err)
 	}
 
-	relPath := filepath.Join(checkpointDir, workspaceID, cpID+".db")
-	dst := filepath.Join(filepath.Dir(s.db.Path()), relPath)
+	// The persisted marker path is the LOGICAL ('/') form — the #75
+	// cross-platform contract, extended to the sim layer by #80:
+	// checkpoints.file_path is data persisted in the DB, so a lab DB
+	// copied between platforms must resolve the same relative path on
+	// both. Disk access crosses the filepath.FromSlash boundary.
+	relPath := path.Join(checkpointDir, workspaceID, cpID+".db")
+	dst := filepath.Join(filepath.Dir(s.db.Path()), filepath.FromSlash(relPath))
 	// The Online Backup API over a pooled connection (P2-0 verified the
 	// modernc.org/sqlite surface; repo.Backup wraps it).
 	if err := s.db.Backup(ctx, dst); err != nil {
@@ -215,7 +221,10 @@ func (s *Service) RestoreCheckpoint(ctx context.Context, workspaceID, checkpoint
 		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: %w", checkpointID, domain.ErrNotFound)
 	}
 
-	snapshotPath := filepath.Join(filepath.Dir(s.db.Path()), cp.FilePath)
+	// FromSlash boundary (#80): the stored contract is logical ('/'),
+	// the local disk path is native — legacy rows normalized by
+	// migration v32 pass through the same boundary.
+	snapshotPath := filepath.Join(filepath.Dir(s.db.Path()), filepath.FromSlash(cp.FilePath))
 	if _, err := os.Stat(snapshotPath); err != nil {
 		// 409 checkpoint_missing_file at the API (brief §7) — see doc comment.
 		return RestoreResult{}, fmt.Errorf("sim: restore checkpoint %s: checkpoint file missing: %s: %w: %v",

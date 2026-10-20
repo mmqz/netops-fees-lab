@@ -171,11 +171,11 @@ VALUES ('chg_v11_bad','res_v11_dev','bat_v11','mgmt_ip','a','b','bogus','s',3,?)
 		t.Fatalf("max version: %v", err)
 	}
 	// Necessary adaptation for v13→v14→v16→v17 (W8-D ptp_port, W20
-	// metrics, W21 type expansion, W22 run state): the reopened registry
-	// applies every registered migration, advancing MAX(version) with the
-	// registry head.
-	if maxV != 31 {
-		t.Errorf("max schema version after upgrade = %d, want 31", maxV)
+	// metrics, W21 type expansion, W22 run state), v31→v32 (#75 fee paths,
+	// #80 checkpoint paths): the reopened registry applies every registered
+	// migration, advancing MAX(version) with the registry head.
+	if maxV != 32 {
+		t.Errorf("max schema version after upgrade = %d, want 32", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

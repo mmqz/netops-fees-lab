@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -69,11 +70,18 @@ func TestCheckpointRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("checkpoint row: %v", err)
 	}
-	wantRel := filepath.Join("checkpoints", ws, "cp-1.db")
+	// The persisted marker path is the LOGICAL ('/') contract (#80): a
+	// string constant, NOT filepath.Join — the stored value must not flip
+	// with the test platform's separator.
+	wantRel := "checkpoints/" + ws + "/cp-1.db"
 	if row.FilePath != wantRel {
 		t.Fatalf("checkpoint file_path = %q, want the relative path %q", row.FilePath, wantRel)
 	}
-	snapshot := filepath.Join(filepath.Dir(db.Path()), row.FilePath)
+	if strings.Contains(row.FilePath, `\`) {
+		t.Fatalf("checkpoint file_path %q contains a backslash — the persisted contract is always '/'", row.FilePath)
+	}
+	// Disk access crosses the FromSlash boundary (#80).
+	snapshot := filepath.Join(filepath.Dir(db.Path()), filepath.FromSlash(row.FilePath))
 	if _, err := os.Stat(snapshot); err != nil {
 		t.Fatalf("snapshot file %s missing: %v", snapshot, err)
 	}
