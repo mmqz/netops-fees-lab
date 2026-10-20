@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -302,7 +303,7 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 	if !engine.Available() {
 		return fmt.Errorf("fees: 本二进制未编译分析查询引擎（%w）——发布构建使用 -tags duckdb（CGO）", fees.ErrEngineNotBuilt)
 	}
-	analysis := dataDir + string(os.PathSeparator) + "analysis"
+	analysis := filepath.Join(dataDir, "analysis")
 	switch preset {
 	case "totals":
 		rows, err := engine.Totals(ctx, analysis, t, *year, *month, *limit)

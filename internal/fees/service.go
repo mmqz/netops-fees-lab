@@ -406,7 +406,9 @@ func min(a, b int) int {
 func filePaths(base string, files []partitionFile) []string {
 	out := make([]string, 0, len(files))
 	for _, f := range files {
-		out = append(out, filepath.Join(base, f.relPath))
+		// relPath is the logical ('/') contract; the disk join converts
+		// once at the boundary (#75).
+		out = append(out, filepath.Join(base, filepath.FromSlash(f.relPath)))
 	}
 	return out
 }

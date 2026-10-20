@@ -141,3 +141,27 @@ FAIL  internal/api         684.418s   ← 仅此一处断言失败
 
 **无超时**（`-timeout 25m` 生效；本机 fsync 仍慢但已能跑完）。
 除本 issue 外，v0.15.1 未发现其他产品缺陷。
+
+---
+
+## 修复记录（2026-10-20，R1 轮）
+
+**修复方案 = issue 建议的原样落地 + v31 存量迁移**：
+
+| 触点 | 修复内容 |
+| --- | --- |
+| `internal/fees/snapshot.go` | `SnapshotPath` 改 `path.Join`（逻辑路径恒 `/`，注释声明跨平台契约语义）；`WriteSnapshot` 磁盘拼接加 `filepath.FromSlash`（契约 → OS 路径的唯一转换边界） |
+| `internal/fees/parquet.go` | 分区 `rel` 同改 `path.Join`；commit 拼接加 `FromSlash` |
+| `internal/fees/service.go` | `filePaths` helper 加 `FromSlash`（回滚删除链） |
+| `internal/app/fees_cli.go` | `analysis` 手拼 `dataDir + PathSeparator + "analysis"` 顺手统一为 `filepath.Join` |
+| `internal/repo/migrations_v31.go` | **存量归一**：`UPDATE fee_batches SET snapshot_path = replace(snapshot_path, '\', '/') WHERE snapshot_path LIKE '%\%'`（纯 UPDATE 无重建，幂等由构造保证；Windows 旧数据全部 `\` 都是分隔符——OS 禁止文件名含 `\`；POSIX 边界场景与写侧裁决一致，已在迁移注释声明） |
+| 测试 | ①新 `TestSnapshotPathIsLogicalContract`：SnapshotPath 恒 `/` 断言 + WriteSnapshot 落盘 FromSlash 复核 + 内容寻址确定性；②`TestWriteParquetPartitionsLayout` 的 `want` 从 `filepath.Join` 改**字符串常量**（原断言本身是 #75 的镜像——在 Windows 上期望值会变 `\`）+ 无反斜杠断言；③`service_test` 三处拼盘改 `FromSlash` + SnapshotPath 契约断言；④新 `TestMigrationV31NormalizesFeeSnapshotPaths`：真 v30 库插反斜杠行 → 升级归一 → slash 行字节不动 → 二次 reopen 幂等；⑤22 处 `maxV != 30` max-version 断言随迁移前进至 31（既有惯例：仅 max-version 断言随迁移前进） |
+
+**验收对照（issue §五）**：
+
+1. `TestAPIFeesImportJourney` 断言 `HasPrefix(snapRel, "fee-imports/electricity/2024/05/")` 修复后双平台恒成立（SnapshotPath 恒 `/`）——Linux 实测 PASS；Windows 由契约保证（不再有平台分隔符进入断言值）。
+2. `SnapshotPath` / Parquet `relPath` 无反斜杠断言已落地（`strings.Contains(rel, "\\")` 三处钉死）。
+3. 跨平台迁移：v31 迁移在任意平台把存量 `\` 归一为 `/`；新数据恒 `/`；`FromSlash` 使逻辑路径在任意平台解析到同一磁盘位置。
+4. 旧数据兼容：Windows 旧库经 v31 归一后 API/CLI 输出与 Linux 库一致；快照证据文件本身不动（迁移只改写记录，不动磁盘——磁盘文件名在 Windows 上本来就用 `\` 分隔落盘，归一后的逻辑路径经 FromSlash 还原为同一 OS 路径）。
+
+**门禁**：25 包全 ok / 0 FAIL · gofmt 空 · vet 0 告警（Linux 实测；Windows 侧修复后语义等价，issue 报告者可复测）。

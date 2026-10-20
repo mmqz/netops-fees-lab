@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,13 +77,19 @@ func TestImportPipelineAndIdempotency(t *testing.T) {
 		b.FeeYear != 2024 || b.FeeMonth != 5 || b.RowsImported != 3 || b.CompletedAt == nil {
 		t.Fatalf("batch = %+v (err %v)", b, err)
 	}
-	// snapshot exists and is the evidence anchor.
-	if _, err := os.Stat(filepath.Join(dir, b.SnapshotPath)); err != nil {
+	// snapshot exists and is the evidence anchor. SnapshotPath is the
+	// logical ('/') contract (#75): never carries the platform separator,
+	// and the disk join converts once via FromSlash.
+	if strings.Contains(b.SnapshotPath, `\`) {
+		t.Fatalf("snapshotPath %q contains a backslash — logical paths are always '/' (#75)", b.SnapshotPath)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(b.SnapshotPath))); err != nil {
 		t.Fatalf("snapshot missing: %v", err)
 	}
 	// the parquet file carries the lineage (source_row = the CSV data row
-	// numbers 2..4, NOT the import order).
-	f, err := os.Open(filepath.Join(dir, "analysis", sum.Files[0]))
+	// numbers 2..4, NOT the import order). sum.Files is the logical
+	// contract too (#75).
+	f, err := os.Open(filepath.Join(dir, "analysis", filepath.FromSlash(sum.Files[0])))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +293,7 @@ func TestRollbackAndGC(t *testing.T) {
 	if err != nil || full.SnapshotPath == "" {
 		t.Fatalf("snapshot path must survive rollback: %+v (err %v)", full, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, full.SnapshotPath)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(full.SnapshotPath))); err != nil {
 		t.Fatalf("snapshot file must survive rollback: %v", err)
 	}
 	// re-rollback → conflict.

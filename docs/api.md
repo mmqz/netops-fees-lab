@@ -1125,7 +1125,7 @@ multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricit
 
 ## GET /api/fees/batches?status= — 费用导入批次列表
 
-`status=completed/failed/rolled_back`（缺省全部）；最新在前。`feeTypeLabel`（中文）与 `period`（2024-05）为展示字段；`snapshotPath` 是内容寻址快照相对路径（证据锚点）。
+`status=completed/failed/rolled_back`（缺省全部）；最新在前。`feeTypeLabel`（中文）与 `period`（2024-05）为展示字段；`snapshotPath` 是内容寻址快照相对路径（证据锚点；**逻辑路径，恒 `/` 分隔**——跨平台契约，migration v31 起存量统一归一）。
 
 ## POST /api/fees/batches/{id}/rollback — 回滚费用批次
 

@@ -677,7 +677,7 @@ CREATE TABLE fee_batches (
   fee_type TEXT NOT NULL CHECK (fee_type IN ('electricity','tower_lease','repair','maintenance')),
   fee_year INTEGER NOT NULL CHECK (fee_year BETWEEN 2000 AND 2100),
   fee_month INTEGER NOT NULL CHECK (fee_month BETWEEN 1 AND 12),
-  snapshot_path TEXT NOT NULL,                  -- 相对 data 目录（内容寻址快照）
+  snapshot_path TEXT NOT NULL,                  -- 相对 data 目录的逻辑路径（恒 / 分隔，跨平台契约；v31 起存量归一）
   mapping TEXT NOT NULL,                        -- 规范化列映射 JSON（幂等键成分）
   status TEXT NOT NULL CHECK (status IN ('completed','failed','rolled_back')),
   rows_total INTEGER NOT NULL DEFAULT 0,

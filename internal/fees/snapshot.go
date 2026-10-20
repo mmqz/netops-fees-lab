@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -19,7 +20,7 @@ import (
 //
 // Layout (the #60 sketch):
 //
-//	fee-imports/<fee_type>/<year>/<month>/<sha256>_<original-name>.<ext>
+//      fee-imports/<fee_type>/<year>/<month>/<sha256>_<original-name>.<ext>
 //
 // The fee_type/year/month directory components come from the batch's
 // DECLARED period (the operator's statement of what the file covers); a
@@ -60,8 +61,18 @@ func HashFile(path string) (string, error) {
 // The base name carries BOTH the hash and the original name — the
 // evidence reader sees the original filename without opening the batch
 // record, and the hash prefix keeps names unique.
+//
+// The return value is a LOGICAL path (path.Join: always '/') — it is a
+// cross-platform data contract, not a local filesystem path: it is
+// persisted to fee_batches.snapshot_path, returned by the HTTP API
+// (snapshotPath) and printed by the CLI (#75). A database and data dir
+// copied from Windows to Linux (or back) must resolve identically, and
+// the API must not change shape with the server's OS. Consumers that
+// touch the disk convert once via filepath.FromSlash at the join point
+// (WriteSnapshot below); filepath.Join here would leak the platform
+// separator into the contract.
 func SnapshotPath(feeType FeeType, year, month int, sha256, originalName string) string {
-	return filepath.Join("fee-imports", string(feeType),
+	return path.Join("fee-imports", string(feeType),
 		fmt.Sprintf("%d", year), fmt.Sprintf("%02d", month),
 		sha256+"_"+originalName)
 }
@@ -74,7 +85,7 @@ func SnapshotPath(feeType FeeType, year, month int, sha256, originalName string)
 // atomic rename, so a crash never leaves a torn snapshot.
 func WriteSnapshot(dataDir, srcPath string, feeType FeeType, year, month int, sha256, originalName string) (string, error) {
 	rel := SnapshotPath(feeType, year, month, sha256, originalName)
-	dst := filepath.Join(dataDir, rel)
+	dst := filepath.Join(dataDir, filepath.FromSlash(rel)) // contract → OS path at the disk boundary
 	if _, err := os.Stat(dst); err == nil {
 		return rel, nil // already snapshotted (identical content by naming)
 	}

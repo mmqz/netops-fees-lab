@@ -3,6 +3,7 @@ package fees
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parquet-go/parquet-go"
@@ -25,10 +26,13 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeParquetPartitions: %v", err)
 	}
+	// The manifest paths are the LOGICAL ('/') contract (#75): path.Join
+	// constants, NOT filepath.Join — the API/CLI echo them verbatim, so
+	// the expectation must not flip with the test platform's separator.
 	want := []string{
-		filepath.Join("fees", "fee_type=electricity", "year=2023", "month=12", "batch-fee_b1.parquet"),
-		filepath.Join("fees", "fee_type=electricity", "year=2024", "month=05", "batch-fee_b1.parquet"),
-		filepath.Join("fees", "fee_type=electricity", "year=2024", "month=06", "batch-fee_b1.parquet"),
+		"fees/fee_type=electricity/year=2023/month=12/batch-fee_b1.parquet",
+		"fees/fee_type=electricity/year=2024/month=05/batch-fee_b1.parquet",
+		"fees/fee_type=electricity/year=2024/month=06/batch-fee_b1.parquet",
 	}
 	if len(files) != len(want) {
 		t.Fatalf("files = %v, want %v", files, want)
@@ -37,7 +41,11 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 		if f.relPath != want[i] {
 			t.Errorf("file[%d] = %q, want %q", i, f.relPath, want[i])
 		}
-		if _, err := os.Stat(filepath.Join(dir, f.relPath)); err != nil {
+		// The contract never carries the platform separator (#75).
+		if strings.Contains(f.relPath, `\`) {
+			t.Errorf("file[%d] relPath %q contains a backslash — logical paths are always '/'", i, f.relPath)
+		}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f.relPath))); err != nil {
 			t.Errorf("partition file missing: %v", err)
 		}
 	}

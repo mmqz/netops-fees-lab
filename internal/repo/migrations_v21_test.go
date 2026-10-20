@@ -156,8 +156,8 @@ VALUES ('run_bad','?','2026-03-10T08:00:00Z','2026-03-10T08:00:01Z',1)`, bad); e
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 30 {
-		t.Errorf("max schema version after upgrade = %d, want 30", maxV)
+	if maxV != 31 {
+		t.Errorf("max schema version after upgrade = %d, want 31", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op — the receipt rows

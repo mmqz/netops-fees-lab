@@ -3,6 +3,7 @@ package fees
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 
@@ -96,7 +97,12 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 	files := make([]partitionFile, 0, len(keys))
 	for _, k := range keys {
 		year, month := k[0], k[1]
-		rel := filepath.Join("fees",
+		// relPath is a LOGICAL path (path.Join: always '/') — it flows into
+		// the batch manifest, the HTTP API's files[] and the CLI JSON
+		// output, so it is a cross-platform contract like
+		// SnapshotPath (#75); the disk join converts via
+		// filepath.FromSlash below.
+		rel := path.Join("fees",
 			fmt.Sprintf("fee_type=%s", string(feeType)),
 			fmt.Sprintf("year=%d", year),
 			fmt.Sprintf("month=%02d", month),
@@ -109,7 +115,7 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 	}
 	// commit: atomic rename per file into the live partition dirs
 	for _, f := range files {
-		dst := filepath.Join(analysisDir, f.relPath)
+		dst := filepath.Join(analysisDir, filepath.FromSlash(f.relPath)) // contract → OS path
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return nil, fmt.Errorf("fees: 创建分区目录: %w", err)
 		}
