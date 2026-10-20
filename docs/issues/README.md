@@ -713,6 +713,31 @@ fast path 与原路径逐位相同。额外发现我没想到的坑：
 | --- | --- |
 | [v0151](v0151-check-and-issue65-verification.md) | v0.15.1 检查更新 + #65 三项 P1 独立验证 |
 
+### v0.15.1 全量测试发现（2026-10-20 追加）
+
+`go test -timeout 25m ./...`：**24 包 ok / 1 包 FAIL / 1 个断言失败，无超时**。
+
+唯一失败是 **Windows 路径分隔符**——`TestAPIFeesImportJourney` 稳定失败（单独跑 2.9 秒必现）：
+
+```
+fees_test.go:136: snapshotPath = "fee-imports\\electricity\\2024\\05\\c84b..._may.csv",
+                  want the content-addressed tree under the declared period
+```
+
+**根因**：`snapshot.go:64` 与 `parquet.go:99` 用 `filepath.Join` 生成**相对路径**，
+Windows 产 `\`、Linux 产 `/`。而这个相对路径是**跨平台数据契约**：
+存进 SQLite `fee_batches.snapshot_path`、返回 HTTP API、CLI JSON、前端展示。
+`domain/fees.go:99` 的注释就写着 "relative to the data dir (content-addressed)"——
+**是逻辑路径不是 OS 路径**。
+
+**后果**：Windows 导入 + Linux 读取时库里路径拼不出磁盘；且 CI 跑在 linux 上
+**永远看不到这个失败**，Windows 开发者每次都撞。
+
+**修复**：改用 `path.Join` 生成相对路径（实测产出 `fee-imports/electricity/2024/05/...`），
+用 `filepath.FromSlash` 在使用前转回 OS 路径；旧反斜杠数据在读取侧归一化。
+
+更详细的见 [issue-66](issue-66-windows-path-separator.md)。
+
 ## v0.8.1 本地验证（2026-10-14）
 
 来源：[docs/audit-v0.8.1.md](../audit-v0.8.1.md)。v0.8.1 是针对 #38–#45 的修复轮。
