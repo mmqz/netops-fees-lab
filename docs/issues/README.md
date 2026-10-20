@@ -713,6 +713,56 @@ fast path 与原路径逐位相同。额外发现我没想到的坑：
 | --- | --- |
 | [v0151](v0151-check-and-issue65-verification.md) | v0.15.1 检查更新 + #65 三项 P1 独立验证 |
 
+## v0.15.2 验证（2026-10-20）
+
+来源：拉取 `80d33a5`（v0.15.2，7 个提交），重点验证 #75 修复。
+
+### #75 跨平台路径契约 —— ✅ 彻底修复
+
+修复方式与建议完全一致，并**额外做了 v31 迁移**处理旧反斜杠数据（正是验收标准第 4 条）。
+
+我的独立验证（不看自述，直接跑）：
+
+```
+SnapshotPath 返回值: fee-imports/electricity/2024/05/abc123_bill.csv
+含反斜杠: false
+以 fee-imports/ 开头: true
+
+TestAPIFeesImportJourney          → PASS (2.70s)   ← 修复前 Windows 上稳定 FAIL
+TestSnapshotPathIsLogicalContract → PASS
+TestMigrationV31NormalizesFeeSnapshotPaths → PASS
+```
+
+实现要点（提交 `3377762`）：
+- 写侧 `SnapshotPath` 与分区 rel 改 `path.Join`；磁盘拼接处统一 `filepath.FromSlash` 一次转换；
+- **migration v31**：纯 UPDATE 重写旧反斜杠行（`LIKE '%\%'` 守卫，幂等）；
+- 顺带修正了 parquet 布局测试的期望值（旧 `filepath.Join` 期望是**同一 bug 的镜像**）。
+
+### 其余三个修复
+
+| 提交 | 内容 | 我的验证 |
+| --- | --- | --- |
+| `92a94ca` | **Makefile 恢复 TAB 缩进** | ✅ 实测 12 个 TAB、0 个 4 空格缩进 |
+| `e97b4be` | workflow 解析失败（步骤名含 `#72:` 被当 YAML 注释） | 未能本地验证（GitHub Actions） |
+| `68194a1` | 模糊扫描减少 2000 万次 `[]rune` 转换 | 未能独立量化（未单独跑基准） |
+
+**`92a94ca` 值得记一笔**：`make` 从 **v0.13.1 起就坏了**（`c82bb0e` 重新引入 8 空格缩进回归），
+但 CI 用的是 `cd web && npm ci && npm run build` + 裸 go 命令，**从不调用 make**，
+所以 CI 全绿而本地 `make build` 直接报 `*** missing separator`。
+这与 #72「全包 duckdb 构建是门禁盲区」属同一类问题：**门禁覆盖不到真实入口**。
+
+### 构建与服务验证
+
+```
+前端构建: exit 0, 2m7s
+二进制:   65,282,048 bytes, v0.15.2
+服务:     health=ok
+数据:     资源 3464 / 告警 4（v31 迁移后旧数据完好）
+```
+
+`/api/stats` 首次请求 5,936ms，复测 5 次为 195/15/11/11/9ms ——
+**冷启动 + 本机 fsync 慢所致，非性能退化**（首次后稳定在 10ms 级）。
+
 ### v0.15.1 全量测试发现（2026-10-20 追加）
 
 `go test -timeout 25m ./...`：**24 包 ok / 1 包 FAIL / 1 个断言失败，无超时**。
