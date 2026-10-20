@@ -1,5 +1,8 @@
 # [P1] Windows 上持久化/API 的相对路径用反斜杠：`TestAPIFeesImportJourney` 稳定失败，跨平台契约被破坏
 
+> GitHub issue 编号：**[#75](https://github.com/mmqz/netops-lab/issues/75)**
+> （仓库内文件名 issue-66-*.md 是本地序号，GitHub 上 #66–#74 已被其他 issue 占用）
+
 来源：v0.15.1（`ddd9c3e`）全量测试，2026-10-20
 环境：Windows / Go 1.27 / `go test -timeout 25m ./...`
 

@@ -736,7 +736,7 @@ Windows 产 `\`、Linux 产 `/`。而这个相对路径是**跨平台数据契�
 **修复**：改用 `path.Join` 生成相对路径（实测产出 `fee-imports/electricity/2024/05/...`），
 用 `filepath.FromSlash` 在使用前转回 OS 路径；旧反斜杠数据在读取侧归一化。
 
-更详细的见 [issue-66](issue-66-windows-path-separator.md)。
+更详细的见 [issue-66](issue-66-windows-path-separator.md)（GitHub: [#75](https://github.com/mmqz/netops-lab/issues/75)——#66–#74 已被其他 issue 占用）。
 
 ## v0.8.1 本地验证（2026-10-14）
 
