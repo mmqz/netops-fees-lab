@@ -885,6 +885,45 @@ issue-11  底图信息量    →  修复后才可见：底图过简 / 无切换
 - **CLI/API 错误处理**：统一 JSON 信封、规范退出码、非法枚举 400
 - **拓扑画布**：Cytoscape 渲染、状态着色、图例、迷你地图均正常
 
+## v0.15.2 Windows 测试发现（2026-10-20）
+
+来源：#77 记录声称「25 包 Go 测试 ok / 无可做」，Windows 侧独立复核。
+
+`go test -timeout 25m ./...`：**24 包 ok / 1 包 FAIL / 1 个断言失败**。
+
+```
+--- FAIL: TestSnapshotLayer (0.00s)
+    parquet_test.go:150: snapshot path = "fee-imports/electricity/2024/05/db5406..._bill.csv",
+                         want "fee-imports\\electricity\\2024\\05\\db5406..._bill.csv"
+```
+
+**根因**：#75 修复把产品侧路径改为逻辑路径（`/`），大量测试期望同步改成
+`filepath.FromSlash` 或字符串常量，**唯独 `parquet_test.go:148` 漏了**：
+
+```go
+want := filepath.Join("fee-imports", "electricity", "2024", "05", sha+"_bill.csv")
+```
+
+同文件 30 行已改为字符串常量（并加了注释说明），48 行读盘用 `FromSlash` 正确，
+`service_test.go:86`、`snapshot_test.go:52` 也都正确 —— **仅此一处遗漏**。
+全仓库扫描确认：用于**断言期望值**的 `filepath.Join` 只剩这一个。
+
+**CI 看不见的原因**：CI 跑 linux，`filepath.Join` 与 `path.Join` 产出相同，测试全绿。
+
+**验收建议**：修复后加守卫测试——`TestSnapshotPathIsLogicalContract` 已覆盖
+`SnapshotPath`，但**未覆盖 `WriteSnapshot` 的返回值**，而本 issue 恰好走的是这条路径。
+
+### 附：云端声明的独立核实
+
+| 声明 | 核实 |
+| --- | --- |
+| 25 包 Go 测试 ok | ❌ Windows 上 24 ok / 1 FAIL |
+| CI 配额未恢复 | ✅ 属实，GitHub 原文 `recent account payments have failed or your spending limit needs to be increased`（runner_id=0，4-12 秒失败） |
+| 仅剩 #76/#78 两个 open issue | ✅ 属实，均为外部阻塞 |
+| 浏览器回归 68 断言全绿 | 未独立复跑（需 agent-browser 环境） |
+
+**结论**：云端"无可做"大方向准确（卡在账户计费），但"测试全绿"在 Windows 上不成立。
+
 ## #77 浏览器回归脚本校准（2026-10-20）
 
 来源：GitHub issue [#77](https://github.com/mmqz/netops-lab/issues/77)（CI 空转窗口内前端演进而脚本断言未跟）。commit `4f00a71`。
