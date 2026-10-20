@@ -20,11 +20,13 @@
 package workbook
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,6 +154,16 @@ func parseBytes(data []byte) (*Workbook, error) {
 		cells += used
 		wb.Sheets = append(wb.Sheets, BuildSheet(name, raw))
 	}
+	// Honest-import guard (#81): excelize v2.11's row iterator swallows
+	// mid-stream XML decode errors (Next/Columns discard xml.Decoder
+	// errors and Rows.Error only reports its own ErrMaxRows), so a sheet
+	// cut short mid-file would otherwise import as a silent row prefix.
+	// The tail check is the structural fingerprint that catches the
+	// dominant real-world corruption class; it also re-verifies every
+	// worksheet stream's zip CRC32 in passing.
+	if err := CheckWorksheetTails(data); err != nil {
+		return nil, err
+	}
 	for i := range wb.Sheets {
 		if wb.Sheets[i].DataRows > 0 {
 			return wb, nil
@@ -182,7 +194,12 @@ func sheetRows(f *excelize.File, name string, cellsBefore int) ([][]string, int,
 		}
 		row, err := rows.Columns()
 		if err != nil {
-			break
+			// #81: a mid-row iteration error must NOT read as "file ends
+			// here" — returning the prefix as success is silent
+			// truncation (the workbook channel's row-count contract is
+			// the idempotency baseline).
+			_ = rows.Close()
+			return nil, 0, fmt.Errorf("workbook: read sheet %q row %d: %w", name, cur, err)
 		}
 		if len(row) > 0 {
 			if emptyRows := cur - maxVal - 1; emptyRows > 0 {
@@ -197,6 +214,12 @@ func sheetRows(f *excelize.File, name string, cellsBefore int) ([][]string, int,
 					ErrWorkbookTooLarge, MaxCellsPerWorkbook, name)
 			}
 		}
+	}
+	// #81: Rows.Error is the iterator's own error surface (ErrMaxRows);
+	// Rows.Close only reports the temp-file close in the normal path.
+	if err := rows.Error(); err != nil {
+		_ = rows.Close()
+		return nil, 0, fmt.Errorf("workbook: read sheet %q: %w", name, err)
 	}
 	return results[:maxVal], cells, rows.Close()
 }
@@ -271,4 +294,77 @@ func (w *Workbook) SheetsByName() map[string]*Sheet {
 		m[w.Sheets[i].Name] = &w.Sheets[i]
 	}
 	return m
+}
+
+// ErrTruncatedSheet reports an xlsx whose worksheet XML stream ends without
+// its close tag — the structural fingerprint of a sheet that was cut short
+// or corrupted mid-file (#81). excel's own reader refuses such a file
+// outright; without this guard our stream reader would import a silent row
+// prefix as success and the caller could not tell "the file had 40 rows"
+// from "the file was cut after row 40".
+var ErrTruncatedSheet = errors.New("workbook: worksheet stream ends without its close tag (truncated or corrupt xlsx)")
+
+// CheckWorksheetTails verifies that every worksheet XML stream inside the
+// xlsx zip ends with the worksheet close tag. It exists because excelize
+// v2.11's row iterator has no error surface for mid-stream XML corruption:
+// Rows.Next and Rows.Columns both DISCARD xml.Decoder errors (rows.go:105
+// "token, _ := rows.decoder.Token()" and rows.go:172), Rows.Error only
+// reports excelize's own ErrMaxRows, and Rows.Close only reports the
+// temp-file close in the normal path — so a truncated sheet parses as a
+// clean row prefix with a nil error everywhere. The tail check closes that
+// hole; fully streaming every sheet also re-verifies each entry's zip
+// CRC32 (a corrupt stream surfaces as zip.ErrChecksum here).
+//
+// The check is structural, not semantic: it accepts any well-formed tail
+// ending in the close tag, so it costs one sequential pass per worksheet
+// (bounded by the same file the caller just parsed) and never false-positives
+// on legitimate files — every OOXML producer must close the root element.
+// It is exported so the fees channel (issue #81's second instance, whose
+// readXLSX shares the same excelize semantics) enforces the identical
+// contract.
+func CheckWorksheetTails(data []byte) error {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrNotXLSX, err)
+	}
+	checked := 0
+	for _, ze := range zr.File {
+		if !strings.HasPrefix(ze.Name, "xl/worksheets/") || !strings.HasSuffix(ze.Name, ".xml") {
+			continue
+		}
+		checked++
+		rc, err := ze.Open()
+		if err != nil {
+			return fmt.Errorf("workbook: open %s: %w", ze.Name, err)
+		}
+		var tail []byte
+		chunk := make([]byte, 32*1024)
+		for {
+			n, rerr := rc.Read(chunk)
+			if n > 0 {
+				tail = append(tail, chunk[:n]...)
+				if len(tail) > 256 {
+					tail = tail[len(tail)-256:]
+				}
+			}
+			if rerr == io.EOF {
+				break
+			}
+			if rerr != nil {
+				_ = rc.Close()
+				return fmt.Errorf("workbook: read %s: %w", ze.Name, rerr)
+			}
+		}
+		_ = rc.Close()
+		if !strings.HasSuffix(strings.TrimSpace(string(tail)), "</worksheet>") {
+			return fmt.Errorf("%w: %s", ErrTruncatedSheet, ze.Name)
+		}
+	}
+	if checked == 0 {
+		// A zip with zero worksheet entries cannot have come through a
+		// successful excelize parse (GetSheetList read at least one);
+		// reaching here means the file's structure changed under us.
+		return fmt.Errorf("%w: no worksheet streams found", ErrTruncatedSheet)
+	}
+	return nil
 }

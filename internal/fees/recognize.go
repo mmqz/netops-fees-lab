@@ -1,6 +1,7 @@
 package fees
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mmqz/netops-lab/internal/workbook"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -84,7 +86,11 @@ func readCSV(path string) ([]string, []SourceRow, error) {
 }
 
 func readXLSX(path string) ([]string, []SourceRow, error) {
-	f, err := excelize.OpenFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fees: 打开工作簿 %s: %w", path, err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, nil, fmt.Errorf("fees: 打开工作簿 %s: %w", path, err)
 	}
@@ -122,8 +128,23 @@ func readXLSX(path string) ([]string, []SourceRow, error) {
 		}
 		rows = append(rows, SourceRow{Number: rowNum, Cells: strs})
 	}
+	// #81: it.Next() returns false on BOTH clean end and iteration error
+	// (excelize discards xml.Decoder errors); it.Error() is the only error
+	// surface the iterator exposes — not checking it reads corruption as
+	// a clean end-of-file.
+	if err := it.Error(); err != nil {
+		return nil, nil, fmt.Errorf("fees: 读取工作表 %s: %w", sheet, err)
+	}
 	if headers == nil {
 		return nil, nil, fmt.Errorf("fees: 工作表 %s 没有可识别的表头行", sheet)
+	}
+	// #81: same honest-import guard as the resource channel — excelize's
+	// iterator has no error surface for mid-stream XML corruption, so a
+	// truncated sheet would otherwise import as a silent row prefix. The
+	// fee channel's evidence chain (row anchors into the snapshot) is only
+	// as trustworthy as the row count.
+	if err := workbook.CheckWorksheetTails(data); err != nil {
+		return nil, nil, fmt.Errorf("fees: %s: %w", path, err)
 	}
 	return headers, rows, nil
 }

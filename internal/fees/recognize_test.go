@@ -16,10 +16,15 @@ package fees
 // data — the coordinate must stay usable in the original file).
 
 import (
+	"archive/zip"
+	"errors"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mmqz/netops-lab/internal/workbook"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -146,5 +151,102 @@ func TestReadFeeFileXLSXNoHeader(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "没有可识别的表头行") {
 		t.Fatalf("err = %v, want the no-recognizable-header copy", err)
+	}
+}
+
+// --- honest import guard (#81): the fees channel's own copy of the corruption scenarios ---
+
+// rewriteZipEntryFees rewrites one entry of an xlsx zip into a new file
+// (test-local copy of the workbook package's helper — test files do not
+// cross packages).
+func rewriteZipEntryFees(t *testing.T, src, name string, transform func([]byte) []byte) string {
+	t.Helper()
+	zr, err := zip.OpenReader(src)
+	if err != nil {
+		t.Fatalf("OpenReader(%s): %v", src, err)
+	}
+	defer func() { _ = zr.Close() }()
+	dst := filepath.Join(t.TempDir(), "rewritten.xlsx")
+	out, err := os.Create(dst)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	zw := zip.NewWriter(out)
+	for _, ze := range zr.File {
+		rc, err := ze.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", ze.Name, err)
+		}
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read %s: %v", ze.Name, err)
+		}
+		_ = rc.Close()
+		if ze.Name == name {
+			data = transform(data)
+		}
+		w, err := zw.Create(ze.Name)
+		if err != nil {
+			t.Fatalf("create %s: %v", ze.Name, err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatalf("write %s: %v", ze.Name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip Close: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("file Close: %v", err)
+	}
+	return dst
+}
+
+// TestReadFeeFileRejectsTruncatedSheet pins the fee channel to the same
+// honest-import contract (#81): evidence anchors (source_file + source_row)
+// are only as trustworthy as the row count, so a sheet cut mid-file must
+// surface as an error — never as a clean partial import.
+func TestReadFeeFileRejectsTruncatedSheet(t *testing.T) {
+	dir := t.TempDir()
+	src := writeXLSX(t, dir, "trunc.xlsx", [][]string{
+		{"站址编码", "电费", "账期"},
+		{"HLJ0001", "100", "2025-01"},
+		{"HLJ0002", "200", "2025-01"},
+		{"HLJ0003", "300", "2025-01"},
+	}, nil)
+	corrupt := rewriteZipEntryFees(t, src, "xl/worksheets/sheet1.xml", func(b []byte) []byte {
+		return b[:len(b)*6/10]
+	})
+	_, _, err := ReadFeeFile(corrupt)
+	if err == nil {
+		t.Fatal("ReadFeeFile(truncated sheet) error = nil, want wrapped workbook.ErrTruncatedSheet")
+	}
+	if !errors.Is(err, workbook.ErrTruncatedSheet) {
+		t.Fatalf("ReadFeeFile(truncated sheet) error = %v, want wrapped workbook.ErrTruncatedSheet", err)
+	}
+	if err := errors.Unwrap(err); err == nil {
+		t.Errorf("error must wrap (not merely mention) the sentinel: %v", err)
+	}
+	if !strings.Contains(err.Error(), "fees:") {
+		t.Errorf("error text should carry the fees channel prefix: %v", err)
+	}
+}
+
+// TestReadFeeFileAcceptsValidXLSXAfterGuard pins the no-false-positive side:
+// the guard runs on every xlsx read now, so the pre-existing happy-path
+// tests keep passing (TestReadFeeFileXLSX et al.) and this explicit one
+// guards the multi-sheet case too.
+func TestReadFeeFileAcceptsValidXLSXAfterGuard(t *testing.T) {
+	dir := t.TempDir()
+	p := writeXLSX(t, dir, "valid.xlsx", [][]string{
+		{"站址编码", "电费", "账期"},
+		{"HLJ0001", "100", "2025-01"},
+	}, map[string][][]string{"Sheet2": {{"x"}, {"y"}}})
+	headers, rows, err := ReadFeeFile(p)
+	if err != nil {
+		t.Fatalf("ReadFeeFile(valid) = %v, want nil", err)
+	}
+	if len(headers) != 3 || len(rows) != 1 || rows[0].Number != 2 {
+		t.Fatalf("headers=%v rows=%v, want 3 headers + 1 data row at Number 2", headers, rows)
 	}
 }

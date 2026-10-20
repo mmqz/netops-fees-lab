@@ -1,10 +1,12 @@
 package workbook
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -492,5 +494,115 @@ func TestReadRejectsWorkbookExceedingCellLimit(t *testing.T) {
 	_, err := Read(writeSheetWorkbook(t, 3, 5, 4))
 	if !errors.Is(err, ErrWorkbookTooLarge) {
 		t.Fatalf("Read(two sheets, 27 cells, limit 20) error = %v, want wrapped ErrWorkbookTooLarge", err)
+	}
+}
+
+// --- honest import guards (#81) ---
+
+// rewriteZipEntry rewrites one entry of an xlsx zip into a new file with the
+// entry's bytes transformed, recompressing only the touched entry (raw copy
+// for the rest). Test helper for corruption scenarios.
+func rewriteZipEntry(t *testing.T, src, name string, transform func([]byte) []byte) string {
+	t.Helper()
+	zr, err := zip.OpenReader(src)
+	if err != nil {
+		t.Fatalf("OpenReader(%s): %v", src, err)
+	}
+	defer func() { _ = zr.Close() }()
+	dst := filepath.Join(t.TempDir(), "rewritten.xlsx")
+	out, err := os.Create(dst)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	zw := zip.NewWriter(out)
+	for _, ze := range zr.File {
+		rc, err := ze.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", ze.Name, err)
+		}
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read %s: %v", ze.Name, err)
+		}
+		_ = rc.Close()
+		if ze.Name == name {
+			data = transform(data)
+		}
+		w, err := zw.Create(ze.Name)
+		if err != nil {
+			t.Fatalf("create %s: %v", ze.Name, err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatalf("write %s: %v", ze.Name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip Close: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("file Close: %v", err)
+	}
+	return dst
+}
+
+// TestReadRejectsTruncatedSheetXML is the #81 core scenario: a valid xlsx
+// whose sheet stream is CUT mid-file (bit rot, interrupted copy, manual
+// tampering). excelize v2.11's iterator swallows mid-stream decode errors
+// (Next/Columns discard xml.Decoder errors; Error() only reports ErrMaxRows),
+// so before the tail guard this file imported as a silent row prefix with a
+// nil error — the caller could not tell "3 data rows" from "file cut after
+// row 4".
+func TestReadRejectsTruncatedSheetXML(t *testing.T) {
+	src := writeSheetWorkbook(t, 3, 4) // header + 3 data rows
+	corrupt := rewriteZipEntry(t, src, "xl/worksheets/sheet1.xml", func(b []byte) []byte {
+		// cut mid-row well before the closing tags
+		return b[:len(b)*6/10]
+	})
+	_, err := Read(corrupt)
+	if !errors.Is(err, ErrTruncatedSheet) {
+		t.Fatalf("Read(truncated sheet) error = %v, want wrapped ErrTruncatedSheet", err)
+	}
+}
+
+// TestReadRejectsGarbageTailedSheet covers the corruption variant where the
+// sheet stream keeps its length but the tail is garbage — no close tag.
+func TestReadRejectsGarbageTailedSheet(t *testing.T) {
+	src := writeSheetWorkbook(t, 3, 4)
+	corrupt := rewriteZipEntry(t, src, "xl/worksheets/sheet1.xml", func(b []byte) []byte {
+		return append(b[:len(b)-64], 'x') // valid prefix + junk tail, no </worksheet>
+	})
+	_, err := Read(corrupt)
+	if !errors.Is(err, ErrTruncatedSheet) {
+		t.Fatalf("Read(garbage-tailed sheet) error = %v, want wrapped ErrTruncatedSheet", err)
+	}
+}
+
+// TestReadRejectsCorruptSharedStrings exercises the Rows.Columns error path:
+// a corrupt sharedStrings table surfaces through sharedStringsReader inside
+// Columns (excelize rows.go:165) — before #81, sheetRows broke out of the
+// loop and discarded that error, importing a silent prefix.
+func TestReadRejectsCorruptSharedStrings(t *testing.T) {
+	src := writeSheetWorkbook(t, 3, 4)
+	corrupt := rewriteZipEntry(t, src, "xl/sharedStrings.xml", func(b []byte) []byte {
+		return []byte("<sst unclosed...")
+	})
+	_, err := Read(corrupt)
+	if err == nil {
+		t.Fatal("Read(corrupt sharedStrings) error = nil, want the Columns error to propagate")
+	}
+	if errors.Is(err, ErrTruncatedSheet) {
+		t.Errorf("corrupt sharedStrings misreported as truncation: %v", err)
+	}
+}
+
+// TestCheckWorksheetTailsAcceptsValidFile pins the no-false-positive side of
+// the guard: every legitimate file produced by a real OOXML writer passes.
+func TestCheckWorksheetTailsAcceptsValidFile(t *testing.T) {
+	data, err := os.ReadFile(writeSheetWorkbook(t, 3, 4, 5))
+	if err != nil {
+		t.Fatalf("read workbook: %v", err)
+	}
+	if err := CheckWorksheetTails(data); err != nil {
+		t.Fatalf("CheckWorksheetTails(valid file) = %v, want nil", err)
 	}
 }
