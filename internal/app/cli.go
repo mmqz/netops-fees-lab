@@ -257,6 +257,17 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	} else if n > 0 {
 		a.Log.Info("recovered interrupted import batches", "count", n)
 	}
+	// The metric channel's twin heal (#87): metric ingests write their
+	// terminal status inside the ingest transaction, so a crashed previous
+	// run leaves its batch importing forever — sweep it here, at the same
+	// call site discipline (serve startup, before the listener starts).
+	if a.Metrics != nil {
+		if n, err := a.Metrics.RecoverInterrupted(ctx); err != nil {
+			return fmt.Errorf("recover interrupted metric batches: %w", err)
+		} else if n > 0 {
+			a.Log.Info("recovered interrupted metric batches", "count", n)
+		}
+	}
 
 	// Uploads garbage collection (W5-D, v0.4.0), same placement rationale
 	// as RecoverInterrupted above: run serially BEFORE the listener starts,
@@ -374,6 +385,14 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("recover interrupted imports: %w", err)
 	} else if n > 0 {
 		a.Log.Info("recovered interrupted import batches", "count", n)
+	}
+	// Metric channel twin heal (#87) — same placement discipline.
+	if a.Metrics != nil {
+		if n, err := a.Metrics.RecoverInterrupted(ctx); err != nil {
+			return fmt.Errorf("recover interrupted metric batches: %w", err)
+		} else if n > 0 {
+			a.Log.Info("recovered interrupted metric batches", "count", n)
+		}
 	}
 
 	var sum importer.Summary

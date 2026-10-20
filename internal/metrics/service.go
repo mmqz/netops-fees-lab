@@ -221,6 +221,30 @@ type IngestSummary struct {
 // Values outside the catalog's advisory bounds are recorded with
 // quality='suspect' (never rejected). workbookName is the display name of
 // the batch (the HTTP upload path passes the user's original file name).
+// interruptedMetricReason is the metric channel's twin of the importer's
+// contractual heal marker (recover.go): the leading "interrupted" token
+// makes a healed batch recognizable as "the pipeline never reached a
+// terminal state", not as an ordinary ingest failure.
+const interruptedMetricReason = "interrupted: metric ingest stopped before reaching a terminal state (process crash or restart)"
+
+// RecoverInterrupted heals the metric channel's crash-window batches (#87):
+// Ingest writes its terminal status inside the ingest transaction, so a
+// process death mid-ingest leaves the batch row stuck at importing forever
+// — the metric channel was the only one of the three import channels
+// without a sweeper (the resource channel heals via
+// importer.RecoverInterrupted, the fee channel's batches are created in
+// the retry-open style with a failed row as the fallback). This resets
+// every transient metric batch to failed(interrupted) and returns the
+// number healed. Same placement discipline as the importer twin: only at
+// serve startup / CLI entry, never in repo.Open or the MCP path.
+func (s *Service) RecoverInterrupted(ctx context.Context) (int64, error) {
+	n, err := s.db.MetricBatches.MarkInterruptedImportsFailed(ctx, interruptedMetricReason)
+	if err != nil {
+		return 0, fmt.Errorf("metrics: recover interrupted batches: %w", err)
+	}
+	return n, nil
+}
+
 func (s *Service) Ingest(ctx context.Context, path string, m IngestMapping, workbookName string) (IngestSummary, error) {
 	wb, err := workbook.Read(path)
 	if err != nil {

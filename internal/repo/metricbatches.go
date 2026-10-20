@@ -195,3 +195,37 @@ func (r *MetricBatchRepo) Count(ctx context.Context) (int, error) {
 	}
 	return n, nil
 }
+
+// MarkInterruptedImportsFailed heals the metric channel's crash window
+// (#87, the RecoverInterrupted precedent from the resource channel): a
+// metric ingest writes its terminal status INSIDE the ingest transaction,
+// so a batch still in a transient state after a process death is debris of
+// a crashed run and would stay importing forever — no other write would
+// ever touch it. Resets every analyzing/importing metric batch to
+// failed(interrupted) and stamps finished_at once.
+//
+// Safety mirrors the resource channel's ruling (batches.go):
+//   - terminal statuses (completed / failed / rolled_back) are excluded by
+//     the WHERE clause, so the heal is idempotent (second run: 0 rows)
+//   - a false positive (another process's ingest genuinely in flight while
+//     this runs) is tolerated by design: that ingest writes its own
+//     terminal status inside its transaction afterwards, overwriting the heal
+//   - call sites: only where no ingest of THIS process is in flight —
+//     serve startup and the CLI entry, right next to
+//     Importer.RecoverInterrupted. Never in repo.Open or the MCP path.
+func (r *MetricBatchRepo) MarkInterruptedImportsFailed(ctx context.Context, reason string) (int64, error) {
+	res, err := r.q.ExecContext(ctx,
+		`UPDATE metric_batches
+SET status = ?, error = ?, finished_at = COALESCE(finished_at, ?)
+WHERE status IN (?, ?)`,
+		domain.BatchStatusFailed.String(), nullString(reason), formatTime(time.Now().UTC()),
+		domain.BatchStatusAnalyzing.String(), domain.BatchStatusImporting.String())
+	if err != nil {
+		return 0, fmt.Errorf("repo: mark interrupted metric batches failed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("repo: mark interrupted metric batches failed: rows affected: %w", err)
+	}
+	return n, nil
+}
