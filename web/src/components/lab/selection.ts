@@ -127,15 +127,20 @@ export function isValidIpv4(value: string): boolean {
  * 可选 IPv4 地址+前缀对的统一校验（AUD2-1/FX2-1）：
  * - 两者均空 → 合法（表示不配置/清除）；
  * - 只填其一 → LAB_I_ERR_BOTH；地址非 dotted-quad → LAB_I_ERR_ADDR；
- * - 前缀非 0–32 整数 → LAB_I_ERR_PREFIX。
+ * - 前缀非 0–32 十进制整数 → LAB_I_ERR_PREFIX。
  * 纯函数：OpsDialog 与 InterfaceConfigDialog 共用，保证两处行为一致。
- * （仓库无 vitest 测试运行器，不新增；用 node 对本模块做过手工断言，见 FX-2 工作日志。）
+ * （#96 起本模块随仓库其余纯函数一起由 vitest 覆盖——见 selection.test.ts。）
  */
 export function validateIpv4Pair(addr: string, prefix: string): string | null {
   if (addr.trim() === '' && prefix.trim() === '') return null;
   if (addr.trim() === '' || prefix.trim() === '') return LAB_I_ERR_BOTH;
   if (!isValidIpv4(addr.trim())) return LAB_I_ERR_ADDR;
-  const prefixNum = Number(prefix);
-  if (!Number.isInteger(prefixNum) || prefixNum < 0 || prefixNum > 32) return LAB_I_ERR_PREFIX;
+  // #96: 十进制字面量校验——Number() 会把 "0x1"(→1)、"1e1"(→10)、" 5"(→5)
+  // 放行，与 isValidIpv4 对齐的 Go netip.ParsePrefix 语义（strconv.Atoi 的
+  // 纯十进制）把它们全部拒绝；前缀解析漂移会让客户端放过、服务端 400。
+  const p = prefix.trim();
+  if (!/^\d{1,3}$/.test(p)) return LAB_I_ERR_PREFIX;
+  const prefixNum = Number(p);
+  if (prefixNum < 0 || prefixNum > 32) return LAB_I_ERR_PREFIX;
   return null;
 }
