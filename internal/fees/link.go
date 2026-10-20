@@ -18,7 +18,10 @@ package fees
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -684,15 +687,71 @@ func topFuzzy(candidates []resourceCandidate, code string) []fuzzyCandidate {
 	return scored
 }
 
+// readBatchSiteCodes streams one live Parquet file's site_code column into
+// seen. It runs guarded: parquet-go's NewGenericReader PANICS on
+// structurally corrupt files (openFile → invalid magic/footer → reader.go:39
+// `panic(err)`), and a corrupted batch on disk is a DATA error, not a
+// programmer error — it must surface as this scan's fail-loud error, never
+// as a process crash (#84).
+func readBatchSiteCodes(path string, seen map[string]struct{}) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("fees: 读取 %s: 损坏的 Parquet 文件: %v", path, r)
+		}
+	}()
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("fees: 打开 %s: %w", path, err)
+	}
+	r := parquet.NewGenericReader[feeParquetRow](f)
+	rows := make([]feeParquetRow, 256)
+	defer func() {
+		_ = r.Close()
+		_ = f.Close()
+	}()
+	for {
+		n, rerr := r.Read(rows)
+		for i := 0; i < n; i++ {
+			if rows[i].SiteCode != "" {
+				seen[rows[i].SiteCode] = struct{}{}
+			}
+		}
+		if rerr != nil {
+			if !errors.Is(rerr, io.EOF) {
+				return fmt.Errorf("fees: 读取 %s: %w", path, rerr)
+			}
+			return nil
+		}
+	}
+}
+
 // distinctSiteCodes reads the distinct site_code values of the LIVE
 // Parquet files (the keep-set = completed batch ids) — pure Go, column
 // projection (only site_code is decoded). Deterministic order: sorted.
+//
+// #84: this is the UNIVERSE that feeds DeleteAutoNotIn — "auto links
+// follow the data". A read error shrunk silently to a partial universe
+// would delete live auto links on a transient FS hiccup (the empty
+// universe wipes them all). So read errors are NOT best-effort here:
+// any walk/open/read failure on the live batch set aborts the scan, and
+// only the "no fees directory at all AND no live batches" state counts
+// as a legitimately empty universe.
 func distinctSiteCodes(analysisDir string, live map[string]struct{}) ([]string, error) {
 	root := filepath.Join(analysisDir, "fees")
 	seen := map[string]struct{}{}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
-			return nil //nolint — unreadable trees are skipped, the scan is best-effort per file
+		if walkErr != nil {
+			// Missing root with no live batches is the one legal empty
+			// universe (fresh install; auto links follow data that never
+			// existed). Everything else — a vanished root under live
+			// batches, permission errors, I/O faults — must fail loud.
+			if errors.Is(walkErr, fs.ErrNotExist) && len(live) == 0 && path == root {
+				return nil
+			}
+			return fmt.Errorf("fees: 扫描 %s: %w", path, walkErr)
+		}
+		if d.IsDir() {
+			return nil
 		}
 		name := d.Name()
 		if !strings.HasPrefix(name, "batch-") || !strings.HasSuffix(name, ".parquet") {
@@ -702,26 +761,7 @@ func distinctSiteCodes(analysisDir string, live map[string]struct{}) ([]string, 
 		if _, keep := live[id]; !keep {
 			return nil // an orphan or non-completed batch — not in the universe
 		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil //nolint — one unreadable file never aborts the scan
-		}
-		r := parquet.NewGenericReader[feeParquetRow](f)
-		rows := make([]feeParquetRow, 256)
-		for {
-			n, err := r.Read(rows)
-			for i := 0; i < n; i++ {
-				if rows[i].SiteCode != "" {
-					seen[rows[i].SiteCode] = struct{}{}
-				}
-			}
-			if err != nil {
-				break
-			}
-		}
-		_ = r.Close()
-		_ = f.Close()
-		return nil
+		return readBatchSiteCodes(path, seen)
 	})
 	if err != nil {
 		return nil, err

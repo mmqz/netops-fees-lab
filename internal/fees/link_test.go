@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -470,4 +471,62 @@ func TestSweepAutoNotInRepo(t *testing.T) {
 		t.Errorf("human link must survive the empty-universe sweep: %v", err)
 	}
 	_ = svc // the service handle is part of the fixture contract; the sweep is repo-level
+}
+
+// TestLinkScanFailsLoudOnUniverseReadErrors pins #84: the keep-set that
+// feeds DeleteAutoNotIn is built from the live Parquet files, and a read
+// error there must ABORT the scan — never shrink silently to a partial
+// universe. The empty universe wipes ALL auto links, so a transient FS
+// fault (truncated file, vanished directory) must surface as an error
+// while the links stay in place.
+func TestLinkScanFailsLoudOnUniverseReadErrors(t *testing.T) {
+	mk := func(t *testing.T) (context.Context, *Service, *repo.DB, string) {
+		svc, db, dir := newService(t)
+		ctx := context.Background()
+		seedSiteResource(t, db, "res_ue", "site", "UE001", "局站UE")
+		src := writeCSV(t, dir, "ue.csv", "站址编码,账期,电费(元)\nUE001,2024-05,1.00\n")
+		if _, err := svc.Import(ctx, ImportOptions{Path: src, FeeType: FeeTypeElectricity, Year: 2024, Month: 5}); err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if _, err := svc.ScanLinks(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx, svc, db, dir
+	}
+
+	// Case 1: the live batch's parquet file is corrupted mid-read.
+	t.Run("corrupt parquet aborts scan, links survive", func(t *testing.T) {
+		ctx, svc, db, dir := mk(t)
+		// The batch files live in hive partitions (fees/fee_type=…/year=…/month=…/batch-*.parquet).
+		var matches []string
+		err := filepath.WalkDir(filepath.Join(dir, "analysis", "fees"), func(p string, d os.DirEntry, werr error) error {
+			if werr == nil && !d.IsDir() && strings.HasPrefix(d.Name(), "batch-") && strings.HasSuffix(d.Name(), ".parquet") {
+				matches = append(matches, p)
+			}
+			return werr
+		})
+		if err != nil || len(matches) == 0 {
+			t.Fatalf("no live parquet files under %s (err %v)", filepath.Join(dir, "analysis", "fees"), err)
+		}
+		if err := os.WriteFile(matches[0], []byte("\xff\xfe PARQU1 junk-not-a-parquet"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.ScanLinks(ctx); err == nil {
+			t.Fatal("ScanLinks(corrupt universe) = nil error, want fail-loud (the sweep must not run on a partial universe)")
+		}
+		if _, err := db.FeeSiteLinks.ConfirmedByCode(ctx, "UE001"); err != nil {
+			t.Fatalf("the live auto link must survive the aborted scan, got %v", err)
+		}
+	})
+
+	// Case 2: the whole fees directory vanished under live batches.
+	t.Run("vanished fees dir aborts scan", func(t *testing.T) {
+		ctx, svc, _, dir := mk(t)
+		if err := os.RemoveAll(filepath.Join(dir, "analysis", "fees")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.ScanLinks(ctx); err == nil {
+			t.Fatal("ScanLinks(vanished universe, live batches) = nil error, want fail-loud — the empty universe would wipe every auto link")
+		}
+	})
 }
