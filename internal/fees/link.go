@@ -177,8 +177,22 @@ func Similarity(a, b string) float64 {
 // cap itself is derived by evaluating the naive threshold expression
 // (monotone in dist), never by float-truncating the algebra, so the fast
 // path's accept/reject decisions are bit-identical to the naive path's.
+//
+// The string form converts once and delegates to the rune form — the
+// scan's hot loop (topFuzzy) calls the rune form directly with
+// PRE-CONVERTED slices (candidate keys converted once per scan at
+// candidate-build time, the fee code once per code): 10k codes × 1k
+// candidates otherwise paid 20M []rune conversions, each an allocation +
+// copy — the single biggest cost of the sweep after the banded DP
+// itself (#76 follow-up: the acceptance budget must hold on a loaded
+// 2-core box, so the headroom matters as much as the algorithm).
 func similarityAtLeast(a, b string, threshold float64) (float64, bool) {
-	ar, br := []rune(a), []rune(b)
+	return similarityAtLeastRune([]rune(a), []rune(b), threshold)
+}
+
+// similarityAtLeastRune is similarityAtLeast over pre-converted rune
+// slices. Same decisions, same values, zero conversions.
+func similarityAtLeastRune(ar, br []rune, threshold float64) (float64, bool) {
 	m := max(len(ar), len(br))
 	if m == 0 {
 		return 1, true // the Similarity convention: two empty keys match fully
@@ -331,9 +345,10 @@ func asciiCountDelta(a, b []rune) (int32, bool) {
 
 // resourceCandidate is one member of the match universe.
 type resourceCandidate struct {
-	id  string
-	typ domain.ResourceType
-	key string
+	id       string
+	typ      domain.ResourceType
+	key      string
+	keyRunes []rune // pre-converted once at candidate-build time (#76 follow-up): the fuzzy sweep reuses it for every code
 }
 
 // ScanResult reports one scan's outcome.
@@ -476,7 +491,10 @@ func (s *Service) ScanLinks(ctx context.Context) (ScanResult, error) {
 			return ScanResult{}, fmt.Errorf("fees: link scan (%s): %w", typ, err)
 		}
 		for _, res := range resources {
-			candidates = append(candidates, resourceCandidate{id: res.ID, typ: res.Type, key: res.NaturalKey})
+			candidates = append(candidates, resourceCandidate{
+				id: res.ID, typ: res.Type, key: res.NaturalKey,
+				keyRunes: []rune(res.NaturalKey), // one conversion per candidate, reused by every code's sweep
+			})
 		}
 	}
 	universe := buildScanUniverse(candidates)
@@ -638,11 +656,16 @@ type fuzzyCandidate struct {
 // the naive Similarity >= threshold comparison.
 func topFuzzy(candidates []resourceCandidate, code string) []fuzzyCandidate {
 	var scored []fuzzyCandidate
+	codeRunes := []rune(code) // one conversion per code, shared by all its candidates
 	for _, c := range candidates {
 		if c.key == "" || code == "" {
 			continue
 		}
-		if sim, ok := similarityAtLeast(code, c.key, FUZZY_THRESHOLD); ok {
+		kr := c.keyRunes
+		if kr == nil {
+			kr = []rune(c.key) // defensive: candidates built outside the scan path convert lazily
+		}
+		if sim, ok := similarityAtLeastRune(codeRunes, kr, FUZZY_THRESHOLD); ok {
 			scored = append(scored, fuzzyCandidate{c: c, similarity: sim})
 		}
 	}
