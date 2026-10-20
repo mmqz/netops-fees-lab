@@ -28,7 +28,7 @@ conn.Raw(func(dc any) error {            // 拿到底层驱动连接（*sqlite.c
   - *裸拷贝 .db 文件*：WAL 下数据可能还在 `-wal` 里，快照陈旧/撕裂——红线禁止；
   - *`VACUUM INTO`*：同样产出一致快照，但它是"复制优化后的整库"且语义面向压缩；Online Backup 是官方为备份设计的路径，页级增量、可分步（未来大库可 `Step(n)` 分批），且本 ADR 的断言方式对两者通用，选更正统的 API；
   - *SQL 层导出（dump 重建）*：文本转储无事务一致性保证，且要自己重新执行全部 DDL/DML。
-- 落点：`<dbdir>/checkpoints/<workspaceId>/<cpId>.db`；`file_path` 存**相对路径**（库整体搬迁后检查点仍可用）；目录惰性创建；标记行（checkpoints 表）在**备份成功之后**插入——崩溃窗口只会留下"无引用的孤儿快照文件"（无害）而不会留下"指向不存在文件的行"。
+- 落点：`<dbdir>/checkpoints/<workspaceId>/<cpId>.db`；`file_path` 存**相对路径**（库整体搬迁后检查点仍可用；#80 修复后该值恒为**逻辑形态（`/`）**——跨平台搬库（如 Windows 建库 → Linux 复原）也成立，存量行由 migration v32 归一，磁盘访问走 `filepath.FromSlash` 边界）；目录惰性创建；标记行（checkpoints 表）在**备份成功之后**插入——崩溃窗口只会留下"无引用的孤儿快照文件"（无害）而不会留下"指向不存在文件的行"。
 
 ## 决策 2 — 恢复：工作区级、前向操作变更集
 

@@ -186,7 +186,7 @@ import_batches 1 ──── n resources ──── n relations（端点为 r
   - API/拓扑负载用 `""` / `-1` 渲染未配置接口，**状态哈希**与 §3 规范 JSON 用 `null`（两套表示故意不同：负载面向 UI 字符串字段，哈希面向规范 JSON）。
 - **状态哈希（workspace_hash）**：仿真状态的确定性指纹 = 对规范 JSON 的 sha256（hex）。规范 JSON：设备按 `code` 排序、接口按 `name` 排序、链路按 `(aDevice, aInterface, zDevice, zInterface, label)` 排序；未配置地址渲染 `null`；字段顺序固定（`{"devices":[{"code","name","status","interfaces":[{"name","status","ipv4Addr","ipv4Prefix"}]}],"links":[{"aDevice","aInterface","zDevice","zInterface","status","label"}]}`）。同状态 ⇒ 同哈希——撤销/检查点恢复的"精确回到基线"验证依赖它。
 - **`check_runs.topology_json`**：运行时的规范边快照（全部链路含 down，排序同哈希 links 数组，字段 aDevice/aInterface/zDevice/zInterface/status/label）——diff 无需重放操作即可重算可达性。
-- **检查点文件**：`<dbdir>/checkpoints/<workspaceId>/<cpId>.db`（Online Backup API 全库快照）；`file_path` 存**相对路径**；删除工作区时级联删行 + 尽力清理目录。
+- **检查点文件**：`<dbdir>/checkpoints/<workspaceId>/<cpId>.db`（Online Backup API 全库快照）；`file_path` 存**相对路径且恒为逻辑形态（`/`，#75 契约 / #80 收口 / migration v32 归一存量）**，磁盘访问在唯一边界 `filepath.FromSlash`；删除工作区时级联删行 + 尽力清理目录。
 
 ## 7. DDL v5 全文
 

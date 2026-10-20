@@ -961,3 +961,16 @@ run `39403484430`（`4f00a71`）：workflow 解析正常（go/web/duckdb/windows
 但四 job 仍 `runner_id=0` / 3 秒死——**Actions 分钟配额未恢复**（#76 第二段诊断在案，
 等 owner 充值或月度配额刷新）。本轮校准验证全部在本地沙箱完成：
 25 包 Go 测试 ok / gofmt 空 / vet 0 / vitest 40/40 / tsc 0 / 三浏览器脚本 68 断言全绿。
+
+### #79/#80 修复轮（2026-10-20，第二轮）
+
+接上表（#77 校准轮）。本轮两项闭环 + 一项延伸审计：
+
+| 项 | 内容 | 提交 | 运行态 |
+| --- | --- | --- | --- |
+| **#79**（P1，测试侧） | `parquet_test.go:148` 期望值入逻辑路径契约（`filepath.Join` → 字符串常量 + `FromSlash` 读盘 + `WriteSnapshot` 返回值反斜杠守卫）——#75 修复的最后一处漏改，Windows 稳定失败、linux CI 不可见 | `ef0262a` | run 39418864077：4 job 壳 + runner_id=0（配额模式，#76 在案） |
+| **#80**（P2，产品侧，本轮立案+修复） | #79 复扫发现 `checkpoints.file_path` 以平台原生分隔符持久化（跨平台搬库后 restore 必断）——`path.Join` 写侧 + `FromSlash` 双边界 + **migration v32** 归一存量（v31 孪生）+ 守卫测试；14 处 registry-head 钉随约定 31→32 | `06ce6cd` | run 39420112339：同配额模式 |
+
+**契约闭环**：#75「持久化相对路径 = 跨平台契约」的两个产品侧落点（fee `snapshot_path` → v31 / checkpoint `file_path` → v32）与测试侧镜像（#79）全部收口；持久化路径列普查确认无剩余违规点（`workbook_path` 为调用方本地路径原样记录，不同类）。
+
+**门禁**（两轮同集）：25 包 ok / 0 FAIL · gofmt 空 · vet 0 · -race sim+repo 0 race · tsc 0 · vitest 40/40 · demo.sh + demo-lab.sh 回归绿。镜像文档：[issue-79](issue-79-snapshot-test-missed.md) · [issue-80](issue-80-checkpoint-path-contract.md)。

@@ -96,3 +96,25 @@ got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(want)))
 
 **结论**：云端"无可做"的判断在**大方向上是准确的**（剩下的确实卡在账户计费），
 但**"测试全绿"这个前提在 Windows 上不成立**——所以还有一件小小的能做的事。
+
+---
+
+## 修复记录（2026-10-20，推送 ef0262a）
+
+**修复方案 = issue 建议的原样落地**（`internal/fees/parquet_test.go` TestSnapshotLayer）：
+
+| 触点 | 修复内容 |
+| --- | --- |
+| `:148` 期望值 | `filepath.Join(...)` → 字符串常量 `"fee-imports/electricity/2024/05/" + sha + "_bill.csv"`（同文件 :32-36 既有约定） |
+| `:152` 读盘 | `filepath.Join(dir, want)` → `filepath.Join(dir, filepath.FromSlash(want))`（service_test.go:86 / snapshot_test.go:52 同款边界） |
+| 守卫 | `WriteSnapshot` 返回值加 `strings.Contains(rel, "\\")` 反斜杠断言（验收标准 2） |
+
+**验收对照**：
+
+1. Linux 实测 PASS（fees 包 + 全仓 25 包 ok / 0 FAIL）；Windows 由构造保证——期望值与读盘均不再含平台分隔符成分，任何平台恒等。
+2. 守卫已落地；另勘误：`TestSnapshotPathIsLogicalContract` 实际**已覆盖** `WriteSnapshot` 返回值（3377762 在 snapshot_test.go:41-53 加了字面量断言+反斜杠守卫+FromSlash 落盘核验），issue 的该条前提滞后一个版本。双重守卫保留。
+3. CI windows job 已存在且跑全量 `go test ./...`（含 fees），结构上早已满足；执行被 #76 配额阻塞（run 39418864077：4 job 壳 + runner_id=0 + 3 秒死，配额模式逐字一致）。
+
+**门禁**：gofmt 空 · vet 0 · 25 包 ok / 0 FAIL · tsc 0 · vitest 40/40 · web build ok。
+
+**顺带发现**：全仓复扫确认测试侧仅此一处；同时发现产品侧同型隐患一处（`sim/checkpoint.go` 的 `checkpoints.file_path` 以平台原生分隔符持久化）——已单独立案 **#80** 并同轮修复（06ce6cd）。
