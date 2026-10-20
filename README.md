@@ -132,6 +132,8 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 
 前置要求：**Go 1.27+**（编译后端；无 CGO，纯 Go）、**Node 18+**（构建前端；本仓库验证于 Node 24 / npm 11）、python3（演示脚本用）。
 
+> **只想下载产物？** 从 [GitHub Releases](https://github.com/mmqz/netops-lab/releases) 取最新版：`netops-lab-<TAG>-linux-amd64.tar.gz`（默认构建）或 `netops-lab-<TAG>-linux-amd64-duckdb.tar.gz`（含费用分析引擎的 DuckDB 构建，v0.15.2 起随渠道分发）；历史版本至少提供 source tarball。
+
 ```bash
 # 1) 测试
 make test            # go test -count=1 -timeout 15m ./...（25 包全绿；顶层测试计数随版本演进，以 CHANGELOG 门禁行为准）
@@ -337,7 +339,7 @@ netopslab gc       --db ./data/netops.db --data ./data       # 手动清理孤�
 netopslab testdata --out testdata
 ```
 
-**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.15.1`），注册**恰好 11 个工具**（5 资源/仿真域 + 5 图分析域 + 1 费用风险域，TestMCPToolRegistry 钉死）：
+**MCP**：`netopslab mcp` 启动 stdio JSON-RPC 服务器（server name `netops-lab`，version `v0.15.2`），注册**恰好 11 个工具**（5 资源/仿真域 + 5 图分析域 + 1 费用风险域，TestMCPToolRegistry 钉死）：
 
 | 工具 | 类别 | 职责 |
 | --- | --- | --- |

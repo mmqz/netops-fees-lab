@@ -2,6 +2,26 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.15.2] — 2026-10-20
+
+**发布渠道修复 + 跨平台路径契约版**（#74 发布断档第二轮修复 + #75 P1；v0.15.1 后 main 上八个提交的 patch 发布——发布渠道自 v0.8.0 起停摆九个版本，本版把渠道修到可下载、可复用、带引擎）。
+
+### 修复 — Windows 持久化路径破坏跨平台契约（#75，P1，migration v31）
+- `fee_batches.snapshot_path` 与 Parquet 分区清单是**逻辑路径契约**（持久化 + API `snapshotPath`/`files[]` + CLI JSON 逐字回显，"相对 data 目录"），却用 `filepath.Join` 生成——Windows 上产反斜杠，`TestAPIFeesImportJourney` 稳定失败而 linux CI 永远看不见。写侧改 `path.Join`（恒 `/`），磁盘拼接在唯一边界 `filepath.FromSlash`；**migration v31** 纯 UPDATE 归一存量（`replace('\','/')`，幂等；Windows 旧数据的每个反斜杠都是分隔符——OS 禁止文件名含反斜杠）；测试侧同步修掉**镜像缺陷**（parquet 布局断言的期望值原用 `filepath.Join` 构造——Windows 上期望值自己变反斜杠）。新增 `TestSnapshotPathIsLogicalContract` 与 `TestMigrationV31NormalizesFeeSnapshotPaths`；22 处 max-version 断言随 v31 前进（既有惯例）。
+
+### 修复 — 空分析目录答 500 而非诚实空结果（#72，P2）
+- `feeTableGlob` 在空目录时让 DuckDB 抛 IO 错（API 500），fresh install 的 MCP/API engine-state 测试对空库答非所问；修复后 `analysisEmpty` 短路为诚实空列表。**全包 `-tags duckdb` 构建盲区**一并补门禁（此前只有单包 duckdb 构建，多包编译错误漏网）。
+
+### 测试 — 两条测试底座（#70 / #73）
+- xlsx 读取通道首个 reader 契约测试（first-sheet、证据行号、全切片导入——9ecb3bd）；r7 回执六格化断言收口（计数 + 六标签集双断言——ddd9c3e）。
+
+### 文档 — 三处漂移修复（#71）
+- §19.2 幂等键集合停在 v0.15.1 前、README 快速开始计数停在 v0.8.1、onboarding 缺费用域——26521ee。
+
+### 修复 — 发布断档第二轮（#74，发布工程）
+- **现象**：Release 下载渠道停在 v0.8.0——v0.9.0 Release 空壳（有正文零资产）、v0.10.0–v0.14.0 八个 tag 无 Release、v0.15.0/v0.15.1 连 tag 都没打。费用风险六场景整个里程碑对"只下载产物"的运营者不可见。
+- **修复**（七项）：①本 v0.15.2 patch 收口 main 全部未发布修复；②`scripts/release.sh` 参数化发布（TAG/名称/正文文件/资产清单，取代 TAG 硬编码 v0.8.0 的一次性 w29 脚本——不可复用正是断档根因之一）；③v0.15.2 Release 三资产：source + linux-amd64 默认构建 + **linux-amd64 duckdb 构建**（费用引擎首次随渠道分发——此前 fee_risks 在所有下载产物上 501 engine_not_built）；④下载产物核对（`serve` + `/api/health` 实报 v0.15.2，duckdb 产物另核 fee_risks 应答）；⑤v0.9.0 空壳补齐双资产；⑥v0.15.0/v0.15.1 补 tag（b5c96cb / 231e0a1）+ v0.10.0–v0.15.1 十个 tag 各建 source-only Release（历史版二进制不回补——#14 先例）；⑦verified-capabilities 增"发布断档修复（#74）"行 + README 快速开始增 Release 下载入口。
+
 ## [0.15.1] — 2026-10-19
 
 **分级关联复提修复版**（#69 修复 + #67/#68 文档与测试收口；v0.15.0 后三个提交的 patch 发布）。
