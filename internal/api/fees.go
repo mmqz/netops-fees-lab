@@ -138,8 +138,10 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 }
 
 // errUnsupportedFeeExt answers a fee upload whose extension is outside
-// csv/xlsx/xls.
-var errUnsupportedFeeExt = errors.New("仅支持 .csv / .xlsx / .xls 费用文件")
+// csv/xlsx (.xls gets its own dedicated message — #92).
+var errUnsupportedFeeExt = errors.New("仅支持 .csv / .xlsx 费用文件")
+
+var errXlsBinaryFormat = errors.New(".xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试")
 
 // stageFeeUpload writes the uploaded fee file under
 // <dataDir>/uploads/fees/<sha256>_<name> and returns its path —
@@ -155,7 +157,9 @@ var errUnsupportedFeeExt = errors.New("仅支持 .csv / .xlsx / .xls 费用文�
 func stageFeeUpload(dataDir string, file io.Reader, name string) (string, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 	switch ext {
-	case "csv", "xlsx", "xls":
+	case "csv", "xlsx":
+	case "xls":
+		return "", errXlsBinaryFormat
 	default:
 		return "", fmt.Errorf("%w（收到 .%s）", errUnsupportedFeeExt, ext)
 	}

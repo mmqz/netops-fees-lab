@@ -18,7 +18,7 @@
                     │  ┌── API（net/http stdlib）── 嵌入式 React UI    │
                     │  │   （/lab Cytoscape 拓扑画布）                │
                     │  ├── CLI（结构化 JSON 输出；lab 子命令树）       │
-                    │  └── MCP（stdio，5 工具：1 只读 + 4 仿真）       │
+                    │  └── MCP（stdio JSON-RPC；工具面见 §8，全部只读/仿真封闭集）     │
                     │      │                                       │
                     │      ▼                                       │
                     │  query/topology/report（检索·二跳关系·质量报告）  │
@@ -31,7 +31,7 @@
 
 ## 1. 项目定位
 
-NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿真工作台：把多份 Excel 资源台账与 PTP 配置脚本（设备 / 地址池 / 电路 / 端口 / 基站 / 机房 / 局站 / PTP 端口）经**用户确认的列映射**导入 SQLite，完成行级记账的标准化与确定性质量校验；再从导入资源**一键物化**虚拟拓扑工作区，让用户与 AI（经 MCP）通过**封闭的类型化操作集**（含故障注入）在仿真态上做真实状态迁移，引擎给出确定性校验结果、前后对比与三层撤销（事务回滚 / 变更集逆向 / 检查点）。出口为 HTTP API、嵌入式 React 界面（含 Cytoscape 拓扑画布）、CLI 与 **MCP 十工具**（1 检索 + 4 仿真 + 5 只读分析）。本仓库交付 **Stage 0（技术验证）+ Phase 1（资源治理）+ Phase 2（仿真工作台）**。
+NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿真工作台：把多份 Excel 资源台账与 PTP 配置脚本（设备 / 地址池 / 电路 / 端口 / 基站 / 机房 / 局站 / PTP 端口）经**用户确认的列映射**导入 SQLite，完成行级记账的标准化与确定性质量校验；再从导入资源**一键物化**虚拟拓扑工作区，让用户与 AI（经 MCP）通过**封闭的类型化操作集**（含故障注入）在仿真态上做真实状态迁移，引擎给出确定性校验结果、前后对比与三层撤销（事务回滚 / 变更集逆向 / 检查点）。出口为 HTTP API、嵌入式 React 界面（含 Cytoscape 拓扑画布）、CLI 与 **MCP 工具面**（1 检索 + 4 仿真 + 5 图分析 + 1 费用风险，全部只读/仿真封闭集，TestMCPToolRegistry 钉死）。本仓库交付 **Stage 0（技术验证）+ Phase 1（资源治理）+ Phase 2（仿真工作台）**。
 
 ## 2. 当前阶段能力清单（Stage 0 + Phase 1 + Phase 2 已交付）
 
@@ -74,7 +74,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **指标时序可视化**：资源抽屉「性能指标」页签——零依赖确定性 SVG 折线（y 三线网格 + x 首末日期、suspect 橙点/missing 空心、**劣化序列红色**），中文指标标签来自封闭目录；7 日光功率 -8→-24 dBm 劣化故事在 UI 直接可见。
 - **影响分析页签**：资源抽屉四子模式——根因分析（impact down：根因候选 + 中文判定理由 + 受影响面）/ 影响面（up）/ 向下穿透 / 向上汇总；节点行带层族色 chip 与运行态 chip，点击穿透到对应资源抽屉。
 - **运行状态视图**：抽屉属性页的运行状态行（运行/劣化/停机/维护/未知 + 最近 8 条状态历史小时间线）——台账状态（登记事实）与运行状态（观测事实）双态模型的 UI 面；概览页「触发中告警」统计卡红色高亮。
-- **MCP 十工具**（见 §8）：五个只读分析工具构成 AI 根因分析闭环——`alerts_query → graph_context → graph_impact(根因) → metrics_query`。
+- **MCP 图分析工具**（见 §8）：graph 闭环 alerts_query → graph_context → graph_impact(根因) → metrics_query。
 
 ### 仿真工作台（Phase 2，v0.6.0 治理三部曲终章与数据双向闭环版）
 
@@ -242,7 +242,7 @@ netopslab lab checkpoint --db $DB --workspace <wsId> --restore --id cp-1
 | 后端 | Go 1.27（无 CGO） | 仅 `net/http` stdlib 路由；无 Web 框架 |
 | 存储 | SQLite（modernc.org/sqlite v1.60.1） | 纯 Go 驱动；WAL + busy_timeout + foreign_keys；Online Backup API（检查点） |
 | Excel | xuri/excelize/v2 v2.11.0 | 多 Sheet 解析、类型化单元格读取 |
-| MCP | modelcontextprotocol/go-sdk v1.8.0 | stdio JSON-RPC；5 工具（1 只读 + 4 仿真） |
+| MCP | modelcontextprotocol/go-sdk v1.8.0 | stdio JSON-RPC；工具面见 §8（全部只读/仿真封闭集） |
 | 前端 | React 18 + TypeScript 5.6（strict）+ Vite 6 | 手写设计系统 CSS，无 UI 框架 |
 | 拓扑图 | cytoscape 3.32.0（精确版本，无插件） | /lab 画布；单 chunk 嵌入（ADR-0009） |
 | 嵌入 | go:embed all:dist | 前端产物打进二进制，单文件分发 |

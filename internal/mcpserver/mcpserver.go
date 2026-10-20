@@ -1,11 +1,14 @@
 // Package mcpserver exposes the NetOps Lab MCP STDIO server: resource_search
 // of PROJECT_BRIEF §10, the four simulation-workbench lab tools of
 // PROJECT_BRIEF_P2 §8 (lab_apply_ops, lab_run_checks, lab_diff_undo,
-// lab_checkpoint) and the five read-only analysis tools of v0.9 R4
+// lab_checkpoint), the five read-only analysis tools of v0.9 R4
 // (graph_traverse, graph_impact, graph_context, alerts_query, metrics_query)
-// — EXACTLY TEN tools and nothing else: no SQL, shell, SSH or file tools, no
+// and the fee risk tool of v0.15 (#58 stage 5). The tool surface is a
+// CLOSED READ-ONLY SET pinned by TestMCPToolRegistry (the count lives in
+// the registry test, not here — a number frozen in prose is a sentence
+// that lies on every addition): no SQL, shell, SSH or file tools, no
 // production write capability of any kind (the SEC non-negotiable of
-// PROJECT_BRIEF §1 and PROJECT_BRIEF_P2 §1; the R4 additions widen only the
+// PROJECT_BRIEF §1 and PROJECT_BRIEF_P2 §1; later additions widened only the
 // READ surface — ack/clear and detection runs stay human/HTTP/CLI).
 //
 // The AI mutates simulation state ONLY through these tools, and only by

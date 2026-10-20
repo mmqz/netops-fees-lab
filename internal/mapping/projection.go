@@ -9,7 +9,7 @@ import (
 // registry plus the domain rule catalog. Everything below is generated from
 // the Go specs — nothing is hand-copied, so the endpoint cannot drift from
 // the real mapping engine (the projection tests walk Specs field by field).
-// The MCP tool surface stays frozen at the five read-only tools: the schema
+// The MCP tool surface stays frozen at its read-only tools: the schema
 // endpoint is HTTP-only discovery, not an MCP capability.
 
 // SchemaDocument is the top-level body of GET /api/schema: the resource type

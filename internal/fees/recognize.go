@@ -40,10 +40,16 @@ func ReadFeeFile(path string) (headers []string, rows []SourceRow, err error) {
 	switch ext {
 	case "csv":
 		return readCSV(path)
-	case "xlsx", "xls":
+	case "xlsx":
 		return readXLSX(path)
+	case "xls":
+		// #92: honest refusal — .xls is the pre-2007 BINARY format; excelize
+		// only reads xlsx (zip+XML), so routing .xls there surfaced a
+		// misleading "zip: not a valid zip file" from deep inside the
+		// library instead of telling the operator what to do.
+		return nil, nil, fmt.Errorf("fees: .xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试：%s", path)
 	default:
-		return nil, nil, fmt.Errorf("fees: 文件 %s 的扩展名不受支持（可用：csv / xlsx / xls）", path)
+		return nil, nil, fmt.Errorf("fees: 文件 %s 的扩展名不受支持（可用：csv / xlsx）", path)
 	}
 }
 

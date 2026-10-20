@@ -1,7 +1,8 @@
 package mcpserver
 
 // feetools.go — the read-only fee risk-analysis tool of the MCP surface
-// (#58 stage 5, v0.14): the AI loop's entry into the six risk scenarios
+// (#58 stage 5, delivered with v0.15.0): the AI loop's entry into the six
+// risk scenarios
 // of #64. The tool runs ONE fixed preset with the documented default
 // thresholds — the AI may not tune statistical bars (ratio/z/minSites
 // stay governed defaults; a human adjusts them via HTTP/CLI), it may

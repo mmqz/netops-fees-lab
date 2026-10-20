@@ -1,7 +1,9 @@
 // graphtools.go — the v0.9 read-only analysis tools of the MCP surface
 // (R4): graph_traverse, graph_impact, graph_context, alerts_query and
-// metrics_query. With resource_search and the four lab tools they form the
-// EXACTLY TEN tools of the MCP surface.
+// metrics_query. With resource_search, the four lab tools and the fee
+// risk tool they form the MCP tool surface — a closed read-only set
+// pinned by TestMCPToolRegistry (the count lives in the registry test,
+// not in prose).
 //
 // Why: the v0.7 data-model arc (graph engine §10, detection alerts, metric
 // timeseries) and the v0.8 real-data milestone were HTTP/CLI-only — the AI

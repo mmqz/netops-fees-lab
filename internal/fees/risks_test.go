@@ -207,8 +207,11 @@ func TestRisksRetiredBillingComposition(t *testing.T) {
 	if len(result.Clues[0].Evidence) != 2 || result.Clues[0].Evidence[0].SourceFile != "ret.csv" {
 		t.Errorf("top clue evidence = %+v", result.Clues[0].Evidence)
 	}
-	if result.Clues[2].Evidence != nil {
-		t.Errorf("clue without canned evidence must stay anchor-less, got %+v", result.Clues[2].Evidence)
+	// #93: a clue without canned evidence stays anchor-less — as an EMPTY
+	// slice, never nil (the arrays-are-never-null discipline; the frontend
+	// row expander maps over it without guards).
+	if result.Clues[2].Evidence == nil || len(result.Clues[2].Evidence) != 0 {
+		t.Errorf("clue without canned evidence must carry an empty anchor list, got %+v", result.Clues[2].Evidence)
 	}
 	// a custom status set narrows the fire set
 	result, err = svc.Risks(ctx, engine, RiskRetiredBilling, RiskQuery{

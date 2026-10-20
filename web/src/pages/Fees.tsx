@@ -411,7 +411,7 @@ export function FeesPage() {
                               {c.note !== undefined && c.note !== '' && <p className="muted">{c.note}</p>}
                               <p className="kv__title">{FEES_RISKS_EVIDENCE}</p>
                               <ul className="kv">
-                                {c.evidence.map((a, i) => (
+                                {(c.evidence ?? []).map((a, i) => (
                                   <li key={i} className="kv__item">
                                     <span className="kv__key">{a.sourceFile}:{a.sourceRow}</span>
                                     <span className="kv__value">
@@ -604,7 +604,7 @@ export function FeesPage() {
               <input
                 ref={fileInput}
                 type="file"
-                accept=".csv,.xlsx,.xls"
+                accept=".csv,.xlsx"
               />
             </label>
             <button className="btn btn--primary" disabled={importing} onClick={() => void doImport()}>

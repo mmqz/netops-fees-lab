@@ -34,15 +34,18 @@ import (
 // period, the snapshot layer remembers where the file was filed.
 
 // SnapshotExt reports the snapshot extension of a fee file (lower-cased,
-// without dot): csv / xlsx / xls. Unknown extensions are refused by the
-// importer before the snapshot is taken.
+// without dot): csv / xlsx. Unknown extensions — including .xls, the
+// pre-2007 binary format no supported reader can parse (#92) — are refused
+// by the importer before the snapshot is taken.
 func SnapshotExt(name string) (string, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 	switch ext {
-	case "csv", "xlsx", "xls":
+	case "csv", "xlsx":
 		return ext, nil
+	case "xls":
+		return "", fmt.Errorf("fees: .xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试：%q", name)
 	default:
-		return "", fmt.Errorf("fees: 文件 %q 的扩展名不受支持（可用：csv / xlsx / xls）", name)
+		return "", fmt.Errorf("fees: 文件 %q 的扩展名不受支持（可用：csv / xlsx）", name)
 	}
 }
 
@@ -163,7 +166,7 @@ func ReadSnapshotRow(path string, row int) (RowEvidence, error) {
 	switch ext {
 	case "csv":
 		return readSnapshotRowCSV(path, row)
-	default: // "xlsx" / "xls" — the only other SnapshotExt outputs
+	default: // "xlsx" — the only other SnapshotExt output
 		return readSnapshotRowXLSX(path, row)
 	}
 }

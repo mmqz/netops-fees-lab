@@ -1,6 +1,6 @@
 # NetOps Lab — 数据模型（Data Model）
 
-> Schema 与代码同步维护：本文 DDL 摘自各 `internal/repo/migrations*.go`（**实现即规范**）。当前 schema version = **28**。v5 = 仿真工作台表；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表、v12 改名提案表、v13 ptp_port 类型为后续追加节；v14–v27（指标表族 / 运行状态 / 检测规则与告警 / 运行回执 / 图层投影 / 模板 / 维护窗口 / 关联列 / 抖动列 / webhook 投递审计）为 v0.7–v0.12 告警运营线的迁移，其表结构散记于 [api.md](api.md) 与 ADR-0011（**本文的历史断层，如实声明**——各迁移文件即权威规范）；v28 起本文恢复逐表记载。历史章节保持原貌。
+> Schema 与代码同步维护：本文 DDL 摘自各 `internal/repo/migrations*.go`（**实现即规范**）。当前 schema version = **32**（registry-head 由 migrations_test 钉死）。v5 = 仿真工作台表；v6 geo 列、v7 port 类型、v8 port 换键、v9 base_station 类型、v10 site/machine_room 类型 + belongs_to 关系、v11 属性变更历史表、v12 改名提案表、v13 ptp_port 类型为后续追加节；v14–v27（指标表族 / 运行状态 / 检测规则与告警 / 运行回执 / 图层投影 / 模板 / 维护窗口 / 关联列 / 抖动列 / webhook 投递审计）为 v0.7–v0.12 告警运营线的迁移，其表结构散记于 [api.md](api.md) 与 ADR-0011（**本文的历史断层，如实声明**——各迁移文件即权威规范）；v28 起本文恢复逐表记载。历史章节保持原貌。
 
 ## 1. ID 与时间戳约定
 

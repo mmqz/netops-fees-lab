@@ -393,9 +393,14 @@ func (s *Service) risksUnlinked(ctx context.Context, engine QueryEngine, q RiskQ
 
 // finishClues is the shared tail: sort, cap, fetch the evidence anchors,
 // render the envelope. Deterministic order: metric value descending, then
-// (site, period ascending). Returns the completed envelope; evidence
-// fetch failures propagate (a clue without anchors would be a broken
-// evidence chain, not a degraded one).
+// (site, period ascending). Evidence fetching is BEST-EFFORT at the
+// envelope level (#93: the code, this comment and the tests now say the
+// same thing): an anchor-fetch failure leaves the affected clues with an
+// EMPTY anchor list — the clue itself (site, period, metric, threshold)
+// stays, and the snapshot layer remains the source of truth for the
+// read-back (#86). A clue's Evidence is therefore never null — an
+// anchor-less clue carries [] (the arrays-are-never-null discipline of
+// the whole API surface), and the frontend renders it defensively.
 func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQuery,
 	scenario RiskScenario, clues []RiskClue, excluded int, note string) RiskResult {
 
@@ -421,13 +426,23 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 		if err == nil {
 			for i := range clues {
 				k := EvidenceKey{SiteCode: clues[i].SiteCode, Year: clues[i].Year, Month: clues[i].Month}
-				clues[i].Evidence = anchors[k]
+				if a := anchors[k]; a != nil {
+					clues[i].Evidence = a
+				}
 			}
 		}
 		// anchor fetch is best-effort at the envelope level: a missing
 		// anchor set never fabricates evidence — the clue stays, the
 		// snapshot remains the source of truth (errors would surface in
 		// the engine query itself for the real failures)
+	}
+	// #93: arrays are never null — a clue whose anchors could not be
+	// fetched (or that has none in range) serializes as "evidence": [],
+	// not null; the frontend row expander maps over it without guards.
+	for i := range clues {
+		if clues[i].Evidence == nil {
+			clues[i].Evidence = make([]EvidenceAnchor, 0)
+		}
 	}
 	return RiskResult{
 		Scenario:   string(scenario),
