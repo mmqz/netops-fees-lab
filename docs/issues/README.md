@@ -884,3 +884,41 @@ issue-11  底图信息量    →  修复后才可见：底图过简 / 无切换
 - **导入管线**：幂等重导、重复表头跳过、复合自然键、精准错误定位
 - **CLI/API 错误处理**：统一 JSON 信封、规范退出码、非法枚举 400
 - **拓扑画布**：Cytoscape 渲染、状态着色、图例、迷你地图均正常
+
+## #77 浏览器回归脚本校准（2026-10-20）
+
+来源：GitHub issue [#77](https://github.com/mmqz/netops-lab/issues/77)（CI 空转窗口内前端演进而脚本断言未跟）。commit `4f00a71`。
+
+### 三脚本终态
+
+| 脚本 | 校准前 | 校准后 | 本轮改动 |
+| --- | --- | --- | --- |
+| w17 | 16 PASS / **19 FAIL** | **40 PASS / 0 FAIL** | 全面重校准 + 新增 A0 组 |
+| w28 | 12 / 2 | 14 / 0 | 无（`80d33a5` 已修，本环境复跑确认） |
+| w47 | 13 / **1 FAIL** | **14 / 0 FAIL** | B12 拆为宽/窄两契约 |
+
+### 19 项失败的根因分类（逐项对照当前产品意图）
+
+| 根因 | 项数 | 校准 |
+| --- | --- | --- |
+| 偏好存储 **v2→v3 迁移**（#50：重图层默认降级 + 懒加载，v2 键内容被迁移逻辑强制重置为关） | 15 | 预置键升级 v3 显式开重图层（=「恢复完整底图」一键开的存储等价态）；**新增 A0 组钉死 #50 默认最小集**：无偏好时 contours/forest/hillshade=none、区划+光缆（v0.8.0 主叙事）=visible |
+| **懒加载空源**（默认关的叠加源是空 FeatureCollection） | 探针层 | 开启后 querySourceFeatures 取到真实特征：等高线 31,839 / natural 22,905 / 地名 38,112 |
+| **terrain 异步挂载**（effect 在 sourcesReady 后） | 4 | 固定 sleep 改 wait-fn 轮询；C3 改「夸张与 zoom 分档函数一致」断言（实测 3D fit 落在 zoom 8.15 → 1.3 档，旧「远观 ≥2.5」在当前 fit 语义下无意义）；D2 随之看到 77 个真实 DEM 请求 |
+| **maplibre 加载后 data 变解析对象**（GCJ 探针） | 2 | 见下「探针方法论」 |
+| **#44 换行收纳**（窄画布两行工具带是有意设计，CSS 注释明言 wrap 严格优于旧 nowrap 的横向逃逸） | 1 | B12 拆两契约：1600 单行 ≤52px；1280 组内不折行（seg 34px/actions 32px）+ 零横向溢出 |
+
+### 探针方法论（GCJ 变体断言的三轮迭代）
+
+1. **网络请求探针 ✗**：maplibre 的 geojson 源由 worker fetch，agent-browser 的 CDP
+   网络记录对此失明（同会话 raster-dem 瓦片 77 个可见、hlj-* geojson 0 个）。
+2. **特征质心探针 ✗**：querySourceFeatures 的特征子集随视口 tile 化时点漂移，
+   质心噪声远大于 GCJ ~0.005° 系统性平移（实测切回后质心差 0.004 系采样噪声）。
+3. **setStyle spy ✓**：monkey-patch `map.setStyle` 记录每次样式重建传入的
+   natural 源 URL（`buildGeoStyle` 的确定性产物）——无竞速、无采样依赖。
+
+### #76 现状确认（本轮 push 后）
+
+run `39403484430`（`4f00a71`）：workflow 解析正常（go/web/duckdb/windows 四 job 齐全），
+但四 job 仍 `runner_id=0` / 3 秒死——**Actions 分钟配额未恢复**（#76 第二段诊断在案，
+等 owner 充值或月度配额刷新）。本轮校准验证全部在本地沙箱完成：
+25 包 Go 测试 ok / gofmt 空 / vet 0 / vitest 40/40 / tsc 0 / 三浏览器脚本 68 断言全绿。
