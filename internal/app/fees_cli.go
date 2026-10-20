@@ -314,7 +314,7 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 	feeType := fs.String("type", "", "费用类型，必填")
 	year := fs.Int("year", 0, "年份（必填）")
 	month := fs.Int("month", 0, "月份（可选：缺省整年）")
-	limit := fs.Int("limit", 20, "totals 返回条数上限（默认 20）")
+	limit := fs.Int("limit", 20, "返回条数上限（默认 20；totals/duplicates 均生效）")
 	if err := fs.Parse(rest); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -344,7 +344,7 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 			"items": rows, "total": len(rows),
 		})
 	case "duplicates":
-		rows, err := engine.Duplicates(ctx, analysis, t, *year, *month)
+		rows, err := engine.Duplicates(ctx, analysis, t, *year, *month, *limit)
 		if err != nil {
 			return err
 		}

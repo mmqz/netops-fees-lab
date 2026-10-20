@@ -62,7 +62,7 @@ func TestDuckEngineTotalsAndDuplicates(t *testing.T) {
 
 	// Duplicates: exactly S1@2024-05 (2 batches, 2 rows, 400 total);
 	// S2 and June are single-batch, no signal.
-	dups, err := e.Duplicates(ctx, analysis, FeeTypeElectricity, 2024, 0)
+	dups, err := e.Duplicates(ctx, analysis, FeeTypeElectricity, 2024, 0, 20)
 	if err != nil {
 		t.Fatalf("Duplicates: %v", err)
 	}

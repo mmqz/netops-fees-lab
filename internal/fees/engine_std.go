@@ -20,7 +20,7 @@ func (stdQueryEngine) Totals(ctx context.Context, analysisDir string, feeType Fe
 	return nil, ErrEngineNotBuilt
 }
 
-func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]DuplicateRow, error) {
+func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
 	return nil, ErrEngineNotBuilt
 }
 

@@ -192,6 +192,40 @@ type FeeLinkFilter struct {
 	Grade    domain.LinkGrade
 	Code     string
 	Resource string
+	// Limit/Offset page the list (#90). Limit <= 0 means unbounded — the
+	// internal call sites (the link scan's own bookkeeping) still want
+	// everything; the HTTP surface always pages.
+	Limit  int
+	Offset int
+}
+
+// Count returns the number of links matching the filter — the pagination
+// envelope's total (#90: the old list returned every row and reported
+// len(rows) as "total", so the operator never saw how far the list went).
+func (r *FeeSiteLinkRepo) Count(ctx context.Context, f FeeLinkFilter) (int, error) {
+	query := `SELECT count(*) FROM fee_site_links WHERE 1=1`
+	args := []any{}
+	if f.Status != "" {
+		query += ` AND status = ?`
+		args = append(args, string(f.Status))
+	}
+	if f.Grade != "" {
+		query += ` AND grade = ?`
+		args = append(args, string(f.Grade))
+	}
+	if f.Code != "" {
+		query += ` AND fee_site_code = ?`
+		args = append(args, f.Code)
+	}
+	if f.Resource != "" {
+		query += ` AND resource_id = ?`
+		args = append(args, f.Resource)
+	}
+	var n int
+	if err := r.q.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count fee site links: %w", err)
+	}
+	return n, nil
 }
 
 // List returns links ordered newest first.
@@ -215,6 +249,10 @@ func (r *FeeSiteLinkRepo) List(ctx context.Context, f FeeLinkFilter) ([]domain.F
 		args = append(args, f.Resource)
 	}
 	query += ` ORDER BY created_at DESC, id DESC`
+	if f.Limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, f.Limit, f.Offset)
+	}
 	rows, err := r.q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("repo: list fee site links: %w", err)

@@ -878,6 +878,14 @@ export const FEES_RISKS_TITLE = '风险六场景';
 export const FEES_RISKS_SCENARIO = '场景';
 export const FEES_RISKS_RUN = '查询';
 export const FEES_RISKS_LIMIT = '线索上限';
+// #89: per-scenario threshold parameters (the HTTP surface has accepted
+// these since #58; the web is the human channel for exactly this tuning).
+export const FEES_RISKS_STATUS = '资源状态集';
+export const FEES_RISKS_STATUS_HINT = '如 停用,退用';
+export const FEES_RISKS_DIFF_CENTS = '差异下限(分)';
+export const FEES_RISKS_RATIO = '环比阈值';
+export const FEES_RISKS_Z = 'z 阈值';
+export const FEES_RISKS_MIN_SITES = '最少样本';
 export const FEES_RISKS_EMPTY = '该场景在选定范围内无风险线索。';
 export const FEES_RISKS_EXCLUDED = (a: number) => `已排除 ${a} 个跨批次 (站址, 账期)（属于重复结算/金额差异场景的线索域）`;
 export const FEES_RISKS_EVIDENCE = '证据锚点';

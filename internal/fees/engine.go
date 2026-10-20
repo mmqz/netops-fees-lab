@@ -78,7 +78,7 @@ type QueryEngine interface {
 	// Duplicates returns the cross-batch duplicate-settlement candidates
 	// of one fee type (month 0 = the whole year): every (site, period)
 	// whose rows span more than one import batch.
-	Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]DuplicateRow, error)
+	Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error)
 
 	// ---- the six risk scenarios (#64, #58 stage 4) ----
 	// The four pure-Parquet presets return BARE clues (no evidence

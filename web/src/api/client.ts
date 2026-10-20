@@ -991,6 +991,8 @@ export function fetchFeeLinks(params: {
   grade?: string;
   code?: string;
   resourceId?: string;
+  page?: number;
+  pageSize?: number;
 }): Promise<FeeLinksList> {
   return requestJson<FeeLinksList>(
     `/fees/links${buildQuery({
@@ -998,7 +1000,9 @@ export function fetchFeeLinks(params: {
       grade: params.grade,
       code: params.code,
       resource_id: params.resourceId,
-    })}`,
+      page: params.page,
+      pageSize: params.pageSize,
+    } as Record<string, string | number | undefined>)}`,
   );
 }
 

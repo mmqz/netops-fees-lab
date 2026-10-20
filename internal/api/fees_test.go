@@ -416,6 +416,26 @@ func TestAPIFeesLinkJourney(t *testing.T) {
 	if links.Total != 2 {
 		t.Fatalf("links total = %d, want 2", links.Total)
 	}
+	// #90: the paged contract — total is the FULL count (not the page
+	// size), page/pageSize echo back, and a small pageSize walks pages.
+	var paged struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+		Total    int `json:"total"`
+		Page     int `json:"page"`
+		PageSize int `json:"pageSize"`
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/links?pageSize=1&page=2", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("links paged: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	if err := json.Unmarshal(body, &paged); err != nil {
+		t.Fatal(err)
+	}
+	if paged.Total != 2 || paged.Page != 2 || paged.PageSize != 1 || len(paged.Items) != 1 {
+		t.Fatalf("paged links = %+v, want total 2 / page 2 / pageSize 1 / 1 item (the newest-first tail)", paged)
+	}
 	var proposalID string
 	for _, l := range links.Items {
 		if l.ResourceName == "" {

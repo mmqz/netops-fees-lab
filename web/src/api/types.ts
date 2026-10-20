@@ -1507,10 +1507,12 @@ export interface FeeLinkItem {
   decidedAt: string | null;
 }
 
-/** GET /api/fees/links 信封 */
+/** GET /api/fees/links 信封（#90 分页化：total 为全量计数） */
 export interface FeeLinksList {
   items: FeeLinkItem[];
   total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** POST /api/fees/links/scan 计数回执 */

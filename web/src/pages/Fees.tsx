@@ -30,6 +30,7 @@ import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Spinner } from '../components/Spinner';
+import { Pagination } from '../components/Pagination';
 import {
   clueKey,
   centsToYuan,
@@ -73,6 +74,12 @@ import {
   FEES_RISKS_EVIDENCE,
   FEES_RISKS_EVIDENCE_MORE,
   FEES_RISKS_EXCLUDED,
+  FEES_RISKS_STATUS,
+  FEES_RISKS_STATUS_HINT,
+  FEES_RISKS_DIFF_CENTS,
+  FEES_RISKS_RATIO,
+  FEES_RISKS_Z,
+  FEES_RISKS_MIN_SITES,
   FEES_RISKS_LIMIT,
   FEES_RISKS_RUN,
   FEES_RISKS_SCENARIO,
@@ -204,6 +211,8 @@ export function FeesPage() {
 
   // ---- 关联（费用-资源分级关联的人类确认通道）----
   const [links, setLinks] = useState<FeeLinkItem[] | null>(null);
+  const [linksTotal, setLinksTotal] = useState(0);
+  const [linkPage, setLinkPage] = useState(1);
   const [linksError, setLinksError] = useState('');
   const [linkStatus, setLinkStatus] = useState('pending');
   const [linkGrade, setLinkGrade] = useState('');
@@ -218,13 +227,17 @@ export function FeesPage() {
       const res = await fetchFeeLinks({
         status: linkStatus === '' ? undefined : linkStatus,
         grade: linkGrade === '' ? undefined : linkGrade,
+        page: linkPage,
+        pageSize: 20,
       });
       setLinks(res.items);
+      setLinksTotal(res.total);
     } catch (err) {
       setLinksError(formatApiErrorText(err));
       setLinks(null);
+      setLinksTotal(0);
     }
-  }, [linkStatus, linkGrade]);
+  }, [linkStatus, linkGrade, linkPage]);
 
   useEffect(() => {
     void loadLinks();
@@ -235,6 +248,7 @@ export function FeesPage() {
     try {
       const res = await scanFeeLinks();
       setScanResult(res);
+      setLinkPage(1); // #90: a fresh scan re-shapes the list — restart from page 1
       await loadLinks();
     } catch (err) {
       toast.show(formatApiErrorText(err), 'error');
@@ -276,6 +290,13 @@ export function FeesPage() {
   const [riskYear, setRiskYear] = useState(String(new Date().getFullYear()));
   const [riskMonth, setRiskMonth] = useState('');
   const [riskLimit, setRiskLimit] = useState('50');
+  // #89: the six-scenario thresholds — visible only for their scenario, so
+  // the human channel can tune exactly what the scenario tunes.
+  const [riskDiffCents, setRiskDiffCents] = useState('');
+  const [riskRatio, setRiskRatio] = useState('');
+  const [riskZ, setRiskZ] = useState('');
+  const [riskMinSites, setRiskMinSites] = useState('');
+  const [riskStatus, setRiskStatus] = useState('');
   const [running, setRunning] = useState(false);
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
   const [riskError, setRiskError] = useState('');
@@ -298,6 +319,16 @@ export function FeesPage() {
         year,
         month: riskMonth === '' ? undefined : Number(riskMonth),
         limit: riskLimit === '' ? undefined : Number(riskLimit),
+        // #89: per-scenario thresholds — empty input = the governed default.
+        status: scenario === 'retired-billing' && riskStatus.trim() !== '' ? riskStatus.trim() : undefined,
+        diffCents:
+          scenario === 'ledger-mismatch' && riskDiffCents.trim() !== ''
+            ? Number(riskDiffCents)
+            : undefined,
+        ratio: scenario === 'spike' && riskRatio.trim() !== '' ? Number(riskRatio) : undefined,
+        z: scenario === 'outlier' && riskZ.trim() !== '' ? Number(riskZ) : undefined,
+        minSites:
+          scenario === 'outlier' && riskMinSites.trim() !== '' ? Number(riskMinSites) : undefined,
       });
       setRiskResult(res);
     } catch (err) {
@@ -311,7 +342,18 @@ export function FeesPage() {
     } finally {
       setRunning(false);
     }
-  }, [scenario, riskType, riskYear, riskMonth, riskLimit]);
+  }, [
+    scenario,
+    riskType,
+    riskYear,
+    riskMonth,
+    riskLimit,
+    riskStatus,
+    riskDiffCents,
+    riskRatio,
+    riskZ,
+    riskMinSites,
+  ]);
 
   return (
     <div className="page">
@@ -358,6 +400,55 @@ export function FeesPage() {
             <span>{FEES_RISKS_LIMIT}</span>
             <input value={riskLimit} onChange={(e) => setRiskLimit(e.target.value)} inputMode="numeric" />
           </label>
+          {scenario === 'retired-billing' && (
+            <label className="field">
+              <span>{FEES_RISKS_STATUS}</span>
+              <input
+                value={riskStatus}
+                onChange={(e) => setRiskStatus(e.target.value)}
+                placeholder={FEES_RISKS_STATUS_HINT}
+              />
+            </label>
+          )}
+          {scenario === 'ledger-mismatch' && (
+            <label className="field field--xs">
+              <span>{FEES_RISKS_DIFF_CENTS}</span>
+              <input
+                value={riskDiffCents}
+                onChange={(e) => setRiskDiffCents(e.target.value)}
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </label>
+          )}
+          {scenario === 'spike' && (
+            <label className="field field--xs">
+              <span>{FEES_RISKS_RATIO}</span>
+              <input
+                value={riskRatio}
+                onChange={(e) => setRiskRatio(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.5"
+              />
+            </label>
+          )}
+          {scenario === 'outlier' && (
+            <>
+              <label className="field field--xs">
+                <span>{FEES_RISKS_Z}</span>
+                <input value={riskZ} onChange={(e) => setRiskZ(e.target.value)} inputMode="decimal" placeholder="3" />
+              </label>
+              <label className="field field--xs">
+                <span>{FEES_RISKS_MIN_SITES}</span>
+                <input
+                  value={riskMinSites}
+                  onChange={(e) => setRiskMinSites(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="8"
+                />
+              </label>
+            </>
+          )}
           <button className="btn btn--primary" disabled={running} onClick={() => void runRisks()}>
             {running ? <Spinner /> : FEES_RISKS_RUN}
           </button>
@@ -476,6 +567,9 @@ export function FeesPage() {
         {linksError !== '' && <ErrorBlock message={linksError} />}
         <div className="panel__body">
           {links !== null && links.length === 0 && <p className="empty">{FEES_LINKS_EMPTY}</p>}
+          {links !== null && links.length > 0 && (
+            <Pagination page={linkPage} pageSize={20} total={linksTotal} onChange={setLinkPage} />
+          )}
           {links !== null && links.length > 0 && (
             <table className="table table--interactive">
               <thead>

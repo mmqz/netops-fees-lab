@@ -393,6 +393,42 @@ func (r *ResourceRepo) ListByType(ctx context.Context, resourceType domain.Resou
 	return out, nil
 }
 
+// GetByIDs resolves many resources in ONE query (#90: the fee-links list
+// used to run a GetByID point query per unique resource of the page —
+// a 100-link page cost 100 queries). Callers bound the id list (the HTTP
+// surface passes ≤ pageSize ids); a missing id simply maps to no entry,
+// the caller's "keep the recorded key" rule stays with the link fields.
+func (r *ResourceRepo) GetByIDs(ctx context.Context, ids []string) (map[string]domain.Resource, error) {
+	out := make(map[string]domain.Resource, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := r.q.QueryContext(ctx,
+		`SELECT `+resourceColumns+` FROM resources WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...)
+	if err != nil {
+		return nil, fmt.Errorf("repo: get resources by ids: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		res, err := scanResource(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repo: scan resource: %w", err)
+		}
+		out[res.ID] = res
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo: get resources by ids: %w", err)
+	}
+	return out, nil
+}
+
 // UpdateNaturalKey rewrites the natural key of the resource with the given
 // id and refreshes updated_at. It is the key write of the rename apply flow
 // (renames service): the caller has verified inside the SAME DB.Do

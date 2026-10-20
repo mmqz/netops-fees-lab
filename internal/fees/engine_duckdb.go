@@ -80,7 +80,7 @@ LIMIT %d`,
 	return out, rows.Err()
 }
 
-func (duckQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]DuplicateRow, error) {
+func (duckQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
 	if analysisEmpty(analysisDir) {
 		return nil, nil
 	}
@@ -89,14 +89,23 @@ func (duckQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeTy
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()
+	// #90: bounded like the sibling presets — an unbounded duplicate scan on
+	// a dirty 10k-code universe could materialize the whole pair list; the
+	// risk presets have always capped their clue sets, this preset now does
+	// too. limit <= 0 falls back to the CLI-visible default (the 20-line
+	// preview the docs describe).
+	if limit <= 0 {
+		limit = 20
+	}
 	query := fmt.Sprintf(`
 SELECT site_code, year, month, count(DISTINCT import_batch) AS batches, count(*) AS rows, sum(amount_cents) AS total_cents
 FROM read_parquet('%s', hive_partitioning = true)
 WHERE fee_type = '%s' %s
 GROUP BY site_code, year, month
 HAVING count(DISTINCT import_batch) > 1
-ORDER BY total_cents DESC, site_code, year, month`,
-		feeTableGlob(analysisDir), string(feeType), periodFilter(year, month))
+ORDER BY total_cents DESC, site_code, year, month
+LIMIT %d`,
+		feeTableGlob(analysisDir), string(feeType), periodFilter(year, month), limit)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("fees: 查询跨批次重复结算候选: %w", err)
