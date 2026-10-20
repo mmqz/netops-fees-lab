@@ -6,7 +6,9 @@
 #       （数据到位）→ 浏览器全链路。
 # 断言：
 #   B1  /alerts「立即检测」按钮 + 确认对话框（全库扫描说明文案）；
-#   B2  确认运行 → 回执四格统计（发现/新建/清除/写入）+ 数据截止行；
+#   B2  确认运行 → 回执六格统计（发现/新建/清除/写入/维护抑制/抖动抑制，
+#       计数与六标签集双断言——回执再加格时此处大声断掉而非静默漏测）
+#       + 数据截止行；
 #   B3  数据与规则未变时重跑 → 新建 0 清除 0（确定性，非错误）+ 空变更文案；
 #   B4  回执完成后告警列表自动刷新（onFinished → fetchAlerts）；
 #   B5  /rules 页「立即检测」入口同样可用（改规则后的验证通道）；
@@ -101,12 +103,13 @@ START="$(jeval "(() => { const b = [...document.querySelectorAll('.modal .btn--p
 agent-browser wait --fn "!!document.querySelector('.run-stats')" --timeout 30000 >/dev/null 2>&1
 agent-browser wait 500 >/dev/null
 STATS_N="$(jeval "document.querySelectorAll('.modal .run-stat').length")"
+STATS_LABELS="$(jeval "(() => { const want = ['发现越限','新建告警','恢复清除','写入运行状态','维护抑制','抖动抑制']; const got = [...document.querySelectorAll('.modal .run-stat-label')].map(x => (x.textContent||'')); const miss = want.filter(w => !got.some(g => g.startsWith(w))); return miss.length === 0 ? 'ok' : 'missing:' + miss.join('/'); })()")"
 EVAL_AT="$(jeval "(() => { const n = document.querySelector('.modal .muted-note'); return n ? (n.textContent||'').slice(0, 30) : 'none'; })()")"
 TOAST_RUN="$(jeval "(() => { return [...document.querySelectorAll('.toast, [class*=toast]')].some(t => (t.textContent||'').includes('检测完成')); })()")"
-if [[ "$START" == "ok" && "$STATS_N" == "4" && "$EVAL_AT" == *数据截止* ]]; then
-  ok "B2 回执四格统计 + 数据截止（toast=$TOAST_RUN）"
+if [[ "$START" == "ok" && "$STATS_N" == "6" && "$STATS_LABELS" == "ok" && "$EVAL_AT" == *数据截止* ]]; then
+  ok "B2 回执六格统计（六标签全在场）+ 数据截止（toast=$TOAST_RUN）"
 else
-  bad "B2 start=$START stats=$STATS_N evalAt=$EVAL_AT"
+  bad "B2 start=$START stats=$STATS_N labels=$STATS_LABELS evalAt=$EVAL_AT"
 fi
 agent-browser wait 3000 >/dev/null
 
