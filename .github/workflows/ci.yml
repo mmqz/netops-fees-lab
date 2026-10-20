@@ -12,6 +12,18 @@ on:
   pull_request:
     branches: [main]
 
+# Issue #76 follow-up: the account's Actions spending limit was exhausted on
+# 2026-10-11 (private repo, free 2000 min/month; windows bills 2x) and every
+# job since then dies in ~4s with "The job was not started because recent
+# account payments have failed or your spending limit needs to be increased".
+# Nothing in this file can fix that — it is an account-level action
+# (Settings → Billing & plans). What code CAN do is stop burning minutes once
+# the quota resets: cancel-in-progress drops superseded runs from rapid
+# push chains so only the newest commit actually bills.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   go:
     runs-on: ubuntu-latest
