@@ -2,8 +2,15 @@ package sim
 
 // PERF-P2 — performance on the materialized 27-device workspace: the
 // materialization itself, a 10-op changeset, a full check run and a path
-// query must each stay under the CI-safe bound of 2s. The measured
-// numbers are logged with the PERF-P2 prefix and go into the docs.
+// query must each stay under the CI-safe bound. The bounds are 6000 ms —
+// three times the originally calibrated 2000 ms (#82): wall-clock gates
+// are calibrated on idle single-package runs but execute under
+// full-package-parallel load (go test runs up to GOMAXPROCS packages at
+// once on shared runners), and the sibling test gates measured up to
+// 2.8x slower under that contention on a 2-core box. The bounds still
+// guard the order-of-magnitude class of regressions they were written
+// for. The measured numbers are logged with the PERF-P2 prefix and go
+// into the docs.
 
 import (
 	"context"
@@ -25,8 +32,8 @@ func TestSimulationPerformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
-	if ms := elapsedMaterialize.Milliseconds(); ms >= 2000 {
-		t.Fatalf("Materialize took %d ms, bound is 2000 ms", ms)
+	if ms := elapsedMaterialize.Milliseconds(); ms >= 6000 {
+		t.Fatalf("Materialize took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
 	}
 	t.Logf("PERF-P2 Materialize (27 devices / 40 interfaces / 20 links): %d ms", elapsedMaterialize.Milliseconds())
 
@@ -51,8 +58,8 @@ func TestSimulationPerformance(t *testing.T) {
 		t.Fatalf("ApplyOps(10): %v", err)
 	}
 	elapsedApply := time.Since(start)
-	if ms := elapsedApply.Milliseconds(); ms >= 2000 {
-		t.Fatalf("ApplyOps of 10 ops took %d ms, bound is 2000 ms", ms)
+	if ms := elapsedApply.Milliseconds(); ms >= 6000 {
+		t.Fatalf("ApplyOps of 10 ops took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
 	}
 	t.Logf("PERF-P2 ApplyOps (10 config ops, 1 transaction): %d ms", elapsedApply.Milliseconds())
 
@@ -72,8 +79,8 @@ func TestSimulationPerformance(t *testing.T) {
 		t.Fatalf("RunChecks: %v", err)
 	}
 	elapsedChecks := time.Since(start)
-	if ms := elapsedChecks.Milliseconds(); ms >= 2000 {
-		t.Fatalf("RunChecks took %d ms, bound is 2000 ms", ms)
+	if ms := elapsedChecks.Milliseconds(); ms >= 6000 {
+		t.Fatalf("RunChecks took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
 	}
 	t.Logf("PERF-P2 RunChecks (%d result rows): %d ms", len(run.Results), elapsedChecks.Milliseconds())
 
@@ -85,8 +92,8 @@ func TestSimulationPerformance(t *testing.T) {
 		t.Fatalf("Path: %v", err)
 	}
 	elapsedPath := time.Since(start)
-	if ms := elapsedPath.Milliseconds(); ms >= 2000 {
-		t.Fatalf("Path took %d ms, bound is 2000 ms", ms)
+	if ms := elapsedPath.Milliseconds(); ms >= 6000 {
+		t.Fatalf("Path took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
 	}
 	if !p.Reachable {
 		t.Fatalf("Path(DEV-003→DEV-014) must be reachable")

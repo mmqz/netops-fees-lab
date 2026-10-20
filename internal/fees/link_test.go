@@ -357,8 +357,17 @@ func TestFuzzyScanPerformance(t *testing.T) {
 			n++
 		}
 	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("10k×1k parallel fuzzy sweep took %v, want < 2s (issue #65 acceptance; naive extrapolation was 15.5s)", elapsed)
+	if elapsed > 8*time.Second {
+		// #82: the bound was 2s, calibrated on idle single-package runs —
+		// but under full-package-parallel test execution (go test runs up
+		// to GOMAXPROCS packages at once, CI runners share cores with
+		// siblings) the SAME optimized code measured 5.56s on a loaded
+		// 2-core box. Wall-clock gates can never be load-immune; the honest
+		// calibration points are 1.38s (idle) / 5.56s (worst observed
+		// contention) / 15.5s (the naive-implementation floor this gate
+		// exists to catch, issue #65). 8s sits between the last two with
+		// margin on both sides.
+		t.Fatalf("10k×1k parallel fuzzy sweep took %v, want < 8s (#65 acceptance, #82 contention-calibrated; naive floor was 15.5s)", elapsed)
 	}
 	t.Logf("10k codes × 1k same-length-class candidates (parallel, %d workers): %v, %d codes had proposals", workers, elapsed, n)
 	if n == 0 {
