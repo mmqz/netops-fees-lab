@@ -22,6 +22,7 @@ package fees
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -303,24 +304,47 @@ func (s *Service) risksRetiredBilling(ctx context.Context, engine QueryEngine, q
 	for _, st := range q.Statuses {
 		retired[st] = struct{}{}
 	}
+	// #85: SitePeriodTotals returns one row per (site, period) — a 12-month
+	// scope hits the SAME site's link + resource lookups 12 times. The memo
+	// resolves each distinct code once; and the two point-query misses that
+	// are business states (no confirmed link → scenario 6's business;
+	// linked resource vanished → rollback cascade) are classified apart
+	// from real DB failures, which now abort the report instead of silently
+	// dropping rows from it.
+	type linkedResource struct {
+		ok         bool
+		naturalKey string
+		status     string
+	}
+	memo := make(map[string]linkedResource, len(rows))
 	var clues []RiskClue
 	for _, r := range rows {
-		link, err := s.db.FeeSiteLinks.ConfirmedByCode(ctx, r.SiteCode)
-		if err != nil {
-			continue // no confirmed link: the code is scenario 6's business, not 1's
+		lr, seen := memo[r.SiteCode]
+		if !seen {
+			link, err := s.db.FeeSiteLinks.ConfirmedByCode(ctx, r.SiteCode)
+			if err == nil {
+				res, rerr := s.db.Resources.GetByID(ctx, link.ResourceID)
+				if rerr == nil {
+					lr = linkedResource{ok: true, naturalKey: res.NaturalKey, status: res.Status}
+				} else if !errors.Is(rerr, domain.ErrNotFound) {
+					return cluesPack{}, fmt.Errorf("fees: retired-billing 查资源 %s: %w", link.ResourceID, rerr)
+				}
+			} else if !errors.Is(err, domain.ErrNotFound) {
+				return cluesPack{}, fmt.Errorf("fees: retired-billing 查关联 %s: %w", r.SiteCode, err)
+			}
+			memo[r.SiteCode] = lr
 		}
-		res, err := s.db.Resources.GetByID(ctx, link.ResourceID)
-		if err != nil {
-			continue // linked resource vanished (rollback cascade): nothing to judge
+		if !lr.ok {
+			continue
 		}
-		if _, hit := retired[res.Status]; !hit {
+		if _, hit := retired[lr.status]; !hit {
 			continue
 		}
 		clues = append(clues, RiskClue{
 			SiteCode: r.SiteCode, Year: r.Year, Month: r.Month,
 			MetricValue: float64(r.TotalCents), MetricLabel: "totalCents",
 			EvidenceTotal: r.Rows,
-			Note:          fmt.Sprintf("关联资源 %s 状态为 %q，该账期费用仍流入——请人工核实", res.NaturalKey, res.Status),
+			Note:          fmt.Sprintf("关联资源 %s 状态为 %q，该账期费用仍流入——请人工核实", lr.naturalKey, lr.status),
 		})
 	}
 	return cluesPack{
