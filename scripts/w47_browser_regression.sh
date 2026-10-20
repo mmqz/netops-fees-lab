@@ -9,7 +9,8 @@
 #   3. /lab/:id 页头卡片移除：.lab-pagehead 不存在，.lab-pagebar 单行存在；
 #   4. 工具带顺序：画布固有控件（.canvas-seg）在 .lab-canvas-actions 之前；
 #      动作组 7 个图标钮（.btn--ico）；
-#   5. 不换行：1600 与 1280 视口下工具带单行（高度 ≤ 52px）；
+#   5. 工具带布局契约（#77 校准）：1600 宽画布单行 ≤52px；1280 窄画布按 #44
+#      换行收纳——组内不折行（组高 ≤42px）+ 零横向溢出；
 #   6. 全程 console error / unhandledrejection 零。
 # 截图存 repo tmp/（不进 download/ —— 截屏不作为交付物）。
 set -euo pipefail
@@ -100,16 +101,32 @@ if [[ "$ICOBTNS" -eq 7 ]]; then ok "B10 七个动作按钮图标化（32px 方�
 ACTNOWRAP="$(jeval "(() => { const g = document.querySelector('.lab-canvas-actions'); const cs = getComputedStyle(g); return cs.flexWrap; })()")"
 if [[ "$ACTNOWRAP" == "nowrap" ]]; then ok "B11 动作组 nowrap（不出现两行按钮）"; else bad "B11 flexWrap = $ACTNOWRAP"; fi
 
-# —— 5. 不换行（1600 与 1280） ——
-check_toolbar_single_line() {
-  local VP="$1"
+# —— 5. 工具带布局契约（#77 校准）：#44 并入动作按钮组后，窄画布单行放
+#    不下整条工具带——设计意图改为「换行收纳」：分组（canvas-seg /
+#    lab-canvas-actions）内部不折行，组与组在行间流动，且不再横向逃逸
+#    容器（旧 nowrap 时代真溢出直接横向逃逸，wrap 严格更优——见
+#    global.css .lab-canvas-toolbar 注释）。校准后的断言：
+#    宽画布（1600）仍承诺单行 ≤52px；窄画布（1280）允许第二行，但
+#    每组自身单行（组高 ≤42px）且工具带零横向溢出。 ——
+check_toolbar_layout() {
+  local VP="$1" WANT_SINGLE="$2"
   agent-browser set viewport "$VP" 900 >/dev/null
   agent-browser wait 500 >/dev/null
-  local H="$(jeval "(() => { const tb = document.querySelector('.lab-canvas-toolbar'); return tb ? Math.round(tb.getBoundingClientRect().height) : 0; })()")"
-  if [[ "$H" -le 52 ]]; then ok "B12 ${VP}px 视口工具带单行（${H}px）"; else bad "B12 ${VP}px 工具带高度 ${H}px（换行）"; fi
+  local M="$(jeval "(() => { const tb = document.querySelector('.lab-canvas-toolbar'); const seg = tb && tb.querySelector('.canvas-seg'); const act = tb && tb.querySelector('.lab-canvas-actions'); if (!tb || !seg || !act) return 'missing'; return [Math.round(tb.getBoundingClientRect().height), Math.round(seg.getBoundingClientRect().height), Math.round(act.getBoundingClientRect().height), tb.scrollWidth > tb.clientWidth + 1 ? 1 : 0].join(','); })()")"
+  local TBH SEGHT ACTH OVERFLOW
+  IFS=',' read -r TBH SEGHT ACTH OVERFLOW <<< "$M"
+  if [[ "$WANT_SINGLE" == "1" ]]; then
+    if [[ "$TBH" -le 52 && "$OVERFLOW" == "0" ]]; then ok "B12 ${VP}px 宽画布工具带单行（${TBH}px）"; else bad "B12 ${VP}px 工具带高 ${TBH}px / 溢出 ${OVERFLOW}（宽画布应单行）"; fi
+  else
+    if [[ "$SEGHT" -le 42 && "$ACTH" -le 42 && "$OVERFLOW" == "0" ]]; then
+      ok "B12 ${VP}px 窄画布换行收纳：组内不折行（seg ${SEGHT}px / actions ${ACTH}px）、零横向溢出（总高 ${TBH}px）"
+    else
+      bad "B12 ${VP}px 组内折行或溢出：seg=${SEGHT} actions=${ACTH} overflow=${OVERFLOW} 总高=${TBH}"
+    fi
+  fi
 }
-check_toolbar_single_line 1600
-check_toolbar_single_line 1280
+check_toolbar_layout 1600 1
+check_toolbar_layout 1280 0
 
 agent-browser screenshot "$SHOT_DIR/w47-workspace.png" >/dev/null 2>&1 || true
 agent-browser set viewport 1600 900 >/dev/null
