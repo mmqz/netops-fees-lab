@@ -25,7 +25,6 @@ import (
 	"github.com/mmqz/netops-lab/internal/metrics"
 	"github.com/mmqz/netops-lab/internal/query"
 	"github.com/mmqz/netops-lab/internal/renames"
-	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/sim"
 	"github.com/mmqz/netops-lab/internal/testfixtures"
 	"github.com/mmqz/netops-lab/internal/topology"
@@ -949,17 +948,17 @@ func cmdValidate(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		all, _, err := a.DB.Issues.List(ctx, repo.IssueFilter{})
-		if err != nil {
-			return err
-		}
 		for sev, n := range rowPhase {
 			issues[sev.String()] += n
 		}
-		for _, iss := range all {
-			if iss.BatchID == nil {
-				issues[iss.Severity.String()]++
-			}
+		// #102: the set-level half is a GROUP BY, not a full-table
+		// materialization + in-memory filter of every issue row.
+		setLevel, err := a.DB.Issues.CountSetLevelBySeverity(ctx)
+		if err != nil {
+			return err
+		}
+		for sev, n := range setLevel {
+			issues[sev.String()] += n
 		}
 	}
 

@@ -17,7 +17,6 @@ import (
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/importer"
 	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/repo"
 )
 
 // handleHealth implements GET /api/health. dbPath is the ABSOLUTE path of
@@ -296,17 +295,9 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 // setLevelIssueCounts counts the set-level issues (batch_id NULL) per
-// severity — the database-global half of a batch-scope count.
+// severity — the GROUP BY pushdown of #102-D: this used to materialize the
+// WHOLE issues table and filter in memory (the CLI validate twin did the
+// same).
 func (s *Server) setLevelIssueCounts(ctx context.Context) (map[domain.Severity]int, error) {
-	all, _, err := s.db.Issues.List(ctx, repo.IssueFilter{})
-	if err != nil {
-		return nil, err
-	}
-	counts := map[domain.Severity]int{}
-	for _, iss := range all {
-		if iss.BatchID == nil {
-			counts[iss.Severity]++
-		}
-	}
-	return counts, nil
+	return s.db.Issues.CountSetLevelBySeverity(ctx)
 }

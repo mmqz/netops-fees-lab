@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/repo"
 	"github.com/mmqz/netops-lab/internal/sim"
 )
 
@@ -202,71 +203,55 @@ func (s *Server) handleWorkspacesList(w http.ResponseWriter, r *http.Request) {
 		s.respondErrorFor(w, r, err, "")
 		return
 	}
+	// #102: the per-row assembly (7 count queries + Latest per row — 8
+	// point queries per workspace, 800 for one page) is now TWO batched
+	// calls whose cost is independent of the page size.
+	ids := make([]string, len(workspaces))
+	for i, ws := range workspaces {
+		ids[i] = ws.ID
+	}
+	summaries, err := s.db.Workspaces.CountSummariesOfWorkspaces(r.Context(), ids)
+	if err != nil {
+		s.respondSimError(w, r, err)
+		return
+	}
+	latestRuns, err := s.db.CheckRuns.LatestByWorkspaces(r.Context(), ids)
+	if err != nil {
+		s.respondSimError(w, r, err)
+		return
+	}
 	items := make([]workspaceListItem, 0, len(workspaces))
 	for _, ws := range workspaces {
-		item, err := s.workspaceListItem(r, ws)
-		if err != nil {
-			s.respondSimError(w, r, err)
-			return
-		}
-		items = append(items, item)
+		items = append(items, workspaceListItemOf(ws, summaries[ws.ID], latestRuns[ws.ID]))
 	}
 	respondJSON(w, http.StatusOK, workspacesPage{Items: items, Total: total, Page: page, PageSize: pageSize})
 }
 
-// workspaceListItem assembles one list item: inventory counts from the
-// repositories plus the latest check run (null fields before the first run).
-func (s *Server) workspaceListItem(r *http.Request, ws domain.Workspace) (workspaceListItem, error) {
-	ctx := r.Context()
-	devCounts, err := s.db.VirtualDevices.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
-	ifaceCounts, err := s.db.SimInterfaces.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
-	linkCounts, err := s.db.SimLinks.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
-	csCount, err := s.db.ChangeSets.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
-	cpCount, err := s.db.Checkpoints.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
-	layerNodeCount, err := s.db.LayerNodes.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
-	layerLinkCount, err := s.db.LayerLinks.CountByWorkspace(ctx, ws.ID)
-	if err != nil {
-		return workspaceListItem{}, err
-	}
+// workspaceListItemOf assembles one list item from the workspace row, its
+// batched count summary and its latest run (absent = zero counts / no run —
+// the exact semantics the per-row queries had: CountByWorkspace of an
+// empty workspace answers empty maps, Latest answers ErrNotFound which was
+// treated as "no run yet").
+func workspaceListItemOf(ws domain.Workspace, sum repo.WorkspaceCountSummary, latest domain.CheckRun) workspaceListItem {
 	item := workspaceListItem{
 		ID:              ws.ID,
 		Name:            ws.Name,
 		Description:     ws.Description,
-		DeviceCount:     devCounts[domain.EntityStatusUp] + devCounts[domain.EntityStatusDown],
-		UpDeviceCount:   devCounts[domain.EntityStatusUp],
-		InterfaceCount:  ifaceCounts[domain.EntityStatusUp] + ifaceCounts[domain.EntityStatusDown],
-		LinkCount:       linkCounts[domain.EntityStatusUp] + linkCounts[domain.EntityStatusDown],
-		LayerNodeCount:  layerNodeCount,
-		LayerLinkCount:  layerLinkCount,
-		ChangeSetCount:  csCount,
-		CheckpointCount: cpCount,
+		DeviceCount:     sum.DeviceStatus[domain.EntityStatusUp] + sum.DeviceStatus[domain.EntityStatusDown],
+		UpDeviceCount:   sum.DeviceStatus[domain.EntityStatusUp],
+		InterfaceCount:  sum.InterfaceStatus[domain.EntityStatusUp] + sum.InterfaceStatus[domain.EntityStatusDown],
+		LinkCount:       sum.LinkStatus[domain.EntityStatusUp] + sum.LinkStatus[domain.EntityStatusDown],
+		LayerNodeCount:  sum.LayerNodes,
+		LayerLinkCount:  sum.LayerLinks,
+		ChangeSetCount:  sum.ChangeSets,
+		CheckpointCount: sum.Checkpoints,
 		CreatedAt:       ws.CreatedAt,
 	}
-	if run, err := s.db.CheckRuns.Latest(ctx, ws.ID); err == nil {
-		id, score := run.ID, run.Score
+	if latest.ID != "" {
+		id, score := latest.ID, latest.Score
 		item.LastRunID, item.LastRunScore = &id, &score
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return workspaceListItem{}, err
 	}
-	return item, nil
+	return item
 }
 
 // createWorkspaceBody is the request of POST /api/workspaces (§6/§7).
@@ -642,6 +627,19 @@ func (s *Server) handleWorkspaceChecksList(w http.ResponseWriter, r *http.Reques
 		s.respondSimError(w, r, err)
 		return
 	}
+	// #102: the per-run GetResults loaded every result row of every run
+	// just to count severities — one GROUP BY over the page's run ids
+	// answers the same counts (passed rows never counted, so the
+	// passed = 0 filter reproduces sevCountsOfResults exactly).
+	runIDs := make([]string, len(runs))
+	for i, run := range runs {
+		runIDs[i] = run.ID
+	}
+	sevCounts, err := s.db.CheckRuns.SeverityCountsByRuns(ctx, runIDs)
+	if err != nil {
+		s.respondSimError(w, r, err)
+		return
+	}
 	items := make([]checkRunItem, 0, len(runs))
 	for _, run := range runs {
 		item := checkRunItem{
@@ -654,12 +652,11 @@ func (s *Server) handleWorkspaceChecksList(w http.ResponseWriter, r *http.Reques
 			id := run.ChangesetID
 			item.ChangeSetID = &id
 		}
-		results, err := s.db.CheckRuns.GetResults(ctx, run.ID)
-		if err != nil {
-			s.respondSimError(w, r, err)
-			return
+		item.Counts = sim.SevCounts{
+			Error:   sevCounts[run.ID][domain.SeverityError],
+			Warning: sevCounts[run.ID][domain.SeverityWarning],
+			Info:    sevCounts[run.ID][domain.SeverityInfo],
 		}
-		item.Counts = sevCountsOfResults(results)
 		items = append(items, item)
 	}
 	respondJSON(w, http.StatusOK, checksPage{Items: items, Total: total, Page: page, PageSize: pageSize})

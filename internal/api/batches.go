@@ -98,29 +98,31 @@ func (s *Server) handleBatchDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Per-sheet summary from the row results (ordered by sheet name).
-	results, _, err := s.db.RowResults.List(r.Context(), repo.RowResultFilter{BatchID: id})
+	// Per-sheet summary from the row results — the GROUP BY pushdown of
+	// #102: the handler used to materialize EVERY row result of the batch
+	// (up to 100k rows) to count four numbers per sheet.
+	groups, err := s.db.RowResults.CountBySheetStatus(r.Context(), id)
 	if err != nil {
 		s.respondErrorFor(w, r, err, "")
 		return
 	}
 	bySheet := map[string]*sheetSummary{}
 	names := make([]string, 0)
-	for _, rr := range results {
-		ss, ok := bySheet[rr.Sheet]
+	for _, g := range groups {
+		ss, ok := bySheet[g.Sheet]
 		if !ok {
-			ss = &sheetSummary{Sheet: rr.Sheet}
-			bySheet[rr.Sheet] = ss
-			names = append(names, rr.Sheet)
+			ss = &sheetSummary{Sheet: g.Sheet}
+			bySheet[g.Sheet] = ss
+			names = append(names, g.Sheet)
 		}
-		ss.RowsTotal++
-		switch rr.Status {
+		ss.RowsTotal += g.Count
+		switch g.Status {
 		case domain.RowStatusImported:
-			ss.RowsImported++
+			ss.RowsImported += g.Count
 		case domain.RowStatusSkipped:
-			ss.RowsSkipped++
+			ss.RowsSkipped += g.Count
 		case domain.RowStatusFailed:
-			ss.RowsFailed++
+			ss.RowsFailed += g.Count
 		}
 	}
 	sheets := make([]sheetSummary, 0, len(names))
