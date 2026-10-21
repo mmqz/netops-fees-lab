@@ -188,7 +188,7 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 
 multipart/form-data，字段名 `file`，扩展名 `.xlsx` / `.txt` / `.cfg`（W8-D 起文本脚本放行），≤10MB（压缩尺寸超出 → 413 `too_large`）。**PTP 配置脚本通道（W8-D）**：`.txt`/`.cfg` 内容须含脚本特征（同时出现 `config ter` 与 `ptp`）→ 解析为「PTP配置」虚拟 sheet 走同一映射/导入管线（解析规则与语义见 [import-and-validation.md](import-and-validation.md) §18）；无特征 → 422 `unsupported_script`；解析失败 → 422 `script_parse_error`（消息含行号）。其它扩展名维持 422 `not_xlsx`。**解压后尺寸另有上限（v0.3.2，zip 炸弹防护）**：单 sheet 物化行数 > 100,000（含表头）或全簿物化单元格总数 > 5,000,000 → **422 `workbook_too_large`**（"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"）。解析为逐 sheet 流式读取，超限即中止，不会整表先物化。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
 
-上传落盘为内容寻址存储 `dataDir/uploads/<sha256>_<原名>.xlsx`；**孤儿上传清理（v0.4.0）**：`serve` 启动时（HTTP 监听启动前、串行执行）与 CLI `netopslab gc --db <db> --data <dir>` 会删除 uploads 下未被任何批次 `workbook_path` 引用的文件（任何状态的批次都算引用——含 failed/rolled_back）；MCP 进程不触发清理。见 [docs/import-and-validation.md](import-and-validation.md) §15。
+上传落盘为内容寻址存储 `dataDir/uploads/<sha256>_<原名>.xlsx`；**孤儿上传清理（v0.4.0；#106 费用域接入）**：`serve` 启动时（HTTP 监听启动前、串行执行）与 CLI `netopslab gc --db <db> --data <dir>` 会删除 uploads 下未被任何批次 `workbook_path` 引用的文件（任何状态的批次都算引用——含 failed/rolled_back），并降入 `uploads/fees` 清理未被任何 `fee_batches` 行的 `(sha256, workbook_name)` 派生名的费用暂存文件；MCP 进程不触发清理。见 [docs/import-and-validation.md](import-and-validation.md) §15。费用分析层（`analysis/fees`）的 Parquet 孤儿与过期 `.staging` 暂存目录由同一二处触发点清扫（含 1 小时 mtime 里程碑防跨进程在途导入竞态，CLI JSON 多 `analysisFiles`/`analysisStaging` 字段，见 [fees-layer.md](fees-layer.md) §4）。
 
 ```json
 {

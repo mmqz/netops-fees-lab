@@ -399,13 +399,30 @@ func (s *Service) EvidenceRow(ctx context.Context, batchID string, row int) (Evi
 	}, nil
 }
 
+// gcOrphanGrace is how long an unaccounted Parquet file or staging dir
+// must have been idle before the sweep may delete it (#106-C). The two
+// trigger placements (serve startup before the listener, the manual
+// `netopslab gc` subcommand) share no process with an in-flight HTTP
+// import — but the fees CLI is a separate process that MAY be importing
+// while serve starts: a batch's Parquet files are renamed into their
+// live partitions BEFORE the batch row flips to completed, so a graceless
+// sweep could delete a just-renamed file of a losing or in-flight batch
+// and silently lose rows. The mtime milestone keeps anything freshly
+// written on the KEEP side; real orphans (crash debris) are older than
+// the window by the time anyone sweeps, so the grace costs collection
+// latency only for debris that crashed within the last hour.
+const gcOrphanGrace = time.Hour
+
 // GCAnalysis removes the analysis layer's orphans: Parquet files whose
 // batch-id is not a completed batch (crash leftovers, rolled-back
 // relicts), and stale staging dirs. Returns the counts. The keep-set is
 // exactly the completed batch ids — the conservative direction is KEEP
 // (an unaccounted file is reported, not deleted, when its batch row is
 // missing entirely… no: a file whose batch row vanished IS an orphan by
-// definition — the row is the commit record. Delete.)
+// definition — the row is the commit record. Delete. EXCEPT when the
+// mtime says it was written moments ago: an unaccounted FRESH file is a
+// possible in-flight import of another process, and the milestone keeps
+// it until the next sweep — #106.)
 func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging int, err error) {
 	live, err := s.db.FeeBatches.ListParquetLiveBatchIDs(ctx)
 	if err != nil {
@@ -414,18 +431,29 @@ func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging 
 	root := filepath.Join(s.analysisDir(), "fees")
 	var doomed []string
 	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
+		if walkErr != nil {
 			return nil //nolint — unreadable trees are skipped, GC is best-effort
 		}
-		if d.Name() == ".staging" {
+		if d.IsDir() {
+			// The staging subtree belongs to the dedicated sweep below:
+			// its files are mid-write by definition, the walk must not
+			// even look at them (pre-#106 the ".staging" name check here
+			// was dead code — directories returned one line above).
+			if d.Name() == ".staging" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		name := d.Name()
 		if len(name) > 6 && name[:6] == "batch-" && filepath.Ext(name) == ".parquet" {
 			id := strings.TrimSuffix(strings.TrimPrefix(name, "batch-"), ".parquet")
-			if _, keep := live[id]; !keep {
-				doomed = append(doomed, path)
+			if _, keep := live[id]; keep {
+				return nil
 			}
+			if !entryIdle(d, gcOrphanGrace) {
+				return nil // fresh write: possibly another process mid-import
+			}
+			doomed = append(doomed, path)
 		}
 		return nil
 	})
@@ -435,7 +463,9 @@ func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging 
 	if err := RemoveParquetFiles(doomed); err != nil {
 		return 0, 0, fmt.Errorf("fees: GC: %w", err)
 	}
-	// stale staging dirs: every staging dir whose batch is not live
+	// stale staging dirs: every staging dir whose batch is not live AND
+	// that has been idle past the grace window (an in-flight import's
+	// staging dir is seconds old; crash debris is not).
 	staging := filepath.Join(root, ".staging")
 	entries, derr := os.ReadDir(staging)
 	if derr == nil {
@@ -443,14 +473,29 @@ func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging 
 			if !e.IsDir() {
 				continue
 			}
-			if _, keep := live[e.Name()]; !keep {
-				if os.RemoveAll(filepath.Join(staging, e.Name())) == nil {
-					deletedStaging++
-				}
+			if _, keep := live[e.Name()]; keep {
+				continue
+			}
+			if !entryIdle(e, gcOrphanGrace) {
+				continue
+			}
+			if os.RemoveAll(filepath.Join(staging, e.Name())) == nil {
+				deletedStaging++
 			}
 		}
 	}
 	return len(doomed), deletedStaging, nil
+}
+
+// entryIdle reports whether the entry was last touched at least grace ago.
+// An unreadable mtime reads as fresh (the conservative side of every GC
+// judgment here is KEEP).
+func entryIdle(d os.DirEntry, grace time.Duration) bool {
+	info, err := d.Info()
+	if err != nil {
+		return false
+	}
+	return time.Since(info.ModTime()) >= grace
 }
 
 // helpers

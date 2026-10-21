@@ -90,7 +90,12 @@ func SnapshotPath(feeType FeeType, year, month int, sha256, originalName string)
 // file is verified (size + hash prefix already match by construction, so a
 // byte-identical short-circuit is enough) and the copy is skipped — the
 // snapshot layer is idempotent by naming. The copy lands via a temp file +
-// atomic rename, so a crash never leaves a torn snapshot.
+// atomic rename, so a crash never leaves a torn snapshot. The temp name is
+// UNIQUE per call (#106): two concurrent imports of the same file both
+// miss the Stat fast-path and would otherwise share one O_TRUNC temp —
+// interleaved truncate+copy can leave zero holes that no writer comes
+// back to fill, and the "atomic" rename would then commit the torn file
+// under the evidence hash's own name.
 func WriteSnapshot(dataDir, srcPath string, feeType FeeType, year, month int, sha256, originalName string) (string, error) {
 	rel := SnapshotPath(feeType, year, month, sha256, originalName)
 	dst := filepath.Join(dataDir, filepath.FromSlash(rel)) // contract → OS path at the disk boundary
@@ -106,22 +111,28 @@ func WriteSnapshot(dataDir, srcPath string, feeType FeeType, year, month int, sh
 	}
 	defer func() { _ = in.Close() }()
 
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".snap-*")
 	if err != nil {
 		return "", fmt.Errorf("fees: 创建快照临时文件: %w", err)
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmp)
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("fees: 写快照: %w", err)
 	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("fees: 关闭快照: %w", err)
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
+	// CreateTemp opens 0600; snapshots sit next to files this layer
+	// writes as 0644, and the operator may read them outside the app.
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		_ = os.Remove(tmpName)
+		return "", fmt.Errorf("fees: 写快照: %w", err)
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("fees: 提交快照: %w", err)
 	}
 	return rel, nil

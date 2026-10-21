@@ -49,6 +49,31 @@ func writeFile(t *testing.T, path string) {
 	}
 }
 
+// gcFeeTestBatch inserts one fee batch row whose staging keep-set entry is
+// the (sha256, workbook_name) pair the sweep derives names from.
+func gcFeeTestBatch(t *testing.T, db *repo.DB, id string, status domain.FeeStatus, sha, name string) {
+	t.Helper()
+	b := domain.FeeBatch{
+		ID: id, WorkbookName: name, SHA256: sha, FeeType: domain.FeeTypeElectricity,
+		FeeYear: 2024, FeeMonth: 5, SnapshotPath: "fee-imports/electricity/2024/05/" + sha + "_" + name,
+		Mapping: `{"columns":{"siteCode":"站址编码","amount":"电费(元)"}}`,
+		Status:  status, CreatedAt: time.Now().UTC(),
+	}
+	if err := db.FeeBatches.Create(context.Background(), b); err != nil {
+		t.Fatalf("create fee batch %s: %v", id, err)
+	}
+}
+
+// backdateGC pushes an entry's mtime past the fee GC milestone window
+// (real orphans are crash debris — old by the time anyone sweeps).
+func backdateGC(t *testing.T, path string) {
+	t.Helper()
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("chtimes %s: %v", path, err)
+	}
+}
+
 func TestGCOrphanUploads(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	dbPath := filepath.Join(dir, "netops.db")
@@ -186,6 +211,21 @@ func TestCLIGCSubcommand(t *testing.T) {
 	}
 	orphan := filepath.Join(uploads, "zzz999_deadbeef_orphan.xlsx")
 	writeFile(t, orphan)
+	// #106-C: the manual gc now ALSO sweeps the fee analysis tree — seed
+	// one orphan Parquet file (backdated past the milestone) and one stale
+	// staging dir, and the single-JSON contract carries their counts.
+	analysisOrphan := filepath.Join(dir, "analysis", "fees",
+		"fee_type=electricity", "year=2024", "month=05", "batch-fee_nope.parquet")
+	if err := os.MkdirAll(filepath.Dir(analysisOrphan), 0o755); err != nil {
+		t.Fatalf("mkdir analysis partition: %v", err)
+	}
+	writeFile(t, analysisOrphan)
+	backdateGC(t, analysisOrphan)
+	staleStaging := filepath.Join(dir, "analysis", "fees", ".staging", "fee_nope2")
+	if err := os.MkdirAll(staleStaging, 0o755); err != nil {
+		t.Fatalf("mkdir stale staging: %v", err)
+	}
+	backdateGC(t, staleStaging)
 	if err := a.Close(); err != nil {
 		t.Fatalf("app.Close: %v", err)
 	}
@@ -202,8 +242,17 @@ func TestCLIGCSubcommand(t *testing.T) {
 	if got.Scanned != 1 || got.Deleted != 1 || got.Referenced != 0 || got.Errors != 0 {
 		t.Errorf("gc response = %+v, want scanned=1 deleted=1", got)
 	}
+	if got.AnalysisFiles != 1 || got.AnalysisStaging != 1 {
+		t.Errorf("gc response analysis counts = %+v, want analysisFiles=1 analysisStaging=1 (the seeded fee orphans)", got)
+	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Errorf("orphan still exists after CLI gc (stat err = %v)", err)
+	}
+	if _, err := os.Stat(analysisOrphan); !os.IsNotExist(err) {
+		t.Errorf("analysis orphan must be swept by CLI gc (stat err = %v)", err)
+	}
+	if _, err := os.Stat(staleStaging); !os.IsNotExist(err) {
+		t.Errorf("stale staging dir must be swept by CLI gc (stat err = %v)", err)
 	}
 
 	// Usage error keeps exit code 2 and the JSON error envelope.
@@ -214,5 +263,155 @@ func TestCLIGCSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "usage_error") {
 		t.Errorf("gc stray-arg stdout = %q, want usage_error envelope", stdout.String())
+	}
+}
+
+// TestGCOrphanFeeStagingUploads pins the #106-B sweep: uploads/fees shares
+// the uploads doctrine — a fee batch of ANY status derives a staging
+// file's name and keeps it; never-derived files (pre-batch crash debris,
+// refused uploads, interrupted staging temps) are orphans. The counts
+// aggregate with the flat uploads dir in one GCResult.
+func TestGCOrphanFeeStagingUploads(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	dbPath := filepath.Join(dir, "netops.db")
+	a, err := New(Config{DBPath: dbPath, DataDir: dir})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	uploads := filepath.Join(dir, "uploads")
+	feesDir := filepath.Join(uploads, "fees")
+	if err := os.MkdirAll(feesDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads/fees: %v", err)
+	}
+	// One flat orphan (the legacy sweep must keep working through the
+	// merged result) + the fees entries.
+	flatOrphan := filepath.Join(uploads, "flat_deadbeef_orphan.xlsx")
+	writeFile(t, flatOrphan)
+	feeOrphan := filepath.Join(feesDir, "aaa111deadbeef_orphan.csv") // no fee batch derives it
+	writeFile(t, feeOrphan)
+	// Referenced staging files, one per batch status — the name is exactly
+	// what stageFeeUpload derives (<sha256>_<multipart base name>) and
+	// what the keep-set rebuilds from the batch row.
+	keptCompleted := filepath.Join(feesDir, "bbb222deadbeef_kept-completed.csv")
+	keptFailed := filepath.Join(feesDir, "ccc333deadbeef_kept-failed.csv")
+	keptRolled := filepath.Join(feesDir, "ddd444deadbeef_kept-rolled.csv")
+	writeFile(t, keptCompleted)
+	writeFile(t, keptFailed)
+	writeFile(t, keptRolled)
+	gcFeeTestBatch(t, a.DB, "fee_gc_completed", domain.FeeStatusCompleted, "bbb222deadbeef", "kept-completed.csv")
+	gcFeeTestBatch(t, a.DB, "fee_gc_failed", domain.FeeStatusFailed, "ccc333deadbeef", "kept-failed.csv")
+	gcFeeTestBatch(t, a.DB, "fee_gc_rolled", domain.FeeStatusRolledBack, "ddd444deadbeef", "kept-rolled.csv")
+	// An interrupted staging temp (pre-rename crash debris) is an orphan.
+	writeFile(t, filepath.Join(feesDir, ".tmp-1234567"))
+	// A stray directory inside uploads/fees is kept (conservative).
+	if err := os.MkdirAll(filepath.Join(feesDir, "stray-dir"), 0o755); err != nil {
+		t.Fatalf("mkdir stray-dir: %v", err)
+	}
+
+	res, err := a.GCOrphanUploads(context.Background())
+	if err != nil {
+		t.Fatalf("GCOrphanUploads: %v", err)
+	}
+	// Scanned = 1 flat + 6 fees entries; deleted = flat + fee orphans +
+	// temp; referenced = 3 kept + stray dir.
+	if res.Scanned != 7 || res.Deleted != 3 || res.Referenced != 4 || res.Errors != 0 {
+		t.Fatalf("gc result = %+v, want scanned=7 deleted=3 referenced=4 errors=0", res)
+	}
+	for _, p := range []string{flatOrphan, feeOrphan, filepath.Join(feesDir, ".tmp-1234567")} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("orphan %s still exists (stat err = %v)", p, err)
+		}
+	}
+	for _, p := range []string{keptCompleted, keptFailed, keptRolled} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("referenced fee staging %s missing: %v", p, err)
+		}
+	}
+
+	// Idempotent second sweep: nothing left to collect, only the kept
+	// entries remain (3 referenced staging files + the conservative dir).
+	res, err = a.GCOrphanUploads(context.Background())
+	if err != nil {
+		t.Fatalf("second GCOrphanUploads: %v", err)
+	}
+	if res.Deleted != 0 || res.Scanned != 4 {
+		t.Fatalf("second gc result = %+v, want deleted=0 scanned=4", res)
+	}
+}
+
+// TestGCSweepServeStartup pins the serve-startup wiring helper (#106-C):
+// both sweeps run through gcSweep — the uploads staging sweep and the fee
+// analysis sweep — and a BROKEN uploads sweep must not stop the fees
+// sweep (log-and-continue, never fatal, the serve doctrine).
+func TestGCSweepServeStartup(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	dbPath := filepath.Join(dir, "netops.db")
+
+	// Seed orphans of both worlds through the app wiring (same DB/dataDir
+	// the helper re-opens): a flat upload orphan, a fee staging orphan and
+	// a fee analysis orphan (backdated past the milestone).
+	a, err := New(Config{DBPath: dbPath, DataDir: dir})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	flatOrphan := filepath.Join(a.Config.DataDir, "uploads", "eee555deadbeef_flat.xlsx")
+	if err := os.MkdirAll(filepath.Dir(flatOrphan), 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	writeFile(t, flatOrphan)
+	feeStagedOrphan := filepath.Join(a.Config.DataDir, "uploads", "fees", "fff666deadbeef_fee.csv")
+	if err := os.MkdirAll(filepath.Dir(feeStagedOrphan), 0o755); err != nil {
+		t.Fatalf("mkdir uploads/fees: %v", err)
+	}
+	writeFile(t, feeStagedOrphan)
+	analysisOrphan := filepath.Join(a.Config.DataDir, "analysis", "fees",
+		"fee_type=electricity", "year=2024", "month=05", "batch-fee_nope.parquet")
+	if err := os.MkdirAll(filepath.Dir(analysisOrphan), 0o755); err != nil {
+		t.Fatalf("mkdir analysis partition: %v", err)
+	}
+	writeFile(t, analysisOrphan)
+	backdateGC(t, analysisOrphan)
+	staleStaging := filepath.Join(a.Config.DataDir, "analysis", "fees", ".staging", "fee_nope2")
+	if err := os.MkdirAll(staleStaging, 0o755); err != nil {
+		t.Fatalf("mkdir stale staging: %v", err)
+	}
+	backdateGC(t, staleStaging)
+
+	a.gcSweep(context.Background())
+	for _, p := range []string{flatOrphan, feeStagedOrphan, analysisOrphan, staleStaging} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("gcSweep must sweep %s (stat err = %v)", p, err)
+		}
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("app.Close: %v", err)
+	}
+
+	// Failure doctrine: uploads being unreadable (a regular file in the
+	// way) logs an Error but NEVER blocks startup — and the fees sweep
+	// still runs.
+	dir2 := testsupport.TempDir(t)
+	dbPath2 := filepath.Join(dir2, "netops.db")
+	a2, err := New(Config{DBPath: dbPath2, DataDir: dir2})
+	if err != nil {
+		t.Fatalf("app.New 2: %v", err)
+	}
+	defer func() { _ = a2.Close() }()
+	if err := os.WriteFile(filepath.Join(dir2, "uploads"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("plant broken uploads: %v", err)
+	}
+	analysisOrphan2 := filepath.Join(dir2, "analysis", "fees",
+		"fee_type=electricity", "year=2024", "month=05", "batch-fee_nope.parquet")
+	if err := os.MkdirAll(filepath.Dir(analysisOrphan2), 0o755); err != nil {
+		t.Fatalf("mkdir analysis partition 2: %v", err)
+	}
+	writeFile(t, analysisOrphan2)
+	backdateGC(t, analysisOrphan2)
+
+	a2.gcSweep(context.Background()) // must not panic, must still sweep fees
+	if _, err := os.Stat(analysisOrphan2); !os.IsNotExist(err) {
+		t.Errorf("gcSweep must run the fees sweep even when the uploads sweep fails (stat err = %v)", err)
 	}
 }

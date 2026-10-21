@@ -53,7 +53,7 @@ analysis/fees/fee_type=electricity/year=2024/month=05/batch-fee_<uuid>.parquet
 
 - **幂等键**：`(sha256, fee_type, fee_year, fee_month, mapping)` 的**部分唯一索引**（`WHERE status='completed'`）——同文件+同类型+同账期+同映射至多一个 completed 批次；failed/rolled_back **不占键**（重试通道构造性开放，#61「转换失败的批处理重试不产生半写状态」）。
 - **提交点**：`MarkCompleted`（唯一索引在此触发）。导入顺序 = 崩溃安全设计：哈希读文件 → 幂等预检 → 快照（幂等）→ 规范化（行失败计数不致命）→ Parquet **staging 写入 + 原子 rename** → 批次行 flip completed。提交点之前的崩溃最多留下 GC 孤儿文件 + 一个 failed 批次行，重试永远干净。
-- **GC**（`GCAnalysis`）：keep-set = completed 批次 id；`.staging` 下非 completed 批次的暂存目录、`batch-*.parquet` 中无 completed 行背书的文件 = 孤儿，删除。方向保守：completed 引用的一律保留。
+- **GC**（`GCAnalysis`，#106 接线）：keep-set = completed 批次 id；`.staging` 下非 completed 批次的暂存目录、`batch-*.parquet` 中无 completed 行背书的文件 = 孤儿，删除。方向保守：completed 引用的一律保留。**触发点（cmd 层，与 uploads GC 同款二处）**：①`serve` 启动时——HTTP 监听启动**前**串行执行（本进程不可能有在途导入）；②CLI `netopslab gc`（与 uploads 清理同一次运行，stdout 单 JSON 计数对象多 `analysisFiles`/`analysisStaging` 两字段）。MCP 进程零触发、HTTP 无 GC 路由。**并发里程碑（mtime 防御）**：Parquet 文件在批次行 flip completed **之前**就已 rename 进分区目录——跨进程（`fees import` CLI 与 serve 启动重叠）在途导入的文件会短暂呈现「无 completed 行背书」形态；无差别清理会静默丢行。孤儿仅在**最后写入时间超过 1 小时宽限**后才可删：在途导入的文件总是秒级新鲜，真实崩溃孤儿在被扫到时早已过期，宽限只延迟「一小时内崩溃的碎片」的收集。`.staging` 子树 walk 整体跳过（`filepath.SkipDir`），只由专属暂存目录清扫按同一里程碑判定。
 - 与 `import_batches` **无外键、零耦合**：费用管道与资源管道是两个世界（资源导入器看不到 fee 批次，费用导入器不创建资源）。
 
 ## 5. 构建形态（CGO 隔离）

@@ -195,15 +195,22 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
   2. **ref 字段、资源已有派生关系**（from=该资源 且 type=该字段派生关系类型——派生映射用导入侧同一张 `mapping.RelationTypeFor`，方向与导入派生一致，绝不第二张表）：新值先按被引用类型（spec.RefType）的自然键解析（与 E003 同一查法；导入路径里悬空引用本就过不了 E003，人工确认也不引入第二条产生悬空引用的路）——**解析不到 → 409 `ref_target_missing`**（message 含字段/目标键/被引用类型，建议先导入目标再确认；提案保持 pending，资源与关系零改动）；解析成功 → 新值写入 attributes 且**同一事务内**把该派生关系的 `to_resource_id` 改挂到新目标（apply 响应带 `relationRetargeted: true`，CLI 透传）。改挂不创建不删除关系行：`first_batch_id` / `source_refs` / `attributes` / `created_at` 谱系列原样保留（改挂只修正指向，创建谱系不变——变更记录本身是审计线；relations 表无 updated_at 列，如实声明不刷新时间戳）。UNIQUE(from,to,type) 安全性：from 与 type 不动、仅 to 移动，与既有边相撞需要「同 from 同 type 已指向新目标」——导入派生世界里每个单值 ref 字段至多一条边，边已指向新目标则属性已等于新值、W005 旧值守卫在上游就否了提案；唯一的理论来源是改名合并（RetargetResource）把两条同 (from,type) 异 to 边留在同一资源上，此时改挂两条到同一目标必撞 UNIQUE、语句中止、整个 apply 事务回滚——原子失败而非脏边集；
   3. **ref 字段、资源无边**（如机房 site_id 空导入的 W001 孤儿，或目标资源连带删除后属性残留）：只改属性快照**绝不建边**（apply 响应 `relationRetargeted: false`）——每条 relation 行的 first_batch_id 锚定其工作簿证据（导入来源），人工 apply 没有工作簿行可作谱系，建无证据的边破坏溯源不变式；改挂不同——边已有谱系，确认只是修正指向。需要「从无边到有边」仍走回滚批次后重导（E003 顺序约束重新生效）。
 
-## 15. 孤儿上传文件清理（uploads GC，v0.4 W5-D）
+## 15. 孤儿上传文件清理（uploads GC，v0.4 W5-D；#106 费用域接入）
 
 上传的工作簿以内容寻址落盘（`dataDir/uploads/<sha256>_<原名>.xlsx`），批次表记录其 `workbook_path`。两类垃圾会产生**从未被任何批次引用**的孤儿文件：崩溃窗口（`analyzing` 瞬态批次失败但文件已写盘）与同内容不同名的重复上传。v0.4.0 起 GC 清理它们：
 
 - **引用口径（保守）**：`import_batches.workbook_path` 非空的**任何状态**批次都算引用——completed 批次回读工作簿出具 issue 证据；failed/rolled_back 批次的路径是「导入了什么」的审计记录（操作者可能据此重导）。**只删从未被任何批次引用的文件**。
-- **触发点（cmd 层，二处）**：①`serve` 启动时——HTTP 监听启动**前**串行执行（此时本进程不可能有在途上传，判定无竞态；与 R1-D6 崩溃自愈同款先例）；②CLI 子命令 `netopslab gc --db <db> --data <dir>`（手动可跑，stdout 单 JSON 计数对象 `{"scanned","deleted","referenced","errors"}`，n>0 时 slog Info 走 stderr）。**MCP 进程零触发**（mcp 子命令不经过 serve 启动路径）；HTTP API 无 GC 路由（维护动作归进程所有者）。
-- **非致命语义**：删除失败（权限等）记 slog Warn 并计入 `errors`，不中断启动、不改变退出码；uploads 目录不存在（全新安装）为 no-op；uploads 下的子目录跳过不递归（保守）。
+- **触发点（cmd 层，二处）**：①`serve` 启动时——HTTP 监听启动**前**串行执行（此时本进程不可能有在途上传，判定无竞态；与 R1-D6 崩溃自愈同款先例）；②CLI 子命令 `netopslab gc --db <db> --data <dir>`（手动可跑，stdout 单 JSON 计数对象 `{"scanned","deleted","referenced","errors","analysisFiles","analysisStaging"}`，n>0 时 slog Info 走 stderr）。**MCP 进程零触发**（mcp 子命令不经过 serve 启动路径）；HTTP API 无 GC 路由（维护动作归进程所有者）。
+- **非致命语义**：删除失败（权限等）记 slog Warn 并计入 `errors`，不中断启动、不改变退出码；uploads 目录不存在（全新安装）为 no-op；uploads 下的子目录跳过不递归（保守）——**唯一例外是 uploads/fees**（见下）。
 - **匹配口径**：引用路径按 Clean 后原值、绝对形式与**基名**三形态匹配（上传文件名含 sha256 前缀，全局唯一）；基名命中优先保留——误保留（多留一个文件）远轻于误删除（丢证据）。
 - 测试钉死（internal/app/gc_test.go）：孤儿被删 / completed+failed+rolled_back 三状态引用保留（含相对路径形态）/ 幂等二跑 / 目录缺失 no-op / 删除失败非致命 / CLI 契约（exit 0 + 单 JSON + usage 错误 2）。
+
+### 15.1 费用域两棵树的同款接入（#106）
+
+- **uploads/fees 暂存区（HTTP 通道）**：每次 HTTP 费用导入文件落两处——内容寻址暂存 `uploads/fees/<sha256>_<原名>` + 不可变快照 `fee-imports/…`；#106 前整个目录被当「子目录」永久跳过，暂存份无限累积。现在同次 GC 下降入该目录按**同款引用口径**清理：`fee_batches` 行（任何状态）的 `(sha256, workbook_name)` 恰好派生文件名者算引用（暂存通道的身份是从命名来源重建的，不是记录的路径）；派生不到的（批次行落库前的崩溃碎片、被拒上传、中断的 `.tmp-*` 暂存临时文件）= 孤儿删除。计数并入同一 `GCResult`。
+- **分析层 Parquet（`analysis/fees`，`GCAnalysis`）**：无 completed 行背书的 `batch-*.parquet`（崩溃碎片、回滚残留）与 `.staging` 下非 completed 批次的暂存目录 = 孤儿。#106 前该函数无任何调用点（文档宣称与实现脱节的死代码），现接线到同一二处触发点：serve 预监听 + `netopslab gc`（与 uploads 清理同一次运行，计数走 JSON 的 `analysisFiles`/`analysisStaging` 字段）。**并发里程碑（mtime 防御）**：Parquet 文件在批次行 flip completed **之前**就已 rename 进分区目录——跨进程在途导入（`fees import` CLI 与 serve 启动重叠、手动 gc 与 serve 在途导入重叠）的文件会短暂呈现孤儿形态；孤儿仅在最后写入时间**超过 1 小时宽限**后才删（在途文件秒级新鲜，真实崩溃碎片早已过期；宽限只延迟一小时内的碎片收集，见 [fees-layer.md](fees-layer.md) §4）。`.staging` 子树 walk 整体跳过，只由专属清扫按同一里程碑判定（旧实现里 walk 内的 `.staging` 名字检查是永远走不到的死分支——目录在三行前就 return 了）。
+- 测试钉死：internal/fees/service_test.go（`TestGCAnalysisMilestone`：新鲜孤儿保留/过期孤儿删/completed 引用压过里程碑/暂存目录同里程碑/子树 SkipDir；`TestRollbackAndGC` 适配过期孤儿）；internal/app/gc_test.go（`TestGCOrphanFeeStagingUploads` 三状态引用保留+孤儿与临时文件删+计数聚合；`TestGCSweepServeStartup` serve 接线 + uploads 清理失败不阻断费用清理；`TestCLIGCSubcommand` 扩展 analysisFiles/analysisStaging 契约）。
+- **同根未修（诚实声明）**：资源/指标通道的上传落盘（imports.go/metrics.go）也是原地 `O_TRUNC` 写（与 #106-A 同形态，#88 家族）——同内容并发双提交同样可能哈希/字节不一致。#106 范围仅费用域（审计 #88 续查指名），资源/指标通道待后续 issue 处置。
 
 
 ## 16. 疑似改名检测与身份合并人工流（v0.5，W6-D）

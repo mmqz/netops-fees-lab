@@ -27,7 +27,9 @@ import (
 // <analysisDir>/fees/.staging/<batch>/… then RENAMED into place (atomic
 // per file); the SQLite batch row's completed flip is the commit point.
 // Files without a completed batch row are GC orphans by definition (the
-// keep-set is exactly the completed batch ids — see the GC in engine.go).
+// keep-set is exactly the completed batch ids — see GCAnalysis in
+// service.go, wired to serve startup + `netopslab gc` with an mtime
+// milestone since #106).
 
 // feeParquetRow is the on-disk schema of one analysis row. Column names
 // are the query surface (DuckDB reads them verbatim); source_row is the
@@ -124,7 +126,8 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 		}
 	}
 	// best-effort staging cleanup (a crash before this leaves an empty
-	// dir — the GC sweeps staging dirs of non-completed batches anyway)
+	// dir — the GC sweeps staging dirs of non-completed batches once
+	// past the idle milestone, see service.go)
 	_ = os.RemoveAll(staging)
 	return files, nil
 }

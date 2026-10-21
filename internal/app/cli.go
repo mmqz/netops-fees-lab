@@ -281,19 +281,15 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	// Uploads garbage collection (W5-D, v0.4.0), same placement rationale
-	// as RecoverInterrupted above: run serially BEFORE the listener starts,
-	// so no upload of this (or any other) process can be in flight while we
-	// judge orphans — an upload being written right now is not yet
-	// referenced by any batch and would be misjudged. The MCP process never
+	// Garbage collection (W5-D uploads + #106 fee analysis), same placement
+	// rationale as RecoverInterrupted above: run serially BEFORE the
+	// listener starts, so no upload or fee import of this (or any other)
+	// process can be in flight while we judge orphans — a file being
+	// written right now is not yet referenced by any batch and would be
+	// misjudged (the fees CLI is a separate process; GCAnalysis's mtime
+	// milestone covers that cross-process window). The MCP process never
 	// reaches this call site (it owns no serve loop).
-	if gc, err := a.GCOrphanUploads(ctx); err != nil {
-		// Not fatal: a broken sweep must not keep the server down; the
-		// operator can retry with `netopslab gc`.
-		a.Log.Error("uploads gc failed (server continues)", "error", err.Error())
-	} else if gc.Deleted > 0 {
-		a.Log.Info("gc: removed orphan uploads", "deleted", gc.Deleted, "scanned", gc.Scanned)
-	}
+	a.gcSweep(ctx)
 	return a.Run(ctx)
 }
 

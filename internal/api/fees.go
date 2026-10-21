@@ -165,13 +165,20 @@ var errXlsBinaryFormat = errors.New(".xls 是 Excel 2003 二进制旧格式，�
 // <dataDir>/uploads/fees/<sha256>_<name> and returns its path —
 // content-addressed, the same pattern as the resource and metrics
 // channels (#88). The importer later opens this staging path three
-// times (HashFile → ReadFeeFile → WriteSnapshot); under the old
-// name-addressed staging, two concurrent same-name uploads with
-// different contents interleaved those opens and a batch could record
-// a SHA256 that does not match the bytes it actually imported or
-// snapshotted — the evidence hash must never be able to lie. Content
-// addressing removes the window: identical content shares one path,
-// different content never collides.
+// times (HashFile → ReadFeeFile → WriteSnapshot); the name alone must
+// therefore never be visible with partial bytes. #88 fixed the
+// name-collision half (identical content shares one path, different
+// content never collides) but kept the in-place O_TRUNC write: two
+// concurrent same-content submissions truncated and rewrote the SAME
+// file while the other request was reading it, so a reader could
+// hash/parse a torn file and record a SHA256 that does not match the
+// bytes actually imported — the evidence hash must never be able to
+// lie (#106-A). The bytes now land under a per-request temp name and
+// rename into the content-addressed name only once complete: rename
+// is atomic per file, so concurrent same-content uploads replace each
+// other with whole identical files and no reader ever observes a
+// partial one (this also self-heals a torn file a pre-#106 crash may
+// have left at the target name).
 func stageFeeUpload(dataDir string, file io.Reader, name string) (string, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 	switch ext {
@@ -190,8 +197,30 @@ func stageFeeUpload(dataDir string, file io.Reader, name string) (string, error)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("创建费用上传目录: %w", err)
 	}
+	// Temp name INSIDE the target directory (rename cannot cross
+	// filesystems) and unique per request: concurrent submissions of the
+	// same content each stage their own copy and never share write state.
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return "", fmt.Errorf("创建上传临时文件: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", fmt.Errorf("保存上传文件: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", fmt.Errorf("保存上传文件: %w", err)
+	}
+	// CreateTemp opens 0600; every data file this tree writes is 0644.
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", fmt.Errorf("保存上传文件: %w", err)
+	}
 	path := filepath.Join(dir, hex.EncodeToString(sum[:])+"_"+name)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
 		return "", fmt.Errorf("保存上传文件: %w", err)
 	}
 	return path, nil

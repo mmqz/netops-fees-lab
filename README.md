@@ -118,7 +118,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **资源导出通道（v0.6.0 W12-D）**：`GET /api/exports/resources?types=` / `netopslab export --db --out [--types]` / 资源页「导出资源」按钮——把当前资源清单导出为与导入工作簿同构的 xlsx（每类型一 sheet、表头 = 字段 Label、行 = 属性快照，含 W005/W006 apply 后状态），**字节级确定性**（同库同参数两次导出逐字节一致）；**回源幂等**：导出文件直接走既有 analyze → suggest → import 管线导入全新库，资源集合与关系集合（ref 重新派生）等价；MCP 零新增；见 [docs/api.md](docs/api.md) 导出节 + [docs/import-and-validation.md](docs/import-and-validation.md) §19。
 - **治理总览看板（v0.6.0 W14-D）**：`GET /api/governance/summary` / `netopslab query --db <path> governance` / 概览页「治理总览」区——把待确认队列（属性变更 / 疑似改名）、决策审计计数、问题分布（按严重级 + 按规则 Top 10）与资源/关系/批次形态汇成一屏的只读聚合；全部计数走 SQL COUNT（无全表拉取），除 generatedAt 外全字段确定性（同库两次调用逐字段相等），空库恒全零；MCP 零新增；见 [docs/api.md](docs/api.md) 治理总览节。
 - **schema 动态发现与 uploads 垃圾回收（v0.4 W5-D 发布轮）**：`GET /api/schema` 返回 `mapping.Specs` 的忠实投影（v0.7.0 W21 起 33 类资源的字段/键位/枚举/ref/同义词/层次/专业域 + 13 条规则目录，机械生成禁止手抄，仅 HTTP 不进 MCP）
-；`serve` 启动与 CLI `netopslab gc` 清理未被任何批次引用的孤儿上传文件（任何状态的批次都算引用）；前端构建 manualChunks 分包（主 chunk 795 → 187 kB）。
+；`serve` 启动与 CLI `netopslab gc` 清理未被任何批次引用的孤儿上传文件（任何状态的批次都算引用；#106 起费用域同款接入：`uploads/fees` 暂存文件 + `analysis/fees` 的 Parquet 孤儿与过期 `.staging` 暂存目录，含跨进程在途导入的 mtime 里程碑防御）；前端构建 manualChunks 分包（主 chunk 795 → 187 kB）。
 - **v0.7.0 里程碑收口（W25）**：`leased_line.customer_code` 补齐（真实专线表「客户名称」列 → subscribed_by 直连客户——「某客户有多少条专线」可答）；浏览器级 UI 验收（通用资源页 33 类型筛选/chip/抽屉 + 向导 33 选项，`scripts/w25_acceptance.sh` 24 断言全过）；四层模型端到端实测（层次穿透 L6→L2 / 业务影响含客户与专线 / 保护结构 / 客户聚合）。
 - **无人值守导入（v0.7.0 W24，migration v19）**：映射模板持久化（§12-B7 方案 A）——表头指纹（sheet 名 + 规范化表头序列 sha256，**列序敏感**）命中即以已确认映射自动执行（`POST /api/imports?auto=1` / `netopslab import --auto`），任一表头变更 → 指纹变化 → 拒绝执行并点名 sheet（**表头变更感知，从不静默**），批次回落 `awaiting_mapping` 人工兜底；模板捕获一键保存（`POST /api/imports/{id}/template` / `netopslab templates save`）、回滚不对称（模板是确认产物，批次回滚不删模板）；七日无人值守测试钉死全旅程。
 - **异常检测与告警（v0.7.0 W23，ADR-0011 D2/D3）**：检测规则配置化（`detection_rules` 表 + 5 条种子规则，不改代码新增阈值规则）；纯函数判定引擎（末尾连续 window 点越限去抖、ts 全来自数据、同数据同规则同结果）；告警状态机三边（firing→acked 人工 / firing→cleared 恢复 / acked→cleared——无自动升级无超时关闭）；firing 告警联动 run_state（error→down / warning→degraded，source=alert）；HTTP 六端点 + CLI `netopslab detect`；MCP 冻结不动（AI 经 HTTP 消费告警）。
@@ -335,7 +335,7 @@ netopslab lab      --db ./data/netops.db workspace create --name <n> [--all-batc
 netopslab lab      … topology|path|apply|checks|diff|undo|checkpoint                   # 见 docs/teleagent-integration.md §4.2
 netopslab serve    --addr :8080 --db ./data/netops.db
 netopslab mcp      [--db ./data/netops.db]                  # 或环境变量 NETOPS_DB
-netopslab gc       --db ./data/netops.db --data ./data       # 手动清理孤儿上传（serve 启动时也会跑）
+netopslab gc       --db ./data/netops.db --data ./data       # 手动清理孤儿上传与费用分析孤儿（serve 启动时也会跑）
 netopslab testdata --out testdata
 ```
 

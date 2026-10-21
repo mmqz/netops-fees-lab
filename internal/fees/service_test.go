@@ -40,6 +40,16 @@ func writeCSV(t *testing.T, dir, name, content string) string {
 	return p
 }
 
+// backdate pushes an entry's mtime past the GC milestone window, the state
+// every real orphan (crash debris) has reached by the time anyone sweeps.
+func backdate(t *testing.T, path string) {
+	t.Helper()
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("chtimes %s: %v", path, err)
+	}
+}
+
 const csvMay = `站址编码,账期,电费(元),电量(kWh)
 0230101ABCDEFG01,2024-05,1,234.56,3200
 0230101ABCDEFG02,2024-05,5,678.00,4100
@@ -306,12 +316,16 @@ func TestRollbackAndGC(t *testing.T) {
 		t.Fatalf("re-import after rollback = %+v (err %v), want completed", sum2, err)
 	}
 	// GC: plant a fake orphan file (batch id that has no completed row)
-	// and verify it is swept while the live batch's file survives.
+	// and verify it is swept while the live batch's file survives. The
+	// planted file is backdated past the #106 milestone window — a FRESH
+	// unaccounted file is kept (possibly another process mid-import; pinned
+	// by TestGCAnalysisMilestone).
 	part := filepath.Join(dir, "analysis", "fees", "fee_type=electricity", "year=2024", "month=05")
 	orphan := filepath.Join(part, "batch-fee_nope.parquet")
 	if err := os.WriteFile(orphan, []byte("fake"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	backdate(t, orphan)
 	deleted, _, err := svc.GCAnalysis(ctx)
 	if err != nil || deleted != 1 {
 		t.Fatalf("GC = %d deleted (err %v), want 1 (the planted orphan)", deleted, err)
@@ -321,6 +335,109 @@ func TestRollbackAndGC(t *testing.T) {
 	}
 	if live, _ := BatchParquetFiles(filepath.Join(dir, "analysis"), sum2.BatchID); len(live) != 1 {
 		t.Fatalf("live batch file must survive the GC: %v", live)
+	}
+}
+
+// TestGCAnalysisMilestone pins the #106-C concurrency defense: the sweep
+// only collects orphans that have been IDLE past the grace window — an
+// unaccounted file written moments ago is possibly another process's
+// in-flight import (Parquet files are renamed into place BEFORE the batch
+// row flips to completed; deleting such a file loses rows silently). The
+// staging subtree is walked by nobody (SkipDir) and its dirs are judged by
+// the same milestone; the keep-set (completed batch ids) always wins over
+// the milestone.
+func TestGCAnalysisMilestone(t *testing.T) {
+	svc, _, dir := newService(t)
+	ctx := context.Background()
+
+	// One real completed import: its partition file is the live-set pin.
+	src := writeCSV(t, dir, "mile.csv", "站址编码,账期,电费(元)\nM1,2024-05,10.00\n")
+	sum, err := svc.Import(ctx, ImportOptions{Path: src, FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil || sum.Status != "completed" {
+		t.Fatalf("import = %+v (err %v), want completed", sum, err)
+	}
+
+	part := filepath.Join(dir, "analysis", "fees", "fee_type=electricity", "year=2024", "month=05")
+	feesStaging := filepath.Join(dir, "analysis", "fees", ".staging")
+
+	// A FRESH unaccounted batch file (mtime = now): kept — possibly an
+	// import of another process mid-flight.
+	freshOrphan := filepath.Join(part, "batch-fee_fresh.parquet")
+	if err := os.WriteFile(freshOrphan, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A STALE unaccounted batch file: swept.
+	staleOrphan := filepath.Join(part, "batch-fee_stale.parquet")
+	if err := os.WriteFile(staleOrphan, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backdate(t, staleOrphan)
+	// The live batch's own file, backdated too: the keep-set wins over the
+	// milestone — a completed batch's file is never an orphan.
+	liveFile := filepath.Join(part, "batch-"+sum.BatchID+".parquet")
+	backdate(t, liveFile)
+	// A FRESH staging dir of an unaccounted batch: kept (mid-import shape).
+	freshStaging := filepath.Join(feesStaging, "fee_staging_fresh")
+	if err := os.MkdirAll(freshStaging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A STALE staging dir of an unaccounted batch: swept — together with
+	// everything inside it.
+	staleStaging := filepath.Join(feesStaging, "fee_staging_stale")
+	if err := os.MkdirAll(staleStaging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staleStaging, "year=2024_month=05.parquet"), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backdate(t, staleStaging)
+
+	deleted, deletedStaging, err := svc.GCAnalysis(ctx)
+	if err != nil {
+		t.Fatalf("GCAnalysis: %v", err)
+	}
+	if deleted != 1 || deletedStaging != 1 {
+		t.Fatalf("GCAnalysis = files %d, staging %d; want exactly the stale orphan pair (1/1)", deleted, deletedStaging)
+	}
+	if _, err := os.Stat(freshOrphan); err != nil {
+		t.Errorf("fresh unaccounted file must survive the milestone (in-flight defense): %v", err)
+	}
+	if _, err := os.Stat(staleOrphan); !os.IsNotExist(err) {
+		t.Errorf("stale orphan must be swept (stat err = %v)", err)
+	}
+	if _, err := os.Stat(liveFile); err != nil {
+		t.Errorf("live batch file must survive even backdated (keep-set wins): %v", err)
+	}
+	if _, err := os.Stat(freshStaging); err != nil {
+		t.Errorf("fresh staging dir must survive the milestone: %v", err)
+	}
+	if _, err := os.Stat(staleStaging); !os.IsNotExist(err) {
+		t.Errorf("stale staging dir must be swept with its contents (stat err = %v)", err)
+	}
+
+	// A batch-named file INSIDE a kept (fresh) staging dir is never judged
+	// by the walk — the subtree is skipped whole; only the dir sweep
+	// governs .staging, and only once the dir itself is stale.
+	inStaging := filepath.Join(freshStaging, "batch-fee_planted.parquet")
+	if err := os.WriteFile(inStaging, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backdate(t, inStaging)
+	if _, _, err := svc.GCAnalysis(ctx); err != nil {
+		t.Fatalf("second GCAnalysis: %v", err)
+	}
+	if _, err := os.Stat(inStaging); err != nil {
+		t.Errorf("the walk must skip the .staging subtree (SkipDir), file inside judged only via its dir: %v", err)
+	}
+
+	// Once the fresh staging dir goes stale, one sweep collects it — and
+	// the in-flight-looking file inside goes with it.
+	backdate(t, freshStaging)
+	if _, _, err := svc.GCAnalysis(ctx); err != nil {
+		t.Fatalf("third GCAnalysis: %v", err)
+	}
+	if _, err := os.Stat(freshStaging); !os.IsNotExist(err) {
+		t.Errorf("stale staging dir must be swept on the next pass (stat err = %v)", err)
 	}
 }
 

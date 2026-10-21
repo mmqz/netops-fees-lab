@@ -10,7 +10,10 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -18,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/app"
@@ -72,6 +76,7 @@ func uploadFeeFile(t *testing.T, srv *httptest.Server, filename, content, feeTyp
 type feeImportSummary struct {
 	BatchID          string   `json:"batchId"`
 	Status           string   `json:"status"`
+	SHA256           string   `json:"sha256"`
 	RowsTotal        int      `json:"rowsTotal"`
 	RowsImported     int      `json:"rowsImported"`
 	RowsFailed       int      `json:"rowsFailed"`
@@ -771,5 +776,197 @@ func TestAPIFeesImportErrorClassification(t *testing.T) {
 	}
 	if !strings.Contains(env.Error.Message, "服务器内部错误") {
 		t.Errorf("server fault message = %q, want the generic internal text", env.Error.Message)
+	}
+}
+
+// buildFeeMultipart serializes one fee import multipart body (the same
+// shape uploadFeeFile posts) and returns its content type — a body built
+// once can be posted by several goroutines, each with its own reader.
+func buildFeeMultipart(t *testing.T, filename, content, feeType, year, month string) (string, []byte) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := fw.Write([]byte(content)); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	for k, v := range map[string]string{"feeType": feeType, "year": year, "month": month} {
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("write field %s: %v", k, err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return mw.FormDataContentType(), buf.Bytes()
+}
+
+// hashFile returns the hex SHA-256 of a file on disk.
+func hashFile(t *testing.T, path string) string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		t.Fatalf("hash %s: %v", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TestAPIFeesConcurrentSameUpload pins #106-A: two CONCURRENT POSTs of the
+// same content (and name) must leave BOTH content-addressed copies honest
+// — the staged upload and the immutable snapshot hash to exactly the
+// SHA256 the batch records. Pre-#106 the staging write was an in-place
+// O_TRUNC: one request truncated and rewrote the file while the other was
+// hashing/reading it, so the loser could record a SHA256 that does not
+// match the bytes it actually imported — the evidence hash lied. The write
+// now lands under a per-request temp name and renames into place only once
+// complete; the idempotent-duplicate semantics still admit exactly one
+// completed batch (the MarkCompleted race loser answers 200
+// informational).
+func TestAPIFeesConcurrentSameUpload(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	a, err := app.New(app.Config{
+		DBPath:  filepath.Join(dir, "netops.db"),
+		DataDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	srv := httptest.NewServer(a.Routes())
+	t.Cleanup(func() {
+		srv.Close()
+		_ = a.Close()
+	})
+
+	for round := 0; round < 6; round++ {
+		// ~48KB: large enough that the snapshot layer's io.Copy crosses
+		// several 32KB chunks — the old shared-temp write interleaved at
+		// chunk granularity, so a bigger file gives the (now fixed) race a
+		// realistic surface if it ever regresses.
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "站址编码,账期,电费(元)\n")
+		for row := 0; row < 400; row++ {
+			fmt.Fprintf(&sb, "R%d-%03d,2024-05,%d.00\n", round, row, 100+row%50)
+		}
+		content := sb.String()
+		sum := sha256.Sum256([]byte(content))
+		contentSHA := hex.EncodeToString(sum[:])
+		contentType, body := buildFeeMultipart(t, "race.csv", content, "electricity", "2024", "5")
+
+		// Two goroutines post the SAME bytes at the same instant; only
+		// Errorf (goroutine-safe) fires inside them, FailNow stays with
+		// the test goroutine.
+		start := make(chan struct{})
+		results := make([]struct {
+			status int
+			body   []byte
+		}, 2)
+		var wg sync.WaitGroup
+		for i := range results {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				req, rerr := http.NewRequest(http.MethodPost, srv.URL+"/api/fees/imports", bytes.NewReader(body))
+				if rerr != nil {
+					t.Errorf("round %d: build request: %v", round, rerr)
+					return
+				}
+				req.Header.Set("Content-Type", contentType)
+				resp, rerr := http.DefaultClient.Do(req)
+				if rerr != nil {
+					t.Errorf("round %d: post: %v", round, rerr)
+					return
+				}
+				defer func() { _ = resp.Body.Close() }()
+				b, rerr := io.ReadAll(resp.Body)
+				if rerr != nil {
+					t.Errorf("round %d: read body: %v", round, rerr)
+					return
+				}
+				results[i].status = resp.StatusCode
+				results[i].body = b
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		codes := map[int]int{}
+		var winnerBatch string
+		for _, r := range results {
+			if r.status != http.StatusCreated && r.status != http.StatusOK {
+				t.Fatalf("round %d: concurrent import status = %d (want 201/200)\nbody: %s", round, r.status, r.body)
+			}
+			codes[r.status]++
+			var sum feeImportSummary
+			if err := json.Unmarshal(r.body, &sum); err != nil {
+				t.Fatalf("round %d: decode summary: %v\n%s", round, err, r.body)
+			}
+			if sum.SHA256 != contentSHA {
+				t.Errorf("round %d: recorded sha256 = %s, want the content hash %s — the evidence hash must never lie", round, sum.SHA256, contentSHA)
+			}
+			if r.status == http.StatusCreated {
+				winnerBatch = sum.BatchID
+				if sum.RowsImported != 400 || sum.Status != "completed" {
+					t.Errorf("round %d: fresh import = %+v, want completed with 400 rows", round, sum)
+				}
+			}
+		}
+		if codes[http.StatusCreated] != 1 || codes[http.StatusOK] != 1 {
+			t.Fatalf("round %d: status codes = %v, want exactly one 201 and one informational 200 duplicate", round, codes)
+		}
+
+		// Both content-addressed copies are byte-honest: the staged upload
+		// under uploads/fees and the immutable snapshot recorded by the
+		// completed batch hash to the recorded SHA256.
+		staged := filepath.Join(dir, "uploads", "fees", contentSHA+"_race.csv")
+		if got := hashFile(t, staged); got != contentSHA {
+			t.Errorf("round %d: staged upload hashes to %s, want %s", round, got, contentSHA)
+		}
+		resp, body := doRequest(t, srv, http.MethodGet, "/api/fees/batches?status=completed", nil, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("round %d: batches list: status = %d\n%s", round, resp.StatusCode, body)
+		}
+		var list struct {
+			Items []struct {
+				ID           string `json:"id"`
+				SnapshotPath string `json:"snapshotPath"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(body, &list); err != nil {
+			t.Fatalf("round %d: decode batches: %v", round, err)
+		}
+		var snapPath string
+		for _, it := range list.Items {
+			if it.ID == winnerBatch {
+				snapPath = it.SnapshotPath
+			}
+		}
+		if snapPath == "" {
+			t.Fatalf("round %d: completed batch %s not in the list", round, winnerBatch)
+		}
+		snapshot := filepath.Join(dir, filepath.FromSlash(snapPath))
+		if got := hashFile(t, snapshot); got != contentSHA {
+			t.Errorf("round %d: snapshot %s hashes to %s, want %s (the copy the evidence anchors point at)", round, snapshot, got, contentSHA)
+		}
+	}
+
+	// No staging temp leaks: every rename consumed its temp file.
+	feesDir := filepath.Join(dir, "uploads", "fees")
+	entries, err := os.ReadDir(feesDir)
+	if err != nil {
+		t.Fatalf("read fees staging dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("staging temp %s leaked after the concurrent uploads", e.Name())
+		}
 	}
 }
