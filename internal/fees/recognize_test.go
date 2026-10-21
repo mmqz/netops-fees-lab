@@ -250,3 +250,139 @@ func TestReadFeeFileAcceptsValidXLSXAfterGuard(t *testing.T) {
 		t.Fatalf("headers=%v rows=%v, want 3 headers + 1 data row at Number 2", headers, rows)
 	}
 }
+
+// ---- #98: the CSV reading channel's correctness defects ----
+
+// writeFeeCSV writes a raw CSV with exact bytes (no trailing tweaks).
+func writeFeeCSV(t *testing.T, dir, name string, content []byte) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestReadFeeFileCSVBOMTolerated (#98-B): Excel prepends a UTF-8 BOM to its
+// CSV exports; the doc contract says "UTF-8 with BOM tolerated", but the
+// BOM used to survive into the first header cell ("\ufeff站址编码"), the
+// recognizer missed siteCode, and the file bounced out of auto-recognize.
+func TestReadFeeFileCSVBOMTolerated(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("站址编码,账期,电费(元)\nHLJ-0001,2024-05,100.00\n")
+	src := writeFeeCSV(t, dir, "bom.csv", append([]byte{0xEF, 0xBB, 0xBF}, body...))
+
+	headers, rows, err := ReadFeeFile(src)
+	if err != nil {
+		t.Fatalf("ReadFeeFile(BOM csv): %v", err)
+	}
+	if headers[0] != "站址编码" {
+		t.Fatalf("headers[0] = %q, want the BOM stripped (\"站址编码\")", headers[0])
+	}
+	if len(rows) != 1 || rows[0].Cells[0] != "HLJ-0001" {
+		t.Fatalf("rows = %+v, want the one data row intact", rows)
+	}
+	// and the recognizer sees the core columns through the BOM file
+	typ, cols := Recognize(headers)
+	if cols["siteCode"] != "站址编码" || cols["amount"] == "" {
+		t.Fatalf("Recognize(BOM headers) = type %q cols %v, want siteCode/amount recognized", typ, cols)
+	}
+}
+
+// TestReadFeeFileCSVThousandsReassembled (#98-A): the unquoted thousands
+// separator is the classic real-world CSV defect — "1,234.56" splits into
+// two cells, the amount column reads "1", and the batch used to import at
+// 1/1000 of the truth with ZERO failures. The reader now reassembles the
+// accounting grouping (1-3 digit head + exactly-3-digit tail) whenever the
+// row count can equalize with the header; the amounts come back exact.
+func TestReadFeeFileCSVThousandsReassembled(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFeeCSV(t, dir, "thousands.csv", []byte(
+		"站址编码,账期,电费(元),电量(kWh)\n"+
+			"HLJ-0001,2024-05,1,234.56,3200\n"+
+			"HLJ-0002,2024-05,12,345.00,4100\n"+
+			"HLJ-0003,2024-05,9,876.50,5300\n"+
+			"HLJ-0004,2024-05,100.00,6000\n")) // plain row: no merge needed
+
+	headers, rows, err := ReadFeeFile(src)
+	if err != nil {
+		t.Fatalf("ReadFeeFile(thousands csv): %v", err)
+	}
+	if len(headers) != 4 {
+		t.Fatalf("headers = %v, want 4", headers)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want 4", len(rows))
+	}
+	want := []string{"1234.56", "12345.00", "9876.50", "100.00"}
+	for i, w := range want {
+		if got := rows[i].Cells[2]; got != w {
+			t.Errorf("row %d amount cell = %q, want the reassembled %q", i+2, got, w)
+		}
+	}
+	// the merged amount parses to the TRUE cents (the old channel: 100)
+	if cents, err := NormalizeAmount(rows[0].Cells[2]); err != nil || cents != 123456 {
+		t.Errorf("row 2 amount = %d cents (err %v), want 123456 — no 1000x shrink", cents, err)
+	}
+}
+
+// TestReadFeeFileCSVRaggedRefused (#98-A): a row with more cells than the
+// header that CANNOT be reassembled as thousands groups must fail LOUD with
+// the row number — misaligned data never reaches the analysis table.
+func TestReadFeeFileCSVRaggedRefused(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFeeCSV(t, dir, "ragged.csv", []byte(
+		"站址编码,账期,电费(元)\n"+
+			"HLJ-0001,2024-05,100.00\n"+
+			"HLJ-0002,2024-05,100.00,extra,garbage\n"))
+	_, _, err := ReadFeeFile(src)
+	if err == nil {
+		t.Fatal("the unreassemblable ragged row must fail the read loudly")
+	}
+	if !strings.Contains(err.Error(), "第 3 行") || !strings.Contains(err.Error(), "5 列") {
+		t.Fatalf("error = %v, want the row number and cell count as evidence", err)
+	}
+}
+
+// TestReadFeeFileCSVShortRowsStillTolerated: rows SHORTER than the header
+// keep the tolerant "" cells (a missing trailing optional column stays
+// legal) — the #98 refusal is only for the OVER-count misalignment.
+func TestReadFeeFileCSVShortRowsStillTolerated(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFeeCSV(t, dir, "short.csv", []byte(
+		"站址编码,账期,电费(元),备注\n"+
+			"HLJ-0001,2024-05,100.00\n"))
+	headers, rows, err := ReadFeeFile(src)
+	if err != nil {
+		t.Fatalf("ReadFeeFile(short row): %v", err)
+	}
+	if len(headers) != 4 || len(rows) != 1 || len(rows[0].Cells) != 3 {
+		t.Fatalf("headers=%v rows=%+v, want the short row imported as-is", headers, rows)
+	}
+}
+
+// TestReassembleThousandsUnits pins the grouping rules directly: the tail
+// is EXACTLY three digits (a ("100", "50") pair never merges), the fraction
+// is at most two digits, and overshooting merges refuse.
+func TestReassembleThousandsUnits(t *testing.T) {
+	// ("1", "234.56") merges
+	if out, ok := reassembleThousands([]string{"a", "1", "234.56", "b"}, 3); !ok || out[1] != "1234.56" {
+		t.Fatalf("(1,234.56) = %v ok=%v", out, ok)
+	}
+	// ("100", "50") never merges: the tail must be exactly 3 digits
+	if _, ok := reassembleThousands([]string{"x", "100", "50", "y"}, 3); ok {
+		t.Fatal("(100,50) must not merge — a 2-digit tail is not a thousands group")
+	}
+	// "234.567" is not a tail: three fraction digits refuse
+	if _, ok := reassembleThousands([]string{"x", "1", "234.567"}, 2); ok {
+		t.Fatal("234.567 must not merge (fraction beyond cents)")
+	}
+	// no candidate pair → false even when the count could match
+	if _, ok := reassembleThousands([]string{"a", "b", "c", "d"}, 3); ok {
+		t.Fatal("non-numeric cells must never merge")
+	}
+	// multi-group number: 1,234,567.89 needs TWO merges
+	if out, ok := reassembleThousands([]string{"c", "1", "234", "567.89"}, 2); !ok || out[1] != "1234567.89" {
+		t.Fatalf("(1,234,567.89) = %v ok=%v", out, ok)
+	}
+}

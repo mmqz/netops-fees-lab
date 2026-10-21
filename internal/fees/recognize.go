@@ -53,13 +53,20 @@ func ReadFeeFile(path string) (headers []string, rows []SourceRow, err error) {
 	}
 }
 
+// UTF-8 BOM (EF BB BF) — Excel's CSV export prepends it; the doc contract
+// says "UTF-8 with BOM tolerated", so the reader strips it before the CSV
+// parser ever sees it (#98: a surviving BOM glued the first header cell
+// into "\ufeff站址编码", the recognizer missed siteCode, and the whole
+// file bounced out of auto-recognize with a confusing 422).
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 func readCSV(path string) ([]string, []SourceRow, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fees: 打开 CSV %s: %w", path, err)
 	}
-	defer func() { _ = f.Close() }()
-	r := csv.NewReader(f)
+	data = bytes.TrimPrefix(data, utf8BOM)
+	r := csv.NewReader(bytes.NewReader(data))
 	r.LazyQuotes = true
 	r.FieldsPerRecord = -1 // ragged rows tolerated; mapping is by header
 	r.TrimLeadingSpace = true
@@ -83,12 +90,86 @@ func readCSV(path string) ([]string, []SourceRow, error) {
 			headers = trimAll(rec)
 			continue
 		}
+		// #98: a row with MORE cells than the header is misaligned data —
+		// the classic producer is an UNQUOTED thousands separator ("1,234.56"
+		// splits into two cells, the amount cell reads "1" and the file
+		// imports at 1/1000 of the truth with zero failures). The only
+		// recovery hypothesis consistent with the header count is the
+		// accounting grouping (1-3 digit head + exactly-3-digit tail); rows
+		// that cannot reassemble fail LOUD with the row number — the
+		// misparse must never reach the analysis table silently. Rows
+		// SHORTER than the header keep the tolerant "" cells (a missing
+		// trailing optional column stays legal).
+		if len(rec) > len(headers) {
+			merged, ok := reassembleThousands(rec, len(headers))
+			if !ok {
+				return nil, nil, fmt.Errorf("fees: CSV %s 第 %d 行有 %d 列，超出表头的 %d 列，且无法按千分位分组（1-3 位头 + 恰好 3 位尾）重组——疑似未加引号的千分位逗号；拒绝静默错位导入", path, line, len(rec), len(headers))
+			}
+			rec = merged
+		}
 		rows = append(rows, SourceRow{Number: line, Cells: rec})
 	}
 	if headers == nil {
 		return nil, nil, fmt.Errorf("fees: CSV %s 没有可识别的表头行", path)
 	}
 	return headers, rows, nil
+}
+
+// reassembleThousands merges adjacent cells of split thousands-separated
+// numbers until the row matches the header count (#98). Head: 1-3 pure
+// ASCII digits (the leading group "1" of "1,234.56"), or the product of a
+// previous merge pass (so the chain "1"+"234" → "1234" then
+// "1234"+"567.89" → "1234567.89" completes — a file-native "1234" cell is
+// NOT a head, keeping the false-merge surface at the single-group size).
+// Tail: exactly 3 digits with an optional 1-2 digit fraction ("234.56",
+// "000.00") — the accounting grouping convention is groups of EXACTLY
+// three, which keeps a legit adjacent pair like ("100", "50") from merging.
+// Greedy leftmost, one pair per pass, deterministic. ok=false when the
+// passes cannot equalize the count (the caller fails the row loudly).
+func reassembleThousands(cells []string, want int) ([]string, bool) {
+	mergedHeads := map[string]bool{}
+	for len(cells) > want {
+		merged := false
+		for i := 0; i+1 < len(cells); i++ {
+			head, tail := strings.TrimSpace(cells[i]), strings.TrimSpace(cells[i+1])
+			if !(isThousandsHead(head) || mergedHeads[head]) || !isThousandsTail(tail) {
+				continue
+			}
+			out := make([]string, 0, len(cells)-1)
+			out = append(out, cells[:i]...)
+			out = append(out, cells[i]+cells[i+1])
+			out = append(out, cells[i+2:]...)
+			cells = out
+			mergedHeads[head+tail] = true
+			merged = true
+			break
+		}
+		if !merged {
+			return nil, false
+		}
+	}
+	return cells, len(cells) == want
+}
+
+// isThousandsHead: the leading group — 1-3 pure ASCII digits.
+func isThousandsHead(s string) bool {
+	s = strings.TrimSpace(s)
+	return len(s) >= 1 && len(s) <= 3 && allDigits(s)
+}
+
+// isThousandsTail: a continuation group — exactly 3 digits, optionally
+// followed by a 1-2 digit fraction (amounts carry at most two fraction
+// digits, and a third is refused downstream anyway).
+func isThousandsTail(s string) bool {
+	s = strings.TrimSpace(s)
+	intPart, frac := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		intPart, frac = s[:i], s[i+1:]
+	}
+	if len(frac) > 2 {
+		return false
+	}
+	return len(intPart) == 3 && allDigits(intPart) && (frac == "" || allDigits(frac))
 }
 
 func readXLSX(path string) ([]string, []SourceRow, error) {

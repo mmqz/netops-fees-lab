@@ -25,22 +25,41 @@ import (
 // FIXED-POINT digit-by-digit: the value never passes through a float.
 //
 // Accepted shapes: the currency/separator stripping of the old parser
-// (¥/￥/$, half/full-width commas, spaces, trailing 元, parentheses,
-// full-width digits and dot), then [−]?digits[.digits] with AT MOST TWO
-// fraction digits — a third fraction digit is refused (never silently
-// rounded: a mangled amount is a false risk signal, the normalize layer
-// refuses rather than guesses). Scientific notation is refused as well
-// (real fee files never carry it; ParseFloat's acceptance of 1e3 was an
-// accident of the float path, not a contract).
+// (¥/￥/$, half/full-width commas, spaces, trailing 元, full-width digits
+// and dot), the ACCOUNTING NEGATIVE — a fully parenthesized value
+// "(50.00)"/“（50.00）” means minus (#98: the old parser stripped the
+// parentheses and parsed (50.00) as POSITIVE 5000 cents, flipping credit
+// signs) — then [−]?digits[.digits] with AT MOST TWO fraction digits — a
+// third fraction digit is refused (never silently rounded: a mangled
+// amount is a false risk signal, the normalize layer refuses rather than
+// guesses). Scientific notation is refused as well (real fee files never
+// carry it; ParseFloat's acceptance of 1e3 was an accident of the float
+// path, not a contract). Parentheses anywhere else — "(50.00", "1(2)3" —
+// are refused: the wrap is the only legal paren shape.
 func NormalizeAmount(raw string) (int64, error) {
 	s := strings.TrimSpace(raw)
+	// currency signs and the trailing unit strip FIRST so the wrap check
+	// also sees "¥(25.00)" and "(¥25.00)" in their bare paren shape.
+	s = strings.NewReplacer("¥", "", "￥", "", "$", "", "元", "").Replace(s)
+	// accounting negative next: (…) / （…） — the full wrap means minus.
+	// Either paren family, but the pair must MATCH (mixed "（50)" is not a
+	// shape real files produce — refuse rather than guess).
+	neg := false
+	if len(s) >= 3 {
+		if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+			neg = true
+			s = s[1 : len(s)-1]
+		} else if strings.HasPrefix(s, "（") && strings.HasSuffix(s, "）") {
+			neg = true
+			s = s[len("（") : len(s)-len("）")]
+		}
+	}
+	if strings.ContainsAny(s, "()（）") {
+		return 0, fmt.Errorf("数值 %q 无法解析（括号仅可整体包裹表示负数）", raw)
+	}
 	s = strings.NewReplacer(
-		"¥", "", "￥", "", "$", "",
 		",", "", "，", "",
 		" ", "", "　", "",
-		"元", "",
-		"（", "", "）", "",
-		"(", "", ")", "",
 	).Replace(s)
 	if s == "" {
 		return 0, fmt.Errorf("空金额")
@@ -61,7 +80,6 @@ func NormalizeAmount(raw string) (int64, error) {
 	}
 	s = b.String()
 
-	neg := false
 	if strings.HasPrefix(s, "-") {
 		neg = true
 		s = s[1:]

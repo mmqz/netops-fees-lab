@@ -36,6 +36,19 @@ func TestNormalizeAmount(t *testing.T) {
 		{"92233720368547758.08", 0, true}, // one cent past the int64 ceiling
 		{"99999999999999999", 0, true},    // 17-digit integer part overflows
 		{"-", 0, true},
+		// #98: the accounting negative — a full paren wrap means minus; the
+		// old parser stripped the parens and parsed (50.00) as +5000 cents.
+		{"(50.00)", -5000, false},
+		{"（50.00）", -5000, false},
+		{"¥(25.00)", -2500, false},
+		{"(¥25.00)", -2500, false},
+		{"(1,234.56)", -123456, false},
+		{"(-50.00)", -5000, false},
+		{"(0.01)", -1, false},
+		{"(50.00", 0, true},  // unbalanced wrap: refused, never guessed
+		{"1(2)3", 0, true},   // parens inside a number: garbage, refused
+		{"(50)00)", 0, true}, // not a single wrap: refused
+		{"()", 0, true},      // empty wrap: refused
 	} {
 		got, err := NormalizeAmount(tc.raw)
 		if tc.fail {
