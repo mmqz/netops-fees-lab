@@ -14,6 +14,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -94,7 +95,13 @@ func feeRisks(ctx context.Context, svc *services.Services, in feeRisksInput) (*m
 		FeeType: feeType, Year: *in.Year, Month: month, Limit: limit,
 	})
 	if err != nil {
-		return nil, feeRisksOutput{}, err
+		// #103: engine failures carry DuckDB/parquet error texts with absolute
+		// filesystem paths; the HTTP twin logs the detail and answers the
+		// generic 500 message. The MCP face has no operator response body —
+		// the detail goes to the server's stderr (slog default logger), and
+		// the tool error carries the same generic vocabulary.
+		slog.Error("fee_risks engine failure", "scenario", scenario, "error", err.Error())
+		return nil, feeRisksOutput{}, fmt.Errorf("费用风险查询失败（引擎内部错误，详情见服务端日志）")
 	}
 	return nil, feeRisksOutput{RiskResult: result}, nil
 }

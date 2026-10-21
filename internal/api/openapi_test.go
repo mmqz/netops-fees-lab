@@ -156,3 +156,115 @@ func TestOpenAPISpecDeterministic(t *testing.T) {
 		t.Errorf("document is suspiciously small: %d bytes", len(first))
 	}
 }
+
+// TestOpenAPISpecStatusProjection pins #103: the document projects each
+// route's HONEST status set — the declared success status (201/202 where the
+// handler answers them, 200 elsewhere), the derived defaults (400; 404 on
+// id patterns; 401 on mutating verbs; 500), and the declared extras (501 on
+// the engine-gated fees routes, 422 on the file-semantic importers, 409 on
+// the conflict-carrying mutations). The old document claimed 200 for every
+// route — a discovery lie for any agent client.
+func TestOpenAPISpecStatusProjection(t *testing.T) {
+	srv := newAPITestServer(t)
+	resp, body := doRequest(t, srv, http.MethodGet, "/api/openapi.json", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("openapi.json: %d", resp.StatusCode)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]json.RawMessage `json:"responses"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("openapi.json: %v", err)
+	}
+	get := func(path, method string) map[string]json.RawMessage {
+		p, ok := doc.Paths[path]
+		if !ok {
+			t.Fatalf("path %s missing from the document", path)
+		}
+		op, ok := p[method]
+		if !ok {
+			t.Fatalf("%s %s missing from the document", method, path)
+		}
+		return op.Responses
+	}
+
+	// The success-status truths verified against the handlers (2026-10-21):
+	created := []struct{ path, method string }{
+		{"/api/detection/rules", "post"},
+		{"/api/fees/imports", "post"},
+		{"/api/maintenance/windows", "post"},
+		{"/api/imports/{id}/template", "post"},
+		{"/api/workspaces", "post"},
+		{"/api/workspaces/{id}/checkpoints", "post"},
+	}
+	for _, c := range created {
+		if _, ok := get(c.path, c.method)["201"]; !ok {
+			t.Errorf("%s %s: no 201 in responses — the handler answers StatusCreated", c.method, c.path)
+		}
+		if _, ok := get(c.path, c.method)["200"]; ok {
+			t.Errorf("%s %s: still claims 200 — the success status is 201", c.method, c.path)
+		}
+	}
+	accepted := []struct{ path, method string }{
+		{"/api/imports", "post"},
+		{"/api/imports/{id}/mapping", "post"},
+		{"/api/metrics/imports", "post"},
+	}
+	for _, a := range accepted {
+		if _, ok := get(a.path, a.method)["202"]; !ok {
+			t.Errorf("%s %s: no 202 in responses — the handler answers StatusAccepted", a.method, a.path)
+		}
+		if _, ok := get(a.path, a.method)["200"]; ok {
+			t.Errorf("%s %s: still claims 200 — the success status is 202", a.method, a.path)
+		}
+	}
+	// 501 engine_not_built: the three engine-gated fees routes.
+	for _, path := range []string{"/api/fees/query/totals", "/api/fees/query/duplicates", "/api/fees/risks/{scenario}"} {
+		if _, ok := get(path, "get")["501"]; !ok {
+			t.Errorf("GET %s: no 501 — default builds answer engine_not_built", path)
+		}
+	}
+	// 422 on the file-semantic importers.
+	for _, path := range []string{"/api/imports", "/api/metrics/imports", "/api/fees/imports"} {
+		if _, ok := get(path, "post")["422"]; !ok {
+			t.Errorf("POST %s: no 422 — semantic file errors answer 422", path)
+		}
+	}
+	// 409 on the conflict-carrying mutations.
+	for _, tc := range []struct{ path, method string }{
+		{"/api/attribute-changes/{id}/apply", "post"},
+		{"/api/renames/{id}/apply", "post"},
+		{"/api/workspaces/{id}/checkpoints/{cpId}/restore", "post"},
+		{"/api/batches/{id}", "delete"},
+	} {
+		if _, ok := get(tc.path, tc.method)["409"]; !ok {
+			t.Errorf("%s %s: no 409 — the handler answers conflicts", tc.method, tc.path)
+		}
+	}
+	// Derived defaults: 404 on {id} patterns; 401 on mutations; 400+500 everywhere.
+	if _, ok := get("/api/batches/{id}", "get")["404"]; !ok {
+		t.Error("GET /api/batches/{id}: no 404")
+	}
+	if _, ok := get("/api/batches/{id}", "get")["401"]; ok {
+		t.Error("GET /api/batches/{id}: 401 must not appear on read routes")
+	}
+	if _, ok := get("/api/workspaces", "post")["401"]; !ok {
+		t.Error("POST /api/workspaces: no 401 — the --auth-token write gate covers mutations")
+	}
+	if _, ok := get("/api/health", "get")["400"]; !ok {
+		t.Error("GET /api/health: no 400")
+	}
+	if _, ok := get("/api/health", "get")["500"]; !ok {
+		t.Error("GET /api/health: no 500")
+	}
+	// Read routes never claim 401; the detection-rules DELETE carries the
+	// audit-protection 409.
+	if _, ok := get("/api/resources", "get")["401"]; ok {
+		t.Error("GET /api/resources: 401 must not appear on read routes")
+	}
+	if _, ok := get("/api/detection/rules/{id}", "delete")["409"]; !ok {
+		t.Error("DELETE /api/detection/rules/{id}: no 409 — the audit protection answers conflicts")
+	}
+}

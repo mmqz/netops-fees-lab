@@ -18,6 +18,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -72,31 +74,53 @@ func tagOrder(routes []route) []string {
 	return order
 }
 
+// successEnvelope is the shared success response body description.
+func successEnvelope(desc string) openAPIResponse {
+	return openAPIResponse{
+		Description: desc,
+		Content: map[string]openAPIContent{
+			"application/json": {Schema: map[string]any{"type": "object"}},
+		},
+	}
+}
+
+// routeResponses projects one route's HONEST status set (#103: the document
+// used to claim 200 for every route while nine routes answer 201, four answer
+// 202, and the fees-analysis routes answer 501 on default builds). The set:
+// the route's declared success status + the per-route derived defaults
+// (400 everywhere; 404 on {id} patterns; 401 on mutating verbs — the
+// optional --auth-token write gate; 500 everywhere) + the route's declared
+// extras (501 engine_not_built, 422 semantic file errors, 409 conflicts).
+func routeResponses(r route) map[string]openAPIResponse {
+	success := r.SuccessStatus
+	if success == 0 {
+		success = http.StatusOK
+	}
+	out := map[string]openAPIResponse{
+		strconv.Itoa(success): successEnvelope("成功（错误走统一信封 {error:{code,message}}）"),
+		"400":                 {Description: "请求校验失败（统一信封）"},
+		"500":                 {Description: "服务器内部错误（统一信封，message 不携带内部细节）"},
+	}
+	if strings.Contains(r.Pattern, "{id}") || strings.Contains(r.Pattern, "{cpId}") || strings.Contains(r.Pattern, "{scenario}") {
+		out["404"] = openAPIResponse{Description: "对象不存在（not_found）"}
+	}
+	if r.Method != http.MethodGet {
+		out["401"] = openAPIResponse{Description: "写门禁启用时（serve --auth-token）：缺少/错误 Bearer 令牌（unauthorized）"}
+	}
+	for status, desc := range r.ExtraStatuses {
+		out[strconv.Itoa(status)] = openAPIResponse{Description: desc}
+	}
+	return out
+}
+
 // buildOpenAPIDoc projects the route table into the document.
 func buildOpenAPIDoc(routes []route) openAPIDoc {
 	paths := map[string]openAPIPath{}
 	for _, r := range routes {
 		op := openAPIOperation{
-			Tags:    []string{r.Tag},
-			Summary: r.Summary,
-			Responses: map[string]openAPIResponse{
-				"200": {
-					Description: "成功（错误走统一信封 {error:{code,message}}）",
-					Content: map[string]openAPIContent{
-						"application/json": {Schema: map[string]any{"type": "object"}},
-					},
-				},
-			},
-		}
-		// The JSON envelope summary for mutating verbs.
-		switch r.Method {
-		case http.MethodPost, http.MethodPatch, http.MethodDelete:
-			op.Responses["200"] = openAPIResponse{
-				Description: "成功（错误走统一信封 {error:{code,message}}）",
-				Content: map[string]openAPIContent{
-					"application/json": {Schema: map[string]any{"type": "object"}},
-				},
-			}
+			Tags:      []string{r.Tag},
+			Summary:   r.Summary,
+			Responses: routeResponses(r),
 		}
 		p := paths[r.Pattern]
 		switch r.Method {

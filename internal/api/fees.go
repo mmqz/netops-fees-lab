@@ -657,7 +657,12 @@ func (s *Server) handleFeesRisks(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.fees.Risks(r.Context(), engine, scenario, rq)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "internal", err.Error())
+		// #103: engine failures carry DuckDB/parquet error texts with
+		// absolute filesystem paths — the raw text leaked to the client and
+		// to the AI face. respondErrorFor LOGS the detail server-side and
+		// answers the generic 500 message, the same vocabulary every other
+		// route uses.
+		s.respondErrorFor(w, r, err, "")
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
