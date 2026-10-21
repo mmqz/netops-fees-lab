@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -149,13 +150,20 @@ func (d *DB) applyMigrations(ctx context.Context) error {
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("repo: scan schema_migrations: %w", err)
 		}
 		applied[v] = struct{}{}
 	}
+	// #101: a mid-iteration IO error surfaces as rows.Err() — the loop
+	// above silently treats it as a clean end and the missing versions
+	// would re-apply (or worse, the chain would skip).
+	iterErr := rows.Err()
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("repo: close schema_migrations rows: %w", err)
+	}
+	if iterErr != nil {
+		return fmt.Errorf("repo: read schema_migrations: %w", iterErr)
 	}
 	for _, m := range migrations {
 		if _, done := applied[m.Version]; done {
@@ -202,7 +210,7 @@ func (d *DB) applyMigration(ctx context.Context, m Migration) error {
 // is restored afterwards so the connection returns to the pool with
 // enforcement re-enabled — the simplified safe form of SQLite's official
 // 12-step ALTER procedure.
-func (d *DB) applyMigrationFKOff(ctx context.Context, m Migration) error {
+func (d *DB) applyMigrationFKOff(ctx context.Context, m Migration) (err error) {
 	conn, err := d.sql.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("repo: migration %d (%s): acquire connection: %w", m.Version, m.Name, err)
@@ -214,10 +222,20 @@ func (d *DB) applyMigrationFKOff(ctx context.Context, m Migration) error {
 	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		return fmt.Errorf("repo: migration %d (%s): disable foreign keys: %w", m.Version, m.Name, err)
 	}
-	var restoreErr error
+	// #101: named return REQUIRED — the deferred restore used to write a
+	// local that the already-computed return value never saw, so a failed
+	// re-enable was swallowed and the connection returned to the pool with
+	// enforcement OFF (integrity hazard, no symptom). With the named return
+	// the deferred assignment reaches the caller; on a failed migration the
+	// original error stays primary and the restore failure is joined.
 	defer func() {
-		if _, err := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); err != nil {
-			restoreErr = fmt.Errorf("repo: migration %d (%s): re-enable foreign keys: %w", m.Version, m.Name, err)
+		if _, rerr := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); rerr != nil {
+			rest := fmt.Errorf("repo: migration %d (%s): re-enable foreign keys: %w", m.Version, m.Name, rerr)
+			if err == nil {
+				err = rest
+			} else {
+				err = errors.Join(err, rest)
+			}
 		}
 	}()
 
@@ -243,7 +261,7 @@ func (d *DB) applyMigrationFKOff(ctx context.Context, m Migration) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("repo: migration %d (%s): commit: %w", m.Version, m.Name, err)
 	}
-	return restoreErr
+	return nil
 }
 
 // recordMigration inserts the bookkeeping row of m into schema_migrations.
