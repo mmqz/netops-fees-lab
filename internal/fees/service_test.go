@@ -390,3 +390,35 @@ func TestImportXLSX(t *testing.T) {
 		t.Fatalf("parquet files = %v (err %v), want the one partition file", files, err)
 	}
 }
+
+// TestImportPreflightPropagatesDBErrors pins #104-B: the idempotency
+// preflight used to read ANY error as "no duplicate" and proceed — a real
+// DB failure silently voided the guarantee (or crashed later with a less
+// honest message). Only the not-found verdict may proceed; everything else
+// propagates as a preflight error.
+func TestImportPreflightPropagatesDBErrors(t *testing.T) {
+	svc, db, dir := newService(t)
+	ctx := context.Background()
+	src := writeCSV(t, dir, "healthy.csv", "站址编码,账期,电费(元)\nS1,2024-05,10.00\n")
+
+	// Close the DB underneath the service: HashFile/ReadFeeFile still work
+	// (filesystem), so the FIRST database touch — the preflight point
+	// query — is what fails. The OLD shape skipped it silently and died at
+	// the batch Create with a misleading error; the NEW shape fails the
+	// preflight LOUDLY.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	_, err := svc.Import(ctx, ImportOptions{
+		Path: src, FeeType: FeeTypeElectricity, Year: 2024, Month: 5,
+	})
+	if err == nil {
+		t.Fatal("Import with a dead database must fail")
+	}
+	if !strings.Contains(err.Error(), "幂等性预检") {
+		t.Fatalf("Import error = %v, want the honest preflight classification (the DB failed, not the file)", err)
+	}
+	if errors.Is(err, ErrImportRefused) {
+		t.Fatalf("a dead database is a SERVER fault, not an operator refusal: %v", err)
+	}
+}

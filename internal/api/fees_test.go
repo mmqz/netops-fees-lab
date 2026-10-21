@@ -15,10 +15,14 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mmqz/netops-lab/internal/app"
 	"github.com/mmqz/netops-lab/internal/fees"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 )
 
 // uploadFeeFile posts the fee import multipart (file + feeType + year +
@@ -685,5 +689,87 @@ func TestAPIFeesEvidenceReadback(t *testing.T) {
 	resp, body = get("2")
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("evidence after rollback: status = %d, want 200 — the snapshot survives rollback\nbody: %s", resp.StatusCode, body)
+	}
+}
+
+// TestAPIFeesImportErrorClassification pins #104: the import channel tells
+// the operator's file apart from the server's fault. Refusals (unreadable
+// shape / missing mapping / all rows failed) answer 422 with the honest
+// text; SERVER faults (snapshot layer unwritable) answer 500 with the
+// generic message — the raw error (with filesystem paths) goes to the log,
+// never the wire, and the operator is no longer told to fix their file
+// when the disk is the problem.
+func TestAPIFeesImportErrorClassification(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	a, err := app.New(app.Config{
+		DBPath:  filepath.Join(dir, "netops.db"),
+		DataDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	srv := httptest.NewServer(a.Routes())
+	t.Cleanup(func() {
+		srv.Close()
+		_ = a.Close()
+	})
+
+	csv := "站址编码,账期,电费(元)\nS1,2024-08,100.00\n"
+
+	// A completed import first: it creates the snapshot tree we make
+	// unwritable below (the staging area stays writable so the failure is
+	// the SNAPSHOT layer's, not the staging one).
+	if resp, body := uploadFeeFile(t, srv, "base.csv", csv, "electricity", "2024", "8", ""); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("base import: status = %d\n%s", resp.StatusCode, body)
+	}
+
+	// A: refusal — headers that resolve neither siteCode nor amount (no
+	// map) answer 422 fee_import_refused with the honest text.
+	resp, body := uploadFeeFile(t, srv, "mystery.csv", "列一,列二,列三\n1,2,3\n", "electricity", "2024", "9", "")
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("refusal: status = %d, want 422\n%s", resp.StatusCode, body)
+	}
+	var env struct {
+		Error struct{ Code, Message string }
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != "fee_import_refused" {
+		t.Errorf("refusal code = %q, want fee_import_refused", env.Error.Code)
+	}
+	if !strings.Contains(env.Error.Message, "siteCode") {
+		t.Errorf("refusal message = %q, want the honest missing-mapping text", env.Error.Message)
+	}
+
+	// B: server fault — the snapshot tree goes unwritable; the file is
+	// fine. The OLD channel answered 422 fee_import_failed (fix your file
+	// — misleading); the classified channel answers 500 internal with the
+	// generic message and the path-carrying detail in the log.
+	// The DEEPEST existing parent of the new snapshot path: the base import
+	// created fee-imports/electricity/2024/08; the new file (month 07) must
+	// CREATE .../2024/07, which needs write permission on .../2024 — lock
+	// exactly that (chmod of the tree root alone would leave the deeper
+	// parents writable and the write would succeed).
+	snapDir := filepath.Join(dir, "fee-imports", "electricity", "2024")
+	if err := os.Chmod(snapDir, 0o500); err != nil {
+		t.Fatalf("chmod snapshot dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(snapDir, 0o755) })
+	resp, body = uploadFeeFile(t, srv, "good-but-stranded.csv", strings.ReplaceAll(csv, "2024-08", "2024-07"), "electricity", "2024", "7", "")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("server fault: status = %d, want 500\n%s", resp.StatusCode, body)
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != "internal" {
+		t.Errorf("server fault code = %q, want internal", env.Error.Code)
+	}
+	if strings.Contains(env.Error.Message, dir) || strings.Contains(env.Error.Message, "fee-imports") {
+		t.Errorf("server fault message leaks the filesystem path: %q", env.Error.Message)
+	}
+	if !strings.Contains(env.Error.Message, "服务器内部错误") {
+		t.Errorf("server fault message = %q, want the generic internal text", env.Error.Message)
 	}
 }

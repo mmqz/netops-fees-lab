@@ -75,6 +75,21 @@ func (e *ErrDuplicateImport) Error() string {
 	return fmt.Sprintf("fees: 同一文件（同哈希/类型/账期/映射）已于批次 %s 完成导入——零新数据（幂等跳过）", e.BatchID)
 }
 
+// ErrImportRefused marks the CLIENT-side refusals of the import channel
+// (#104): bad file shape, unreadable format, missing mapping — problems the
+// operator fixes in the FILE, not server faults. The HTTP face answers these
+// with 422 and the message text; everything else (snapshot IO, DB, Parquet)
+// is a server fault the transport classifies as 5xx with the detail logged,
+// never shipped.
+var ErrImportRefused = errors.New("fees: 导入被拒绝")
+
+// refusef builds one ErrImportRefused-wrapped refusal (the message is the
+// honest, operator-facing text — headers and mapping names, no filesystem
+// paths beyond the caller's own file name).
+func refusef(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrImportRefused, fmt.Sprintf(format, args...))
+}
+
 // ErrEngineNotBuilt reports that the DuckDB query engine is not compiled
 // into this binary (release builds use -tags duckdb; CGO required). The
 // import/write path is unaffected — only queries answer this.

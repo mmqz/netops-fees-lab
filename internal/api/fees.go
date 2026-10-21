@@ -124,7 +124,25 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusOK, summary)
 			return
 		}
-		respondError(w, http.StatusUnprocessableEntity, "fee_import_failed", err.Error())
+		if errors.Is(err, fees.ErrImportRefused) {
+			// #104: the operator's file is the problem — 422 with the honest
+			// refusal text (bad format / unreadable / missing mapping). The
+			// all-rows-failed shape carries a summary; it keeps its dedicated
+			// code so the client can tell "fix the file, retry" from "wrong
+			// file entirely".
+			if summary.BatchID != "" && summary.Status == "failed" {
+				respondError(w, http.StatusUnprocessableEntity, "fee_rows_failed", "全部行规范化失败："+
+					firstString(summary.Errors, "无行错误详情（见批次记录 error 字段）"))
+				return
+			}
+			respondError(w, http.StatusUnprocessableEntity, "fee_import_refused", err.Error())
+			return
+		}
+		// #104: everything else (snapshot IO / DB / Parquet) is a SERVER
+		// fault — it used to answer 422 fee_import_failed, steering the
+		// operator toward fixing their file. respondErrorFor logs the detail
+		// and answers the generic 500.
+		s.respondErrorFor(w, r, err, "")
 		return
 	}
 	if summary.Status == "failed" {

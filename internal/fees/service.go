@@ -2,6 +2,7 @@ package fees
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,11 +124,13 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 		name = filepath.Base(opts.Path)
 	}
 	if _, err := SnapshotExt(name); err != nil {
-		return ImportSummary{}, err
+		return ImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
 	}
 	headers, rows, err := ReadFeeFile(opts.Path)
 	if err != nil {
-		return ImportSummary{}, err
+		// #104: a bad file shape is the operator's to fix — 422 class, not a
+		// server fault. The reader's texts are the CLI contract already.
+		return ImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
 	}
 
 	// 2. mapping resolution (explicit mapping wins; recognizer fills the
@@ -138,12 +141,18 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 		mapping = suggested
 	}
 	if mapping["siteCode"] == "" || mapping["amount"] == "" {
-		return ImportSummary{}, fmt.Errorf("fees: 缺少必需列映射（siteCode / amount）——请提供映射 JSON 或修正表头；识别到的表头：%v", headers)
+		return ImportSummary{}, refusef("缺少必需列映射（siteCode / amount）——请提供映射 JSON 或修正表头；识别到的表头：%v", headers)
 	}
 	canonical := FeeMapping{FeeType: opts.FeeType, Columns: mapping}.CanonicalMapping()
 
 	// 3. pre-flight idempotency.
-	if existing, err := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical); err == nil {
+	existing, preflightErr := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical)
+	if preflightErr != nil && !errors.Is(preflightErr, domain.ErrNotFound) {
+		// #104: a real DB failure used to read as "no duplicate" and the
+		// import proceeded — the idempotency guarantee silently void.
+		return ImportSummary{}, fmt.Errorf("fees: 幂等性预检: %w", preflightErr)
+	}
+	if preflightErr == nil {
 		return ImportSummary{
 			BatchID: existing.ID, Status: "completed", WorkbookName: existing.WorkbookName,
 			SHA256: sha, FeeType: string(opts.FeeType), FeeYear: opts.Year, FeeMonth: opts.Month,
@@ -179,7 +188,7 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if siteIdx < 0 || amountIdx < 0 {
 		errMsg := fmt.Sprintf("映射列不在表头中：siteCode=%q amount=%q（表头：%v）", mapping["siteCode"], mapping["amount"], headers)
 		_ = s.db.FeeBatches.MarkFailed(ctx, batchID, len(rows), 0, errMsg)
-		return ImportSummary{}, fmt.Errorf("fees: %s", errMsg)
+		return ImportSummary{}, refusef("%s", errMsg)
 	}
 
 	sourceFile := SnapshotSourceFile(name, sha)
@@ -202,7 +211,7 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 			BatchID: batchID, Status: "failed", WorkbookName: name, SHA256: sha,
 			FeeType: string(opts.FeeType), FeeYear: opts.Year, FeeMonth: opts.Month,
 			RowsTotal: len(rows), RowsImported: 0, RowsFailed: len(rows), Errors: errs,
-		}, fmt.Errorf("fees: %d 行全部规范化失败（首个：%s）", len(rows), importErrs[0].Error())
+		}, refusef("%d 行全部规范化失败（首个：%s）", len(rows), importErrs[0].Error())
 	}
 
 	// 6. Parquet partitions (staged → atomic rename).
