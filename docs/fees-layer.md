@@ -22,7 +22,7 @@
 
 - **内容寻址**：`fee-imports/<fee_type>/<year>/<month>/<sha256>_<原始文件名>.<ext>`。目录成分 = 批次声明的账期（操作者对「这文件覆盖什么」的陈述）；同内容 → 同路径（幂等，临时文件 + 原子 rename 落盘）。
 - **永不修改**：快照是每条分析行的回读源（`source_file + source_row` 行号级对位）；原始文件改名/重导不改变证据锚点。回读通道（#86）：`GET /api/fees/batches/{id}/evidence?row=N` 与 `netopslab fees evidence --batch <id> --row <n>`（行号 = 源文件自身编号，表头 = 1；回滚批次仍可读——快照按设计存活）。
-- **回滚保留**：批次回滚删 Parquet（分析行消失）但**快照保留**——与资源导入器回滚保留工作簿的同一不对称语义（证据寿命 > 批次寿命）。
+- **回滚保留**：批次回滚删 Parquet（分析行消失）但**快照保留**——与资源导入器回滚保留工作簿的同一不对称语义（证据寿命 > 批次寿命）。回滚本身是**原子事务（#107）**：先把删除集物化成显式清单（该批次的每个分区文件 → 隔离槽），逐文件以**可逆 rename** 移入 `analysis/fees/.rollback/<批次id>/`（同文件系统、纯元数据操作——失败时文件原地不动），**最后一个文件移完才**把批次行 flip `rolled_back`（单一提交点，与导入的第 7 步同构）。提交点之前的任何故障（IO 错误、DB 故障）→ 隔离整体 UNDO，批次保持 completed、**每一行都还在——回滚要么整体发生要么整体不发生**；UNDO 本身也被阻断的极端双重故障 → 批次行如实标 `failed`（隔离区滞留位置写入 error 文本，绝不假扮 completed/rolled_back；`failed` 释放幂等键，重导快照原件即恢复分析行，滞留隔离区与残留文件过里程碑后由 GC 收走）。隔离区对一切读者不可见（镜像布局在 `fees/` 下五层深，查询 glob 恰三层）；崩溃在隔离中途留下的残局由下一次回滚先收养（恢复隔离文件后重新执行）。
 
 ## 3. 分析层（分区大表）
 
@@ -53,7 +53,8 @@ analysis/fees/fee_type=electricity/year=2024/month=05/batch-fee_<uuid>.parquet
 
 - **幂等键**：`(sha256, fee_type, fee_year, fee_month, mapping)` 的**部分唯一索引**（`WHERE status='completed'`）——同文件+同类型+同账期+同映射至多一个 completed 批次；failed/rolled_back **不占键**（重试通道构造性开放，#61「转换失败的批处理重试不产生半写状态」）。
 - **提交点**：`MarkCompleted`（唯一索引在此触发）。导入顺序 = 崩溃安全设计：哈希读文件 → 幂等预检 → 快照（幂等）→ 规范化（行失败计数不致命）→ Parquet **staging 写入 + 原子 rename** → 批次行 flip completed。提交点之前的崩溃最多留下 GC 孤儿文件 + 一个 failed 批次行，重试永远干净。
-- **GC**（`GCAnalysis`，#106 接线）：keep-set = completed 批次 id；`.staging` 下非 completed 批次的暂存目录、`batch-*.parquet` 中无 completed 行背书的文件 = 孤儿，删除。方向保守：completed 引用的一律保留。**触发点（cmd 层，与 uploads GC 同款二处）**：①`serve` 启动时——HTTP 监听启动**前**串行执行（本进程不可能有在途导入）；②CLI `netopslab gc`（与 uploads 清理同一次运行，stdout 单 JSON 计数对象多 `analysisFiles`/`analysisStaging` 两字段）。MCP 进程零触发、HTTP 无 GC 路由。**并发里程碑（mtime 防御）**：Parquet 文件在批次行 flip completed **之前**就已 rename 进分区目录——跨进程（`fees import` CLI 与 serve 启动重叠）在途导入的文件会短暂呈现「无 completed 行背书」形态；无差别清理会静默丢行。孤儿仅在**最后写入时间超过 1 小时宽限**后才可删：在途导入的文件总是秒级新鲜，真实崩溃孤儿在被扫到时早已过期，宽限只延迟「一小时内崩溃的碎片」的收集。`.staging` 子树 walk 整体跳过（`filepath.SkipDir`），只由专属暂存目录清扫按同一里程碑判定。
+- **回滚原子性（#107）**：回滚不再逐文件 unlink 后 flip——那个窗口里中途 IO 错误会留下「completed 批次 + Parquet 行已删」的中间态（既非完整回滚也非完整保留，审计口径直接损坏）。现行为：物化删除清单 → 逐文件可逆 rename 进 `.rollback` 隔离区 → **flip `rolled_back` 为唯一提交点** → 提交后清隔离区 + 修剪空分区目录。故障语义：提交前故障 = 整体 UNDO（批次保持 completed，行数不变）；UNDO 也故障 = 批次行标 `failed`（既有诚实态：不占幂等键 → 重导即恢复；error 文本记录隔离区滞留位置）；翻转失败（含并发赢家先行 flip）= UNDO 恢复全部分析行后如实报错。隔离区不可见性（五层深 vs 查询 glob 三层）与 GC 接管见下。
+- **GC**（`GCAnalysis`，#106 接线）：keep-set = completed 批次 id；`.staging` 与 `.rollback`（#107 隔离区）下非 completed 批次的工作目录、`batch-*.parquet` 中无 completed 行背书的文件 = 孤儿，删除（隔离区整体按**目录粒度**判定——残局是全有或全无，文件级删除会剥离可收养证据并留空镜像目录垃圾；completed 批次的隔离区是撕裂回滚的收养证据，keep-set 永远赢过里程碑）。方向保守：completed 引用的一律保留。**触发点（cmd 层，与 uploads GC 同款二处）**：①`serve` 启动时——HTTP 监听启动**前**串行执行（本进程不可能有在途导入）；②CLI `netopslab gc`（与 uploads 清理同一次运行，stdout 单 JSON 计数对象多 `analysisFiles`/`analysisStaging` 两字段——`analysisStaging` 覆盖暂存与隔离两工作目录）。MCP 进程零触发、HTTP 无 GC 路由。**并发里程碑（mtime 防御）**：Parquet 文件在批次行 flip completed **之前**就已 rename 进分区目录——跨进程（`fees import` CLI 与 serve 启动重叠）在途导入的文件会短暂呈现「无 completed 行背书」形态；无差别清理会静默丢行。孤儿仅在**最后写入时间超过 1 小时宽限**后才可删：在途导入的文件总是秒级新鲜，真实崩溃孤儿在被扫到时早已过期，宽限只延迟「一小时内崩溃的碎片」的收集。`.staging` 与 `.rollback` 子树 walk 整体跳过（`filepath.SkipDir`），只由专属工作目录清扫按同一里程碑判定。
 - 与 `import_batches` **无外键、零耦合**：费用管道与资源管道是两个世界（资源导入器看不到 fee 批次，费用导入器不创建资源）。
 
 ## 5. 构建形态（CGO 隔离）

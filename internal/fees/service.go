@@ -30,6 +30,15 @@ type Service struct {
 	// Now is the clock hook; tests may replace it for deterministic
 	// timestamps. New installs time.Now; a nil hook falls back.
 	Now func() time.Time
+
+	// testMoveFault, when non-nil (set only via export_test.go — the
+	// importer's afterSheet seam precedent), is consulted before every
+	// file move of the rollback dance; a non-nil answer fails that exact
+	// step. #107's regression tests inject IO faults deterministically
+	// this way: a chmod'd read-only dir cannot place a fault BETWEEN two
+	// renames of the same call (and would not bite when tests run as
+	// root).
+	testMoveFault func(op, path string) error
 }
 
 // NewService binds a service to db and the data dir.
@@ -311,11 +320,51 @@ func (s *Service) List(ctx context.Context, status FeeStatus) ([]FeeBatch, error
 	return s.db.FeeBatches.List(ctx, status)
 }
 
-// Rollback reverses a completed fee batch: the Parquet files are deleted
-// (the analysis rows disappear), the snapshot STAYS (evidence chain — the
-// same asymmetry as the resource importer's batch rollback keeping the
-// workbook), and the batch row flips to rolled_back (terminal audit).
-// Idempotent: rolling back a rolled-back batch answers ErrConflict.
+// The rollback file-dance step names — the testMoveFault seam's op
+// values (quarantine = live partition file → quarantine slot, restore =
+// the inverse, i.e. an undo or torn-attempt adoption step).
+const (
+	moveQuarantine = "quarantine"
+	moveRestore    = "restore"
+)
+
+// moveFault consults the test seam before one rollback file move; nil in
+// production.
+func (s *Service) moveFault(op, path string) error {
+	if s.testMoveFault != nil {
+		return s.testMoveFault(op, path)
+	}
+	return nil
+}
+
+// Rollback reverses a completed fee batch ATOMICALLY (#107): the delete
+// set is materialized first (every partition file of the batch), each
+// file is then RENAMED into the per-batch quarantine (a reversible,
+// metadata-only move — parquet.go's #107 section), and only after the
+// last file moved does the batch row flip to rolled_back — one commit
+// point, the same shape as the import's step-7. The snapshot STAYS
+// (evidence chain — the same asymmetry as the resource importer's batch
+// rollback keeping the workbook).
+//
+// Failure semantics (the issue's acceptance, in order):
+//
+//   - any fault before the flip → the quarantine is UNDONE and the
+//     batch keeps completed with EVERY row intact: a rollback either
+//     fully happens or fully does not ("失败时不落任何删");
+//   - a fault that even blocks the undo (a second IO fault) → the row
+//     is marked failed with the quarantine's whereabouts in the error
+//     text and never left lying as completed/rolled_back: 'failed' is the
+//     existing honest marker (the partial idempotency index covers
+//     completed rows only, so it also frees the key — the snapshot-backed
+//     re-import restores the rows); GCAnalysis sweeps the quarantined
+//     remains past the milestone.
+//
+// A previous attempt torn by a crash (files already quarantined, row
+// still completed) is adopted first: the quarantined files are restored
+// so this attempt re-plans from the full live set. Idempotent at the
+// edges: rolling back a rolled-back batch answers ErrConflict; a
+// missing file inside the plan is tolerated (already gone = where the
+// delete wants it).
 func (s *Service) Rollback(ctx context.Context, id string) (FeeBatch, error) {
 	b, err := s.db.FeeBatches.GetByID(ctx, id)
 	if err != nil {
@@ -324,19 +373,118 @@ func (s *Service) Rollback(ctx context.Context, id string) (FeeBatch, error) {
 	if b.Status != FeeStatusCompleted {
 		return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: 状态 %s，仅 completed 可回滚: %w", id, b.Status, domain.ErrConflict)
 	}
+
+	// adopt a torn attempt first: a crash mid-dance leaves files in the
+	// quarantine with the row still completed; restoring them re-derives
+	// the full live set before this attempt materializes its own plan.
+	torn, terr := quarantinedFiles(s.analysisDir(), id)
+	if terr != nil {
+		return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: %w", id, terr)
+	}
+	for _, p := range torn {
+		if ferr := s.moveFault(moveRestore, p.live); ferr != nil {
+			// rows would stay quarantined under a completed row — the
+			// exact lie #107 closes; record the torn state honestly.
+			s.markRollbackTorn(ctx, b, ferr)
+			return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: 恢复中断的隔离文件 %s: %w", id, p.live, ferr)
+		}
+		if rerr := restoreQuarantinedFile(p); rerr != nil {
+			s.markRollbackTorn(ctx, b, rerr)
+			return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: %w", id, rerr)
+		}
+	}
+	if len(torn) > 0 {
+		_ = os.RemoveAll(rollbackQuarantineRoot(s.analysisDir(), id))
+	}
+
+	// materialize the WHOLE delete plan before touching any file.
 	files, err := BatchParquetFiles(s.analysisDir(), id)
 	if err != nil {
 		return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: %w", id, err)
 	}
-	if err := RemoveParquetFiles(files); err != nil {
-		return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: %w", id, err)
+	plan := buildRollbackPlan(s.analysisDir(), id, files)
+
+	// execute: quarantine every file, each move reversible. Any fault
+	// aborts into a full undo.
+	for _, p := range plan {
+		if ferr := s.moveFault(moveQuarantine, p.live); ferr != nil {
+			return FeeBatch{}, s.abortRollback(ctx, b, plan, fmt.Errorf("fees: 隔离 Parquet 文件 %s: %w", p.live, ferr))
+		}
+		if qerr := quarantineFile(p); qerr != nil {
+			return FeeBatch{}, s.abortRollback(ctx, b, plan, qerr)
+		}
 	}
+
+	// the commit point: the flip is what turns the quarantine into a
+	// deletion (the same single commit point as the import's).
 	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
 		return tx.FeeBatches.MarkRolledBack(ctx, id)
 	}); err != nil {
-		return FeeBatch{}, fmt.Errorf("fees: 回滚批次 %s: %w", id, err)
+		// a concurrent winner may have flipped first; its cleanup then
+		// took the quarantined files and the undo steps below no-op on
+		// ENOENT. A file we do put back under a rolled_back row is
+		// reclaimed by GCAnalysis past the milestone (not keep-set).
+		return FeeBatch{}, s.abortRollback(ctx, b, plan, fmt.Errorf("fees: 提交回滚状态: %w", err))
+	}
+
+	// after the commit the quarantined rows are dead: drop the quarantine
+	// tree (best-effort — a crash here leaves it to GCAnalysis's .rollback
+	// sweep) and prune the emptied partition dirs (the hygiene
+	// RemoveParquetFiles' rollback callers always had).
+	_ = os.RemoveAll(rollbackQuarantineRoot(s.analysisDir(), id))
+	for _, p := range plan {
+		pruneEmptyDirs(filepath.Dir(p.live), 3)
 	}
 	return s.db.FeeBatches.GetByID(ctx, id)
+}
+
+// abortRollback undoes a half-executed dance — #107's core: every
+// quarantined file goes back to its live slot, so a failed rollback
+// leaves the batch completed with ALL rows intact (nothing deleted). If
+// the undo itself hits a fault, the row is marked failed via
+// markRollbackTorn instead of left lying as completed-with-rows-missing.
+// The undo covers the whole plan (never-quarantined slots answer ENOENT
+// and no-op), so it is idempotent against any abort point.
+func (s *Service) abortRollback(ctx context.Context, b FeeBatch, plan []rollbackPlan, cause error) error {
+	id := b.ID
+	for _, p := range plan {
+		if ferr := s.moveFault(moveRestore, p.live); ferr != nil {
+			s.markRollbackTorn(ctx, b, ferr)
+			return fmt.Errorf("fees: 回滚批次 %s: %w（恢复已隔离文件失败，批次已标记 failed，隔离区保留待 GC 清扫）: %v", id, cause, ferr)
+		}
+		if rerr := restoreQuarantinedFile(p); rerr != nil {
+			s.markRollbackTorn(ctx, b, rerr)
+			return fmt.Errorf("fees: 回滚批次 %s: %w（恢复已隔离文件 %s 失败，批次已标记 failed，隔离区保留待 GC 清扫）: %v", id, cause, p.live, rerr)
+		}
+	}
+	_ = os.RemoveAll(rollbackQuarantineRoot(s.analysisDir(), id))
+	return fmt.Errorf("fees: 回滚批次 %s: %w（已恢复全部分析行，批次保持 completed——回滚未发生）", id, cause)
+}
+
+// markRollbackTorn records a rollback that stopped halfway with files
+// stranded in the quarantine: the row must NOT stay completed — part of
+// its rows are out of the query surface. MarkFailed is the existing
+// honest marker (adding a dedicated rollback_failed state would need a
+// repo method — out of this fix's file boundary): the import accounting
+// passes through unchanged (rows_total/rows_failed as they were),
+// completed_at stays as the audit of the once-good import, and 'failed'
+// frees the idempotency key so re-importing the snapshot's file restores
+// the analysis rows (the snapshot survives every rollback by design).
+// Best-effort: if even this write fails (DB down on top of the IO
+// fault), the already-returned error told the operator everything.
+func (s *Service) markRollbackTorn(ctx context.Context, b FeeBatch, cause error) {
+	stranded, _ := quarantinedFiles(s.analysisDir(), b.ID)
+	root := rollbackQuarantineRoot(s.analysisDir(), b.ID)
+	where := make([]string, 0, len(stranded))
+	for _, p := range stranded {
+		where = append(where, strings.TrimPrefix(p.quarantine, root+string(filepath.Separator)))
+	}
+	detail := "无"
+	if len(where) > 0 {
+		detail = strings.Join(where, ", ")
+	}
+	_ = s.db.FeeBatches.MarkFailed(ctx, b.ID, b.RowsTotal, b.RowsFailed,
+		fmt.Sprintf("回滚中断（%s）：分析行已不完整；滞留隔离区待 GC 清扫：%s；快照保留，可重导恢复", cause, detail))
 }
 
 // EvidenceRow is the API-facing read-back of one source row from a batch's
@@ -415,14 +563,18 @@ const gcOrphanGrace = time.Hour
 
 // GCAnalysis removes the analysis layer's orphans: Parquet files whose
 // batch-id is not a completed batch (crash leftovers, rolled-back
-// relicts), and stale staging dirs. Returns the counts. The keep-set is
-// exactly the completed batch ids — the conservative direction is KEEP
-// (an unaccounted file is reported, not deleted, when its batch row is
-// missing entirely… no: a file whose batch row vanished IS an orphan by
-// definition — the row is the commit record. Delete. EXCEPT when the
-// mtime says it was written moments ago: an unaccounted FRESH file is a
-// possible in-flight import of another process, and the milestone keeps
-// it until the next sweep — #106.)
+// relicts), and stale working dirs of the fees tree — the #106 staging
+// trees and the #107 rollback quarantines (a quarantine of a
+// non-completed batch is a rolled-back batch's leftover or a torn
+// rollback's stranded remains). Returns the counts; deletedStaging
+// covers both working-dir namespaces (the CLI's analysisStaging field).
+// The keep-set is exactly the completed batch ids — the conservative
+// direction is KEEP: an unaccounted FRESH file is a possible in-flight
+// import of another process, and the milestone keeps it until the next
+// sweep — #106. A completed batch's working dirs are never debris
+// either: its staging tree is mid-write, and a torn rollback's
+// quarantine (row still completed) is adoption evidence the next
+// Rollback call restores before proceeding.
 func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging int, err error) {
 	live, err := s.db.FeeBatches.ListParquetLiveBatchIDs(ctx)
 	if err != nil {
@@ -435,11 +587,15 @@ func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging 
 			return nil //nolint — unreadable trees are skipped, GC is best-effort
 		}
 		if d.IsDir() {
-			// The staging subtree belongs to the dedicated sweep below:
-			// its files are mid-write by definition, the walk must not
-			// even look at them (pre-#106 the ".staging" name check here
-			// was dead code — directories returned one line above).
-			if d.Name() == ".staging" {
+			// The working subtrees belong to the dedicated sweeps below:
+			// staging files are mid-write by definition and the #107
+			// quarantine is judged at DIR grain (a torn attempt's tree is
+			// all-or-nothing; a completed batch's tree is adoption
+			// evidence — a file-level delete would strip it and litter
+			// empty mirror dirs), so the walk must not even look at
+			// either (pre-#106 the ".staging" name check here was dead
+			// code — directories returned one line above).
+			if d.Name() == ".staging" || d.Name() == quarantineDirName {
 				return filepath.SkipDir
 			}
 			return nil
@@ -463,28 +619,43 @@ func (s *Service) GCAnalysis(ctx context.Context) (deletedFiles, deletedStaging 
 	if err := RemoveParquetFiles(doomed); err != nil {
 		return 0, 0, fmt.Errorf("fees: GC: %w", err)
 	}
-	// stale staging dirs: every staging dir whose batch is not live AND
-	// that has been idle past the grace window (an in-flight import's
-	// staging dir is seconds old; crash debris is not).
-	staging := filepath.Join(root, ".staging")
-	entries, derr := os.ReadDir(staging)
-	if derr == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			if _, keep := live[e.Name()]; keep {
-				continue
-			}
-			if !entryIdle(e, gcOrphanGrace) {
-				continue
-			}
-			if os.RemoveAll(filepath.Join(staging, e.Name())) == nil {
-				deletedStaging++
-			}
+	// stale working dirs — the #106 staging trees and the #107 rollback
+	// quarantines, judged by the same rules: every per-batch dir whose
+	// batch is not completed AND that has been idle past the grace
+	// window is removed whole (an in-flight import's staging dir / a
+	// freshly torn rollback's quarantine is seconds old; real debris is
+	// not). The keep-set always wins over the milestone.
+	deletedStaging += s.sweepIdleBatchDirs(filepath.Join(root, ".staging"), live)
+	deletedStaging += s.sweepIdleBatchDirs(filepath.Join(root, quarantineDirName), live)
+	return len(doomed), deletedStaging, nil
+}
+
+// sweepIdleBatchDirs sweeps one working-dir namespace of the fees tree
+// (.staging, the #107 .rollback quarantine): every per-batch dir whose
+// batch is not in the live keep-set and has been idle past the grace
+// window is removed whole. An unreadable namespace reads as empty (GC
+// is best-effort); the milestone keeps fresh dirs (possibly another
+// process mid-import, possibly a rollback torn moments ago).
+func (s *Service) sweepIdleBatchDirs(root string, live map[string]struct{}) (removed int) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, keep := live[e.Name()]; keep {
+			continue
+		}
+		if !entryIdle(e, gcOrphanGrace) {
+			continue
+		}
+		if os.RemoveAll(filepath.Join(root, e.Name())) == nil {
+			removed++
 		}
 	}
-	return len(doomed), deletedStaging, nil
+	return removed
 }
 
 // entryIdle reports whether the entry was last touched at least grace ago.

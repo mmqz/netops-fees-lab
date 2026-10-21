@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/parquet-go/parquet-go"
 )
@@ -30,6 +31,14 @@ import (
 // keep-set is exactly the completed batch ids — see GCAnalysis in
 // service.go, wired to serve startup + `netopslab gc` with an mtime
 // milestone since #106).
+//
+// Deletion gets the same discipline (#107): Rollback used to unlink the
+// batch's files one by one and flip the row only afterwards — an IO
+// fault mid-loop left earlier files already deleted while the row still
+// said completed (neither fully rolled back nor fully intact). The fix
+// moves the delete set into a per-batch quarantine tree with reversible
+// renames BEFORE the flip — see the rollback section at the bottom of
+// this file and Service.Rollback.
 
 // feeParquetRow is the on-disk schema of one analysis row. Column names
 // are the query surface (DuckDB reads them verbatim); source_row is the
@@ -151,7 +160,11 @@ func writeOneParquet(path string, rows []feeParquetRow) error {
 
 // BatchParquetFiles lists the live Parquet files of one batch (the
 // rollback delete set): glob every fee_type partition tree for
-// batch-<id>.parquet.
+// batch-<id>.parquet. The fees tree's working namespaces are skipped:
+// .staging (mid-write staging — never carries live files) and .rollback
+// (the #107 quarantine; a quarantined file is NOT live, and its delete
+// slot is derived from the mirrored layout, so it must never leak into
+// the delete set it would be moved into).
 func BatchParquetFiles(analysisDir, batchID string) ([]string, error) {
 	root := filepath.Join(analysisDir, "fees")
 	var out []string
@@ -160,6 +173,9 @@ func BatchParquetFiles(analysisDir, batchID string) ([]string, error) {
 			return nil //nolint — missing trees are simply empty sets
 		}
 		if d.IsDir() {
+			if d.Name() == ".staging" || d.Name() == ".rollback" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if d.Name() == "batch-"+batchID+".parquet" {
@@ -173,11 +189,14 @@ func BatchParquetFiles(analysisDir, batchID string) ([]string, error) {
 	return out, nil
 }
 
-// RemoveParquetFiles deletes the given files (rollback). Missing files
-// are tolerated (idempotent rollback — a crash mid-rollback retries
-// cleanly). A file's partition directory is pruned when it becomes empty
-// (an empty hive dir is a dead partition — nothing matches the glob, but
-// the tree stays tidy); the walk stops at the first non-empty ancestor.
+// RemoveParquetFiles deletes the given files (the GC orphan sweep and
+// the import's idempotency-race-lost cleanup — rollback itself does NOT
+// unlink files directly anymore, it quarantines them, see the #107
+// section below). Missing files are tolerated (idempotent — a crash
+// mid-sweep retries cleanly). A file's partition directory is pruned
+// when it becomes empty (an empty hive dir is a dead partition — nothing
+// matches the glob, but the tree stays tidy); the walk stops at the
+// first non-empty ancestor.
 func RemoveParquetFiles(files []string) error {
 	for _, f := range files {
 		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
@@ -198,4 +217,132 @@ func pruneEmptyDirs(dir string, levels int) {
 		}
 		dir = filepath.Dir(dir)
 	}
+}
+
+// ---- the #107 rollback quarantine ----
+//
+// Deletion cannot be transactional the way a SQLite row can: a batch's
+// Parquet files live in several partition dirs and os.Remove is one
+// syscall per file. The pre-#107 rollback looped RemoveParquetFiles and
+// aborted at the first error — the files before the fault were already
+// UNLINKED on disk while the batch row still said completed: a
+// "completed" batch with some of its analysis rows silently missing,
+// exactly the audit corruption #107 reports.
+//
+// The fix keeps every step of the delete reversible until the commit:
+// the delete set is MATERIALIZED first (rollbackPlan), then every file
+// is RENAMED into a per-batch quarantine tree that mirrors its live
+// layout,
+//
+//      <analysisDir>/fees/.rollback/<batchID>/<fees-relative path>
+//
+// A rename is metadata-only and same-filesystem by construction: when it
+// fails the file is exactly where it was — a failed quarantine step
+// leaves nothing behind. Only after the LAST file moved does the caller
+// flip the batch row to rolled_back (the single commit point, the same
+// shape as the import's step-7); any failure before the flip UNDOES the
+// moves, so a failed rollback leaves the batch completed with every row
+// intact. The quarantine is invisible to every reader — the query glob
+// is exactly three dirs deep (fees/*/*/*/*.parquet), the mirrored
+// layout sits five levels below fees/ — and GCAnalysis sweeps stale
+// quarantine dirs like stale staging ones (keep-set first: a completed
+// batch's quarantine is torn-attempt evidence, adoptable by the next
+// Rollback call, never swept).
+
+// quarantineDirName is the fees-subtree namespace of the rollback
+// quarantine trees (the delete-side twin of .staging).
+const quarantineDirName = ".rollback"
+
+// rollbackPlan is one materialized delete: the live partition file and
+// the quarantine slot it moves to. The whole batch's plan is built
+// BEFORE any move runs (#107: the delete set is explicit and complete
+// when execution starts — no half-discovered delete lists mid-dance).
+type rollbackPlan struct {
+	live       string
+	quarantine string
+}
+
+// rollbackQuarantineRoot is the per-batch quarantine tree.
+func rollbackQuarantineRoot(analysisDir, batchID string) string {
+	return filepath.Join(analysisDir, "fees", quarantineDirName, batchID)
+}
+
+// buildRollbackPlan materializes the delete plan: every live file of
+// the batch mapped to its mirrored quarantine slot. files are the live
+// paths exactly as BatchParquetFiles returned them (fees-rooted).
+func buildRollbackPlan(analysisDir, batchID string, files []string) []rollbackPlan {
+	feesRoot := filepath.Join(analysisDir, "fees")
+	plan := make([]rollbackPlan, 0, len(files))
+	for _, f := range files {
+		rel := strings.TrimPrefix(f, feesRoot+string(filepath.Separator))
+		plan = append(plan, rollbackPlan{
+			live:       f,
+			quarantine: filepath.Join(rollbackQuarantineRoot(analysisDir, batchID), rel),
+		})
+	}
+	return plan
+}
+
+// quarantinedFiles lists a batch's quarantined files with their live
+// paths derived back from the mirrored layout — the adoption input when
+// a previous attempt was torn by a crash (row still completed, some
+// files already quarantined). A missing quarantine tree is the normal
+// case and answers an empty plan.
+func quarantinedFiles(analysisDir, batchID string) ([]rollbackPlan, error) {
+	root := rollbackQuarantineRoot(analysisDir, batchID)
+	feesRoot := filepath.Join(analysisDir, "fees")
+	var out []rollbackPlan
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// no quarantine at all — the normal entry point
+			if os.IsNotExist(err) && path == root {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel := strings.TrimPrefix(path, root+string(filepath.Separator))
+		out = append(out, rollbackPlan{live: filepath.Join(feesRoot, rel), quarantine: path})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fees: 扫描批次 %s 的回滚隔离文件: %w", batchID, err)
+	}
+	return out, nil
+}
+
+// quarantineFile executes one plan step (live → quarantine). A missing
+// source is tolerated — the file is already gone, which is where the
+// delete wants it (the idempotence RemoveParquetFiles always had); any
+// other failure aborts the dance before anything is truly deleted.
+func quarantineFile(p rollbackPlan) error {
+	if err := os.MkdirAll(filepath.Dir(p.quarantine), 0o755); err != nil {
+		return fmt.Errorf("fees: 创建回滚隔离目录: %w", err)
+	}
+	if err := os.Rename(p.live, p.quarantine); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("fees: 隔离 Parquet 文件 %s: %w", p.live, err)
+	}
+	return nil
+}
+
+// restoreQuarantinedFile is quarantineFile's inverse (quarantine →
+// live): one undo step. A missing source is a successful undo — the
+// slot was already restored or swept elsewhere, and an undo that has
+// nothing left to do is exactly what "nothing stays deleted" wants.
+func restoreQuarantinedFile(p rollbackPlan) error {
+	if err := os.MkdirAll(filepath.Dir(p.live), 0o755); err != nil {
+		return fmt.Errorf("fees: 重建分区目录: %w", err)
+	}
+	if err := os.Rename(p.quarantine, p.live); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("fees: 恢复隔离文件到 %s: %w", p.live, err)
+	}
+	return nil
 }

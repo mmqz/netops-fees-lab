@@ -1131,6 +1131,8 @@ multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricit
 
 仅 completed 可回滚（否则 409 `conflict`；未知 id 404）：删除该批次的 Parquet 分析行（空分区目录一并清理），**快照保留**（证据寿命 > 批次寿命），批次行置 `rolled_back`（终态审计）。键随回滚释放——同文件可再导入（201）。
 
+**回滚是原子事务（#107）**：删除集先物化、逐文件以可逆 rename 移入 `analysis/fees/.rollback/<批次id>/` 隔离区，**批次行 flip `rolled_back` 是唯一提交点**。提交点前任何故障（IO/DB，5xx 上报）→ 隔离整体 UNDO——批次保持 `completed`、分析行**一行不少**（回滚要么整体发生要么整体不发生，可干净重试）；连 UNDO 都被阻断的极端双重故障 → 批次行如实标 `failed`（error 文本记录隔离区滞留位置；`failed` 不占幂等键——重导快照原件即恢复分析行，滞留物过 1 小时里程碑后由 GC 收走）。并发边角：两请求同批回滚时 SQLite flip 串行化出唯一赢家，输家的 UNDO 对已被赢家带走的文件按 ENOENT 空转，终态恒收敛。
+
 ## GET /api/fees/query/totals?feeType=&year=&month=&limit= — 站址费用汇总
 
 **固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,totalCents}],total}`（按 totalCents 降序）。**金额为整数分**（`totalCents`，#65 P1-a：金额在解析/存储/聚合/输出全链路走 int64 分，杜绝浮点对账误差；展示层自行 /100）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；Windows 原生无 duckdb 路径——用 Docker/WSL2，见 fees-layer.md §5；导入/快照/Parquet 写入不受影响）。
