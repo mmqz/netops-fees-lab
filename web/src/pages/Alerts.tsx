@@ -113,6 +113,9 @@ import {
   WEBHOOK_FAILED_ATTEMPTS_TITLE,
   WEBHOOK_OFF_LABEL,
   PATROL_DURATION_TEXT,
+  PATROL_INTERVAL_HOURS_TEXT,
+  PATROL_INTERVAL_MINUTES_TEXT,
+  PATROL_INTERVAL_SECONDS_TEXT,
   PATROL_LAST_FAILED,
   PATROL_LAST_LABEL,
   PATROL_LAST_LINE,
@@ -304,11 +307,16 @@ function AckDialog({
   );
 }
 
-/** 巡检调度间隔的人话表达（health.intervalSeconds → 「x 小时 / x 分钟 / x 秒」）。 */
+/** 巡检调度间隔的人话表达（health.intervalSeconds → 「x 小时 / x 分钟 / x 秒」）。
+ *  文案从 i18n 常量填充（#111-D：原先常量写好但此处硬编码，改措辞时两处漂移）。 */
 function patrolIntervalText(seconds: number): string {
-  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600} 小时`;
-  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} 分钟`;
-  return `${seconds} 秒`;
+  if (seconds >= 3600 && seconds % 3600 === 0) {
+    return format(PATROL_INTERVAL_HOURS_TEXT, { n: seconds / 3600 });
+  }
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return format(PATROL_INTERVAL_MINUTES_TEXT, { n: seconds / 60 });
+  }
+  return format(PATROL_INTERVAL_SECONDS_TEXT, { n: seconds });
 }
 
 /** 评估窗口列文案：空窗口=全库，否则「from ~ to」（缩到日期）。 */

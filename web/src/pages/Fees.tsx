@@ -42,14 +42,24 @@ import {
 import type { LinkFilterSelection } from './fees-format';
 import {
   FEES_501_HINT,
+  FEES_BATCHES_COL_FILE,
+  FEES_BATCHES_COL_PERIOD,
+  FEES_BATCHES_COL_ROWS,
+  FEES_BATCHES_COL_STATUS,
+  FEES_BATCHES_COL_TYPE,
+  FEES_BATCHES_EMPTY,
+  FEES_BATCHES_FAILED_ROWS,
   FEES_BATCHES_ROLLED_BACK,
   FEES_BATCHES_ROLLBACK,
+  FEES_BATCHES_ROLLBACK_BUSY,
+  FEES_BATCHES_ROLLBACK_CONFIRM,
   FEES_BATCHES_TITLE,
   FEES_DESC,
   FEES_IMPORT_DUP,
   FEES_IMPORT_FILE,
   FEES_IMPORT_MONTH,
   FEES_IMPORT_OK,
+  FEES_IMPORT_PERIOD_INVALID,
   FEES_IMPORT_SUBMIT,
   FEES_IMPORT_TITLE,
   FEES_IMPORT_TYPE,
@@ -69,15 +79,27 @@ import {
   FEES_LINKS_RESOURCE,
   FEES_LINKS_SCAN,
   FEES_LINKS_SCAN_RESULT,
+  FEES_LINKS_SIMILARITY,
   FEES_LINKS_SOURCE,
   FEES_LINKS_STATUS,
   FEES_LINKS_TITLE,
+  FEES_RISKS_CLUE_COUNT,
+  FEES_RISKS_COL_EVIDENCE,
+  FEES_RISKS_COL_METRIC,
+  FEES_RISKS_COL_PERIOD,
+  FEES_RISKS_COL_SITE,
+  FEES_RISKS_COL_THRESHOLD,
+  FEES_RISKS_EVIDENCE_BATCH,
+  FEES_RISKS_EVIDENCE_ROWS,
   FEES_RISKS_EMPTY,
   FEES_RISKS_EVIDENCE,
   FEES_RISKS_EVIDENCE_MORE,
   FEES_RISKS_EXCLUDED,
+  FEES_RISKS_MONTH_ALL,
+  FEES_RISKS_PERIOD_ALL_YEAR,
   FEES_RISKS_STATUS,
   FEES_RISKS_STATUS_HINT,
+  FEES_RISKS_YEAR_INVALID,
   FEES_RISKS_DIFF_CENTS,
   FEES_RISKS_RATIO,
   FEES_RISKS_Z,
@@ -188,7 +210,7 @@ export function FeesPage() {
     const year = Number(importYear);
     const month = Number(importMonth);
     if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
-      toast.show('账期必须是 2000–2100 年的 1–12 月', 'error');
+      toast.show(FEES_IMPORT_PERIOD_INVALID, 'error');
       return;
     }
     setImporting(true);
@@ -318,7 +340,7 @@ export function FeesPage() {
   const runRisks = useCallback(async () => {
     const year = Number(riskYear);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-      setRiskError('年份必须是 2000–2100');
+      setRiskError(FEES_RISKS_YEAR_INVALID);
       return;
     }
     setRunning(true);
@@ -405,7 +427,7 @@ export function FeesPage() {
               value={riskMonth}
               onChange={(e) => setRiskMonth(e.target.value)}
               inputMode="numeric"
-              placeholder="整年"
+              placeholder={FEES_RISKS_MONTH_ALL}
             />
           </label>
           <label className="field field--xs">
@@ -471,7 +493,7 @@ export function FeesPage() {
         {riskResult !== null && (
           <div className="panel__body">
             <p className="muted">
-              {riskResult.scenarioCn} · {riskResult.total} 条线索
+              {riskResult.scenarioCn} · {FEES_RISKS_CLUE_COUNT(riskResult.total)}
               {riskResult.excluded > 0 && <> · {FEES_RISKS_EXCLUDED(riskResult.excluded)}</>}
             </p>
             <p className="muted muted--small">{riskResult.note}</p>
@@ -481,11 +503,11 @@ export function FeesPage() {
               <table className="table table--interactive">
                 <thead>
                   <tr>
-                    <th>站址</th>
-                    <th>账期</th>
-                    <th>触发指标</th>
-                    <th>阈值</th>
-                    <th>证据</th>
+                    <th>{FEES_RISKS_COL_SITE}</th>
+                    <th>{FEES_RISKS_COL_PERIOD}</th>
+                    <th>{FEES_RISKS_COL_METRIC}</th>
+                    <th>{FEES_RISKS_COL_THRESHOLD}</th>
+                    <th>{FEES_RISKS_COL_EVIDENCE}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -501,12 +523,12 @@ export function FeesPage() {
                           }}
                         >
                           <td>{c.siteCode}</td>
-                          <td>{c.month > 0 ? `${c.year}-${String(c.month).padStart(2, '0')}` : `${c.year} 全年`}</td>
+                          <td>{c.month > 0 ? `${c.year}-${String(c.month).padStart(2, '0')}` : FEES_RISKS_PERIOD_ALL_YEAR(c.year)}</td>
                           <td>
                             {formatRiskMetric(c.metricValue, c.metricLabel)}（{c.metricLabel}）
                           </td>
                           <td className="muted">{c.thresholdLabel}</td>
-                          <td>{c.evidenceTotal} 行</td>
+                          <td>{FEES_RISKS_EVIDENCE_ROWS(c.evidenceTotal)}</td>
                         </tr>
                         {open && (
                           <tr className="row--detail">
@@ -518,7 +540,7 @@ export function FeesPage() {
                                   <li key={i} className="kv__item">
                                     <span className="kv__key">{a.sourceFile}:{a.sourceRow}</span>
                                     <span className="kv__value">
-                                      ¥{centsToYuan(a.amountCents)} · 批次 {a.importBatch}
+                                      ¥{centsToYuan(a.amountCents)} · {FEES_RISKS_EVIDENCE_BATCH(a.importBatch)}
                                     </span>
                                   </li>
                                 ))}
@@ -603,7 +625,7 @@ export function FeesPage() {
                       {l.resourceKey}
                       {l.resourceName !== undefined ? '）' : ''}
                       {l.similarity !== undefined && l.similarity > 0 && (
-                        <span className="chip chip--muted">相似度 {(l.similarity * 100).toFixed(0)}%</span>
+                        <span className="chip chip--muted">{FEES_LINKS_SIMILARITY((l.similarity * 100).toFixed(0))}</span>
                       )}
                     </td>
                     <td>
@@ -641,17 +663,17 @@ export function FeesPage() {
         <div className="panel__body">
           {batchesError !== '' && <ErrorBlock message={batchesError} />}
           {batches !== null && batches.length === 0 && (
-            <p className="empty">暂无费用批次——先在上方导入费用文件。</p>
+            <p className="empty">{FEES_BATCHES_EMPTY}</p>
           )}
           {batches !== null && batches.length > 0 && (
             <table className="table table--interactive">
               <thead>
                 <tr>
-                  <th>文件</th>
-                  <th>类型</th>
-                  <th>账期</th>
-                  <th>行数</th>
-                  <th>状态</th>
+                  <th>{FEES_BATCHES_COL_FILE}</th>
+                  <th>{FEES_BATCHES_COL_TYPE}</th>
+                  <th>{FEES_BATCHES_COL_PERIOD}</th>
+                  <th>{FEES_BATCHES_COL_ROWS}</th>
+                  <th>{FEES_BATCHES_COL_STATUS}</th>
                   <th />
                 </tr>
               </thead>
@@ -663,7 +685,7 @@ export function FeesPage() {
                     <td>{b.period}</td>
                     <td>
                       {b.rowsImported}/{b.rowsTotal}
-                      {b.rowsFailed > 0 && <span className="chip chip--warn">失败 {b.rowsFailed}</span>}
+                      {b.rowsFailed > 0 && <span className="chip chip--warn">{FEES_BATCHES_FAILED_ROWS(b.rowsFailed)}</span>}
                     </td>
                     <td>
                       <span className={`chip chip--${b.status === 'completed' ? 'ok' : b.status === 'failed' ? 'error' : 'muted'}`}>
@@ -723,8 +745,8 @@ export function FeesPage() {
       <ConfirmDialog
         open={rollbackTarget !== null}
         title={FEES_BATCHES_ROLLBACK}
-        message={rollbackTarget !== null ? `回滚批次 ${rollbackTarget.workbookName}（${rollbackTarget.period}）？分析行将删除，快照证据保留，同文件可再导入。` : ''}
-        confirmLabel={rollingBack ? '回滚中…' : FEES_BATCHES_ROLLBACK}
+        message={rollbackTarget !== null ? FEES_BATCHES_ROLLBACK_CONFIRM(rollbackTarget.workbookName, rollbackTarget.period) : ''}
+        confirmLabel={rollingBack ? FEES_BATCHES_ROLLBACK_BUSY : FEES_BATCHES_ROLLBACK}
         busy={rollingBack}
         onConfirm={() => void doRollback()}
         onCancel={() => {

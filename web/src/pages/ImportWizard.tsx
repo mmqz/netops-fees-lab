@@ -19,12 +19,10 @@ import type {
   ImportAnalysisResponse,
   ImportResultResponse,
   MappingAction,
-  MappingModel,
   Paged,
   ResourceType,
   RowStatus,
   SheetAnalysis,
-  Severity,
 } from '../api/types';
 import { ApiError, filledIssueCounts, formatApiErrorText, listBatchRows, submitMapping, uploadWorkbook } from '../api/client';
 import {
@@ -52,7 +50,6 @@ import {
   IMP_DROPZONE_RETRY,
   IMP_DROPZONE_TITLE,
   IMP_ERR_FILE_TYPE,
-  IMP_ERR_REQUIRED_UNMAPPED,
   IMP_ERR_TOO_LARGE,
   IMP_ERR_RETRY_HINT,
   IMP_ISSUE_STATS,
@@ -95,7 +92,7 @@ import {
   ROW_STATUS_LABELS,
   SEVERITY_LABELS,
 } from '../i18n';
-import { fieldsForType, fieldLabel, KEY_FALLBACK_FIELDS, naturalKeyFields, requiredFields } from '../schema';
+import { fieldsForType, fieldLabel, KEY_FALLBACK_FIELDS, naturalKeyFields } from '../schema';
 import type { FieldSpec } from '../schema';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
@@ -106,6 +103,15 @@ import { Spinner } from '../components/Spinner';
 import { Stepper } from '../components/Stepper';
 import { useToast } from '../components/Toast';
 import { IconInfo, IconUpload, IconWarning } from '../components/icons';
+// 映射纯函数（#111-A 抽出，表测见 import-mapping.test.ts）
+import {
+  buildDrafts,
+  buildMapping,
+  collectErrors,
+  prefillFromColumns,
+  severityForRule,
+} from './import-mapping';
+import type { SheetDraft, SheetError } from './import-mapping';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const WIZARD_STEPS = [
@@ -119,20 +125,8 @@ const ROWS_PAGE_SIZE = 20;
 // 向导状态
 // ---------------------------------------------------------------------------
 
-interface SheetDraft {
-  sheet: string;
-  action: MappingAction;
-  resourceType: ResourceType;
-  /** 目标字段 → 源表头。 */
-  columnMapping: Record<string, string>;
-}
-
-/** 规则代码前缀 → 严重级别（与 internal/domain/rules.go 的映射一致）。 */
-function severityForRule(code: string): Severity {
-  if (code.startsWith('E')) return 'error';
-  if (code.startsWith('W')) return 'warning';
-  return 'info';
-}
+// SheetDraft / SheetError 及 severityForRule / prefillFromColumns /
+// buildDrafts / buildMapping / collectErrors 见 ./import-mapping.ts（#111-A）。
 
 function validateFile(file: File): string | null {
   const lower = file.name.toLowerCase();
@@ -143,75 +137,6 @@ function validateFile(file: File): string | null {
     return IMP_ERR_TOO_LARGE;
   }
   return null;
-}
-
-/** 未提供后端建议映射时，按列建议（confidence>0 且字段属于该类型）预填。 */
-function prefillFromColumns(sheet: SheetAnalysis, type: ResourceType): Record<string, string> {
-  const valid = new Set<string>(fieldsForType(type).map((f) => f.field));
-  const mapping: Record<string, string> = {};
-  for (const column of sheet.columns) {
-    if (column.suggestedField !== '' && column.confidence > 0 && valid.has(column.suggestedField)) {
-      mapping[column.suggestedField] = column.header;
-    }
-  }
-  return mapping;
-}
-
-function buildDrafts(analysis: ImportAnalysisResponse): SheetDraft[] {
-  return analysis.sheets.map((sheet) => {
-    const suggested = analysis.suggestedMapping.sheets.find((m) => m.sheet === sheet.sheet);
-    const type: ResourceType = suggested?.resourceType ?? sheet.suggestedType ?? 'device';
-    const action: MappingAction =
-      suggested?.action ?? (sheet.suggestedType !== undefined ? 'import' : 'skip');
-    const columnMapping: Record<string, string> =
-      suggested !== undefined &&
-      suggested.action === 'import' &&
-      suggested.resourceType === type &&
-      suggested.columnMapping !== undefined
-        ? { ...suggested.columnMapping }
-        : prefillFromColumns(sheet, type);
-    return { sheet: sheet.sheet, action, resourceType: type, columnMapping };
-  });
-}
-
-function buildMapping(drafts: SheetDraft[]): MappingModel {
-  return {
-    sheets: drafts.map((draft) =>
-      draft.action === 'import'
-        ? {
-            sheet: draft.sheet,
-            action: 'import',
-            resourceType: draft.resourceType,
-            keyColumns: naturalKeyFields(draft.resourceType),
-            columnMapping: draft.columnMapping,
-          }
-        : { sheet: draft.sheet, action: 'skip' },
-    ),
-  };
-}
-
-interface SheetError {
-  sheet: string;
-  message: string;
-}
-
-function collectErrors(drafts: SheetDraft[]): SheetError[] {
-  const errors: SheetError[] = [];
-  for (const draft of drafts) {
-    if (draft.action !== 'import') continue;
-    for (const spec of requiredFields(draft.resourceType)) {
-      if (draft.columnMapping[spec.field] === undefined) {
-        errors.push({
-          sheet: draft.sheet,
-          message: format(IMP_ERR_REQUIRED_UNMAPPED, {
-            sheet: draft.sheet,
-            field: fieldLabel(spec.field),
-          }),
-        });
-      }
-    }
-  }
-  return errors;
 }
 
 // ---------------------------------------------------------------------------

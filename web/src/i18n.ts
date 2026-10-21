@@ -425,7 +425,6 @@ export const OV_STAT_TOTAL_ISSUES = '问题总数';
 export const OV_STAT_QUALITY_SCORE = '质量评分';
 export const OV_STAT_LATEST_BATCH = '最近批次';
 export const OV_STAT_SCORE_FULL = '满分 100 分';
-export const OV_STAT_UNIT = '条';
 export const OV_BY_TYPE_TITLE = '资源类型分布';
 export const OV_RECENT_BATCHES = '最近批次';
 export const OV_RECENT_BATCHES_MORE = '仅显示最近 5 个批次';
@@ -483,18 +482,15 @@ export const IMP_ROW_SOURCE = '{sheet} · 行 {row}';
 export const IMP_UPLOADING = '正在上传并解析…';
 export const IMP_ERR_FILE_TYPE = '请选择 .xlsx 工作簿或 .txt/.cfg PTP 配置脚本文件';
 export const IMP_ERR_TOO_LARGE = '文件大小超过 10MB 上限';
-export const IMP_FILE_SIZE = '文件大小';
 export const IMP_UPLOADED_INFO = '已上传：{workbook} · {sheets} 个工作表 · 批次 {batchId}';
 export const IMP_ERR_RETRY_HINT = '上传失败，可更换文件后重试';
 
 export const IMP_TOGGLE_IMPORT = '启用导入';
 export const IMP_TOGGLE_SKIP = '跳过该工作表';
 export const IMP_RESOURCE_TYPE = '资源类型';
-export const IMP_COLUMN_MAPPING = '列映射';
 export const IMP_COL_SOURCE = '源表头';
 export const IMP_COL_SUGGEST = '建议';
 export const IMP_COL_TARGET = '目标字段';
-export const IMP_COL_SAMPLES = '样本';
 export const IMP_OPT_UNMAPPED = '不导入（丢弃该列）';
 export const IMP_REQUIRED_TAG = '必填';
 export const IMP_NATURAL_KEY_TAG = '自然键';
@@ -567,8 +563,6 @@ export const RES_COL_UPDATED = '更新时间';
 export const RES_DRAWER_TAB_ATTRS = '属性信息';
 export const RES_DRAWER_TAB_SOURCE = '来源信息';
 export const RES_DRAWER_TAB_RELATIONS = '关联信息';
-export const RES_ATTR_FIELD = '字段';
-export const RES_ATTR_VALUE = '值';
 export const RES_NO_SOURCE = '暂无来源记录';
 export const RES_SOURCE_ITEM = '{workbook} · {sheet} · 行 {row}';
 export const RES_RELATION_COUNT = '关联数';
@@ -577,7 +571,6 @@ export const RES_HOP2_TITLE = '二跳关联';
 export const RES_HOP2_EMPTY = '该节点没有二跳关联';
 export const RES_ATTR_FIRST_BATCH = '首次导入批次';
 export const RES_ATTR_UPDATED_AT = '更新时间';
-export const RES_ATTR_NATURAL_KEY = '自然键';
 export const RES_EMPTY_TITLE = '暂无资源';
 export const RES_EMPTY_DESC = '还没有任何资源数据，导入工作簿后即可在此浏览与检索。';
 export const RES_TABLE_LABEL = '资源列表';
@@ -874,6 +867,30 @@ export const FEES_IMPORT_FILE = '文件（.csv / .xlsx / .xls）';
 export const FEES_IMPORT_SUBMIT = '导入';
 export const FEES_IMPORT_OK = (a: string, b: number) => `导入完成：${b} 行入库（批次 ${a}）`;
 export const FEES_IMPORT_DUP = (a: string) => `同一文件已于批次 ${a} 完成导入（幂等跳过，零新数据）`;
+/** #111-D：Fees 页原硬编码中文收编（表头/确认文案，~20 处）。 */
+export const FEES_IMPORT_PERIOD_INVALID = '账期必须是 2000–2100 年的 1–12 月';
+export const FEES_RISKS_YEAR_INVALID = '年份必须是 2000–2100';
+export const FEES_RISKS_MONTH_ALL = '整年';
+export const FEES_RISKS_CLUE_COUNT = (a: number) => `${a} 条线索`;
+export const FEES_RISKS_COL_SITE = '站址';
+export const FEES_RISKS_COL_PERIOD = '账期';
+export const FEES_RISKS_COL_METRIC = '触发指标';
+export const FEES_RISKS_COL_THRESHOLD = '阈值';
+export const FEES_RISKS_COL_EVIDENCE = '证据';
+export const FEES_RISKS_PERIOD_ALL_YEAR = (a: number) => `${a} 全年`;
+export const FEES_RISKS_EVIDENCE_ROWS = (a: number) => `${a} 行`;
+export const FEES_RISKS_EVIDENCE_BATCH = (a: string) => `批次 ${a}`;
+export const FEES_LINKS_SIMILARITY = (a: string) => `相似度 ${a}%`;
+export const FEES_BATCHES_EMPTY = '暂无费用批次——先在上方导入费用文件。';
+export const FEES_BATCHES_COL_FILE = '文件';
+export const FEES_BATCHES_COL_TYPE = '类型';
+export const FEES_BATCHES_COL_PERIOD = '账期';
+export const FEES_BATCHES_COL_ROWS = '行数';
+export const FEES_BATCHES_COL_STATUS = '状态';
+export const FEES_BATCHES_FAILED_ROWS = (a: number) => `失败 ${a}`;
+export const FEES_BATCHES_ROLLBACK_CONFIRM = (a: string, b: string) =>
+  `回滚批次 ${a}（${b}）？分析行将删除，快照证据保留，同文件可再导入。`;
+export const FEES_BATCHES_ROLLBACK_BUSY = '回滚中…';
 export const FEES_RISKS_TITLE = '风险六场景';
 export const FEES_RISKS_SCENARIO = '场景';
 export const FEES_RISKS_RUN = '查询';
@@ -955,7 +972,6 @@ export const API_TAG_LABELS: Record<string, string> = {
 export const RES_DRAWER_TAB_METRICS = '性能指标';
 export const METRIC_EMPTY = '该资源没有指标序列（检测告警与劣化曲线在此展示）';
 export const METRIC_LOAD_FAILED = '指标加载失败';
-export const METRIC_LOADING = '指标加载中…';
 export const METRIC_CHART_POINTS = '{n} 点';
 export const METRIC_CHART_LAST = '最新 {v}';
 export const METRIC_CHART_SUSPECT = '疑似异常点';
@@ -968,7 +984,6 @@ export const METRIC_CHART_MISSING = '缺失点';
 export const METRICS_EXPORT_BTN = '导出指标 CSV';
 export const METRICS_EXPORT_EMPTY = '无指标数据点可导出';
 export const METRICS_EXPORT_TOAST = '已导出 {n} 个数据点（{s} 条序列）';
-export const METRICS_EXPORT_FAILED = '导出失败：{message}';
 export const METRICS_EXPORT_WORKING = '导出中…';
 export const METRICS_EXPORT_FILENAME = 'netops-metrics';
 
@@ -1023,8 +1038,6 @@ export const GRAPH_TRUNCATED_HINT = '结果已按预算截断（分类基于不�
 export const GRAPH_RUNSTATE_ABNORMAL = '异常';
 export const GRAPH_RUNSTATE_NORMAL = '正常';
 export const GRAPH_NODE_LINK_TITLE = '在资源浏览中查看该资源';
-export const GRAPH_ROOT_LABEL = '分析起点';
-export const GRAPH_REASON_LABEL = '判定理由';
 
 // ---------------------------------------------------------------------------
 // 资源详情 · 运行状态行（v0.9-R5）
@@ -1033,15 +1046,12 @@ export const GRAPH_REASON_LABEL = '判定理由';
 export const RES_RUNSTATE_LABEL = '运行状态';
 export const RES_RUNSTATE_NO_DATA = '无观测';
 export const RES_RUNSTATE_HISTORY_TITLE = '状态历史';
-export const RES_RUNSTATE_HISTORY_EMPTY = '暂无状态观测记录';
 
 // ---------------------------------------------------------------------------
 // 概览页 · 告警概览卡（v0.9-R5）
 // ---------------------------------------------------------------------------
 
 export const OV_STAT_FIRING_ALERTS = '触发中告警';
-export const OV_ALERTS_SUB = '告警中心待处置队列';
-export const OV_ALERTS_NONE_SUB = '无触发中告警';
 /** v0.11-R11：告警卡副行——待处置级别矩阵 + 已确认数（stats 端点一次取齐）。 */
 export const OV_ALERTS_SUB_V11 = '待处置：错误 {error} · 警告 {warning} · 已确认 {acked}';
 export const BTN_VIEW_ALERTS = '告警中心';
@@ -1064,7 +1074,6 @@ export const RPT_SCOPE_ALL = '全部批次';
 export const RPT_DISCLAIMER = '本报告基于当前已导入的数据生成，请以实际网络情况为准。';
 export const RPT_PREVIEW_TITLE = '报告预览';
 export const RPT_LOADING = '正在生成报告…';
-export const RPT_EMPTY = '暂无报告内容';
 export const RPT_FILENAME_HTML = 'netops-quality-report';
 export const RPT_FILENAME_JSON = 'netops-quality-report';
 export const RPT_FILE_EXT_HTML = '.html';
@@ -1199,8 +1208,6 @@ export const LABWS_CHIP_LAYER_NODES_TITLE =
 export const LABWS_CHIP_LAYER_EDGES = '图层边';
 export const LABWS_CHIP_LAYER_EDGES_TITLE =
   '图层覆盖层（#51）：L3 电路/波道、L4 接入上联、L5 分组归属、L6 业务关联等语义边（只读投影，不计入物理链路）';
-export const LABWS_CHIP_LINKS_TITLE =
-  '物理链路：virtual_links 物化表（设备间物理连接）；覆盖层语义边另计为「图层边」';
 
 export const LAB_BTN_RUN_CHECKS = '运行校验';
 export const LAB_BTN_APPLY_OPS = '执行操作';
@@ -1256,7 +1263,6 @@ export const LAB_TILE_ENTER = '进入工作台';
 export const LAB_TILE_PREVIEW_LOADING = '加载拓扑…';
 export const LAB_TILE_PREVIEW_EMPTY = '空工作台';
 export const LAB_TILE_PREVIEW_ERROR = '拓扑加载失败';
-export const LAB_TILE_SCORE = '评分 {score}';
 export const LAB_TILE_CREATED = '创建于 {at}';
 export const LAB_LAYOUT = '布局';
 export const LAB_LAYOUT_FORCE = '力导';
@@ -1509,7 +1515,6 @@ export const BTN_CONFIG_ADDR = '配置地址';
 export const BTN_DELETE = '删除';
 
 export const LAB_I_CONFIG_TITLE = '配置接口地址';
-export const LAB_I_CONFIG_DESC = '配置 {iface} IPv4 地址';
 export const LAB_I_CONFIG_TARGET = '接口';
 export const LAB_I_F_ADDR = 'IPv4 地址';
 export const LAB_I_F_PREFIX = '前缀长度（0–32）';
@@ -1701,7 +1706,6 @@ export const WEBHOOK_FAILED_LABEL = '投递失败';
 export const WEBHOOK_OFF_LABEL = '—';
 export const LIFECYCLE_EVENT_ACK_LABEL = '确认';
 export const LIFECYCLE_EVENT_CLEAR_LABEL = '清除';
-export const WEBHOOK_DELIVERED_TITLE = '已送达';
 export const WEBHOOK_FAILED_ATTEMPTS_TITLE = '投递失败 · 尝试 {n} 次 · {error}';
 export const PATROL_STATUS_OK = '成功';
 export const PATROL_STATUS_FAILED = '失败';
@@ -1711,11 +1715,10 @@ export const PATROL_DURATION_TEXT = '{n} ms';
 export const PATROL_RUNS_EMPTY = '暂无检测运行记录';
 export const PATROL_RUNS_LOAD_FAILED = '运行历史加载失败';
 
-/** 巡检条 CSS：一行的信息密度（只用于 /alerts 顶部条）。 */
+/** 巡检调度间隔文案（health.intervalSeconds → patrolIntervalText 消费，/alerts 顶部条）。 */
 export const PATROL_INTERVAL_SECONDS_TEXT = '{n} 秒';
 export const PATROL_INTERVAL_MINUTES_TEXT = '{n} 分钟';
 export const PATROL_INTERVAL_HOURS_TEXT = '{n} 小时';
-export const PATROL_INTERVAL_COMPOUND_TEXT = '{n} 秒';
 
 // ---------------------------------------------------------------------------
 // 格式化工具
@@ -1802,9 +1805,6 @@ export const LAYER_TOGGLE_EMPTY = '该层在本工作台无数据';
 /** 聚簇节点显示名（×N 为成员数）。 */
 export const LAYER_CLUSTER_LABEL = '接入 ×{n}';
 
-/** L4 层开关打开时聚簇摘要（tooltip/面板）。 */
-export const LAYER_CLUSTER_SUMMARY = '{clusters} 个接入簇 · 共 {stations} 个基站（聚合显示，点击下钻）';
-
 /** 大图布局保护：可见节点超阈值自动改网格布局的提示。 */
 export const LAYER_LAYOUT_GUARD = '可见节点 {n} 超过 {max}，已自动切换网格布局（性能保护）';
 
@@ -1825,7 +1825,6 @@ export const LAB_IMPACT_PANEL_ROOT = '分析起点';
 export const LAB_IMPACT_PANEL_IMPACTED = '受影响面（向上 {n}）';
 export const LAB_IMPACT_PANEL_CANDIDATES = '根因候选（{n}）';
 export const LAB_IMPACT_PANEL_CLEAR = '清除高亮（Esc）';
-export const LAB_IMPACT_DIMMED_HINT = '未受影响元素已压暗；受影响节点/边为琥珀色';
 
 /** 图层节点 hover/详情文案。 */
 export const LAYER_KIND_LABELS: Record<string, string> = {
@@ -1864,6 +1863,3 @@ export const LAYER_MEMBERS_STATUS = '状态';
 export const LAYER_MEMBERS_LOAD_ERR = '成员加载失败';
 export const LAYER_PON_PORTS = 'PON 口 {n} 个';
 export const LAYER_STATION_SERVES = '服务基站 {n} 个';
-
-/** 图层选中卡（zen 模式之外，画布下方/侧栏的简要信息）。 */
-export const LAYER_NODE_INFO = '{kind} · {code}';

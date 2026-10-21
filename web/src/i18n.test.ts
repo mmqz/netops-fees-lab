@@ -4,6 +4,9 @@ import { format, formatDateTime, formatFileSize, formatRelativeTime, NO_VALUE } 
 // i18n.test.ts — #96: the formatter layer is consumed by EVERY page; before
 // this file the 40-assertion suite covered fees-format + fitGuard only and
 // these were exercised solely through browser regression scripts.
+// #111-D 追加：死常量探测器——i18n.ts 是全站文案唯一事实源，导出常量必须
+// 被 src 内至少一处引用（页面 / 组件 / 本文件内部工具函数 / 测试），
+// 否则就是「常量写好但页面硬编码」或「功能下线遗留」的漂移债。
 
 describe('format（模板填充）', () => {
   it('填充提供的占位符', () => {
@@ -62,5 +65,56 @@ describe('formatRelativeTime', () => {
     // 超过 7 天 → 回退 formatDateTime 的本地绝对形态（无时区后缀构造 + 本地 ISO 解析闭环）
     const old = new Date(now - 8 * 24 * 3600_000);
     expect(formatRelativeTime(old.toISOString())).toBe(formatDateTime(old.toISOString()));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #111-D：死常量探测器（静态扫描——i18n 导出常量的引用闭包）
+// ---------------------------------------------------------------------------
+
+/** 以 ?raw 形式内联全部源码（import.meta.glob 由 vite-node 转换，无需 node:fs，
+ *  类型域保持在浏览器侧 tsconfig 内）。键形如 '/src/pages/Fees.tsx'。 */
+const RAW_SOURCES = import.meta.glob('/src/**/*.{ts,tsx}', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+describe('i18n 导出常量引用闭包（#111-D：死常量回归钉）', () => {
+  const i18nKey = Object.keys(RAW_SOURCES).find((key) => key.endsWith('/i18n.ts')) ?? '';
+  const i18nLines = (RAW_SOURCES[i18nKey] ?? '').split('\n');
+
+  /** 声明行之外的出现视为真实引用（formatRelativeTime 消费 TIME_* 一类）。 */
+  const exportedNames = i18nLines
+    .map((line) => /^export const ([A-Z][A-Z0-9_]*)/.exec(line)?.[1])
+    .filter((name): name is string => name !== undefined);
+
+  const otherContents = Object.entries(RAW_SOURCES)
+    .filter(([key]) => key !== i18nKey)
+    .map(([, content]) => content);
+
+  it('i18n.ts 每个导出常量都被引用（页面/组件/文件内工具/测试至少其一）', () => {
+    const dead: string[] = [];
+    for (const name of exportedNames) {
+      const referencedInFile = i18nLines.some(
+        (line) => new RegExp(`\\b${name}\\b`).test(line) && !/^export const /.test(line),
+      );
+      const referencedElsewhere = otherContents.some((content) =>
+        new RegExp(`\\b${name}\\b`).test(content),
+      );
+      if (!referencedInFile && !referencedElsewhere) dead.push(name);
+    }
+    expect(
+      dead,
+      '死 i18n 常量（写好但无人引用）：删掉它，或把页面的硬编码文案改用常量',
+    ).toEqual([]);
+  });
+
+  it('探测器自检：能枚举导出常量与源码文件（扫描器失效时此断言先红）', () => {
+    expect(i18nKey, '扫描器应能找到 i18n.ts 本体').not.toBe('');
+    expect(exportedNames.length).toBeGreaterThan(300);
+    expect(exportedNames).toContain('NO_VALUE');
+    expect(exportedNames).toContain('APP_NAME');
+    expect(Object.keys(RAW_SOURCES).length).toBeGreaterThan(40);
   });
 });
