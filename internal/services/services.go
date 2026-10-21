@@ -67,8 +67,11 @@ type Services struct {
 	Metrics *metrics.Service
 	// Fees is the fee-data analysis layer service (#58/#60/#61, migration
 	// v29): snapshot + Parquet import pipeline + the query presets. Needs
-	// the data dir (the snapshot and analysis roots live under it) — wired
-	// via WithFees when the app knows it; nil DataDir roots at "./data".
+	// the data dir (the snapshot and analysis roots live under it) —
+	// wired via WithFees. An EMPTY data dir roots the analysis tree at
+	// the process CWD ("analysis"); no production entry point may do
+	// that — serve, the fees CLI and the MCP server all pass their
+	// --data/--data-dir explicitly (#97).
 	Fees *fees.Service
 
 	// Detect is the alert detection engine (W23, migration v18 —
@@ -96,9 +99,11 @@ type options struct {
 type Option func(*options)
 
 // WithFees wires the fee analysis service with its data-dir root (the
-// snapshot layer and the Parquet analysis tree live under it). The
-// composition root calls this when the app configuration carries a
-// DataDir; the CLI fee command builds its own instance the same way.
+// snapshot layer and the Parquet analysis tree live under it). Every
+// production entry point calls this with its --data/--data-dir value
+// (serve, the fees CLI, the MCP server); passing "" roots the analysis
+// tree at the CWD-relative "analysis" — tests only, never production
+// (#97).
 func WithFees(dataDir string) Option {
 	return func(o *options) { o.feesDir = dataDir }
 }

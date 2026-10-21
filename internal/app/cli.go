@@ -200,6 +200,19 @@ func openApp(dbPath string) (*App, error) {
 	return a, nil
 }
 
+// openAppData opens the app with an explicit data dir (the fees analysis
+// root). cmdMCP uses this so the MCP composition resolves the SAME analysis
+// tree the serve/fees channels write (#97: a bare openApp left the fee
+// service rooted at the CWD-relative "analysis", silently answering zero
+// risk clues).
+func openAppData(dbPath, dataDir string) (*App, error) {
+	a, err := New(Config{DBPath: dbPath, DataDir: dataDir})
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
 // openAppWithWebhook opens the app with the detection-run notification
 // channel configured (v0.10-R8): an empty URL leaves the channel off
 // (notify.New returns the nil no-op).
@@ -1512,12 +1525,16 @@ func cmdQueryNearest(ctx context.Context, a *App, args []string, stdout, stderr 
 	})
 }
 
-// cmdMCP implements `netopslab mcp [--db]` (also env NETOPS_DB): run the MCP
-// STDIO server over the real os.Stdin/os.Stdout — stdout carries the MCP
-// protocol, not the CLI JSON object.
+// cmdMCP implements `netopslab mcp [--db] [--data]` (also env NETOPS_DB): run
+// the MCP STDIO server over the real os.Stdin/os.Stdout — stdout carries the
+// MCP protocol, not the CLI JSON object. --data roots the fee analysis layer
+// at the SAME directory serve (--data-dir) and the fees CLI (--data) use
+// (#97); before that flag the composition silently answered fee_risks from a
+// CWD-relative "analysis" tree.
 func cmdMCP(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("mcp")
 	db := fs.String("db", "", fmt.Sprintf("SQLite 数据库路径（缺省读取环境变量 %s 或 ./data/netops.db）", envDBPath))
+	data := fs.String("data", "./data", "费用分析数据目录（快照与分析树根；须与 fees --data / serve --data-dir 指向同一目录，缺省 ./data）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -1534,7 +1551,7 @@ func cmdMCP(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	a, err := openApp(dbPath)
+	a, err := openAppData(dbPath, *data)
 	if err != nil {
 		return err
 	}
