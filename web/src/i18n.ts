@@ -801,6 +801,8 @@ export const MNT_HINT =
   '计划内维护期间抑制新告警：窗口时间区间内的新触发不产生告警（已触发的告警生命周期不受影响，恢复清除照常）。';
 export const MNT_TIME_BASIS =
   '时间基准（双时基判定）：证据时刻（指标数据时间线，可重放）或运行时刻（扫描执行的现实时刻）任一落在窗口内即抑制新告警。当前数据时刻：{dataTime}——若按墙钟排班（如「今晚 22:00」）请按现实时刻填写；若要对历史回放按数据时刻对齐，请让窗口覆盖数据时刻。';
+/** {dataTime} 的回退值：从未跑过检测 → 数据时刻未知（#113-A 收编）。 */
+export const MNT_TIME_UNKNOWN = '未知（尚未执行过检测）';
 export const MNT_EMPTY = '没有维护窗口';
 export const MNT_BTN_NEW = '新建窗口';
 export const MNT_BTN_DELETE = '删除';
@@ -1271,10 +1273,21 @@ export const LAB_LAYOUT_CONCENTRIC = '同心圆';
 export const LAB_LAYOUT_GRID = '网格';
 export const LAB_LAYOUT_CIRCLE = '环形';
 export const LAB_LAYOUT_FREEZE = '锁定';
+/** 工具带布局按钮 title（#113-A 收编；命名与 LAB_VIEW_*_TITLE 同构：label → label_TITLE）。 */
+export const LAB_LAYOUT_FORCE_TITLE = '力导向布局（物理模拟自然聚簇）';
+export const LAB_LAYOUT_HIER_TITLE = '层级布局（自上而下树形，核心层在顶）';
+export const LAB_LAYOUT_CONCENTRIC_TITLE = '同心圆布局（按连接度分环，枢纽居中）';
+export const LAB_LAYOUT_GRID_TITLE = '网格布局（规整行列，便于对照清单）';
+export const LAB_LAYOUT_CIRCLE_TITLE = '环形布局（首尾相接的环）';
+export const LAB_LAYOUT_FREEZE_TITLE = '锁定布局（停用自动排布，保留手动拖拽位置）';
 export const LAB_MODE = '模式';
 export const LAB_MODE_SELECT = '选择';
 export const LAB_MODE_TRACE = '路径';
 export const LAB_MODE_FOCUS = '聚焦';
+/** 工具带交互模式按钮 title（#113-A 收编）。 */
+export const LAB_MODE_SELECT_TITLE = '选择模式（点击联动右侧表格定位）';
+export const LAB_MODE_TRACE_TITLE = '路径模式（依次点击两台设备，高亮最短路径）';
+export const LAB_MODE_FOCUS_TITLE = '聚焦模式（点击设备，仅保留其一跳邻域）';
 export const LAB_CANVAS_LABELS = '链路标签（快捷键 L）';
 export const LAB_CANVAS_HINT = '点击节点或连线，可在右侧定位对应条目';
 export const LAB_CANVAS_EMPTY = '暂无拓扑数据';
@@ -1284,6 +1297,9 @@ export const LAB_MODE_TRACE_HINT = '依次点击两台设备，高亮最短路�
 export const LAB_MODE_FOCUS_HINT = '点击设备聚焦其邻域；Esc 或点击空白取消';
 export const LAB_TRACE_PICK_A = '路径模式：点击起点设备';
 export const LAB_TRACE_PICK_B = '已选起点 {a}，点击终点设备';
+/** 途经折叠：>6 台时「前 6 台 + 等 N 台」，防横幅撑爆（关键信息是跳数，#113-A 收编）。 */
+export const LAB_TRACE_VIA_MORE = '{via} 等 {n} 台';
+export const LAB_TRACE_VIA_DIRECT = '直达';
 export const LAB_TRACE_DONE = '{a} → {b} · {hops} 跳 · 经 {via}';
 export const LAB_TRACE_UNREACHABLE = '{a} → {b} · 不可达（无可用链路）';
 export const LAB_TRACE_CLEAR = '清除路径';
@@ -1478,6 +1494,8 @@ export const LAB_GEO_ELEV_TITLE = '光标处实时海拔（离线 DEM 采样，�
 /** 聚簇气泡（W17：屏幕碰撞聚合，点击放大展开）。 */
 export const LAB_GEO_CLUSTER_ARIA = '{n} 台设备聚簇（含 {down} 台故障），点击放大查看';
 export const LAB_GEO_CLUSTER_TITLE = '{n} 台设备（{down} 台故障）：{codes} —— 点击放大展开';
+/** 聚簇 hover 信息条的计数位（左上角 code 槽，#113-A 收编 GeoCanvas 硬编码）。 */
+export const LAB_GEO_CLUSTER_HOVER = '{n} 台';
 /** GCJ 底图下叠加不可用提示（仅限交通/区划；自然要素任意底图可用）。 */
 export const LAB_GEO_OV_UNAVAILABLE = '交通/区划本地叠加仅在简洁（离线）/极简底图下可用；森林/水系/地名任意底图可用';
 /** 业务图层名。 */
@@ -1863,3 +1881,27 @@ export const LAYER_MEMBERS_STATUS = '状态';
 export const LAYER_MEMBERS_LOAD_ERR = '成员加载失败';
 export const LAYER_PON_PORTS = 'PON 口 {n} 个';
 export const LAYER_STATION_SERVES = '服务基站 {n} 个';
+
+/** LayerInfoTab 信息面板（#113-A 收编：旧工作台空态 + 点选引导空态）。 */
+export const LAYER_INFO_EMPTY_DESC = '本工作台物化于 v0.12 之前，无图层覆盖层数据';
+export const LAYER_INFO_TITLE = '图层信息';
+export const LAYER_INFO_HINT =
+  '在画布上点选接入簇 / OLT / 客户 / 业务 / 逻辑电路等覆盖层实体查看详情（需先打开对应图层开关）';
+/** LayerInfoTab 节点详情 dt 标签。 */
+export const LAYER_INFO_NAME = '名称';
+export const LAYER_INFO_STATUS = '状态';
+export const LAYER_INFO_MEMBER_COUNT = '成员数';
+export const LAYER_INFO_ANCHOR = '锚设备';
+export const LAYER_INFO_PON_PORT = 'PON 口';
+export const LAYER_INFO_STATION_SERVES = '服务规模';
+export const LAYER_INFO_SAMPLE = '样例成员';
+/** LayerInfoTab 边详情 dt 标签。 */
+export const LAYER_INFO_A_END = 'A 端';
+export const LAYER_INFO_Z_END = 'Z 端';
+export const LAYER_INFO_SEMANTIC = '语义';
+/** LayerInfoTab 只读说明（覆盖层边不进操作对话框）。 */
+export const LAYER_INFO_NOTE = '逻辑承载/业务关联边为只读投影：右键菜单可发起影响分析高亮。';
+
+/** 画布右键菜单回退：kind/sem 未命中标签表时的兜底标签（#113-A 收编）。 */
+export const LAYER_NODE_FALLBACK = '图层实体';
+export const LAYER_EDGE_FALLBACK = '图层边';

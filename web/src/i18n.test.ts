@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { format, formatDateTime, formatFileSize, formatRelativeTime, NO_VALUE } from './i18n';
+import {
+  format,
+  formatDateTime,
+  formatFileSize,
+  formatRelativeTime,
+  LAB_GEO_CLUSTER_HOVER,
+  LAB_TRACE_VIA_MORE,
+  NO_VALUE,
+} from './i18n';
 
 // i18n.test.ts — #96: the formatter layer is consumed by EVERY page; before
 // this file the 40-assertion suite covered fees-format + fitGuard only and
@@ -80,8 +88,10 @@ const RAW_SOURCES = import.meta.glob('/src/**/*.{ts,tsx}', {
   eager: true,
 }) as Record<string, string>;
 
+/** i18n.ts 本体的扫描键（#113-A 起探测器与收编回归钉共用）。 */
+const i18nKey = Object.keys(RAW_SOURCES).find((key) => key.endsWith('/i18n.ts')) ?? '';
+
 describe('i18n 导出常量引用闭包（#111-D：死常量回归钉）', () => {
-  const i18nKey = Object.keys(RAW_SOURCES).find((key) => key.endsWith('/i18n.ts')) ?? '';
   const i18nLines = (RAW_SOURCES[i18nKey] ?? '').split('\n');
 
   /** 声明行之外的出现视为真实引用（formatRelativeTime 消费 TIME_* 一类）。 */
@@ -116,5 +126,77 @@ describe('i18n 导出常量引用闭包（#111-D：死常量回归钉）', () =>
     expect(exportedNames).toContain('NO_VALUE');
     expect(exportedNames).toContain('APP_NAME');
     expect(Object.keys(RAW_SOURCES).length).toBeGreaterThan(40);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #113-A：第二批硬编码收编回归钉（LayerInfoTab / TopologyCanvas / GeoCanvas /
+// App 令牌弹窗 / Maintenance——旧内联串零复活 + 迁入完整 + 五触点接线）
+// ---------------------------------------------------------------------------
+
+/** 第二批收编前的旧内联串（长句逐字——短词如「关闭」「直达」太通用，由
+ *  接线钉与死常量探测器共同覆盖）。出现在 i18n.ts / 测试文件之外 = 抄回组件。 */
+const RETIRED_PHRASES = [
+  '本工作台物化于 v0.12 之前，无图层覆盖层数据',
+  '在画布上点选接入簇 / OLT / 客户 / 业务 / 逻辑电路等覆盖层实体查看详情（需先打开对应图层开关）',
+  '逻辑承载/业务关联边为只读投影：右键菜单可发起影响分析高亮。',
+  '力导向布局（物理模拟自然聚簇）',
+  '层级布局（自上而下树形，核心层在顶）',
+  '同心圆布局（按连接度分环，枢纽居中）',
+  '网格布局（规整行列，便于对照清单）',
+  '环形布局（首尾相接的环）',
+  '锁定布局（停用自动排布，保留手动拖拽位置）',
+  '选择模式（点击联动右侧表格定位）',
+  '路径模式（依次点击两台设备，高亮最短路径）',
+  '聚焦模式（点击设备，仅保留其一跳邻域）',
+  '未知（尚未执行过检测）',
+];
+
+describe('i18n 第二批收编回归（#113-A）', () => {
+  /** i18n.ts 与测试文件之外的生产源码。 */
+  const productionSources = Object.entries(RAW_SOURCES).filter(
+    ([key]) => !key.endsWith('/i18n.ts') && !key.includes('.test.'),
+  );
+
+  it('13 条旧串全部迁入 i18n.ts（每条都能在文案事实源找到）', () => {
+    const i18nSource = RAW_SOURCES[i18nKey] ?? '';
+    for (const phrase of RETIRED_PHRASES) {
+      expect(i18nSource.includes(phrase), `「${phrase}」应收编进 i18n.ts`).toBe(true);
+    }
+  });
+
+  it('旧内联串未在任何组件/页面复活（raw 扫描）', () => {
+    const offenders: string[] = [];
+    for (const [key, content] of productionSources) {
+      for (const phrase of RETIRED_PHRASES) {
+        if (content.includes(phrase)) offenders.push(`${key} 内联了「${phrase}」`);
+      }
+    }
+    expect(offenders, '硬编码回潮文件：改回引用 i18n 常量').toEqual([]);
+  });
+
+  it('五触点文件的接线（raw 扫描：新常量确实被对应文件消费，防「只被测试引用」的假绿）', () => {
+    const WIRINGS: Array<[string, string]> = [
+      ['/src/components/lab/LayerInfoTab.tsx', 'LAYER_INFO_EMPTY_DESC'],
+      ['/src/components/lab/LayerInfoTab.tsx', 'LAYER_INFO_HINT'],
+      ['/src/components/lab/LayerInfoTab.tsx', 'LAYER_INFO_NOTE'],
+      ['/src/components/lab/TopologyCanvas.tsx', 'LAB_TRACE_VIA_MORE'],
+      ['/src/components/lab/TopologyCanvas.tsx', 'LAB_LAYOUT_FORCE_TITLE'],
+      ['/src/components/lab/TopologyCanvas.tsx', 'LAB_MODE_SELECT_TITLE'],
+      ['/src/components/lab/TopologyCanvas.tsx', 'LAYER_NODE_FALLBACK'],
+      ['/src/components/lab/GeoCanvas.tsx', 'LAB_GEO_CLUSTER_HOVER'],
+      ['/src/App.tsx', 'BTN_CLOSE'],
+      ['/src/pages/Maintenance.tsx', 'MNT_TIME_UNKNOWN'],
+    ];
+    for (const [file, name] of WIRINGS) {
+      expect(RAW_SOURCES[file], `${file} 应消费 ${name}`).toContain(name);
+    }
+  });
+
+  it('插值词形钉：路径途经折叠「{via} 等 {n} 台」与聚簇 hover「{n} 台」（行为逐字节等价）', () => {
+    expect(
+      format(LAB_TRACE_VIA_MORE, { via: '站一、站二、站三、站四、站五、站六', n: 9 }),
+    ).toBe('站一、站二、站三、站四、站五、站六 等 9 台');
+    expect(format(LAB_GEO_CLUSTER_HOVER, { n: 3 })).toBe('3 台');
   });
 });

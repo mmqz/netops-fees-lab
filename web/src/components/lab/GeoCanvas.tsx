@@ -126,6 +126,7 @@ import {
   LAB_GEO_OFFLINE,
   LAB_GEO_OFFLINE_TITLE,
   LAB_GEO_CLUSTER_ARIA,
+  LAB_GEO_CLUSTER_HOVER,
   LAB_GEO_CLUSTER_TITLE,
   LAB_GEO_OV_ADMIN,
   LAB_GEO_OV_ADMIN_TITLE,
@@ -1324,7 +1325,7 @@ export const GeoCanvas = forwardRef<GeoCanvasHandle, GeoCanvasProps>(function Ge
       const hoverIn = (): void => {
         const d = entry.members.filter((m) => m.status === 'down').length;
         const codes = entry.members.map((m) => m.code).slice(0, 6).join('、');
-        onHoverInfoRef.current?.({ code: `${entry.members.length} 台`, name: codes, status: d > 0 ? 'down' : 'up' });
+        onHoverInfoRef.current?.({ code: format(LAB_GEO_CLUSTER_HOVER, { n: entry.members.length }), name: codes, status: d > 0 ? 'down' : 'up' });
       };
       const hoverOut = (): void => {
         onHoverInfoRef.current?.(null);

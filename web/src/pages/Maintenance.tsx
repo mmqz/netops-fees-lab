@@ -52,6 +52,7 @@ import {
   MNT_FIELD_START,
   MNT_HINT,
   MNT_TIME_BASIS,
+  MNT_TIME_UNKNOWN,
   MNT_LABEL_REQUIRED,
   MNT_LOAD_FAILED,
   MNT_SCOPE_EMPTY_HINT,
@@ -552,7 +553,7 @@ export function MaintenancePage() {
 
       <div className="muted-note table-hint">
         {format(MNT_TIME_BASIS, {
-          dataTime: dataTime !== null ? formatDateTime(dataTime) : '未知（尚未执行过检测）',
+          dataTime: dataTime !== null ? formatDateTime(dataTime) : MNT_TIME_UNKNOWN,
         })}
       </div>
 

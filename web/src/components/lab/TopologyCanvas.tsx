@@ -122,6 +122,12 @@ import {
   LAB_LAYOUT_FREEZE,
   LAB_LAYOUT_GRID,
   LAB_LAYOUT_HIER,
+  LAB_LAYOUT_CIRCLE_TITLE,
+  LAB_LAYOUT_CONCENTRIC_TITLE,
+  LAB_LAYOUT_FORCE_TITLE,
+  LAB_LAYOUT_FREEZE_TITLE,
+  LAB_LAYOUT_GRID_TITLE,
+  LAB_LAYOUT_HIER_TITLE,
   LAB_LEGEND_DEVICE_DOWN,
   LAB_LEGEND_DEVICE_UP,
   LAB_LEGEND_IFACE_FAULT,
@@ -134,12 +140,17 @@ import {
   LAB_MODE_SELECT,
   LAB_MODE_TRACE,
   LAB_MODE_TRACE_HINT,
+  LAB_MODE_FOCUS_TITLE,
+  LAB_MODE_SELECT_TITLE,
+  LAB_MODE_TRACE_TITLE,
   LAB_TRACE_CLEAR,
   LAB_TRACE_DONE,
   LAB_TRACE_EXIT_MODE,
   LAB_TRACE_PICK_A,
   LAB_TRACE_PICK_B,
   LAB_TRACE_UNREACHABLE,
+  LAB_TRACE_VIA_DIRECT,
+  LAB_TRACE_VIA_MORE,
   LAB_VIEW,
   LAB_VIEW_GEO2D,
   LAB_VIEW_GEO2D_TITLE,
@@ -178,6 +189,8 @@ import {
   LAB_IMPACT_PANEL_ROOT,
   LAB_IMPACT_PANEL_TITLE,
   LAB_LAYERS_GROUP,
+  LAYER_EDGE_FALLBACK,
+  LAYER_NODE_FALLBACK,
 } from '../../i18n';
 import {
   IconCamera,
@@ -2233,7 +2246,7 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
             ? [
                 {
                   key: 'locate-layer',
-                  label: LAYER_KIND_LABELS[ele.data('kind') as string] ?? '图层实体',
+                  label: LAYER_KIND_LABELS[ele.data('kind') as string] ?? LAYER_NODE_FALLBACK,
                   title: String(ele.data('name') ?? ''),
                   run: () => onSelectRef.current({ kind: 'layerNode', id }),
                 },
@@ -2277,7 +2290,7 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
           isLayerLink
             ? {
                 key: 'locate',
-                label: LAYER_SEM_LABELS[ele.data('sem') as string] ?? '图层边',
+                label: LAYER_SEM_LABELS[ele.data('sem') as string] ?? LAYER_EDGE_FALLBACK,
                 title: label,
                 run: () => onSelectRef.current({ kind: 'layerLink', id }),
               }
@@ -2726,10 +2739,10 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
       // 途经列表过长时折叠为「前 6 台 + 等 N 台」，避免横幅被撑爆（关键信息是跳数）
       const viaText =
         trace.via.length > 6
-          ? `${trace.via.slice(0, 6).join('、')} 等 ${trace.via.length} 台`
+          ? format(LAB_TRACE_VIA_MORE, { via: trace.via.slice(0, 6).join('、'), n: trace.via.length })
           : trace.via.length > 0
             ? trace.via.join('、')
-            : '直达';
+            : LAB_TRACE_VIA_DIRECT;
       traceBanner = {
         className: 'lab-canvas-trace--done',
         text: format(LAB_TRACE_DONE, {
@@ -2748,17 +2761,17 @@ export function TopologyCanvas({ topology, selected, onSelect, persistKey, zen =
   }
 
   const LAYOUT_BUTTONS: Array<{ kind: LayoutKind; label: string; title: string; icon: ReactNode }> = [
-    { kind: 'force', label: LAB_LAYOUT_FORCE, title: '力导向布局（物理模拟自然聚簇）', icon: <IconLayoutForce /> },
-    { kind: 'hier', label: LAB_LAYOUT_HIER, title: '层级布局（自上而下树形，核心层在顶）', icon: <IconLayoutHier /> },
-    { kind: 'concentric', label: LAB_LAYOUT_CONCENTRIC, title: '同心圆布局（按连接度分环，枢纽居中）', icon: <IconLayoutConcentric /> },
-    { kind: 'grid', label: LAB_LAYOUT_GRID, title: '网格布局（规整行列，便于对照清单）', icon: <IconLayoutGrid /> },
-    { kind: 'circle', label: LAB_LAYOUT_CIRCLE, title: '环形布局（首尾相接的环）', icon: <IconLayoutCircle /> },
-    { kind: 'freeze', label: LAB_LAYOUT_FREEZE, title: '锁定布局（停用自动排布，保留手动拖拽位置）', icon: <IconLayoutFreeze /> },
+    { kind: 'force', label: LAB_LAYOUT_FORCE, title: LAB_LAYOUT_FORCE_TITLE, icon: <IconLayoutForce /> },
+    { kind: 'hier', label: LAB_LAYOUT_HIER, title: LAB_LAYOUT_HIER_TITLE, icon: <IconLayoutHier /> },
+    { kind: 'concentric', label: LAB_LAYOUT_CONCENTRIC, title: LAB_LAYOUT_CONCENTRIC_TITLE, icon: <IconLayoutConcentric /> },
+    { kind: 'grid', label: LAB_LAYOUT_GRID, title: LAB_LAYOUT_GRID_TITLE, icon: <IconLayoutGrid /> },
+    { kind: 'circle', label: LAB_LAYOUT_CIRCLE, title: LAB_LAYOUT_CIRCLE_TITLE, icon: <IconLayoutCircle /> },
+    { kind: 'freeze', label: LAB_LAYOUT_FREEZE, title: LAB_LAYOUT_FREEZE_TITLE, icon: <IconLayoutFreeze /> },
   ];
   const MODE_BUTTONS: Array<{ kind: ModeKind; label: string; title: string; icon: ReactNode }> = [
-    { kind: 'select', label: LAB_MODE_SELECT, title: '选择模式（点击联动右侧表格定位）', icon: <IconModeSelect /> },
-    { kind: 'trace', label: LAB_MODE_TRACE, title: '路径模式（依次点击两台设备，高亮最短路径）', icon: <IconModeTrace /> },
-    { kind: 'focus', label: LAB_MODE_FOCUS, title: '聚焦模式（点击设备，仅保留其一跳邻域）', icon: <IconModeFocus /> },
+    { kind: 'select', label: LAB_MODE_SELECT, title: LAB_MODE_SELECT_TITLE, icon: <IconModeSelect /> },
+    { kind: 'trace', label: LAB_MODE_TRACE, title: LAB_MODE_TRACE_TITLE, icon: <IconModeTrace /> },
+    { kind: 'focus', label: LAB_MODE_FOCUS, title: LAB_MODE_FOCUS_TITLE, icon: <IconModeFocus /> },
   ];
 
   /** GEO-2：顶层视图分段（拓扑图 | 2D 地图 | 3D 地图；后两者互为俯视/斜视切换）。 */

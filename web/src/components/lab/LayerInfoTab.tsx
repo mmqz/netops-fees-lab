@@ -19,6 +19,20 @@ import type { SelectedEntity } from './selection';
 import { Pagination } from '../Pagination';
 import {
   format,
+  LAYER_INFO_A_END,
+  LAYER_INFO_ANCHOR,
+  LAYER_INFO_EMPTY_DESC,
+  LAYER_INFO_HINT,
+  LAYER_INFO_MEMBER_COUNT,
+  LAYER_INFO_NAME,
+  LAYER_INFO_NOTE,
+  LAYER_INFO_PON_PORT,
+  LAYER_INFO_SAMPLE,
+  LAYER_INFO_SEMANTIC,
+  LAYER_INFO_STATION_SERVES,
+  LAYER_INFO_STATUS,
+  LAYER_INFO_TITLE,
+  LAYER_INFO_Z_END,
   LAYER_KIND_LABELS,
   LAYER_MEMBERS_CODE,
   LAYER_MEMBERS_LOAD_ERR,
@@ -89,14 +103,11 @@ export function LayerInfoTab({ topology, selected, workspaceId }: LayerInfoTabPr
   }, [clusterKey, workspaceId, membersPage]);
 
   if (layers === undefined) {
-    return <EmptyState title={NO_VALUE} description="本工作台物化于 v0.12 之前，无图层覆盖层数据" />;
+    return <EmptyState title={NO_VALUE} description={LAYER_INFO_EMPTY_DESC} />;
   }
   if (node === null && edge === null) {
     return (
-      <EmptyState
-        title="图层信息"
-        description="在画布上点选接入簇 / OLT / 客户 / 业务 / 逻辑电路等覆盖层实体查看详情（需先打开对应图层开关）"
-      />
+      <EmptyState title={LAYER_INFO_TITLE} description={LAYER_INFO_HINT} />
     );
   }
 
@@ -114,42 +125,42 @@ export function LayerInfoTab({ topology, selected, workspaceId }: LayerInfoTabPr
         </div>
         <dl className="kv-table">
           <div className="kv-row">
-            <dt>名称</dt>
+            <dt>{LAYER_INFO_NAME}</dt>
             <dd title={node.name}>{node.name || NO_VALUE}</dd>
           </div>
           {node.status !== undefined && node.status !== '' && (
             <div className="kv-row">
-              <dt>状态</dt>
+              <dt>{LAYER_INFO_STATUS}</dt>
               <dd>{node.status}</dd>
             </div>
           )}
           {node.aggregated === true && (
             <div className="kv-row">
-              <dt>成员数</dt>
+              <dt>{LAYER_INFO_MEMBER_COUNT}</dt>
               <dd>{node.memberCount ?? 0}</dd>
             </div>
           )}
           {anchorCode !== undefined && (
             <div className="kv-row">
-              <dt>锚设备</dt>
+              <dt>{LAYER_INFO_ANCHOR}</dt>
               <dd>{anchorCode}</dd>
             </div>
           )}
           {node.detail?.ponPorts !== undefined && (
             <div className="kv-row">
-              <dt>PON 口</dt>
+              <dt>{LAYER_INFO_PON_PORT}</dt>
               <dd>{format(LAYER_PON_PORTS, { n: node.detail.ponPorts.length })}</dd>
             </div>
           )}
           {node.detail?.stationServes !== undefined && (
             <div className="kv-row">
-              <dt>服务规模</dt>
+              <dt>{LAYER_INFO_STATION_SERVES}</dt>
               <dd>{format(LAYER_STATION_SERVES, { n: node.detail.stationServes })}</dd>
             </div>
           )}
           {node.sample !== undefined && node.sample.length > 0 && (
             <div className="kv-row">
-              <dt>样例成员</dt>
+              <dt>{LAYER_INFO_SAMPLE}</dt>
               <dd title={node.sample.join('、')}>{node.sample.join('、')}{node.memberCount !== undefined && node.memberCount > node.sample.length ? ' …' : ''}</dd>
             </div>
           )}
@@ -219,19 +230,19 @@ export function LayerInfoTab({ topology, selected, workspaceId }: LayerInfoTabPr
       </div>
       <dl className="kv-table">
         <div className="kv-row">
-          <dt>A 端</dt>
+          <dt>{LAYER_INFO_A_END}</dt>
           <dd title={e.aRef}>{endpointLabel(e.aKind, e.aRef, e.aCode)}</dd>
         </div>
         <div className="kv-row">
-          <dt>Z 端</dt>
+          <dt>{LAYER_INFO_Z_END}</dt>
           <dd title={e.zRef}>{endpointLabel(e.zKind, e.zRef, e.zCode)}</dd>
         </div>
         <div className="kv-row">
-          <dt>语义</dt>
+          <dt>{LAYER_INFO_SEMANTIC}</dt>
           <dd>{semLabel}</dd>
         </div>
       </dl>
-      <p className="layer-info-note">逻辑承载/业务关联边为只读投影：右键菜单可发起影响分析高亮。</p>
+      <p className="layer-info-note">{LAYER_INFO_NOTE}</p>
     </div>
   );
 }

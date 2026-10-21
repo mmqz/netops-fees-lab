@@ -26,6 +26,7 @@ import {
   BREADCRUMB_HOME,
   BREADCRUMB_LABEL,
   BTN_BACK_HOME,
+  BTN_CLOSE,
   NAV_ALERTS,
   NAV_API,
   NAV_IMPORT,
@@ -260,7 +261,7 @@ function TokenDialog({ onClose }: { onClose: () => void }) {
         </div>
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>
-            关闭
+            {BTN_CLOSE}
           </button>
           {token !== '' && (
             <button type="button" className="btn btn--secondary" onClick={clear}>

@@ -305,12 +305,13 @@ export const KEY_FALLBACK_FIELDS: Partial<Record<ResourceType, string[]>> = {
 };
 
 /**
- * 类型层次/专业域元数据镜像（后端 TypeSpec.Layer/Domain + LayerName 的前端对照，
- * W19/issue #26：单一事实源在后端 mapping 包，此镜像与 GET /api/schema 的
- * layer/layerName/domain 字段同源同值——七层模型 §10.2（§12-B5 修订：接入层
- * 插入为 L4，逻辑层 L5、业务层 L6；ip_pool 归逻辑层））。
- * 当前 UI 尚未消费（W22 traverse 视图与 W25 域过滤将读取），先落地镜像保证
- * 前后端可对照校验。
+ * 类型层次/专业域元数据（#113-B 裁决）：TYPE_META 是前端层名的**单一手抄面**
+ * ——与后端无契约耦合的静态镜像（后端 GET /api/schema 暴露同名 layer/layerName/
+ * domain 字段可人工对照校验，但两端互不消费对方，漂移风险以视觉评审为界）。
+ * W22 traverse 视图（GraphAnalysisTab）自 #113 起经 layerIdName() 消费层名
+ * （层号→层名索引从本表机械派生，不再存在第二份手抄——收敛前该页持有
+ * 一份已漂移的 L0-L6 层名副本）；W25 域过滤待后续消费。
+ * 七层模型 §10.2（§12-B5 修订：接入层 L4、逻辑层 L5、业务层 L6；ip_pool 归逻辑层）。
  */
 export interface TypeMeta {
   /** 七层模型层数（0-6）。 */
@@ -356,3 +357,23 @@ export const TYPE_META: Record<ResourceType, TypeMeta> = {
   service: { layer: 6, layerName: '业务层', domain: 'service' },
   leased_line: { layer: 6, layerName: '业务层', domain: 'service' },
 };
+
+/**
+ * 层号 → 层名索引（#113-B：从 TYPE_META 单一事实源机械派生，禁止手抄——
+ * GraphAnalysisTab 收敛前持有的第二份 L0-L6 层名副本已词形漂移，此后层名
+ * 只有 TYPE_META 一处可改，闭集对齐断言在 schema.test.ts 钉死）。
+ * 同层多类型时以源表出现顺序的最后一个为准（层内 layerName 本应同词）。
+ */
+export const LAYER_ID_NAMES: Record<number, string> = {};
+for (const meta of Object.values(TYPE_META)) {
+  LAYER_ID_NAMES[meta.layer] = meta.layerName;
+}
+
+/**
+ * 层号 → 展示名「L{n} {层名}」；未知层回退「L{n}」数字形态——与后端
+ * mapping.LayerName 的未知层回退同语义（错误可见而非静默空白）。
+ */
+export function layerIdName(layer: number): string {
+  const name = LAYER_ID_NAMES[layer];
+  return name === undefined ? `L${layer}` : `L${layer} ${name}`;
+}

@@ -47,21 +47,9 @@ import {
 } from '../i18n';
 import { ErrorBlock } from './ErrorBlock';
 import { Spinner } from './Spinner';
-
-/** 层号 → 层名（设计 §3.1 七层模型；L0 空间 → L6 业务）。 */
-const LAYER_NAMES: Record<number, string> = {
-  0: 'L0 空间层',
-  1: 'L1 物理层·设备',
-  2: 'L2 物理层·光',
-  3: 'L3 传输层',
-  4: 'L4 接入层',
-  5: 'L5 逻辑层',
-  6: 'L6 业务层',
-};
-
-function layerName(layer: number): string {
-  return LAYER_NAMES[layer] ?? `L${layer}`;
-}
+// #113-B：层名从 schema.ts TYPE_META（前端单一手抄面）派生——本页旧版
+// 持有一份 L0-L6 层名硬编码副本且词形已漂移，收敛后不再有第二份手抄。
+import { layerIdName } from '../schema';
 
 /** 层族色板（镜像 TypeChip 的层族分配）：节点自带 layer，按层配色；
  *  未知层号回落灰 chip（防御——图查询的 type/layer 以 string/number 透传）。 */
@@ -108,7 +96,7 @@ function NodeLine({ node, extra }: { node: NodeRow; extra?: string }) {
       >
         {label}
       </Link>
-      <span className="chip chip--mono">{layerName(node.layer)}</span>
+      <span className="chip chip--mono">{layerIdName(node.layer)}</span>
       {abnormal ? (
         <span className="chip chip--error">{GRAPH_RUNSTATE_ABNORMAL}</span>
       ) : node.runState === 'normal' ? (
