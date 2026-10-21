@@ -13,6 +13,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -99,7 +100,12 @@ func feeRisks(ctx context.Context, svc *services.Services, in feeRisksInput) (*m
 		// filesystem paths; the HTTP twin logs the detail and answers the
 		// generic 500 message. The MCP face has no operator response body —
 		// the detail goes to the server's stderr (slog default logger), and
-		// the tool error carries the same generic vocabulary.
+		// the tool error carries the same generic vocabulary. The ENGINE-
+		// NOT-BUILT refusal is a CONTRACT answer (the HTTP twin's 501), not
+		// an internal leak — it passes through verbatim.
+		if errors.Is(err, fees.ErrEngineNotBuilt) {
+			return nil, feeRisksOutput{}, err
+		}
 		slog.Error("fee_risks engine failure", "scenario", scenario, "error", err.Error())
 		return nil, feeRisksOutput{}, fmt.Errorf("费用风险查询失败（引擎内部错误，详情见服务端日志）")
 	}
