@@ -2,14 +2,11 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -55,8 +52,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleImportUpload implements POST /api/imports: multipart field "file",
 // .xlsx workbook or PTP configuration script (.txt/.cfg), ≤10MB. The
 // upload is stored at
-// dataDir/uploads/<sha256>_<name> (content-addressed, overwriting an
-// identical prior upload), then analyzed via the importer with the user's
+// dataDir/uploads/<sha256>_<name> (content-addressed; identical content
+// replaces itself — staged via temp + atomic rename, #112, so concurrent
+// same-content submissions replace each other with whole files) and then
+// analyzed via the importer with the user's
 // original file name as the batch's display name (202 + Analysis JSON).
 // Script uploads enter the same analyze → confirm → import pipeline: the
 // workbook layer parses the script and synthesizes the virtual sheet (W8-D).
@@ -121,15 +120,15 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Content-addressed storage: <sha256>_<original name> (the extension of
 	// the user's file is preserved — the script channel sniffs on it).
-	sum := sha256.Sum256(data)
-	stored := filepath.Join(s.dataDir, "uploads", hex.EncodeToString(sum[:])+"_"+name)
-	if err := os.MkdirAll(filepath.Join(s.dataDir, "uploads"), 0o755); err != nil {
-		s.log.Error("create uploads dir failed", "error", err.Error())
-		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
-		return
-	}
-	if err := os.WriteFile(stored, data, 0o644); err != nil {
-		s.log.Error("store upload failed", "error", err.Error(), "path", stored)
+	// #112: staged through storeUpload, the shared atomic primitive — the
+	// bytes land under a per-request ".tmp-*" name and rename into the
+	// content-addressed name only once complete, so concurrent same-content
+	// submissions cannot tear the stored file while the analyze step below
+	// re-reads and re-hashes it (the same race #106 fixed for the fee
+	// channel; this call site kept the O_TRUNC in-place write until now).
+	stored, err := storeUpload(filepath.Join(s.dataDir, "uploads"), data, name)
+	if err != nil {
+		s.log.Error("store upload failed", "error", err.Error(), "name", name)
 		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
 		return
 	}

@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -321,7 +319,8 @@ func (s *Server) handleMetricsImport(w http.ResponseWriter, r *http.Request) {
 
 // readMetricsUpload extracts and persists the multipart "file" field the
 // way the resource channel does (content-addressed
-// dataDir/uploads/<sha256>_<name>) and returns its path + display name.
+// dataDir/uploads/<sha256>_<name>, staged via temp + atomic rename —
+// storeUpload, #112) and returns its path + display name.
 func (s *Server) readMetricsUpload(w http.ResponseWriter, r *http.Request) (path, name string, ok bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
@@ -365,15 +364,14 @@ func (s *Server) readMetricsUpload(w http.ResponseWriter, r *http.Request) (path
 		respondError(w, http.StatusUnprocessableEntity, "empty_workbook", "上传文件为空")
 		return "", "", false
 	}
-	sum := sha256.Sum256(data)
-	stored := filepath.Join(s.dataDir, "uploads", hex.EncodeToString(sum[:])+"_"+name)
-	if err := os.MkdirAll(filepath.Join(s.dataDir, "uploads"), 0o755); err != nil {
-		s.log.Error("create uploads dir failed", "error", err.Error())
-		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
-		return "", "", false
-	}
-	if err := os.WriteFile(stored, data, 0o644); err != nil {
-		s.log.Error("store upload failed", "error", err.Error(), "path", stored)
+	// #112: staged through storeUpload, the shared atomic primitive — the
+	// ingest step re-reads and re-hashes this exact path for the batch's
+	// evidence SHA256, so the content-addressed name must never be
+	// observable with partial bytes (the same race #106 fixed for the fee
+	// channel; this call site kept the O_TRUNC in-place write until now).
+	stored, err := storeUpload(filepath.Join(s.dataDir, "uploads"), data, name)
+	if err != nil {
+		s.log.Error("store upload failed", "error", err.Error(), "name", name)
 		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
 		return "", "", false
 	}

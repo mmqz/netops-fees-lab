@@ -21,6 +21,23 @@ type GCResult struct {
 	// status) references via its workbook_path, fee staging files some
 	// fee batch derives, plus directories other than uploads/fees
 	// (conservative skip).
+	//
+	// Interrupted staging temps (".tmp-*", the per-request temp names of
+	// storeUpload — internal/api/uploads.go) are orphans in BOTH areas
+	// (#112 for the flat dir, #106-B for uploads/fees): a temp name is
+	// never recorded in workbook_path nor derivable from a fee batch, so
+	// it is never referenced. Serve startup (the primary trigger) is
+	// unambiguous — the sweep runs before the listener, no request of THIS
+	// process can be mid-write, so any temp found is crash debris. A
+	// manual `netopslab gc` overlapping a live serve MAY collect an
+	// in-flight request's fresh temp — the upload then fails loudly
+	// (rename ENOENT → 500, the operator retries); it can never produce a
+	// torn file or a lying hash: the same accepted window the fee staging
+	// sweep already has (its test seeds a FRESH temp and pins deletion).
+	// Fresh temps are therefore NOT grace-protected here, unlike the
+	// Parquet tree (internal/fees GCAnalysis), where deleting a fresh
+	// orphan would SILENTLY lose rows of a completed batch — loud failure
+	// vs silent loss is the doctrinal line.
 	Referenced int `json:"referenced"`
 	// Errors is the number of removals that failed (logged, not fatal).
 	Errors int `json:"errors"`
@@ -42,7 +59,11 @@ type GCResult struct {
 // are orphans: crash debris of interrupted uploads (the analyzing crash
 // window writes the file before the batch becomes durable), pre-batch
 // refusals, stale re-uploads of the same content under different original
-// names, and interrupted staging temps. Pre-#106 the whole fees directory
+// names, and interrupted staging temps (".tmp-*" — the resource and
+// metrics channels stage in the flat dir since #112, the fee channel
+// has staged in uploads/fees since #106; see the GCResult.Referenced
+// note for the concurrency window a manual gc run must tolerate).
+// Pre-#106 the whole fees directory
 // was skipped as "a directory" and accumulated forever (every HTTP fee
 // import stores the file TWICE: staging + snapshot).
 //

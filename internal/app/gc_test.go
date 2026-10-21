@@ -341,6 +341,73 @@ func TestGCOrphanFeeStagingUploads(t *testing.T) {
 	}
 }
 
+// TestGCOrphanUploadsSweepStagingTemps pins the #112 flat-dir addition:
+// the resource and metrics channels stage their uploads through
+// per-request ".tmp-*" temp names inside the FLAT uploads dir
+// (internal/api storeUpload) before renaming into the content-addressed
+// name — an interrupted temp is never recorded in any workbook_path, so
+// it is orphan crash debris exactly like the fee staging temps (#106-B).
+// The temps here are FRESH (not backdated) on purpose: a manual
+// `netopslab gc` overlapping a live serve may legitimately collect an
+// in-flight request's temp — the upload then fails loudly (rename ENOENT
+// → 500, operator retries) and can never yield a torn file or a lying
+// hash, the same accepted window the fee staging sweep already pins
+// (TestGCOrphanFeeStagingUploads). The serve-startup sweep — the primary
+// trigger — runs before the listener, where a temp is unambiguous debris.
+// This is deliberately NOT the Parquet tree's mtime milestone: deleting
+// a fresh orphan there silently loses rows of a completed batch; deleting
+// a fresh temp here only makes one request fail loudly.
+func TestGCOrphanUploadsSweepStagingTemps(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	dbPath := filepath.Join(dir, "netops.db")
+	a, err := New(Config{DBPath: dbPath, DataDir: dir})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	uploads := filepath.Join(dir, "uploads")
+	if err := os.MkdirAll(uploads, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	// A referenced upload (completed batch) must survive around the temps.
+	kept := filepath.Join(uploads, "aaa111deadbeef_kept.xlsx")
+	writeFile(t, kept)
+	gcTestBatch(t, a.DB, "bat_gc_temps", "completed", kept)
+	// Interrupted staging temps of the resource/metrics channels — fresh,
+	// zero age (see the comment above for why freshness must not keep
+	// them).
+	temp1 := filepath.Join(uploads, ".tmp-112233445")
+	temp2 := filepath.Join(uploads, ".tmp-998877665")
+	writeFile(t, temp1)
+	writeFile(t, temp2)
+
+	res, err := a.GCOrphanUploads(context.Background())
+	if err != nil {
+		t.Fatalf("GCOrphanUploads: %v", err)
+	}
+	if res.Scanned != 3 || res.Deleted != 2 || res.Referenced != 1 || res.Errors != 0 {
+		t.Fatalf("gc result = %+v, want scanned=3 deleted=2 referenced=1 errors=0", res)
+	}
+	for _, p := range []string{temp1, temp2} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("staging temp %s still exists (stat err = %v)", p, err)
+		}
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Errorf("referenced upload %s missing: %v", kept, err)
+	}
+
+	// Idempotent second sweep: only the referenced upload remains.
+	res, err = a.GCOrphanUploads(context.Background())
+	if err != nil {
+		t.Fatalf("second GCOrphanUploads: %v", err)
+	}
+	if res.Deleted != 0 || res.Scanned != 1 || res.Referenced != 1 {
+		t.Fatalf("second gc result = %+v, want deleted=0 scanned=1 referenced=1", res)
+	}
+}
+
 // TestGCSweepServeStartup pins the serve-startup wiring helper (#106-C):
 // both sweeps run through gcSweep — the uploads staging sweep and the fee
 // analysis sweep — and a BROKEN uploads sweep must not stop the fees

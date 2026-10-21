@@ -95,7 +95,11 @@ func SnapshotPath(feeType FeeType, year, month int, sha256, originalName string)
 // miss the Stat fast-path and would otherwise share one O_TRUNC temp —
 // interleaved truncate+copy can leave zero holes that no writer comes
 // back to fill, and the "atomic" rename would then commit the torn file
-// under the evidence hash's own name.
+// under the evidence hash's own name. (This is the byte-level sibling of
+// the HTTP channels' staging primitive — internal/api storeUpload, #112
+// deduplicated that side of the family; it streams from a source file
+// rather than an in-memory buffer, so the implementations stay separate
+// by necessity, the temp-name + rename doctrine identical.)
 func WriteSnapshot(dataDir, srcPath string, feeType FeeType, year, month int, sha256, originalName string) (string, error) {
 	rel := SnapshotPath(feeType, year, month, sha256, originalName)
 	dst := filepath.Join(dataDir, filepath.FromSlash(rel)) // contract → OS path at the disk boundary
