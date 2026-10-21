@@ -106,3 +106,12 @@ alerts(alert_id, rule_id, series_id, fired_at, cleared_at,
 - 检索词锚点（后续实现时替换为实码引用）：SuggestTypeFromHeaders 的
   保守守卫哲学（宁跳勿错）同样适用于检测规则的默认阈值——首版规则全部
   显式确认后启用，不做「开箱即报警」。
+
+## Addendum（2026-10-20 追记，#110 叙事漂移清扫——不改写上文决策）
+
+D5 的「恰好 5 个」冻结此后**两度被显式突破**（均同步扩 `TestMCPToolRegistry` 的钉死断言，未静默扩面；未按本文要求另立新 ADR，诚实声明）：
+
+1. **v0.9 R4**：AI 根因分析闭环需要图/告警/指标只读面——新增 `graph_traverse` / `graph_impact` / `graph_context` / `alerts_query` / `metrics_query` 五个**只读**分析工具（10 个；api.md / CHANGELOG v0.9 记录）；
+2. **v0.15.0（#58 阶段 5）**：费用风险查询 `fee_risks`（只读，阈值恒用治理默认值、AI 不可调参）——11 个。
+
+实质裁决（v0.15.0 #66 清扫时定调）：冻结红线的本义是「**无 SQL/Shell/SSH/文件等越权工具、写面与生命周期边留在人类侧**」，而非「数量恒定」——两度扩容只放宽了 **READ** 面，D5 的攻击面论证继续成立；「数量冻结」句子则被判定为自我贬值的叙事（每加一个工具就多一处撒谎的文档），改为「N 个全部只读」的属性声明。D5 所担心的「顺便加个工具」由 `TestMCPToolRegistry` 名字闭集 + `TestMCPToolCountMatchesFactsFile` 事实源门禁结构性拦截（当前工具数的机读事实源见 [docs/facts.md](../facts.md)；本 Addendum 之前的散落历史数字属当时记录，不回改）。

@@ -102,6 +102,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/imports` | multipart（file + feeType + year + month [+ map]）；201 新导入 / 200 幂等重复（`skippedDuplicate`）/ 422 行全失败或不可映射 |
 | `GET /api/fees/batches?status=` | 批次列表（最新在前，中文类型标签 + 账期渲染） |
 | `POST /api/fees/batches/{id}/rollback` | 回滚（删分析行保快照；409/404 守卫） |
+| `GET /api/fees/batches/{id}/evidence?row=` | 证据回读：快照第 N 行原文（#86；row = 源文件自身编号，表头 = 1；`source_row` 锚点的第三级证据，回滚批次仍可读） |
 | `GET /api/fees/query/totals?feeType=&year=&month=&limit=` | 站址汇总预设 |
 | `GET /api/fees/query/duplicates?feeType=&year=&month=` | 跨批次重复结算候选预设 |
 | `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
@@ -109,7 +110,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/links/{id}/confirm \| dismiss` | 人工确认/驳回模糊提案（人类优先于扫描） |
 | `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=` | 风险六场景（#64/阶段 4；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501） |
 
-写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 10 条路由，路由表生成零漂移）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
+写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 11 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
 ## 8. 风险六场景（#64，#58 阶段 4）
 

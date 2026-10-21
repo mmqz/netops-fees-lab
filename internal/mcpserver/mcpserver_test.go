@@ -1,9 +1,10 @@
 // Tests drive the REAL MCP server (NewServer + Run) over os.Pipe stdio
 // transports with the go-sdk client performing the full JSON-RPC MCP
 // initialize handshake, then tools/list and tools/call. TestMCPToolRegistry
-// is the §11 SEC-P2 acceptance test: exactly ten tools — resource_search,
-// the four lab tools of PROJECT_BRIEF_P2 §8 and the five read-only analysis
-// tools of v0.9 R4 — and nothing else (no SQL/shell/file/production tools,
+// is the §11 SEC-P2 acceptance test: exactly eleven tools — resource_search,
+// the four lab tools of PROJECT_BRIEF_P2 §8, the five read-only analysis
+// tools of v0.9 R4 and the read-only fee-risk tool of v0.15 (#58 stage 5) —
+// and nothing else (no SQL/shell/file/production tools,
 // no workspace create/delete tool, no alert ack/clear or detection-run
 // tool: the analysis surface is read-only). The
 // lab tests materialize a workspace DIRECTLY through sim.Service on the test
@@ -227,10 +228,15 @@ func TestMCPServerResourceSearch(t *testing.T) {
 }
 
 // TestMCPToolRegistry is the §11 SEC-P2 acceptance test: tools/list exposes
-// EXACTLY the five contract tools — resource_search + lab_apply_ops +
-// lab_run_checks + lab_diff_undo + lab_checkpoint (PROJECT_BRIEF_P2 §8) —
+// EXACTLY the eleven contract tools — resource_search + lab_apply_ops +
+// lab_run_checks + lab_diff_undo + lab_checkpoint (PROJECT_BRIEF_P2 §8) +
+// graph_traverse + graph_impact + graph_context + alerts_query +
+// metrics_query (v0.9 R4) + fee_risks (v0.15, #58 stage 5) —
 // and nothing else: no SQL, shell, file or production tools, and no tool
-// that could create or delete a workspace (§1.4).
+// that could create or delete a workspace (§1.4). The COUNT is additionally
+// pinned against docs/facts.md by TestMCPToolCountMatchesFactsFile (#110 —
+// the facts-file gate), so the number quoted in prose can never drift from
+// the registry silently.
 func TestMCPToolRegistry(t *testing.T) {
 	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {

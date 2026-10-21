@@ -1,6 +1,6 @@
 # NetOps Lab — 架构说明（Architecture）
 
-> 本文描述 Stage 0 + Phase 1 + Phase 2（截至 v0.3.x，含 v0.3.0 geo 管道 §8）的实际实现。源码是唯一事实来源：分层、包边界、事务与确定性策略均可在 `internal/` 中逐一对应。中文为主，关键术语保留英文。
+> 本文描述仓库的实际实现（Stage 0 + Phase 1 + Phase 2 及 v0.3 之后的持续演进），随代码同步维护；会漂移的计数（工具数/路由数/迁移数等）以 [docs/facts.md](facts.md) 为机读事实源（漂移门禁测试钉死）。源码是唯一事实来源：分层、包边界、事务与确定性策略均可在 `internal/` 中逐一对应。中文为主，关键术语保留英文。
 
 ## 1. 总体分层
 
@@ -23,7 +23,7 @@ internal/importer · internal/validation · internal/query · internal/report ·
         │        服务层（全部业务规则在这里；只依赖 repo 接口）
         ▼
 internal/repo                          ← 存储层：SQLite（modernc.org/sqlite，纯 Go 无 CGO）
-        │                                  迁移 v1–v5 + 各聚合仓储 + Online Backup（backup.go）
+        │                                  迁移 v1–v32（机读计数见 docs/facts.md）+ 各聚合仓储 + Online Backup（backup.go）
         ▼
 internal/domain                        ← 领域层：实体/枚举/错误/规则码 + 操作码/检查码（零内部依赖）
 
@@ -45,7 +45,7 @@ web/                                   ← React 源码（构建产物输出到 
 | 包 | 职责 | 关键文件 |
 | --- | --- | --- |
 | `domain` | 实体（Resource/Relation/Issue/Batch/SourceRef/RowResult）、枚举、sentinel 错误、规则码→严重级别、ID 生成（`res_`/`rel_`/`src_`/`bat_`/`iss_` 前缀 + UUID） | `entities.go` `enums.go` `rules.go` |
-| `repo` | `Open(path)` 应用迁移（v1–v5）；DSN 携带 `busy_timeout(5000)` `journal_mode(WAL)` `foreign_keys(1)`；`DB.Do(ctx, fn)` 事务组合子；P1 六个聚合仓储 + P2 八个仿真仓储；`DB.Backup`（Online Backup API，ADR-0008）与 `OpenReadOnly`（快照只读打开） | `repo.go` `migrations*.go` `backup.go` |
+| `repo` | `Open(path)` 应用迁移（v1–v32，链长度与连续性由 `TestMigrationCountMatchesFactsFile` 对照 docs/facts.md 断言）；DSN 携带 `busy_timeout(5000)` `journal_mode(WAL)` `foreign_keys(1)`；`DB.Do(ctx, fn)` 事务组合子；聚合仓储：P1 六个（批次/资源/关系/来源/行结果/问题）+ P2 八个仿真 + v0.6 起治理/费用/指标/检测/告警/维护/图层/模板等扩展（全量见 `repo.go` DB 结构）；`DB.Backup`（Online Backup API，ADR-0008）与 `OpenReadOnly`（快照只读打开） | `repo.go` `migrations*.go` `backup.go` |
 | `workbook` | excelize 解析：Sheet 列表、表头行、数据行（空行跳过并计数）、类型化单元格读取；`ErrNotXLSX`/`ErrEmptyWorkbook` | `workbook.go` |
 | `mapping` | 目标 schema（字段类型 string/ipv4/cidr/int/enum/ref + 取值范围）、映射模型与校验（`*FieldError` 定位 sheet/field）、确定性建议引擎（置信度阶梯 1.0/0.9/0.75/0） | `schema.go` `mapping.go` `suggest.go` |
 | `importer` | 分析（建批次、写 workbook_path、产出 Analysis）、执行（单事务导入所有 import sheet、行级规则、行级记账、幂等 skip）、回滚（completed-only + 409 in-use） | `analyze.go` `execute.go` `rollback.go` |
@@ -54,7 +54,7 @@ web/                                   ← React 源码（构建产物输出到 
 | `query` | 检索/统计/详情（含 source_refs 解析与 relationCount）/关系子图/拓扑检查——只读服务 | `query.go` |
 | `report` | 质量报告：`Report` 结构（camelCase JSON）、来源解析（resolve.go：source_ref_id → workbook/sheet/row；行级失败行 → 批次+行号；否则 applicationGenerated）、独立 HTML（`html/template` + `//go:embed template.html`，全量自动转义）；Phase 2 增仿真工作台报告（labreport.go + labtemplate.html：引擎版本/评分/发现/变更集/检查点 + 同一免责声明） | `report.go` `resolve.go` `html.go` `labreport.go` |
 | `sim` | **仿真引擎**（Phase 2）：类型化操作集（10 前向 + 3 内部 restore）与严格校验、物化（确定性端口分配）、CHK-001..005 确定性校验、连通性 BFS、规范状态哈希、run diff、LIFO undo、检查点创建/恢复（ADR-0007/0008）；**独占仿真表写路径** | `ops.go` `apply.go` `materialize.go` `checks.go` `state.go` `diff.go` `undo.go` `checkpoint.go` |
-| `mcpserver` | MCP stdio 服务器（go-sdk v1.8.0 IOTransport）；注册 **5 个工具**：只读 `resource_search` + 仿真写面 `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`（全部绑定 sim 引擎；restore_* 双重拒绝；**无建删工作区工具**） | `mcpserver.go` `labtools.go` |
+| `mcpserver` | MCP stdio 服务器（go-sdk v1.8.0 IOTransport）；注册 **11 个工具**：只读 `resource_search` + 仿真写面 `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`（全部绑定 sim 引擎；restore_* 双重拒绝；**无建删工作区工具**）+ 只读分析面 `graph_traverse` / `graph_impact` / `graph_context` / `alerts_query` / `metrics_query`（v0.9 R4）+ 只读 `fee_risks`（v0.15，#58 阶段 5） | `mcpserver.go` `labtools.go` `graphtools.go` `feetools.go` |
 | `api` | net/http stdlib 路由（Go 1.27 method patterns）、统一 JSON 信封与错误映射（400/404/409/413/422/500）、panic 恢复 + slog 请求日志、10MB 上传限制、`no-store` 缓存中间件、SPA 挂载；Phase 2 增 17 条 §7 仿真路由（workspaces.go，英文错误消息） | `server.go` `workspaces.go` 等 |
 | `app` | 组装 + CLI 子命令实现（退出码 0/1/2、stdout 单 JSON 对象）+ 优雅停机（SIGINT/SIGTERM，5s）；Phase 2 增 `lab` 子命令树（workspace/topology/path/apply/checks/diff/undo/checkpoint） | `app.go` `cli.go` |
 | `webui` | `//go:embed all:dist` 嵌入前端产物；SPA 文件服务 + index.html 回退 | `webui.go` |
@@ -62,7 +62,7 @@ web/                                   ← React 源码（构建产物输出到 
 ## 3. 隔离边界（isolation boundaries）
 
 1. **无 SQL 泄漏**：SQL 只存在于 `internal/repo`；服务层只见类型化仓储方法。MCP/HTTP 均不暴露任意 SQL/Shell/SSH/文件访问。
-2. **无生产写能力**：全仓库不存在任何设备连接代码；仿真的"写"也只落在本地 SQLite 的仿真表。MCP 工具面 = `[resource_search, lab_apply_ops, lab_run_checks, lab_diff_undo, lab_checkpoint]` **恰好 5 个**（测试 `TestMCPToolRegistry` 断言）。
+2. **无生产写能力**：全仓库不存在任何设备连接代码；仿真的"写"也只落在本地 SQLite 的仿真表。MCP 工具面 = `[resource_search, lab_apply_ops, lab_run_checks, lab_diff_undo, lab_checkpoint, graph_traverse, graph_impact, graph_context, alerts_query, metrics_query, fee_risks]` **恰好 11 个**（测试 `TestMCPToolRegistry` 断言名字闭集；数量另由 `TestMCPToolCountMatchesFactsFile` 对照 [docs/facts.md](facts.md) 机读事实源钉死——加工具必须同步事实源，漂移即测试红）。
 3. **AI 边界（Phase 2）**：AI 改仿真态只能通过 4 个类型化 lab 工具（每个变更显式携带 workspaceId、走引擎校验/变更集/自动校验）；**MCP 不能创建/删除工作区**（工作区创建是人工/API 动作）；`restore_*` 内部操作码在 HTTP/MCP/CLI 三边界均被拒。
 4. **引擎独占仿真写路径**：`internal/sim` 是唯一写 v5 仿真表的包（ADR-0007 决策 6）——出口层只做协议适配。
 5. **出口层薄**：`api`/`mcpserver` 只做协议适配（路径参数、错误码映射、JSON 形状），业务规则零重写；CLI 与 HTTP 共用同一服务实例（`app.New` 组装）。P2 路由错误消息为英文、P1 路由保持中文（§7 契约，信封同构）。

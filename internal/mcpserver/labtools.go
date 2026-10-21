@@ -42,7 +42,9 @@ import (
 )
 
 // Tool names of the four Phase 2 lab tools (§8). With resource_search these
-// are the exactly five registered tools.
+// five are the closed set PROJECT_BRIEF_P2 §8 pinned for Phase 2 — the
+// registry has since widened to eleven (see the package doc and NewServer;
+// the current count is pinned in docs/facts.md).
 const (
 	labApplyOpsName         = "lab_apply_ops"
 	labRunChecksName        = "lab_run_checks"

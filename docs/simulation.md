@@ -5,7 +5,7 @@
 ## 0. 合规红线（重申）
 
 - **无生产写路径**：仿真引擎只读写本地 SQLite 中的仿真表；全仓库不存在任何设备连接代码。
-- **AI 仅经 5 个类型化 MCP 工具改仿真态**（`lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`，加上只读的 `resource_search`）；MCP 无 SQL / Shell / SSH / 文件工具，且**不能创建或删除工作区**。
+- **AI 仅经 4 个类型化 MCP lab 工具改仿真态**（`lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`）；MCP 全工具面（11 个，含只读 `resource_search`、分析面与 `fee_risks`）的当前数与清单以 [facts.md](facts.md) 机读事实源为准；MCP 无 SQL / Shell / SSH / 文件工具，且**不能创建或删除工作区**。
 - **每个变更都走同一引擎路径**（API / MCP / CLI 无旁路）：类型化操作 → 引擎校验 → 状态迁移。AI 生成的描述文本永远不会成为仿真状态。
 - **`restore_*` 操作码是引擎内部逆操作**，在每个外部边界（HTTP / MCP / CLI 操作文件）都被拒绝（400 `invalid_request`）。
 
@@ -47,7 +47,7 @@
 | 定位 | **设备级连通性推演沙盘**（what-if：断这条链会怎样） | **全量资源模型**（台账 + 层次 + 时序） |
 | 表族 | `virtual_devices`/`interfaces`/`links`（独立表族，物化只处理 device + circuit a_end/z_end） | `resources`/`relations`（一切资源与关系） |
 | 状态 | 物化自**台账 status**（在网→up，其余→down）；变更集可改 | 台账 status + 运行 run_state（W22 起，来源告警/巡检/人工） |
-| 消费者 | 5 个 MCP lab 工具（仿真操作）+ Web 工作台 | traverse/impact/context HTTP 端点（AI 分析）+ Web 全部数据页 |
+| 消费者 | 4 个 MCP lab 工具（仿真操作）+ Web 工作台 | traverse/impact/context HTTP 端点与图 MCP 工具（AI 分析，只读）+ Web 全部数据页 |
 
 **给 AI 的一句话**：分析（影响面 / 根因 / 业务穿透）用**统一图**；仿真操作（断连/恢复推演）用 **lab**。
 两套图不互相同步状态——lab 是快照沙盘，推演结束即弃；统一图是持久台账。§10.5 的根因

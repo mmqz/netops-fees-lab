@@ -1133,6 +1133,10 @@ multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进�
 
 **回滚是原子事务（#107）**：删除集先物化、逐文件以可逆 rename 移入 `analysis/fees/.rollback/<批次id>/` 隔离区，**批次行 flip `rolled_back` 是唯一提交点**。提交点前任何故障（IO/DB，5xx 上报）→ 隔离整体 UNDO——批次保持 `completed`、分析行**一行不少**（回滚要么整体发生要么整体不发生，可干净重试）；连 UNDO 都被阻断的极端双重故障 → 批次行如实标 `failed`（error 文本记录隔离区滞留位置；`failed` 不占幂等键——重导快照原件即恢复分析行，滞留物过 1 小时里程碑后由 GC 收走）。并发边角：两请求同批回滚时 SQLite flip 串行化出唯一赢家，输家的 UNDO 对已被赢家带走的文件按 ENOENT 空转，终态恒收敛。
 
+## GET /api/fees/batches/{id}/evidence?row= — 费用证据回读（快照原文，#86）
+
+证据链的**第三级兑现**：风险线索/导入错误携带 `source_file + source_row + import_batch` 锚点，本端点把锚点回读成**快照里的原始行**——从「结论」到「原文」一步可查。`row` 是**源文件自身的行号**（表头 = 1；与每条线索的 `sourceRow`、导入错误 detail 里的行号同口径），非法（非整数 / < 1）→ 400。返回 `EvidenceRow{batchId, sourceFile, originalName, feeType, year, month, row, header[], cells[]}`（`header` + `cells` 逐列对位，运营者无需再打开原始文件）。未知批次 id → 404。**纯文件读取，无引擎参与**：任何构建（含默认构建）都可读。快照不可变且**按设计在回滚后存活**，故 `rolled_back` 批次的证据同样可回读（证据寿命 > 批次寿命，与 §`POST /api/fees/batches/{id}/rollback` 同一教义）。CLI 等价：`netopslab fees evidence --batch <id> --row <n>`。
+
 ## GET /api/fees/query/totals?feeType=&year=&month=&limit= — 站址费用汇总
 
 **固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,totalCents}],total}`（按 totalCents 降序）。**金额为整数分**（`totalCents`，#65 P1-a：金额在解析/存储/聚合/输出全链路走 int64 分，杜绝浮点对账误差；展示层自行 /100）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；Windows 原生无 duckdb 路径——用 Docker/WSL2，见 fees-layer.md §5；导入/快照/Parquet 写入不受影响）。

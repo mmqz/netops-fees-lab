@@ -48,8 +48,10 @@ const (
 )
 
 // Tool name — the Phase 1 read-only search tool (unchanged, §10). The four
-// Phase 2 lab tools are registered alongside it in labtools.go; together
-// they are the exactly five tools of PROJECT_BRIEF_P2 §8.
+// Phase 2 lab tools are registered alongside it in labtools.go; these five
+// are the closed set PROJECT_BRIEF_P2 §8 pinned for Phase 2 — the registry
+// has since widened to eleven (see NewServer; the current count is pinned
+// in docs/facts.md and cross-checked by the facts-gate test).
 const toolName = "resource_search"
 
 // Tool input/output limits (§10): limit defaults to 20 and is capped at 100.
@@ -98,8 +100,11 @@ type searchOutput struct {
 	ApplicationGenerated bool         `json:"applicationGenerated"`
 }
 
-// NewServer builds the MCP server with the five registered tools
-// (PROJECT_BRIEF_P2 §8): the Phase 1 resource_search plus the four lab tools.
+// NewServer builds the MCP server with the eleven registered tools: the
+// Phase 1 resource_search, the four lab tools of PROJECT_BRIEF_P2 §8, the
+// five read-only analysis tools of v0.9 R4 and the fee-risk tool of v0.15
+// (#58 stage 5 — the fee tool registers only when the fee service is
+// wired, which every composition root here does via services.WithFees).
 // W9-D: the server consumes the shared *services.Services composition root —
 // resource_search reads through the SAME query service the HTTP API uses
 // (query.Service.SearchResourcesWithSource, batched provenance resolution),
