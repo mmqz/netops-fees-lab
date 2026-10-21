@@ -35,13 +35,6 @@ import {
   LAB_BTN_RUN_CHECKS,
   LAB_BTN_UNDO,
   LAB_SCORE_VALUE,
-  LAB_TAB_CHANGESETS,
-  LAB_TAB_CHECKPOINTS,
-  LAB_TAB_CHECKS,
-  LAB_TAB_DEVICES,
-  LAB_TAB_LAYERS,
-  LAB_TAB_INTERFACES,
-  LAB_TAB_LINKS,
   LAB_UNDO_MESSAGE,
   LAB_UNDO_TITLE,
   LABWS_BACK_LIST,
@@ -100,18 +93,8 @@ import { buildTopologyView } from '../components/lab/selection';
 import type { SelectedEntity } from '../components/lab/selection';
 import { clearLastWorkspace, saveLastWorkspace } from '../lastWorkspace';
 import { useSeq } from '../hooks/useSeq';
-
-type LabTab = 'layers' | 'devices' | 'interfaces' | 'links' | 'checks' | 'changesets' | 'checkpoints';
-
-const TABS: Array<{ value: LabTab; label: string }> = [
-  { value: 'layers', label: LAB_TAB_LAYERS },
-  { value: 'devices', label: LAB_TAB_DEVICES },
-  { value: 'interfaces', label: LAB_TAB_INTERFACES },
-  { value: 'links', label: LAB_TAB_LINKS },
-  { value: 'checks', label: LAB_TAB_CHECKS },
-  { value: 'changesets', label: LAB_TAB_CHANGESETS },
-  { value: 'checkpoints', label: LAB_TAB_CHECKPOINTS },
-];
+import { readPersistedTab, writePersistedTab, TABS } from './labTabs';
+import type { LabTab } from './labTabs';
 
 function scoreChipClass(score: number): string {
   if (score >= 90) return 'chip--success';
@@ -119,28 +102,9 @@ function scoreChipClass(score: number): string {
   return 'chip--error';
 }
 
-const LAB_TAB_VALUES: LabTab[] = ['devices', 'interfaces', 'links', 'checks', 'changesets', 'checkpoints'];
-
-/** 标签页选择按工作台持久化（sessionStorage，刷新后保留，P2）。 */
-function readPersistedTab(workspaceId: string): LabTab {
-  if (typeof sessionStorage === 'undefined') return 'devices';
-  try {
-    const value = sessionStorage.getItem(`netops-lab.tab.${workspaceId}`);
-    if (value !== null && (LAB_TAB_VALUES as string[]).includes(value)) return value as LabTab;
-  } catch {
-    // 隐私模式 / 配额异常：静默回退默认标签
-  }
-  return 'devices';
-}
-
-function writePersistedTab(workspaceId: string, tab: LabTab): void {
-  if (typeof sessionStorage === 'undefined') return;
-  try {
-    sessionStorage.setItem(`netops-lab.tab.${workspaceId}`, tab);
-  } catch {
-    // 写失败不影响功能
-  }
-}
+// 标签页常量（TABS/LabTab）与 sessionStorage 持久化（readPersistedTab/
+// writePersistedTab）抽在 labTabs.ts（#109-C）：白名单从 TABS 派生，防手抄
+// 漂移（修复前白名单漏 'layers'，切图层后刷新必回退「设备」标签）。
 
 // —— FX-5：zen 全屏 / 可拖拽分栏 / 面板折叠的持久化 ——
 

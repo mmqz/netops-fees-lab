@@ -1,6 +1,7 @@
 /**
  * 问题清单页 /issues：
- * - 筛选：严重级别 / 规则（10 条规则中文名）/ 批次（来自 /api/batches）；
+ * - 筛选：严重级别 / 规则（全部规则中文名，从 i18n RULE_LABELS 派生——
+ *   #109-B，消灭手抄清单）/ 批次（来自 /api/batches）；
  * - 表格：级别徽章、规则、消息、实体（链接到资源抽屉）、来源（或「系统生成」）；
  * - 行点击展开证据明细（键/值表）；分页；
  * - 支持 ?batchId= 深链（导入向导「查看问题清单」入口）。
@@ -48,23 +49,14 @@ import { RuleChip } from '../components/RuleChip';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { Table } from '../components/Table';
 import type { TableColumn } from '../components/Table';
+import { RULE_OPTIONS } from './issuesRules';
 
 const PAGE_SIZE = 20;
 const BATCH_OPTION_LIMIT = 100;
 
 const SEVERITY_OPTIONS: Severity[] = ['error', 'warning', 'info'];
-const RULE_OPTIONS: RuleCode[] = [
-  'E001',
-  'E002',
-  'E003',
-  'E004',
-  'E005',
-  'E006',
-  'W001',
-  'W002',
-  'W003',
-  'I001',
-];
+// 规则筛选选项 RULE_OPTIONS 见 issuesRules.ts：从 RULE_LABELS 派生（#109-B），
+// 不在此手抄——此前手抄 10 项漂移，W004/W005/W006 无法过滤。
 
 export function IssuesPage() {
   const [searchParams, setSearchParams] = useSearchParams();

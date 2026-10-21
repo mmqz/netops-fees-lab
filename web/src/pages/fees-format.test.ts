@@ -15,7 +15,9 @@ import {
   linkGradeLabel,
   linkStatusLabel,
   trimMetricTail,
+  selectLinkFilter,
 } from './fees-format';
+import type { LinkFilterSelection } from './fees-format';
 
 describe('centsToYuan — 整数分 → 元（zh-CN 千分位 + 恒两位小数）', () => {
   it.each([
@@ -96,5 +98,36 @@ describe('行键与标签映射（闭集）', () => {
     ['fuzzy', '模糊'],
   ])('linkGradeLabel(%s)', (g, want) => {
     expect(linkGradeLabel(g)).toBe(want);
+  });
+});
+
+describe('selectLinkFilter — 关联筛选变更必须回到第 1 页（#109-A）', () => {
+  // 缺陷场景：pending 全量有 5 页，用户翻到第 5 页后切「已驳回」筛选
+  // （仅 12 条 < 1 页）——旧页码 5 越过新总页数，后端返回空 items，
+  // 前端渲染「暂无关联」假空态。筛选与页码必须同拍迁移。
+  const page5: LinkFilterSelection = { status: 'pending', grade: '', page: 5 };
+
+  it('状态筛选变化：页码从 5 重置为 1（假空态回归钉）', () => {
+    expect(selectLinkFilter(page5, { status: 'dismissed' })).toEqual({
+      status: 'dismissed',
+      grade: '',
+      page: 1,
+    });
+  });
+  it('级别筛选变化：页码同样重置为 1（两个 select 同款纪律）', () => {
+    expect(selectLinkFilter(page5, { grade: 'exact' })).toEqual({
+      status: 'pending',
+      grade: 'exact',
+      page: 1,
+    });
+  });
+  it('未变更的另一维筛选原样保留（筛选互不覆盖）', () => {
+    const next = selectLinkFilter({ status: 'confirmed', grade: 'fuzzy', page: 3 }, { status: 'pending' });
+    expect(next.grade).toBe('fuzzy');
+    expect(next.status).toBe('pending');
+    expect(next.page).toBe(1);
+  });
+  it('已在第 1 页时保持 1（无跳变），清空筛选（空串）也回第 1 页', () => {
+    expect(selectLinkFilter({ status: 'confirmed', grade: '', page: 1 }, { status: '' }).page).toBe(1);
   });
 });

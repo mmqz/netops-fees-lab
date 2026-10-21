@@ -37,7 +37,9 @@ import {
   formatRiskMetric,
   linkGradeLabel,
   linkStatusLabel,
+  selectLinkFilter,
 } from './fees-format';
+import type { LinkFilterSelection } from './fees-format';
 import {
   FEES_501_HINT,
   FEES_BATCHES_ROLLED_BACK,
@@ -283,6 +285,16 @@ export function FeesPage() {
   }, [dismissTarget, loadLinks, toast]);
 
   // 标签映射函数 linkStatusLabel / linkGradeLabel 见 fees-format.ts（#68）
+
+  /** 状态/级别筛选 onChange 的唯一入口（#109-A）：筛选值与页码同拍迁移
+   *  （裁决点在 fees-format.selectLinkFilter）——否则第 5 页切到小数据筛选
+   *  会渲染「暂无关联」假空态。与 doScan 的 setLinkPage(1)（#90）同款。 */
+  function applyLinkFilter(patch: Partial<Pick<LinkFilterSelection, 'status' | 'grade'>>): void {
+    const next = selectLinkFilter({ status: linkStatus, grade: linkGrade, page: linkPage }, patch);
+    setLinkStatus(next.status);
+    setLinkGrade(next.grade);
+    setLinkPage(next.page);
+  }
 
   // ---- 风险查询 ----
   const [scenario, setScenario] = useState('duplicate-settlement');
@@ -535,7 +547,7 @@ export function FeesPage() {
         <div className="filters">
           <label className="field">
             <span>{FEES_LINKS_STATUS}</span>
-            <select value={linkStatus} onChange={(e) => setLinkStatus(e.target.value)}>
+            <select value={linkStatus} onChange={(e) => applyLinkFilter({ status: e.target.value })}>
               <option value="pending">{LINKS_STATUS_PENDING}</option>
               <option value="confirmed">{LINKS_STATUS_CONFIRMED}</option>
               <option value="dismissed">{LINKS_STATUS_DISMISSED}</option>
@@ -544,7 +556,7 @@ export function FeesPage() {
           </label>
           <label className="field">
             <span>{FEES_LINKS_GRADE}</span>
-            <select value={linkGrade} onChange={(e) => setLinkGrade(e.target.value)}>
+            <select value={linkGrade} onChange={(e) => applyLinkFilter({ grade: e.target.value })}>
               <option value="exact">{LINKS_GRADE_EXACT}</option>
               <option value="rule">{LINKS_GRADE_RULE}</option>
               <option value="fuzzy">{LINKS_GRADE_FUZZY}</option>

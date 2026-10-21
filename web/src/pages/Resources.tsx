@@ -136,6 +136,7 @@ import type { TableColumn } from '../components/Table';
 import { TypeChip } from '../components/TypeChip';
 import { IconSearch, IconUpload, IconDownload } from '../components/icons';
 import { useToast } from '../components/Toast';
+import { useSeq } from '../hooks/useSeq';
 import { TOAST_COPIED } from '../i18n';
 
 const PAGE_SIZE = 20;
@@ -294,8 +295,13 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   /** 指标 CSV 导出中（防重复点击）。 */
   const [metricsExporting, setMetricsExporting] = useState(false);
   const toast = useToast();
+  /** 取数竞态守卫（#109-D）：全仓 useSeq 纪律（App/Overview/LabWorkspace 等
+   *  12 处）在抽屉主取数点的唯一漏网——A→B 快速切换时 5 路并发慢响应后到
+   *  会串台盖新（旧数据覆盖新资源）。守卫语义见 hooks/useSeq.ts。 */
+  const loadGuard = useSeq();
 
   const load = useCallback((): void => {
+    const isCurrent = loadGuard.begin();
     setLoading(true);
     setError(null);
     setErrorDetail(null);
@@ -307,6 +313,7 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
       getRunStateHistory(resourceId).catch(() => null),
     ])
       .then((results) => {
+        if (!isCurrent()) return; // #109-D：在途期间发起了新取数/卸载 → 整包丢弃
         setDetail(results[0]);
         setGraph(results[1]);
         setPendingChanges(results[2].items);
@@ -317,12 +324,13 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
         setLoading(false);
       })
       .catch((err: unknown) => {
+        if (!isCurrent()) return;
         const display = formatApiError(err);
         setError(display.title);
         setErrorDetail(display.detail);
         setLoading(false);
       });
-  }, [resourceId]);
+  }, [resourceId, loadGuard]);
 
   /** v0.9-R2：拉取本资源的指标序列 + 指标目录（key → 中文标签）。
    *  懒加载语义：仅首次进入「性能指标」页签触发；失败可经页签内重试。 */
@@ -1144,7 +1152,10 @@ export function ResourcesPage() {
         )}
       </div>
 
-      {drawerId !== null && <ResourceDrawer resourceId={drawerId} onClose={closeDrawer} />}
+      {/* key={drawerId}（#109-D）：切资源时整抽屉重挂载——组件态（页签/二跳
+          展开/行内错误）不残留前一资源，与 ResourceDrawer.load 内的 seq 守卫
+          双保险（key 保证实例隔离，守卫保证响应不串台）。 */}
+      {drawerId !== null && <ResourceDrawer key={drawerId} resourceId={drawerId} onClose={closeDrawer} />}
     </>
   );
 }
