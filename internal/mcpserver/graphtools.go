@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -206,8 +207,13 @@ func graphTraverse(ctx context.Context, svc *services.Services, in graphTraverse
 // graphImpactInput is the typed input of graph_impact.
 type graphImpactInput struct {
 	ResourceID string `json:"resourceId" jsonschema:"分析起点资源 id（uuid）"`
-	Direction  string `json:"direction,omitempty" jsonschema:"down = 根因追查（从疑点向下找异常根因，默认）；up = 影响面收集（从异常源向上汇总业务受损面）"`
-	MaxDepth   *int   `json:"maxDepth,omitempty" jsonschema:"BFS 深度预算 1..8，缺省 8"`
+	// #99: the default is UP — impact-surface collection, the same default
+	// the HTTP handler (GET /api/resources/{id}/impact) and the CLI (query
+	// impact) document. The schema used to claim down as the default, so an
+	// AI omitting direction ran root-cause tracing per its own schema and
+	// impact collection per the code — a verdict over the wrong subgraph.
+	Direction string `json:"direction,omitempty" jsonschema:"up = 影响面收集（从异常源向上汇总业务受损面，默认）；down = 根因追查（从疑点向下找异常根因）"`
+	MaxDepth  *int   `json:"maxDepth,omitempty" jsonschema:"BFS 深度预算 1..8，缺省 8"`
 }
 
 // graphImpactOutput re-exports the engine's wire shape.
@@ -350,8 +356,12 @@ func alertsQuery(ctx context.Context, svc *services.Services, in alertsQueryInpu
 	}
 	limit := defaultAlertsLimit
 	if in.Limit != nil {
-		if *in.Limit < 0 {
-			return nil, alertsQueryOutput{}, fmt.Errorf("limit 必须是不小于 0 的整数，收到 %d", *in.Limit)
+		// #100: zero must be a validation error, not "unlimited" — the
+		// repo maps limit <= 0 to -1 (all rows), so an explicit 0 used
+		// to dump the whole alert table into one MCP result while the
+		// schema promised "缺省 20，最大 100".
+		if *in.Limit < 1 {
+			return nil, alertsQueryOutput{}, fmt.Errorf("limit 必须是 ≥ 1 的整数（缺省 %d，最大 %d），收到 %d", defaultAlertsLimit, maxAlertsLimit, *in.Limit)
 		}
 		if *in.Limit > maxAlertsLimit {
 			limit = maxAlertsLimit
@@ -421,9 +431,15 @@ func alertFilterOf(in alertsQueryInput, limit, offset int) repo.AlertFilter {
 type metricsQueryInput struct {
 	ResourceID string `json:"resourceId" jsonschema:"目标资源 id（uuid；端口/设备类资源有性能序列）"`
 	Keys       string `json:"keys,omitempty" jsonschema:"指标键过滤，逗号列表（如 optical_power_rx_avg_dbm,packet_loss_rx_pct），缺省返回全部序列"`
-	From       string `json:"from,omitempty" jsonschema:"窗口起点（ISO 日期，如 2024-05-01；缺省不设下界）"`
-	To         string `json:"to,omitempty" jsonschema:"窗口终点（ISO 日期；缺省不设上界；长窗口建议配 agg 降载荷）"`
-	Agg        string `json:"agg,omitempty" jsonschema:"聚合粒度：raw（原始点，缺省）/ daily_avg / daily_min / daily_max（按自然日聚合，长窗口首选）"`
+	// #100: from/to are RFC3339 timestamps — the storage contract compares
+	// the normalized UTC strings lexicographically (chronological), so a
+	// date-only "2024-05-01" as `to` silently EXCLUDED the entire final day
+	// and garbage strings silently matched everything or nothing. The
+	// schema used to advertise the wrong format ("ISO 日期") while the HTTP
+	// twin already validated RFC3339 — the tool face now does the same.
+	From string `json:"from,omitempty" jsonschema:"窗口起点（RFC3339 时间戳，如 2024-05-01T00:00:00Z；缺省不设下界）"`
+	To   string `json:"to,omitempty" jsonschema:"窗口终点（RFC3339 时间戳；缺省不设上界；长窗口建议配 agg 降载荷）"`
+	Agg  string `json:"agg,omitempty" jsonschema:"聚合粒度：raw（原始点，缺省）/ daily_avg / daily_min / daily_max（按自然日聚合，长窗口首选）"`
 }
 
 // metricsQueryOutput mirrors the HTTP GET /api/resources/{id}/metrics
@@ -467,7 +483,28 @@ func metricsQuery(ctx context.Context, svc *services.Services, in metricsQueryIn
 	default:
 		return nil, metricsQueryOutput{}, fmt.Errorf("agg 参数 %q 不是 raw/daily_avg/daily_min/daily_max", in.Agg)
 	}
-	series, err := svc.Metrics.ResourceSeries(ctx, in.ResourceID, keys, in.From, in.To, agg)
+	// #100: the from/to validation the HTTP twin (parseRFC3339Query) already
+	// performs — garbage or date-only strings must answer a tool error, not
+	// a silently wrong window (a date-only `to` excluded the final day; a
+	// garbage `to` matched everything).
+	from := ""
+	if in.From != "" {
+		t, err := time.Parse(time.RFC3339, in.From)
+		if err != nil {
+			return nil, metricsQueryOutput{}, fmt.Errorf("from 参数 %q 不是 RFC3339 时间戳（示例 2024-05-01T00:00:00Z）", in.From)
+		}
+		from = t.UTC().Format(time.RFC3339)
+	}
+	to := ""
+	if in.To != "" {
+		t, err := time.Parse(time.RFC3339, in.To)
+		if err != nil {
+			return nil, metricsQueryOutput{}, fmt.Errorf("to 参数 %q 不是 RFC3339 时间戳（示例 2024-05-31T23:59:59Z）", in.To)
+		}
+		to = t.UTC().Format(time.RFC3339)
+	}
+
+	series, err := svc.Metrics.ResourceSeries(ctx, in.ResourceID, keys, from, to, agg)
 	if err != nil {
 		return nil, metricsQueryOutput{}, fmt.Errorf("指标查询失败：%w", err)
 	}

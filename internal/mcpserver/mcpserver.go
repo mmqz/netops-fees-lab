@@ -178,8 +178,12 @@ func resourceSearch(ctx context.Context, svc *query.Service, in searchInput) (se
 	}
 	limit := defaultLimit
 	if in.Limit != nil {
-		if *in.Limit < 0 {
-			return searchOutput{}, fmt.Errorf("limit 必须是不小于 0 的整数，收到 %d", *in.Limit)
+		// #100: zero must be a validation error, not "unlimited" — the
+		// repo maps limit <= 0 to -1 (all rows), so an explicit 0 used to
+		// dump the whole resource table into one MCP result while the
+		// schema promised "缺省 20，最大 100".
+		if *in.Limit < 1 {
+			return searchOutput{}, fmt.Errorf("limit 必须是 ≥ 1 的整数（缺省 %d，最大 %d），收到 %d", defaultLimit, maxLimit, *in.Limit)
 		}
 		if *in.Limit > maxLimit {
 			limit = maxLimit
