@@ -23,6 +23,16 @@ import (
 	"github.com/mmqz/netops-lab/internal/repo"
 )
 
+// feesSubcommands lists the fees dispatcher's cases; both usage surfaces
+// (missing and unknown subcommand) derive from it. #108 found both strings
+// stale — `evidence` and `risks` were missing from one and both
+// respectively — so the list is now joined, never hand-copied, and the
+// closed-set test (usage_closset_test.go) pins it against the switch via
+// go/ast, in both directions.
+var feesSubcommands = []string{
+	"import", "list", "rollback", "evidence", "query", "link-scan", "links", "risks",
+}
+
 // splitFeeArgs parses the leading --db / --data flags of the fees command
 // and splits off the sub-command (splitSubArgs's sibling — the fee
 // pipeline is rooted at a data dir, not only a database).
@@ -57,7 +67,7 @@ func splitFeeArgs(args []string) (dbPath, dataDir, sub string, subArgs []string,
 			return dbPath, dataDir, arg, args[i+1:], nil
 		}
 	}
-	return "", "", "", nil, &usageError{msg: "缺少 fees 子命令（import / list / rollback / query / link-scan / links）"}
+	return "", "", "", nil, &usageError{msg: "缺少 fees 子命令（" + strings.Join(feesSubcommands, " / ") + "）"}
 }
 
 // cmdFees implements `netopslab fees --db <path> --data <dir> import|list|rollback|query …`.
@@ -92,7 +102,7 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 	case "risks":
 		return cmdFeesRisks(ctx, svc, dataDir, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 import、list、rollback、query、link-scan、links 或 risks，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 %s，收到 %q", commandEnum(feesSubcommands), sub)}
 	}
 }
 
@@ -154,7 +164,10 @@ func cmdFeesRisks(ctx context.Context, svc *fees.Service, dataDir string, args [
 // cmdFeesImport implements `fees import --file --type --year --month [--map <json>]`.
 func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("fees import")
-	file := fs.String("file", "", "费用文件路径（.csv / .xlsx / .xls），必填")
+	// #92/#108: .xls is REFUSED (Excel 2003 binary; the reader and the
+	// snapshot layer both reject it with a dedicated message) — the help
+	// must not claim it. Accepted: .csv / .xlsx only.
+	file := fs.String("file", "", "费用文件路径（.csv / .xlsx；.xls 为 Excel 2003 二进制旧格式不受支持），必填")
 	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")

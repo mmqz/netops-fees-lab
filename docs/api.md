@@ -1121,7 +1121,7 @@ body `{label（必填，事由）, startsAt, endsAt（RFC3339，ends > starts）
 
 ## POST /api/fees/imports — 费用数据导入（multipart，#58/#60/#61）
 
-multipart 字段：`file`（.csv/.xlsx/.xls，≤10MB）+ `feeType`（electricity/tower_lease/repair/maintenance）+ `year` + `month`（声明账期）+ 可选 `map`（列映射 JSON：`{"columns":{"siteCode":"站址编码","amount":"电费(元)","period":"账期"}}`，缺省表头自动识别；识别不到必需列 → 422）。管线：快照（内容寻址不可变）→ 规范化（金额/账期/站址编码；行失败计数不致命）→ Parquet 分区大表（`fee_type/year/month` hive 分区，行级账期优先于声明账期）→ 批次行（幂等键 = 哈希×类型×账期×映射）。**幂等**：同文件重导 → **200**（非 201）+ `skippedDuplicate=true` + `existingBatch`（informational，与 CLI 同严重级语义）。新导入 → **201** + 摘要（计数/分区文件清单/行错误）。全部行失败 → 422 `fee_rows_failed`（错误明细在摘要，重试通道开放）。参数非法 → 400；扩展名不支持 → 422 `unsupported_fee_file`。设计全貌见 [fees-layer.md](fees-layer.md)。
+multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进制旧格式，不受支持**——识别层与快照层均以 #92 专门消息拒收并引导「另存为 .xlsx（或导出 .csv）」，CLI `fees import` 帮助文案同口径）+ `feeType`（electricity/tower_lease/repair/maintenance）+ `year` + `month`（声明账期）+ 可选 `map`（列映射 JSON：`{"columns":{"siteCode":"站址编码","amount":"电费(元)","period":"账期"}}`，缺省表头自动识别；识别不到必需列 → 422）。管线：快照（内容寻址不可变）→ 规范化（金额/账期/站址编码；行失败计数不致命）→ Parquet 分区大表（`fee_type/year/month` hive 分区，行级账期优先于声明账期）→ 批次行（幂等键 = 哈希×类型×账期×映射）。**幂等**：同文件重导 → **200**（非 201）+ `skippedDuplicate=true` + `existingBatch`（informational，与 CLI 同严重级语义）。新导入 → **201** + 摘要（计数/分区文件清单/行错误）。全部行失败 → 422 `fee_rows_failed`（错误明细在摘要，重试通道开放）。参数非法 → 400；扩展名不支持（.csv/.xlsx 之外）→ 422 `unsupported_fee_file`。设计全貌见 [fees-layer.md](fees-layer.md)。
 
 ## GET /api/fees/batches?status= — 费用导入批次列表
 

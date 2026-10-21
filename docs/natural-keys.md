@@ -39,7 +39,7 @@
 
 ## 4. 每类型自然键策略表
 
-### 已实现类型（封闭集 = device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port，schema v10/v13）
+### 已实现类型（本表覆盖 v0.5 前落地的 8 类；W21 扩容的 25 类键策略见 §9——完整 33 类型封闭集以 domain 注册表 + migration v15 CHECK 为准）
 
 | 资源类型 | 自然键（现状） | 状态与裁决 |
 | --- | --- | --- |

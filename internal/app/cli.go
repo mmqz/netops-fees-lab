@@ -41,6 +41,45 @@ const (
 // envDBPath is the environment variable the mcp subcommand honors.
 const envDBPath = "NETOPS_DB"
 
+// cliSubcommands lists every top-level subcommand of the dispatch switch in
+// CLI below. Both usage surfaces (missing and unknown subcommand) join this
+// slice, so there is exactly ONE list to keep beside the switch — and the
+// closed-set test (usage_closset_test.go) parses that switch via go/ast and
+// fails on drift in either direction (#108: `backup` once shipped unlisted;
+// two hand-copied strings agreeing only by luck is how it happened).
+var cliSubcommands = []string{
+	"serve", "analyze", "import", "ingest", "synthdata", "detect",
+	"export", "validate", "report", "query", "changes", "renames",
+	"fees", "lab", "templates", "mcp", "gc", "backup", "testdata",
+}
+
+// commandEnum renders the enumeration of the "必须是 …" usage errors:
+// A、B、C 或 D — the last item carries 或. Deriving it from the same slice
+// the "可用：" list joins means the two surfaces can no longer disagree
+// about which subcommands exist (#108).
+func commandEnum(subs []string) string {
+	if len(subs) == 0 {
+		return ""
+	}
+	if len(subs) == 1 {
+		return subs[0]
+	}
+	return strings.Join(subs[:len(subs)-1], "、") + " 或 " + subs[len(subs)-1]
+}
+
+// registeredResourceTypes returns the CLI spelling of the closed resource
+// type set, derived from the domain registry — never hand-copied, so no
+// error message can go stale when the registry extends (#108; same
+// doctrine as the MCP face, #91, cf. mapping's #26 four-point gate that
+// pins the registry itself).
+func registeredResourceTypes() []string {
+	types := make([]string, 0, len(domain.AllResourceTypes()))
+	for _, rt := range domain.AllResourceTypes() {
+		types = append(types, rt.String())
+	}
+	return types
+}
+
 // CLI dispatches the netopslab subcommands. Every successful command writes
 // exactly one JSON object to stdout (the report --format html command writes
 // an HTML document instead, per §10); failures write one JSON error object
@@ -48,7 +87,7 @@ const envDBPath = "NETOPS_DB"
 // The returned value is the process exit code.
 func CLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		writeCLIError(stdout, "usage_error", "缺少子命令；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, fees, lab, templates, mcp, gc, testdata")
+		writeCLIError(stdout, "usage_error", "缺少子命令；可用："+strings.Join(cliSubcommands, ", "))
 		return exitUsage
 	}
 
@@ -93,7 +132,7 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
 	default:
-		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：serve, analyze, import, ingest, synthdata, detect, export, validate, report, query, changes, renames, fees, lab, templates, mcp, gc, backup, testdata", args[0]))
+		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：%s", args[0], strings.Join(cliSubcommands, ", ")))
 		return exitUsage
 	}
 
@@ -452,6 +491,11 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 	return writeJSON(stdout, out)
 }
 
+// templatesSubcommands lists the dispatcher's cases; both usage surfaces
+// derive from it and the closed-set test pins it against the switch (see
+// cliSubcommands for the #108 rationale).
+var templatesSubcommands = []string{"save", "list", "delete"}
+
 // cmdTemplates implements the W24 mapping template subcommands
 // (§12-B7 方案 A, the CLI twin of the HTTP template endpoints):
 //
@@ -468,7 +512,7 @@ func cmdImport(args []string, stdout, stderr io.Writer) error {
 // and a batch rollback never deletes the template).
 func cmdTemplates(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return &usageError{msg: "缺少 templates 子命令；可用：save, list, delete"}
+		return &usageError{msg: "缺少 templates 子命令；可用：" + strings.Join(templatesSubcommands, ", ")}
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -479,7 +523,7 @@ func cmdTemplates(args []string, stdout, stderr io.Writer) error {
 	case "delete":
 		return cmdTemplatesDelete(rest, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("templates 子命令必须是 save、list 或 delete，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("templates 子命令必须是 %s，收到 %q", commandEnum(templatesSubcommands), sub)}
 	}
 }
 
@@ -857,7 +901,11 @@ func cmdExport(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("export")
 	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
 	out := fs.String("out", "", "输出 xlsx 文件路径，必填（已存在则覆盖）")
-	types := fs.String("types", "", "逗号分隔的资源类型列表（缺省导出全部类型：device, ip_pool, circuit, port, base_station, site, machine_room, ptp_port）")
+	// #108: no hand-copied type enumeration — the default is "every
+	// registered type" and an invalid value's error already lists the full
+	// registry-derived closed set (exporter.ParseTypes), so pointing there
+	// keeps the help honest forever instead of frozen at 8 types.
+	types := fs.String("types", "", "逗号分隔的资源类型列表（缺省导出全部注册类型；非法值报错并列出注册闭集）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -1050,11 +1098,18 @@ type reportResponse struct {
 	IssuesBySeverity map[string]int `json:"issuesBySeverity"`
 }
 
+// querySubcommands lists the query dispatcher's cases; both usage surfaces
+// derive from it and the closed-set test pins it against the switch (see
+// cliSubcommands for the #108 rationale).
+var querySubcommands = []string{
+	"resources", "stats", "relations", "governance", "traverse", "impact", "context", "nearest",
+}
+
 // cmdQuery implements `netopslab query --db <path> resources|stats|relations|governance …`.
 // The sub-subcommand may appear before or after the query-level flags; only
 // --db is accepted at the query level.
 func cmdQuery(args []string, stdout, stderr io.Writer) error {
-	dbPath, sub, subArgs, err := splitSubArgs("query", "resources / stats / relations / governance / traverse / impact / context / nearest", args)
+	dbPath, sub, subArgs, err := splitSubArgs("query", strings.Join(querySubcommands, " / "), args)
 	if err != nil {
 		return err
 	}
@@ -1088,7 +1143,7 @@ func cmdQuery(args []string, stdout, stderr io.Writer) error {
 	case "nearest":
 		return cmdQueryNearest(ctx, a, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("query 子命令必须是 resources、stats、relations、governance、traverse、impact、context 或 nearest，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("query 子命令必须是 %s，收到 %q", commandEnum(querySubcommands), sub)}
 	}
 }
 
@@ -1120,13 +1175,17 @@ func splitSubArgs(cmdName, subUsage string, args []string) (dbPath, sub string, 
 	return "", "", nil, &usageError{msg: fmt.Sprintf("缺少 %s 子命令（%s）", cmdName, subUsage)}
 }
 
+// changesSubcommands lists the changes dispatcher's cases; both usage
+// surfaces derive from it (see cliSubcommands for the #108 rationale).
+var changesSubcommands = []string{"list", "apply", "dismiss"}
+
 // cmdChanges implements `netopslab changes --db <path> list|apply|dismiss …`
 // — the CLI side of the attribute change confirmation flow (W4-D; the
 // query subcommand pattern: leading --db, then the sub-subcommand). All
 // outputs are the single-JSON-object stdout contract: list → {items,total};
 // apply/dismiss → the change object after the transition.
 func cmdChanges(args []string, stdout, stderr io.Writer) error {
-	dbPath, sub, subArgs, err := splitSubArgs("changes", "list / apply / dismiss", args)
+	dbPath, sub, subArgs, err := splitSubArgs("changes", strings.Join(changesSubcommands, " / "), args)
 	if err != nil {
 		return err
 	}
@@ -1145,7 +1204,7 @@ func cmdChanges(args []string, stdout, stderr io.Writer) error {
 	case "dismiss":
 		return cmdChangesDismiss(ctx, a, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("changes 子命令必须是 list、apply 或 dismiss，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("changes 子命令必须是 %s，收到 %q", commandEnum(changesSubcommands), sub)}
 	}
 }
 
@@ -1229,7 +1288,10 @@ func cmdChangesDismiss(ctx context.Context, a *App, args []string, stdout, stder
 func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("query resources")
 	q := fs.String("q", "", "搜索关键词（natural_key/name/attributes 模糊匹配）")
-	typ := fs.String("type", "", "资源类型：device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port")
+	// #108: the closed set lives in the --type validation error (derived
+	// from the registry), not in a hand-copied enumeration that froze at
+	// the pre-W21 8 types — same wording doctrine as the MCP face (#91).
+	typ := fs.String("type", "", "资源类型：注册资源类型之一（完整闭集在 --type 校验错误信息里自动列出）")
 	status := fs.String("status", "", "状态过滤")
 	page := fs.Int("page", 1, "页码（1 起）")
 	pageSize := fs.Int("pageSize", query.DefaultPageSize, "每页条数（最大 100）")
@@ -1244,12 +1306,9 @@ func cmdQueryResources(ctx context.Context, a *App, args []string, stdout, stder
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
 			// W21 (v0.7.0): the closed set extends with the registry (33
-			// types) — derived, never hand-copied (issue #26 discipline).
-			types := make([]string, 0, len(domain.AllResourceTypes()))
-			for _, rt := range domain.AllResourceTypes() {
-				types = append(types, rt.String())
-			}
-			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(types, "/"), *typ), usage: usage.String()}
+			// types) — derived, never hand-copied (issue #26 discipline);
+			// #108 hoisted the join into registeredResourceTypes.
+			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(registeredResourceTypes(), "/"), *typ), usage: usage.String()}
 		}
 		filter.Type = t
 	}
@@ -1476,7 +1535,7 @@ func cmdQueryContext(ctx context.Context, a *App, args []string, stdout, stderr 
 // documented ~1.5°×3° window (see repo.ResourceRepo.Nearest).
 func cmdQueryNearest(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("query nearest")
-	typ := fs.String("type", "", "资源类型（注册类型之一），必填")
+	typ := fs.String("type", "", "资源类型（注册类型之一，完整闭集在 --type 校验错误信息里自动列出），必填")
 	lat := fs.Float64("lat", 0, "查询点纬度（-90..90），必填")
 	lng := fs.Float64("lng", 0, "查询点经度（-180..180），必填")
 	limit := fs.Int("limit", 5, "返回数量（1..100）")
@@ -1491,7 +1550,10 @@ func cmdQueryNearest(ctx context.Context, a *App, args []string, stdout, stderr 
 	}
 	rt, err := domain.ParseResourceType(*typ)
 	if err != nil {
-		return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一，收到 %q", *typ), usage: usage.String()}
+		// #108: nearest's help points at this error for the full closed set
+		// (the help no longer enumerates), so the error must actually list it
+		// — derived from the registry, same as the other --type surfaces.
+		return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(registeredResourceTypes(), "/"), *typ), usage: usage.String()}
 	}
 	if *lat < -90 || *lat > 90 {
 		return &usageError{msg: fmt.Sprintf("--lat 必须在 -90..90，收到 %v", *lat), usage: usage.String()}
@@ -1582,6 +1644,13 @@ func cmdTestdata(args []string, stdout, stderr io.Writer) error {
 
 // ---- lab: the simulation workbench subcommand tree (PROJECT_BRIEF_P2 §9) ----
 
+// labSubcommands lists the lab dispatcher's cases; both usage surfaces
+// derive from it and the closed-set test pins it against the switch (see
+// cliSubcommands for the #108 rationale).
+var labSubcommands = []string{
+	"workspace", "topology", "path", "apply", "checks", "diff", "undo", "checkpoint",
+}
+
 // cmdLab implements `netopslab lab …`:
 //
 //	lab workspace create --db <path> --name <n> [--desc <s>] [--batches id1,id2 | --all-batches]
@@ -1598,7 +1667,7 @@ func cmdTestdata(args []string, stdout, stderr io.Writer) error {
 // flow through the sim engine — no sim table is written directly here.
 func cmdLab(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return &usageError{msg: "缺少 lab 子命令；可用：workspace, topology, path, apply, checks, diff, undo, checkpoint"}
+		return &usageError{msg: "缺少 lab 子命令；可用：" + strings.Join(labSubcommands, ", ")}
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -1619,7 +1688,7 @@ func cmdLab(args []string, stdout, stderr io.Writer) error {
 	case "checkpoint":
 		return cmdLabCheckpoint(rest, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("lab 子命令必须是 workspace、topology、path、apply、checks、diff、undo 或 checkpoint，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("lab 子命令必须是 %s，收到 %q", commandEnum(labSubcommands), sub)}
 	}
 }
 
@@ -2111,13 +2180,17 @@ func cmdLabCheckpoint(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// renamesSubcommands lists the renames dispatcher's cases; both usage
+// surfaces derive from it (see cliSubcommands for the #108 rationale).
+var renamesSubcommands = []string{"list", "apply", "reject"}
+
 // cmdRenames implements `netopslab renames --db <path> list|apply|reject …`
 // — the CLI side of the rename confirmation flow (W6-D; the changes
 // subcommand pattern: leading --db, then the sub-subcommand). All outputs
 // are the single-JSON-object stdout contract: list → {items,total};
 // apply/reject → the proposal object after the transition.
 func cmdRenames(args []string, stdout, stderr io.Writer) error {
-	dbPath, sub, subArgs, err := splitSubArgs("renames", "list / apply / reject", args)
+	dbPath, sub, subArgs, err := splitSubArgs("renames", strings.Join(renamesSubcommands, " / "), args)
 	if err != nil {
 		return err
 	}
@@ -2136,7 +2209,7 @@ func cmdRenames(args []string, stdout, stderr io.Writer) error {
 	case "reject":
 		return cmdRenamesReject(ctx, a, subArgs, stdout, stderr)
 	default:
-		return &usageError{msg: fmt.Sprintf("renames 子命令必须是 list、apply 或 reject，收到 %q", sub)}
+		return &usageError{msg: fmt.Sprintf("renames 子命令必须是 %s，收到 %q", commandEnum(renamesSubcommands), sub)}
 	}
 }
 
@@ -2145,7 +2218,10 @@ func cmdRenames(args []string, stdout, stderr io.Writer) error {
 func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("renames list")
 	status := fs.String("status", "", "状态过滤：pending / applied / rejected / all（缺省 all）")
-	typ := fs.String("type", "", "资源类型过滤：device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port")
+	// #108: same doctrine as query resources — the help points at the
+	// registry-derived closed set in the --type validation error instead of
+	// hand-copying a list that froze at the pre-W21 8 types.
+	typ := fs.String("type", "", "资源类型过滤：注册资源类型之一（完整闭集在 --type 校验错误信息里自动列出）")
 	resourceID := fs.String("resource-id", "", "按资源 id 过滤（提案任一侧：旧资源或新资源均可命中）")
 	batchID := fs.String("batch-id", "", "按导入批次 id 过滤")
 	limit := fs.Int("limit", renames.DefaultPageSize, "每页条数（最大 100）")
@@ -2173,12 +2249,9 @@ func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr i
 		t, err := domain.ParseResourceType(*typ)
 		if err != nil {
 			// W21 (v0.7.0): the closed set extends with the registry (33
-			// types) — derived, never hand-copied (issue #26 discipline).
-			types := make([]string, 0, len(domain.AllResourceTypes()))
-			for _, rt := range domain.AllResourceTypes() {
-				types = append(types, rt.String())
-			}
-			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(types, "/"), *typ), usage: usage.String()}
+			// types) — derived, never hand-copied (issue #26 discipline);
+			// #108 hoisted the join into registeredResourceTypes.
+			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(registeredResourceTypes(), "/"), *typ), usage: usage.String()}
 		}
 		filter.ResourceType = t
 	}

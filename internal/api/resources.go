@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/query"
@@ -24,7 +25,17 @@ func (s *Server) handleResourcesList(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("type"); raw != "" {
 		t, err := domain.ParseResourceType(raw)
 		if err != nil {
-			respondErrorf(w, http.StatusBadRequest, "bad_request", "type 参数 %q 不是 device/ip_pool/circuit/port/base_station/site/machine_room/ptp_port", raw)
+			// #108: the closed set is DERIVED from the domain registry,
+			// never hand-copied. The pre-W21 8-type spelling went stale the
+			// day the registry extended to 33 types (W21) and has been lying
+			// to every caller asking for a W21 type since; a registry-driven
+			// join cannot drift (same doctrine as the CLI/MCP faces, #91).
+			types := make([]string, 0, len(domain.AllResourceTypes()))
+			for _, rt := range domain.AllResourceTypes() {
+				types = append(types, rt.String())
+			}
+			respondErrorf(w, http.StatusBadRequest, "bad_request",
+				"type 参数必须是注册资源类型之一（%s），收到 %q", strings.Join(types, "/"), raw)
 			return
 		}
 		filter.Type = t
