@@ -48,6 +48,12 @@ func importRiskFixture(t *testing.T, svc *Service) {
 		{"peers.csv", "站址编码,账期,电费(元)\nS-O01,2024-05,100.00\nS-O02,2024-05,100.00\nS-O03,2024-05,100.00\nS-O04,2024-05,100.00\nS-O05,2024-05,100.00\nS-O06,2024-05,100.00\nS-O07,2024-05,100.00\nS-O08,2024-05,100.00\nS-O09,2024-05,100.00\nS-O10,2024-05,100.00\nS-O11,2024-05,100.00\nS-O12,2024-05,100.00\n"},
 		{"outlier.csv", "站址编码,账期,电费(元)\nS-OUT,2024-05,1000.00\n"},
 		{"wild.csv", "站址编码,账期,电费(元)\nS-WILD,2024-06,900.00\nRETIRED-SITE,2024-06,777.00\nACTIVE-SITE,2024-06,555.00\nPENDING-SITE,2024-06,444.00\n"},
+		// #105: the zero-base spike shape — ¥0.00 in 07 followed by ¥900 in
+		// 08 is the STRONGEST month-over-month rise there is, but the ratio
+		// is undefined on a zero base: it must appear in the EXCLUDED
+		// envelope (it used to be invisible in both counters). Months 07/08
+		// keep it out of the month-05 outlier stats.
+		{"zero-base.csv", "站址编码,账期,电费(元)\nS-ZERO,2024-07,0.00\nS-ZERO,2024-08,900.00\n"},
 	}
 	for _, f := range files {
 		p := filepath.Join(t.TempDir(), f.name)
@@ -144,9 +150,11 @@ func TestRiskPresetsDuck(t *testing.T) {
 	if got := res.Clues[0].MetricValue; got < 1.49 || got > 1.51 {
 		t.Errorf("spike ratio = %v, want 1.5", got)
 	}
-	// S-DUP(05) + S-DUP(06) + S-LEDG(05) = 3 excluded multi-batch pairs
-	if res.Excluded != 3 {
-		t.Errorf("spike excluded = %d, want 3", res.Excluded)
+	// S-DUP(05) + S-DUP(06) + S-LEDG(05) = 3 multi-batch pairs, plus the
+	// #105 class: S-ZERO(08) whose previous billed month total is 0 — the
+	// zero-base pair the ratio cannot judge but the envelope must count.
+	if res.Excluded != 4 {
+		t.Errorf("spike excluded = %d, want 4 (3 multi-batch + 1 zero-base, #105)", res.Excluded)
 	}
 	// single-month scope narrows the clue window
 	resM, err := svc.Risks(ctx, engine, RiskSpike, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 6})
@@ -161,8 +169,8 @@ func TestRiskPresetsDuck(t *testing.T) {
 	if err != nil || resHi.Total != 0 {
 		t.Fatalf("spike ratio=1.6 must be silent, got %+v (err %v)", resHi.Clues, err)
 	}
-	if resHi.Excluded != 3 {
-		t.Errorf("spike ratio=1.6 excluded = %d, want 3 — the envelope must stay truthful on an empty clue set (#83)", resHi.Excluded)
+	if resHi.Excluded != 4 {
+		t.Errorf("spike ratio=1.6 excluded = %d, want 4 — the envelope must stay truthful on an empty clue set (#83) and count the zero-base class (#105)", resHi.Excluded)
 	}
 
 	// ---- scenario 5: outlier ----

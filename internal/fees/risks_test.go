@@ -13,6 +13,8 @@ package fees
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -270,5 +272,70 @@ func TestRisksUnlinkedComposition(t *testing.T) {
 	}
 	if result.Clues[0].EvidenceTotal != 3 {
 		t.Errorf("DISMISSED-1 evidenceTotal = %d, want 3", result.Clues[0].EvidenceTotal)
+	}
+}
+
+// TestSplitCommaTrimsAndDrops pins #105-B: the comma-list parser used to
+// keep items verbatim, so "停用, 退网" (a manual or URL-encoded space) carried
+// " 退网" into the free-text status match — silently narrowing
+// retired-billing while the note displayed the spacey form. Every item is
+// now trimmed (half/full-width spaces), empties dropped.
+func TestSplitCommaTrimsAndDrops(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"停用,退网", []string{"停用", "退网"}},
+		{"停用, 退网", []string{"停用", "退网"}},     // the bug shape
+		{"停用，退网", []string{"停用", "退网"}},      // full-width comma
+		{" 停用 ,  退网 ", []string{"停用", "退网"}}, // spaces everywhere
+		{"停用,　退网", []string{"停用", "退网"}},     // full-width space
+		{",停用,,退网,", []string{"停用", "退网"}},   // empties dropped
+		{"", nil},
+		{",,,", nil},
+	} {
+		got := SplitComma(tc.in)
+		if len(got) != len(tc.want) {
+			t.Errorf("SplitComma(%q) = %v, want %v", tc.in, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("SplitComma(%q)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+// TestAnalysisEmptySurfacesGlobErrors pins #105-C: a malformed glob (a "["
+// in the data dir path) used to be swallowed as "no matches == empty" —
+// the entire query surface answered honest-empty and MASKED the problem
+// the doc comment promised to surface. A glob error now reads as
+// NON-empty, so the real query runs and surfaces the underlying error.
+func TestAnalysisEmptySurfacesGlobErrors(t *testing.T) {
+	tmp := t.TempDir()
+	// empty dir → honestly empty
+	if !analysisEmpty(tmp) {
+		t.Error("empty analysis dir: want analysisEmpty == true")
+	}
+	// a parquet file at the glob's depth (fees/<type>/<year>/<month>/) → non-empty
+	deep := filepath.Join(tmp, "fees", "fee_type=electricity", "year=2024", "month=05")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "part-0.parquet"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if analysisEmpty(tmp) {
+		t.Error("dir with a parquet file: want analysisEmpty == false")
+	}
+	// a "[" in the dir makes the glob pattern malformed → the error must
+	// read as NON-empty (the query surfaces it), never as honest-empty
+	bad := filepath.Join(t.TempDir(), "analysis[bad")
+	if err := os.MkdirAll(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if analysisEmpty(bad) {
+		t.Error("malformed glob (dir contains '['): analysisEmpty must answer false so the real query surfaces the error (#105)")
 	}
 }

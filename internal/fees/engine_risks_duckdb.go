@@ -242,7 +242,38 @@ ORDER BY ratio DESC, site_code, year, month`,
 	if err != nil {
 		return nil, 0, err
 	}
-	return clues, excluded, nil
+	// #105: pairs whose PREVIOUS total is <= 0 used to be invisible in
+	// BOTH counters — no clue (the ratio is undefined on a zero base) and
+	// no excluded entry. A zero-base month followed by charges is the
+	// STRONGEST spike shape there is; the envelope must count it (the
+	// service note tells the operator what the class means).
+	zeroBase, err := zeroBasePairCount(ctx, db, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, 0))
+	if err != nil {
+		return nil, 0, err
+	}
+	return clues, excluded + zeroBase, nil
+}
+
+// zeroBasePairCount counts the single-batch (site, period) pairs whose
+// previous billed month total is <= 0 — the pairs the ratio window cannot
+// judge (#105's excluded class; multi-batch pairs are excludedPairCount's
+// class).
+func zeroBasePairCount(ctx context.Context, db *sql.DB, glob, feeType, period string) (int, error) {
+	query := fmt.Sprintf(riskPerPairCTE+`
+, clean AS (
+  SELECT * FROM per WHERE batches = 1
+), seq AS (
+  SELECT site_code, year, month, total_cents,
+         lag(total_cents) OVER (PARTITION BY site_code ORDER BY (year::BIGINT)*12 + (month::BIGINT)) AS prev_total
+  FROM clean
+)
+SELECT count(*) FROM seq WHERE prev_total IS NOT NULL AND prev_total <= 0`,
+		glob, feeType, period)
+	var n int
+	if err := db.QueryRowContext(ctx, query).Scan(&n); err != nil {
+		return 0, fmt.Errorf("fees: 风险场景零基期计数查询: %w", err)
+	}
+	return n, nil
 }
 
 // RiskOutlierPreset implements scenario 5: single-batch (site, period)

@@ -28,6 +28,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/repo"
+	"strings"
 )
 
 // RiskScenario is the closed enum of the six risk presets (#64's table).
@@ -261,7 +262,7 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		note = "线索口径：同一 (站址, 账期) 的各批次合计金额不一致（合同台账与账单台账作为不同批次导入时的差异形态）——差异金额供核对，非认定结论"
 	case RiskSpike:
 		clues, excluded, err = engine.RiskSpikePreset(ctx, s.analysisDir(), q)
-		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；跨批次 (站址, 账期) 已排除（那属于重复结算/金额差异场景），排除数为全年口径（环比链跨全年，排除影响整链），月份参数只收窄显示的线索窗口（#83）"
+		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；排除数含两类（全年口径，月份参数只收窄显示的线索窗口，#83/#105）：跨批次 (站址, 账期) 对（那属于重复结算/金额差异场景）；环比基期 ≤ 0 的对组——零基期后产生费用是最强烈的突增形态，但涨幅比无定义，无法出线索，请对排除数人工核查"
 	case RiskOutlier:
 		clues, excluded, err = engine.RiskOutlierPreset(ctx, s.analysisDir(), q)
 		note = "线索口径：同期同类（同费用类型）单批次站址集合的 z-score 离群（双侧，符号在 metricValue）——统计线索，非认定结论；跨批次 (站址, 账期) 已排除，排除数见 excluded"
@@ -472,13 +473,18 @@ func joinComma(ss []string) string {
 // (full-width commas tolerated — the operator's input shape).
 func SplitComma(s string) []string { return splitComma(s) }
 
+// splitComma splits a comma list (half/full-width) into TRIMMED, non-empty
+// items (#105: "停用, 退网" — a URL-encoded space or a manual space — used to
+// keep " 退网" verbatim, which then matched nothing in the free-text status
+// column and silently narrowed retired-billing while the note displayed the
+// spacey form; every item is now trimmed, empties dropped).
 func splitComma(s string) []string {
-	var out []string
+	var raw []string
 	cur := make([]rune, 0, len(s))
 	for _, r := range s {
 		if r == ',' || r == '，' {
 			if len(cur) > 0 {
-				out = append(out, string(cur))
+				raw = append(raw, string(cur))
 				cur = cur[:0]
 			}
 			continue
@@ -486,7 +492,14 @@ func splitComma(s string) []string {
 		cur = append(cur, r)
 	}
 	if len(cur) > 0 {
-		out = append(out, string(cur))
+		raw = append(raw, string(cur))
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		item = strings.TrimSpace(strings.NewReplacer(" ", "", "　", "").Replace(item))
+		if item != "" {
+			out = append(out, item)
+		}
 	}
 	return out
 }

@@ -153,6 +153,14 @@ func feeTableGlob(analysisDir string) string {
 // A glob error reads as NON-empty: the real query then surfaces the
 // underlying problem, we never mask it here.
 func analysisEmpty(analysisDir string) bool {
-	matches, _ := filepath.Glob(feeTableGlob(analysisDir))
+	matches, err := filepath.Glob(feeTableGlob(analysisDir))
+	if err != nil {
+		// #105: a GLOB error (a "[" in the data dir makes the pattern
+		// malformed) used to be swallowed into "matches == nil == empty" —
+		// the whole query surface answered honest-empty and MASKED the
+		// problem the doc comment promised to surface. A glob error reads as
+		// NON-empty: the real query runs and surfaces it.
+		return false
+	}
 	return len(matches) == 0
 }
