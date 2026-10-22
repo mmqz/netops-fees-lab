@@ -984,3 +984,13 @@ v0.15.2 全仓调研定位的费用×指标交叉验证整块缺口：六场景�
 | **#114**（新增能力，本轮立案+修复+关闭） | 第七场景 `idle-billing`「有费无量」：引擎 `SitePeriodTotals`（费用面）× confirmed 关联 → 新读原语 `MetricRepo.CountPointsOfResource`（指标面，一次索引 join），**账期窗口内零点触发**、无阈值（零点是确定性信号）；窗口 = 自然月 RFC3339 字典序（与 `ParseTS` 归一约定一致），month=0 整年口径逐 (站址,账期) 开窗；`#85` 双 memo（link 一站一查、计数一 (资源,账期) 一查）；线索 note 恒携带告诫——**采集缺失与空置不可区分，仅供人工核实**（"账单存在≠认定结论"的指标面镜像）；消费面闭集六→七同步（MCP 描述+schema / 路由摘要 / CLI usage 自动派生 / /fees 下拉+i18n 常量 / fees-layer.md §8 场景表+诚实注意义务段 / api.md / facts.md / README） | 本轮 |
 
 **门禁**（本地执行，CI 配额外部阻塞不依赖）：25 包 ok · 0 FAIL（默认 + duckdb 双构建）· gofmt 空 · vet 0（双构建）· vitest 188/188 · tsc 0 · `make web` 重建 dist 后 webui/app/fees 复测 ok。组合逻辑单测（窗口内外/无关联/整年逐月开窗/#93 空锚点非 null）+ 窗口数学单测（平/闰年边界）+ 封闭集三面（fees/mcpserver/e2e）+ duckdb 真实引擎 e2e（RETIRED-SITE 零点触发 vs ACTIVE-SITE 有 6 月点静默 + 单月诚实空）。镜像文档：[issue-114](issue-114-fees-idle-billing.md)。CHANGELOG 入账待发布轮（AppVersion 门禁约束：非发布轮不动 CHANGELOG 头部）。
+
+### #115 修复轮（2026-10-22，v0.15.2 后 main 第二轮）
+
+全仓遗留调研唯一命中的功能欠账：api.md:941 / import-and-validation.md:354 双处声明的「指标批次回滚 CLI 随 W24 一并收口」承诺未兑现——三大导入通道中指标通道是唯一 CLI 无回滚的（资源 `rollback` / 费用 `fees rollback` 齐备，离线操作者导错指标文件无法撤销）。
+
+| 项 | 内容 | 提交 |
+| --- | --- | --- |
+| **#115**（CLI 通道补全，本轮立案+修复+关闭） | 新增 `metrics` 顶层命令（`list` / `rollback`）：`--db` 前置 + 子命令封闭集派生 usage（#108 教义）+ go/ast 闭集测试双向钉死（dispatch 表登记 + 顶层 19→20）；`list` 输出与 HTTP `GET /api/metrics/batches` 完全同形（分页/字段/字符串 status）；`rollback --batch` 与 HTTP 端点**同引擎同错误码表**（conflict / not_found / usage → exit 1/1/2，零新增映射逻辑）；e2e 全旅程（synthdata→资源导入→ingest→list→rollback→复滚 conflict→未知 id not_found→usage 五形态）；api.md 双处承诺句收口 + CLI 通道小节补「三大导入通道 CLI 回滚齐全」事实 + README 20 命令 | 本轮 |
+
+**门禁**（本地执行）：25 包 ok × 双构建 · 0 FAIL · gofmt 空 · vet 0（双构建）· vitest 188/188 · tsc 0。镜像文档：[issue-115](issue-115-metrics-rollback-cli.md)（含 `runCLIJSON` 首参是标签非命令的踩坑记录）。

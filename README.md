@@ -125,7 +125,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **数据模型 v1.0 类型扩容（v0.7.0 W21）**：资源类型 8→33（新增光缆网/传输承载/逻辑/业务/接入层 25 类——光缆/纤芯/ODF/波道/时隙/环网/客户/业务/专线/OLT 等，migration v15+v16）；关系类型 4→29（含 `carried_by`/`uses_fiber`/`provided_by`/`serves`/`uplink_to`/`fiber_of` 等，方向语义注册表可执行门禁）；四点一致性测试（domain 枚举 ↔ SQL CHECK ↔ `/api/schema` ↔ web 镜像）防漂移；B8 键规范化（trim+全角半角+大写，前导零保留）；既有数据保守迁移零改动（B4 守卫测试）。
 - **HTTP API**：`/api/...` 全套 REST 风格接口（错误统一 `{"error":{"code","message"}}` 信封）+ 18 条 lab 域仿真路由（Phase 2 的 §7 家族 17 条 + #51 图层成员下钻；计数以 [docs/facts.md](docs/facts.md) 为机读事实源，门禁测试钉死）。
 - **嵌入式 React 前端**：概览 / 数据导入（三步向导）/ 资源浏览（抽屉 + 二跳）/ 问题清单 / 质量报告 / 工作台列表 / 拓扑工作台 中文界面，`go:embed` 打进单二进制。
-- **结构化 CLI**：`analyze / import / ingest / synthdata / detect / export / validate / report / query / changes / renames / fees / lab / templates / serve / mcp / gc / backup / testdata`（19 个顶层子命令——与二进制 `usage_error` 消息同一清单，闭集测试钉死不漂移），成功输出单一 JSON 对象，退出码 0/1/2（TeleAgent 的 CLI 回退路径）。`query` 子命令含图查询四通道（`traverse / impact / context / nearest`，v0.8.1）——与 HTTP 端点同一引擎同一装配、输出逐字节一致（跨通道 e2e 钉死），脚本化巡检无需先 `serve`（issue #41）。
+- **结构化 CLI**：`analyze / import / ingest / metrics / synthdata / detect / export / validate / report / query / changes / renames / fees / lab / templates / serve / mcp / gc / backup / testdata`（20 个顶层子命令——与二进制 `usage_error` 消息同一清单，闭集测试钉死不漂移），成功输出单一 JSON 对象，退出码 0/1/2（TeleAgent 的 CLI 回退路径）。`query` 子命令含图查询四通道（`traverse / impact / context / nearest`，v0.8.1）——与 HTTP 端点同一引擎同一装配、输出逐字节一致（跨通道 e2e 钉死），脚本化巡检无需先 `serve`（issue #41）。
 - **工程化**：**618 个 Go 顶层测试**（25 个含测试的包；`go test -list '.*'` 顶层函数口径，2026-10-20 实测）全绿；gofmt/vet 干净；确定性导入/校验/仿真；可重复的一键演示脚本（demo.sh + demo-lab.sh）；**组合根单一装配**（v0.5 W9-D：`internal/services` 是服务装配唯一事实源，app/HTTP API/MCP 共享同一实例，指针级测试钉死）。测试计数随测试增删演进——机读事实源与更新纪律见 [docs/facts.md](docs/facts.md)。
 
 ## 3. 快速开始
@@ -326,6 +326,7 @@ netopslab import   --file devices.xlsx --db ./data/netops.db --auto     # 无人
 netopslab templates --db ./data/netops.db save --batch <id> [--name <n>]  # 一键保存已确认映射为模板（v0.7 W24；list/delete 同树）
 netopslab ingest   --file perf.xlsx --map metric-map.json --db ./data/netops.db   # 时序指标导入（v0.7 W20，upsert 幂等）
 netopslab ingest   --file perf.xlsx --suggest               # 只输出建议指标映射 JSON（不写库）
+netopslab metrics  --db ./data/netops.db list|rollback --batch <id>  # 指标批次生命周期（#115：list 分页同 HTTP 形，rollback 同引擎同错误码表）
 netopslab synthdata --out ./synth --devices 20 --days 30 --scenario degrade --seed 42   # 确定性合成数据（同 seed 字节级相同）
 netopslab export   --db ./data/netops.db --out resources.xlsx [--types device,ip_pool]  # 导出当前资源清单（xlsx，可回源导入）
 netopslab validate --db ./data/netops.db [--batch <id>]

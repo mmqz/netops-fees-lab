@@ -82,6 +82,7 @@ func TestDispatcherUsageListsEveryDispatchedSubcommand(t *testing.T) {
 		{"query", "cli.go", "cmdQuery", cmdQuery, nil, []string{"--db", db, "__nope__"}},
 		{"changes", "cli.go", "cmdChanges", cmdChanges, nil, []string{"--db", db, "__nope__"}},
 		{"renames", "cli.go", "cmdRenames", cmdRenames, nil, []string{"--db", db, "__nope__"}},
+		{"metrics", "metrics_cli.go", "cmdMetrics", cmdMetrics, nil, []string{"--db", db, "__nope__"}},
 		{"lab", "cli.go", "cmdLab", cmdLab, nil, []string{"__nope__"}},
 		{"templates", "cli.go", "cmdTemplates", cmdTemplates, nil, []string{"__nope__"}},
 		{"fees", "fees_cli.go", "cmdFees", cmdFees, nil, []string{"--db", db, "--data", dir, "__nope__"}},

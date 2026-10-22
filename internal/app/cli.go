@@ -48,7 +48,7 @@ const envDBPath = "NETOPS_DB"
 // fails on drift in either direction (#108: `backup` once shipped unlisted;
 // two hand-copied strings agreeing only by luck is how it happened).
 var cliSubcommands = []string{
-	"serve", "analyze", "import", "ingest", "synthdata", "detect",
+	"serve", "analyze", "import", "ingest", "metrics", "synthdata", "detect",
 	"export", "validate", "report", "query", "changes", "renames",
 	"fees", "lab", "templates", "mcp", "gc", "backup", "testdata",
 }
@@ -101,6 +101,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdImport(args[1:], stdout, stderr)
 	case "ingest":
 		err = cmdIngest(args[1:], stdout, stderr)
+	case "metrics":
+		err = cmdMetrics(args[1:], stdout, stderr)
 	case "synthdata":
 		err = cmdSynthdata(args[1:], stdout, stderr)
 	case "detect":

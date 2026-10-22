@@ -351,5 +351,5 @@ HTTP `POST /api/imports?auto=1`（或 multipart 字段 `auto=1`）/ CLI `netopsl
 ### 20.5 边界声明
 
 - **Web 向导仍走人工确认**：分析响应新增的逐 sheet `templateMatched` 只驱动信息横幅「已匹配映射模板（确认于 …）」，不提供自动执行勾选——无人值守是 cron/CLI/HTTP-flag 的运维通道，向导是人的通道。
-- 指标批次回滚的 CLI 收口（api.md 时序节遗留注释）不在本轮范围。
+- 指标批次回滚的 CLI 收口：已随 #115 落地——`netopslab metrics --db <path> list|rollback`（list 与 HTTP `GET /api/metrics/batches` 同形分页；rollback `--batch <id>` 与 HTTP 同引擎同错误码表）。
 - MCP 工具面不为此新增工具（11 个只读工具清单见 teleagent-integration.md）：模板生命周期不进 AI 通道。

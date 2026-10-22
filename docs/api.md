@@ -938,11 +938,11 @@ multipart 字段 `file` + `mapping`（analyze 的 suggestedMapping JSON 原样�
 
 ### POST /api/metrics/batches/{id}/rollback — 回滚指标批次
 
-删除该批次写入的测量点（`metrics.batch_id` 锚定）+ 清理因此变空的序列（仍有其他批次点的序列保留）。仅 completed 可回滚 → 200 `{deleted:{points, series}}`；非 completed → 409；未知 id → 404。回滚目前为 HTTP 端点（CLI 侧后续随 W24 无人值守轮次一并收口）。
+删除该批次写入的测量点（`metrics.batch_id` 锚定）+ 清理因此变空的序列（仍有其他批次点的序列保留）。仅 completed 可回滚 → 200 `{deleted:{points, series}}`；非 completed → 409；未知 id → 404。CLI 通道：`netopslab metrics --db <path> rollback --batch <id>`（#115 收口——错误码表与 HTTP 对齐：conflict / not_found / usage_error）
 
 ### CLI 通道（与 HTTP 同引擎）
 
-`netopslab ingest --file perf.xlsx --map m.json --db …`（执行）；`--suggest` 只打印建议映射 JSON；`netopslab synthdata --out DIR --devices N --ports N --days D --scenario normal|degrade|outage --seed S`（确定性合成数据：同 seed 字节级相同；resources.xlsx 走既有资源导入通道，perf-day-*.xlsx 走指标通道）。
+`netopslab ingest --file perf.xlsx --map m.json --db …`（执行）；`--suggest` 只打印建议映射 JSON；`netopslab synthdata --out DIR --devices N --ports N --days D --scenario normal|degrade|outage --seed S`（确定性合成数据：同 seed 字节级相同；resources.xlsx 走既有资源导入通道，perf-day-*.xlsx 走指标通道）。`netopslab metrics --db <path> list [--page N] [--page-size N] | rollback --batch <id>`（批次生命周期，#115：list 与 `GET /api/metrics/batches` 同形分页，rollback 与 HTTP 端点同引擎同错误码表——至此三大导入通道 CLI 回滚齐全：资源 `rollback` / 费用 `fees rollback` / 指标 `metrics rollback`）。
 
 ## 运行状态与图查询端点（v0.7.0 W22 — 数据模型 v1.0 §6/§10/§12-B1）
 
