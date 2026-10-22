@@ -122,7 +122,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `duplicate-settlement` | 跨批次重复结算 | 同 (站址, 账期) 计费批次 >1（metric=batches） | 无阈值 |
 | `ledger-mismatch` | 合同账单金额差异 | 同 (站址, 账期) 各批次合计之差超阈值（先按批次聚合再比——批次内拆分账单不误报） | `diffCents`（默认 0 = 任何差异） |
 | `spike` | 电费环比异常上涨 | 单批次口径月度合计环比涨幅达阈值（上期 = 上一个有账单的月份） | `ratio`（默认 0.30） |
-| `outlier` | 同类站单位成本离群 | 同期同费用类型单批次站址集合的 z-score（双侧，符号在 metric） | `z`（默认 3.0）、`minSites`（默认 8） |
+| `outlier` | 同类站月度金额离群 | 同期同费用类型单批次站址集合的**月度总额** z-score（双侧，符号在 metric）——**非单位成本口径**（#117：规模归一化需基数字段，当前数据面不存在，见下） | `z`（默认 3.0）、`minSites`（默认 8） |
 | `unlinked` | 零资源计费 | 费用编码既无 confirmed 关联也无 pending 提案（dismissed 视为无匹配；跨层组合） | 无阈值 |
 | `idle-billing` | 有费无量 | 已确认关联的站址在该账期窗口内**指标点数为零**且费用仍在流（跨层组合 #114：引擎费用面 × SQLite 指标面；窗口 = 账期自然月 [1日, 末日] 的 RFC3339 字典序；原始需求「停电/无业务量在账」的交叉验证落点） | 无阈值（零点是确定性信号） |
 

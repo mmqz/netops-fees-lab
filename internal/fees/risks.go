@@ -91,7 +91,7 @@ var RiskScenarioLabels = map[RiskScenario]string{
 	RiskDuplicateSettlement: "跨批次重复结算",
 	RiskLedgerMismatch:      "合同账单金额差异",
 	RiskSpike:               "电费环比异常上涨",
-	RiskOutlier:             "同类站单位成本离群",
+	RiskOutlier:             "同类站月度金额离群",
 	RiskUnlinked:            "零资源计费",
 	RiskIdleBilling:         "有费无量",
 }
@@ -278,7 +278,7 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；排除数含两类（全年口径，月份参数只收窄显示的线索窗口，#83/#105）：跨批次 (站址, 账期) 对（那属于重复结算/金额差异场景）；环比基期 ≤ 0 的对组——零基期后产生费用是最强烈的突增形态，但涨幅比无定义，无法出线索，请对排除数人工核查"
 	case RiskOutlier:
 		clues, excluded, err = engine.RiskOutlierPreset(ctx, s.analysisDir(), q)
-		note = "线索口径：同期同类（同费用类型）单批次站址集合的 z-score 离群（双侧，符号在 metricValue）——统计线索，非认定结论；跨批次 (站址, 账期) 已排除，排除数见 excluded"
+		note = "线索口径：同期同类（同费用类型）单批次站址集合的月度总额 z-score 离群（双侧，符号在 metricValue）——注意：本场景对月度总额而非单位成本计算，规模大的站天然偏高，请结合站点规模人工判断（#117：规模归一化待基数字段落地后显式参数化）；统计线索，非认定结论；跨批次 (站址, 账期) 已排除，排除数见 excluded"
 	case RiskRetiredBilling:
 		var c cluesPack
 		c, err = s.risksRetiredBilling(ctx, engine, q)

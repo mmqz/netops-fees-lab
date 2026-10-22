@@ -1004,3 +1004,13 @@ v0.15.2 全仓调研定位的费用×指标交叉验证整块缺口：六场景�
 | **#116**（门禁 + 漂移修复，本轮立案+修复+关闭） | ① api.md 补全三条零文档路由小节（openapi.json / alerts/stats / layer-members——全量比对 82 vs 79 确认）；② 新门禁 `TestAPIMDocHeadingsMatchRouteTable`：api.md 方法标题集 ↔ `apiRoutes()` 表**双向集合比对**，零豁免，双向红验证实测（删小节 → missing；幽灵标题 → no longer exist）；③ README 两处 #66 型漂移修复（「MCP 五工具」→「MCP 仿真域工具」+ 指向 11 工具闭集事实；目录树注释 11 工具现实） | 本轮 |
 
 **门禁**（本地执行）：25 包 ok × 双构建 · 0 FAIL · gofmt 空 · vet 0（双构建）。镜像文档：[issue-116](issue-116-prose-contract-gates.md)。
+
+### #117 修复轮（2026-10-22，v0.15.2 后 main 第四轮）
+
+#110「散文冻结了谎言」缺陷类在场景 5 上的实例：标签称「同类站**单位成本**离群」，实现对月度**总额**直接 z-score（无规模归一化——总额口径会把大站误报为离群）。
+
+| 项 | 内容 | 提交 |
+| --- | --- | --- |
+| **#117**（口径诚实化，本轮立案+修复+关闭） | 裁决**诚实优先**：单位成本归一化需规模基数字段而当前数据面不存在（任何默认基数都是发明数据），且需跨层重构——标签对齐实现（六面同步：Go 标签/MCP 描述/api.md/fees-layer §8/project-overview/前端 i18n）；场景 note 增补规模告诫；`TestRiskOutlierLabelAndNote` 钉死新标签 + note 三要素；归一化登记为显式参数化未来增强（`normBasis`，前置 = 基数字段落地），历史文档按教义不改写 | 本轮 |
+
+**门禁**（本地执行）：25 包 ok × 双构建 · 0 FAIL · gofmt 空 · vet 0（双构建）· vitest + tsc（i18n 常量变更必跑）。镜像文档：[issue-117](issue-117-outlier-label-honesty.md)。

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mmqz/netops-lab/internal/domain"
@@ -47,7 +48,7 @@ func (f *fakeRiskEngine) RiskSpikePreset(ctx context.Context, analysisDir string
 	return nil, 0, errors.New("not used")
 }
 func (f *fakeRiskEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
-	return nil, 0, errors.New("not used")
+	return nil, 0, nil // honest empty — the note test exercises the envelope tail only
 }
 func (f *fakeRiskEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {
 	return f.periodTotals, nil
@@ -272,6 +273,28 @@ func TestRisksUnlinkedComposition(t *testing.T) {
 	}
 	if result.Clues[0].EvidenceTotal != 3 {
 		t.Errorf("DISMISSED-1 evidenceTotal = %d, want 3", result.Clues[0].EvidenceTotal)
+	}
+}
+
+// TestRiskOutlierLabelAndNote pins #117: the scenario-5 label claims
+// what the preset actually computes (月度金额, NOT 单位成本 — the old
+// label promised per-unit normalization the SQL never had), and the
+// envelope note carries the honest scale caveat so a human reading the
+// clue knows big sites skew high and must be judged against their size.
+func TestRiskOutlierLabelAndNote(t *testing.T) {
+	svc, _, _ := newService(t)
+	ctx := context.Background()
+	res, err := svc.Risks(ctx, &fakeRiskEngine{}, RiskOutlier, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(outlier, honest empty): %v", err)
+	}
+	if res.ScenarioCn != "同类站月度金额离群" {
+		t.Errorf("scenarioCn = %q, want 同类站月度金额离群 (#117: the label must not claim unit cost)", res.ScenarioCn)
+	}
+	for _, want := range []string{"月度总额而非单位成本", "规模大的站天然偏高", "统计线索，非认定结论"} {
+		if !strings.Contains(res.Note, want) {
+			t.Errorf("note missing %q: %s", want, res.Note)
+		}
 	}
 }
 
