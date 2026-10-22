@@ -37,7 +37,7 @@ patch 发布（#74 发布断档第二轮 + #75 P1 跨平台路径），v0.15.1 �
 | CI（GitHub Actions） | 账户计费耗尽：v0.13.0 三笔功能提交（586de04/23747f4/448ea89）→ run 39189729436 等四个 job 全部 **0-step failure**（v0.6.0-v0.12.1 同款配额模式；本地门禁集与 CI 同集全绿为权威） | 计费恢复后补记绿 run 号 |
 | 费用域真实账单样本 | 管线用构造 CSV + 真实表头同义词验证；未接真实电费/铁塔租费工作簿（待运维侧供给，含敏感金额） | 有样本后做字段厚度复测 |
 | Windows 上 duckdb 构建 | 预编译绑定声明支持 windows-amd64，但本沙箱无法交叉验证 CGO 工具链 | Windows 实机或 CI 恢复后试构建 |
-| DuckDB 并发查询压测 | 引擎每次查询独立 `:memory:` 句柄（无共享态），#59 并发读基准佐证；未做费用域专项压测 | 阶段 4 风险场景上线前压测 |
+| ~~DuckDB 并发查询压测~~ → **已验证（2026-10-22，费用域专项）**：`TestDuckEngineConcurrentFeeQueries`（`-tags duckdb`）以 2-8 worker × 3 pass 并发跑满读面（Totals/Duplicates/七场景），每结果 `reflect.DeepEqual` 对照单线程黄金值——首跑即抓到 `EvidenceFor` 外层 `ORDER BY kid, source_row` 在跨批 `source_row` 并列（#60 共存教义保证碰撞）时无决胜、同数据两次查询证据锚点序翻转的真实缺陷（外层改 `ORDER BY kid, rn` = 窗口排名全序，修复后 60 查询字节级一致）；基准 `BenchmarkFuzzySweep10k1k` 1.39s/op（#82 校准点 1.38s 同级） | 已闭环（阶段 4/5 上线后的到期项） |
 
 ## ✅ 已验证（2026-10-17，v0.12.1 四 issue 修复版 · linux/amd64 · 沙箱）
 

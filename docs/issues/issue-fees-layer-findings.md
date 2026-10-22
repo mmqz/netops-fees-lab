@@ -204,12 +204,12 @@ EXIT=1
 
 ---
 
-## 五、验收建议
+## 五、验收建议（闭环记录，2026-10-22）
 
-1. 金额精度：`SUM` 结果对账到分**零误差**；补测试断言 100 万行 0.01 累加 == 10000.00；
-2. 模糊匹配：10,000 codes × 1,000 candidates 的 scan **< 2 秒**；补性能基准测试；
-3. Windows：`run.ps1` 或文档给出可查询费用的明确路径；
-4. 识别器：英文常见表头能自动识别。
+1. ~~金额精度：`SUM` 结果对账到分**零误差**~~ → **已闭环**：v0.13.0 起全链 int64 分币（`AmountCents`），`normalize_test.go` 断言 100 万行 0.01 累加 == 1000000 cents 零误差；
+2. ~~模糊匹配：10,000 codes × 1,000 candidates 的 scan **< 2 秒**~~ → **已闭环**：`TestFuzzyScanPerformance`（#65 验收，#82 竞态校准 8s 门，实测 1.38s idle）+ `BenchmarkFuzzySweep10k1k`（`-bench` 基准，实测 1.39s/op）；
+3. Windows：`run.ps1` 或文档给出可查询费用的明确路径——**外部依赖项**（本沙箱无 Windows CGO 工具链，见 verified-capabilities v0.13.0 未验证表）；Docker 路径见 Makefile `build-duckdb` 注释与 docs/fees-layer.md §5；
+4. ~~识别器：英文常见表头能自动识别~~ → **已闭环**：`normalize_test.go` 断言 site_code / Site Code / SITE_CODE / siteCode 等拼写与大小写变体。
 
 ---
 

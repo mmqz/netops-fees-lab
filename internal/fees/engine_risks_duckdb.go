@@ -424,6 +424,16 @@ ORDER BY total_cents DESC, site_code`,
 // amount_cents) and the top-N survive. Chunks of 200 keys per statement
 // (4 placeholders each) keep every SQLite-era habit irrelevant — DuckDB
 // has no such ceiling, the chunk bounds statement size only.
+//
+// Presentation order = the window's rank (outer ORDER BY kid, rn), NOT
+// (kid, source_row): the #60 batch-coexistence doctrine guarantees
+// source_row collisions across coexisting batches (each file numbers
+// its own rows, so two batches of one (site, period) both carry a row
+// 2), and an order without a total-order tiebreak let DuckDB's
+// parallel scan plan decide which batch's row 2 came first — the
+// evidence anchor order wobbled across queries on identical data (the
+// fee-domain concurrency stress caught it live; a re-run must be
+// byte-identical, #64's determinism ruling).
 func (duckQueryEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
 	if analysisEmpty(analysisDir) {
 		return map[EvidenceKey][]EvidenceAnchor{}, nil
@@ -464,7 +474,7 @@ func (duckQueryEngine) EvidenceFor(ctx context.Context, analysisDir string, feeT
   FROM matched
 )
 SELECT kid, site, yr, mo, source_file, source_row, import_batch, amount_cents
-FROM ranked WHERE rn <= ? ORDER BY kid, source_row`)
+FROM ranked WHERE rn <= ? ORDER BY kid, rn`)
 		args = append(args, maxPer)
 		rows, err := db.QueryContext(ctx, b.String(), args...)
 		if err != nil {

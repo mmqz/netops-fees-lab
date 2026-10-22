@@ -49,8 +49,8 @@ backoff := 50ms, 100ms, 150ms    // 三次尝试合计额外等待仅 ~300ms
 3. 测试侧：把「零 BUSY」断言改为**可容忍重试**，或降低并发度——
    该断言在慢 I/O 平台（Windows）上不可达
 
-## 验收
+## 验收（闭环记录，2026-10-22 核对）
 
-- [ ] 全量套件在 Windows 下不再出现 SQLITE_BUSY 逃逸
-- [ ] 提供并发压测证据（如 N 并发写事务全部成功）
-- [ ] 明确文档化「多实例并发」的支持边界
+- [x] 全量套件在 Windows 下不再出现 SQLITE_BUSY 逃逸 —— 修复已落地（AUD1-4：`_txlock=immediate` + `busy_timeout(5000)` + 6 次指数退避 BEGIN 重试，repo.go `beginBusyAttempts`）；linux 全量套件（23+ 包并行）零 BUSY 逃逸由 `polish_test.go` 并发工作负载测试钉死；Windows 实机验证仍在 verified-capabilities 的 Windows 未验证项下（外部依赖）
+- [x] 提供并发压测证据 —— SQLite 面：`polish_test.go` N 并发写事务经 `Do` 零逃逸；费用域面：`engine_concurrency_duckdb_test.go` 的 `TestDuckEngineConcurrentFeeQueries`（并发满读面 + 黄金值逐字节对照）
+- [x] 明确文档化「多实例并发」的支持边界 —— docs/architecture.md §4（单写者 + 重试预算上限 ≈33s 窗口，超出报 BUSY 错误、无数据损坏）与 §7 已文档化

@@ -391,6 +391,46 @@ func codeOf(n int, length int) string {
 	return string(b)
 }
 
+// BenchmarkFuzzySweep10k1k is the `go test -bench` twin of
+// TestFuzzyScanPerformance — the issue-fees-layer-findings acceptance
+// asked for a performance benchmark test; the wall-clock test guards the
+// gate in the suite, this one produces comparable numbers on demand
+// (`go test -bench FuzzySweep10k1k -benchtime=1x ./internal/fees/`).
+// The corpus is the same 10k codes × 1k candidates and the sweep runs
+// through the same worker-pool shape as the real decide phase, so the
+// ns/op is the per-code amortized cost of the whole 10k sweep. Run it
+// with -benchtime=1x: one op already takes ~1.4s idle (#82's calibration
+// point), and the default benchtime target would just repeat it.
+func BenchmarkFuzzySweep10k1k(b *testing.B) {
+	const nCodes, nCands = 10_000, 1_000
+	cands := make([]resourceCandidate, nCands)
+	for i := range cands {
+		cands[i] = resourceCandidate{id: "res_" + strconv.Itoa(i), key: codeOf(i, 18)}
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		var (
+			wg   sync.WaitGroup
+			next atomic.Int32
+		)
+		workers := runtime.GOMAXPROCS(0)
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					i := int(next.Add(1)) - 1
+					if i >= nCodes {
+						return
+					}
+					topFuzzy(cands, codeOf(i*7+3, 18))
+				}
+			}()
+		}
+		wg.Wait()
+	}
+}
+
 // TestSweepAutoNotInRepo pins the SQL-pushed dropout sweep's semantics
 // directly (#65 P1-b): auto links of dropped codes die (confirmed AND
 // pending), human-confirmed links and dismissed proposals are decisions
