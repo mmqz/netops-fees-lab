@@ -94,7 +94,7 @@ NetOps Lab 是一个本地优先（local-first）的云网资源治理与 AI 仿
 - **port 资源类型（v0.3.1 真实表格导入；migration v8 换稳定键）**：真实电信端口工作簿（端口流量监控表 / 端口资源表两种表头形态）可直接导入——`device_name + port_name` 复合自然键（`|` 拼接落库，键的设备侧自 migration v8 起锚定设备名称而非 IP：设备重划 IP 不再分裂资源，存量库升级语义见 [docs/data-model.md](docs/data-model.md) §11）、逐字重复表头行自动跳过多段导出拼接、带宽 0 合法入库；样例 `samples/telecom-port-multi-header.xlsx`（项目所有者在需求会话中提供的真实电信运营导出，已授权入库、仅限本私有仓库使用——来源与授权见 [samples/README.md](samples/README.md)；自然键稳定性分析见 [docs/natural-keys.md](docs/natural-keys.md)）；3D 地图默认视野按全部数据点的包围盒几何直解自适应（修「3D 地图过大」）。
 - **base_station 资源类型与条件自然键（v0.4，migration v9）**：真实无线基站工作簿可直接导入（14 真实业务列，无地市列；样例 `samples/telecom-base-station.xlsx`，来源与授权见 [samples/README.md](samples/README.md)）——主自然键为**基站编码**（非必填，真实表编码列常为空），编码缺失时键退化为 `(地市, 无线基站名称)` 兜底拼接、跳过空值，行照常导入并记 **W004**（身份键退化，warning 级治理 issue）；E001 判重与幂等 skip 都在解析后的最终键上（编码行与名称兜底行天然异键）；基站IP 值带 /30 掩码按 string 值列入库（IP 属可变属性，永不作身份）；键策略裁决见 [docs/natural-keys.md](docs/natural-keys.md) §4、行为细节见 [docs/import-and-validation.md](docs/import-and-validation.md) §12、DDL v9 见 [docs/data-model.md](docs/data-model.md) §12。
 - **机房 / 局站资源类型与 belongs_to 跨表关联（v0.4，migration v10）**：真实机房局站表（8 真实业务列：地市/区县/设备名称/IP地址/机房ID/机房名称/局站ID/局站名称；样例 `samples/telecom-site-machine-room.xlsx`，来源与授权见 [samples/README.md](samples/README.md)）**同一张 sheet 承载两类实体**——先按局站类型导入（键 = 局站ID，12 位数字编码），再按机房类型导入同一 sheet（键 = 机房ID，17 位数字编码，机房 spec 的 局站ID 列映射为可选 ref 字段）：局站先入库即自动派生 `machine_room --belongs_to--> site` 关系，导入顺序由 E003 语义钉死；两类 ID 均为 KindString（前导零即身份，绝不数值化）；机房名称/局站名称/设备名称为昵称（展示名/属性），IP 地址为可变属性；键策略裁决见 [docs/natural-keys.md](docs/natural-keys.md) §4、行为细节见 [docs/import-and-validation.md](docs/import-and-validation.md) §13、DDL v10 见 [docs/data-model.md](docs/data-model.md) §13。
-- **MCP 五工具**：`resource_search`（只读）+ `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`——AI 改仿真态的唯一通道；`restore_*` 内部操作码三边界拒绝；**无建删工作区工具**。
+- **MCP 仿真域工具**：`lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint` + 检索工具 `resource_search`——AI 改仿真态的唯一通道；`restore_*` 内部操作码三边界拒绝；**无建删工作区工具**。工具面现共 11 个（仿真域之外另有 5 图分析只读 + 1 费用风险只读，#66 教义：工具数以 `TestMCPToolRegistry` 闭集测试钉死）。
 - **CLI `lab` 子命令树**：workspace/topology/path/apply/checks/diff/undo/checkpoint，全部单一 JSON 输出。
 - **仿真报告**：`GET /api/lab/report`（HTML/JSON）：引擎版本、评分、发现、变更集史、检查点、固定免责声明。
 
@@ -266,7 +266,7 @@ netops-lab/
 │   ├── topology/         # 关系图 + BFS 可达性
 │   ├── query/            # 检索/统计/关系子图/拓扑检查
 │   ├── report/           # 质量报告 JSON+HTML；仿真工作台报告
-│   ├── mcpserver/        # MCP stdio 服务器（resource_search + 4 个 lab 工具）
+│   ├── mcpserver/        # MCP stdio 服务器（11 工具：resource_search + 4 仿真 + 5 图分析 + 1 费用风险）
 │   ├── api/              # HTTP 处理器、错误信封、中间件 + §7 仿真路由
 │   ├── app/              # 组装（配置/日志/DB/服务）+ CLI 实现（含 lab 子命令）
 │   └── webui/            # go:embed 前端产物（dist/.gitkeep 占位）

@@ -184,6 +184,10 @@ Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 J
 ```
 
 
+## GET /api/openapi.json — 本 API 的 OpenAPI 3 文档（v0.10-R9）
+
+**由路由表机械生成，与实现零漂移**：`buildOpenAPIDoc(apiRoutes())` 从单一事实源路由表投影 paths/methods/tags/summaries/状态集（含每路由的 201/202/409/422/501 诚实偏差），非手抄快照——新增路由不写这里也不会漂（`TestOpenAPISpecMatchesLiveServer` 双向钉死）。机器消费入口：把本 API 目录喂给代码生成器/网关/契约测试；散文人类契约即本文档（两道防线：本端点 + 下文的 api.md 标题集门禁）。只读、无参数、`system` tag。
+
 ## POST /api/imports — 上传并分析工作簿
 
 multipart/form-data，字段名 `file`，扩展名 `.xlsx` / `.txt` / `.cfg`（W8-D 起文本脚本放行），≤10MB（压缩尺寸超出 → 413 `too_large`）。**PTP 配置脚本通道（W8-D）**：`.txt`/`.cfg` 内容须含脚本特征（同时出现 `config ter` 与 `ptp`）→ 解析为「PTP配置」虚拟 sheet 走同一映射/导入管线（解析规则与语义见 [import-and-validation.md](import-and-validation.md) §18）；无特征 → 422 `unsupported_script`；解析失败 → 422 `script_parse_error`（消息含行号）。其它扩展名维持 422 `not_xlsx`。**解压后尺寸另有上限（v0.3.2，zip 炸弹防护）**：单 sheet 物化行数 > 100,000（含表头）或全簿物化单元格总数 > 5,000,000 → **422 `workbook_too_large`**（"工作簿超出大小上限（单表行数或全簿单元格数量过多），请拆分后重试"）。解析为逐 sheet 流式读取，超限即中止，不会整表先物化。返回 **202** + 分析结果（列建议、映射建议）；批次进入 `awaiting_mapping`。
@@ -1033,6 +1037,10 @@ body `{from?, to?}`（RFC3339，评估窗口；缺省全量）。对每条启用
 
 `?page=&pageSize=`（最新开始时间在前）。每行是一次扫描的落库回执：来源（api/cli/scheduler 闭集，MCP 只读红线永不在此）、时钟区间、耗时、评估窗口回显、数据截止、五计数（findings/created/cleared/suppressed/flapHeld）、失败原因（空 = 成功）。**通知投递裁决**（v0.12-R18，LEFT JOIN webhook_deliveries）：`webhookStatus` 三值——`delivered`（含重试吸收的瞬时失败，`webhookAttempts` 为实际 POST 次数 1..3）、`failed`（全部尝试失败，`webhookError` 为最后原因）、`''`（该次运行未配置 webhook 通道——诚实三值，非伪造的 failed）。
 
+### GET /api/alerts/stats — 告警分布统计（v0.11-R11）
+
+无参数。Overview 卡片与告警页头条的单次调用（取代 v0.9 的 pageSize=1 探测法）。**闭集零填充**——每个 map 的每个键恒存在（浏览器不为缺键分支）：`{total, byState:{firing,acked,cleared}, activeBySeverity:{error,warning,info}}`。`byState` 数全量生命周期三态；`activeBySeverity` 只数**待处置工作**（firing + acked）的级别分布——cleared 是历史不是工作。200 恒定形状（空库 = 全零）。
+
 ### GET /api/alerts — 告警列表
 
 `?state=firing|acked|cleared&severity=&resource_id=&role=primary|secondary&page=&pageSize=`。每条含 `rule` 摘要 + `series` + **resource 上下文**（id/type/naturalKey/name——AI 需要的是资源不是裸 series_id）+ `lifecycleDelivery` 块（v0.13-R19，LEFT JOIN alert_event_deliveries，**字段永不缺省**）+ **告警关联三字段**（v0.12-R16，引擎在每次同步后计算的分诊观察态，不改生命周期）。fired_at 倒序。
@@ -1358,6 +1366,10 @@ GET  /api/topology/check?fromDevice=DEV-001&toDevice=DEV-003 → 路径长 2
 （27 节点 / 20 边，此处截断到前 2 节点与第 1 边；`ipv4Addr:""`、`ipv4Prefix:-1` 表示未配置——与状态哈希的 `null` 表示法故意不同，§7 vs §3。）
 
 **节点可选字段 `geoLat` / `geoLng`（v0.3.0 geo 管道）**：导入设备表映射了经度/纬度/经纬度列并物化后，节点携带十进制坐标（上例 vd-2 的坐标为演示库 `testdata/geodevices.xlsx` 哈尔滨枢纽真实捕获值，此处并入示意；两个键均为 `omitempty`——**无位置节点不带键**，而非 `null`）。坐标不参与状态哈希与任何校验规则（红线，见 [simulation.md](simulation.md) §6 与 [architecture.md](architecture.md) §8）。
+
+## GET /api/workspaces/{id}/layer-members?cluster=&page=&pageSize= — 图层聚簇成员分页（issue #51）
+
+画布聚合节点的逐站下钻：`cluster` **必填**（聚合节点的 `anchorDeviceId`——省略 → 400 bad_request），`page/pageSize` 同既有分页契约。返回 `{items:[成员设备行], total, page, pageSize, cluster}`；未知工作区 → 404。聚簇是画布渲染层的折叠表达（一簇多站一锚点），本端点把簇还原回成员清单——供 #51 影响分析高亮逐站穿透。
 
 ## POST /api/workspaces/{id}/topology/path — 连通性查询
 

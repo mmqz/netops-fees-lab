@@ -994,3 +994,13 @@ v0.15.2 全仓调研定位的费用×指标交叉验证整块缺口：六场景�
 | **#115**（CLI 通道补全，本轮立案+修复+关闭） | 新增 `metrics` 顶层命令（`list` / `rollback`）：`--db` 前置 + 子命令封闭集派生 usage（#108 教义）+ go/ast 闭集测试双向钉死（dispatch 表登记 + 顶层 19→20）；`list` 输出与 HTTP `GET /api/metrics/batches` 完全同形（分页/字段/字符串 status）；`rollback --batch` 与 HTTP 端点**同引擎同错误码表**（conflict / not_found / usage → exit 1/1/2，零新增映射逻辑）；e2e 全旅程（synthdata→资源导入→ingest→list→rollback→复滚 conflict→未知 id not_found→usage 五形态）；api.md 双处承诺句收口 + CLI 通道小节补「三大导入通道 CLI 回滚齐全」事实 + README 20 命令 | 本轮 |
 
 **门禁**（本地执行）：25 包 ok × 双构建 · 0 FAIL · gofmt 空 · vet 0（双构建）· vitest 188/188 · tsc 0。镜像文档：[issue-115](issue-115-metrics-rollback-cli.md)（含 `runCLIJSON` 首参是标签非命令的踩坑记录）。
+
+### #116 修复轮（2026-10-22，v0.15.2 后 main 第三轮）
+
+#66/#110 家族的收口轮：工具数/路由数漂移靠人眼清扫永远追不上——本轮给「散文契约」补上结构性门禁。
+
+| 项 | 内容 | 提交 |
+| --- | --- | --- |
+| **#116**（门禁 + 漂移修复，本轮立案+修复+关闭） | ① api.md 补全三条零文档路由小节（openapi.json / alerts/stats / layer-members——全量比对 82 vs 79 确认）；② 新门禁 `TestAPIMDocHeadingsMatchRouteTable`：api.md 方法标题集 ↔ `apiRoutes()` 表**双向集合比对**，零豁免，双向红验证实测（删小节 → missing；幽灵标题 → no longer exist）；③ README 两处 #66 型漂移修复（「MCP 五工具」→「MCP 仿真域工具」+ 指向 11 工具闭集事实；目录树注释 11 工具现实） | 本轮 |
+
+**门禁**（本地执行）：25 包 ok × 双构建 · 0 FAIL · gofmt 空 · vet 0（双构建）。镜像文档：[issue-116](issue-116-prose-contract-gates.md)。
