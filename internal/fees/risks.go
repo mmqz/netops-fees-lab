@@ -1,7 +1,7 @@
 package fees
 
-// risks.go — the six risk scenarios of the fee analysis layer (#64, #58
-// stage 4). Every scenario is a FIXED, parameterized preset: the caller
+// risks.go — the risk scenarios of the fee analysis layer (#64, #58
+// stage 4; #114 adds scenario 7). Every scenario is a FIXED, parameterized preset: the caller
 // passes a scenario id + numeric/enum parameters, never SQL (the red line
 // the MCP surface enforces, extended to the engine face).
 //
@@ -25,13 +25,15 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/repo"
-	"strings"
 )
 
-// RiskScenario is the closed enum of the six risk presets (#64's table).
+// RiskScenario is the closed enum of the risk presets (#64's table + #114's
+// scenario 7).
 type RiskScenario string
 
 const (
@@ -65,12 +67,22 @@ const (
 	// nor a pending proposal — billing with no resource behind it. A
 	// dismissed proposal counts as no match (the human already said so).
 	RiskUnlinked RiskScenario = "unlinked"
+	// RiskIdleBilling (scenario 7, #114): the fee keeps flowing to a site
+	// whose linked resource carries ZERO metric points in the billed
+	// period's time window — the two independent ledgers disagree: the
+	// fee face says the site exists and costs money, the measurement face
+	// has no records at all. The original requirement's "停电告警在账
+	// 资源 / 无业务量却有费用" cross-check, finally carried by a scenario.
+	// The honest caveat is part of the contract: a zero count may mean
+	// idle equipment OR broken/absent collection coverage — the clue is a
+	// to-be-verified signal, never an idleness verdict.
+	RiskIdleBilling RiskScenario = "idle-billing"
 )
 
 // riskScenarios lists every scenario in canonical order (usage + docs).
 var riskScenarios = []RiskScenario{
 	RiskRetiredBilling, RiskDuplicateSettlement, RiskLedgerMismatch,
-	RiskSpike, RiskOutlier, RiskUnlinked,
+	RiskSpike, RiskOutlier, RiskUnlinked, RiskIdleBilling,
 }
 
 // RiskScenarioLabels is the Chinese display name of each scenario.
@@ -81,6 +93,7 @@ var RiskScenarioLabels = map[RiskScenario]string{
 	RiskSpike:               "电费环比异常上涨",
 	RiskOutlier:             "同类站单位成本离群",
 	RiskUnlinked:            "零资源计费",
+	RiskIdleBilling:         "有费无量",
 }
 
 // RiskScenarios lists every scenario id (CLI usage text).
@@ -274,6 +287,10 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		var c cluesPack
 		c, err = s.risksUnlinked(ctx, engine, q)
 		clues, excluded, note = c.clues, c.excluded, c.note
+	case RiskIdleBilling:
+		var c cluesPack
+		c, err = s.risksIdleBilling(ctx, engine, q)
+		clues, excluded, note = c.clues, c.excluded, c.note
 	default:
 		return RiskResult{}, fmt.Errorf("fees: 未实现的风险场景 %q", scenario)
 	}
@@ -390,6 +407,95 @@ func (s *Service) risksUnlinked(ctx context.Context, engine QueryEngine, q RiskQ
 		clues: clues,
 		note:  "线索口径：费用侧有记录且关联面（confirmed+pending）为空；已驳回提案计入线索侧",
 	}, nil
+}
+
+// risksIdleBilling composes scenario 7 (#114): fee-side per-(site,
+// period) totals (engine) × confirmed links → the linked resource's
+// metric-point count in the period's time window (SQLite metrics). A
+// clue fires when the count is ZERO — the deterministic signal, no
+// threshold to tune (a thresholded "nearly no volume" would smuggle a
+// verdict back into a clue). A site without a confirmed link never fires
+// here (which resource to measure is unknown — that is unlinked's
+// business). The note carries the honest caveat: 采集缺失与空置在该证据
+// 形态下不可区分.
+func (s *Service) risksIdleBilling(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	rows, err := engine.SitePeriodTotals(ctx, s.analysisDir(), q.FeeType, q.Year, q.Month)
+	if err != nil {
+		return cluesPack{}, err
+	}
+	// #85's memo discipline, twice over: one link lookup per distinct site
+	// (a whole-year scope repeats the same site per month) and one point
+	// count per (resource, period) — the count is period-scoped, so the
+	// 12 rows of one site share the link memo but not the count memo.
+	// Point-query misses that are business states stay silent; real DB
+	// failures abort the report (#85: never silently drop rows from it).
+	type linkedResource struct {
+		ok         bool
+		resourceID string
+		naturalKey string
+	}
+	linkedMemo := make(map[string]linkedResource, len(rows))
+	countMemo := make(map[string]int, len(rows))
+	var clues []RiskClue
+	for _, r := range rows {
+		lr, seen := linkedMemo[r.SiteCode]
+		if !seen {
+			link, err := s.db.FeeSiteLinks.ConfirmedByCode(ctx, r.SiteCode)
+			if err == nil {
+				res, rerr := s.db.Resources.GetByID(ctx, link.ResourceID)
+				if rerr == nil {
+					lr = linkedResource{ok: true, resourceID: link.ResourceID, naturalKey: res.NaturalKey}
+				} else if !errors.Is(rerr, domain.ErrNotFound) {
+					return cluesPack{}, fmt.Errorf("fees: idle-billing 查资源 %s: %w", link.ResourceID, rerr)
+				}
+			} else if !errors.Is(err, domain.ErrNotFound) {
+				return cluesPack{}, fmt.Errorf("fees: idle-billing 查关联 %s: %w", r.SiteCode, err)
+			}
+			linkedMemo[r.SiteCode] = lr
+		}
+		if !lr.ok {
+			continue
+		}
+		countKey := fmt.Sprintf("%s|%04d-%02d", lr.resourceID, r.Year, r.Month)
+		n, seen := countMemo[countKey]
+		if !seen {
+			from, to := periodWindow(r.Year, r.Month)
+			n, err = s.db.Metrics.CountPointsOfResource(ctx, lr.resourceID, from, to)
+			if err != nil {
+				return cluesPack{}, fmt.Errorf("fees: idle-billing 统计指标点 %s: %w", lr.resourceID, err)
+			}
+			countMemo[countKey] = n
+		}
+		if n > 0 {
+			continue
+		}
+		clues = append(clues, RiskClue{
+			SiteCode: r.SiteCode, Year: r.Year, Month: r.Month,
+			MetricValue: float64(r.TotalCents), MetricLabel: "totalCents",
+			EvidenceTotal: r.Rows,
+			Note:          fmt.Sprintf("关联资源 %s 在 %04d-%02d 账期窗口内无任何指标采集点，但该账期仍有费用记录——两条台账矛盾，请人工核实（无采集也可能是采集覆盖缺失或断链，非空置认定）", lr.naturalKey, r.Year, r.Month),
+		})
+	}
+	return cluesPack{
+		clues: clues,
+		note:  "线索口径：已确认关联的站址在该账期窗口内指标点数为零且费用仍在流（跨层组合：引擎费用面 × SQLite 指标面）——账单存在 ≠ 认定结论，采集缺失与空置不可区分，请人工核实",
+	}, nil
+}
+
+// periodWindow renders the [from, to] ts bounds of one billing period in
+// the metrics layer's normalized-RFC3339 lexicographic convention:
+// month 0 (the whole-year scope) spans the year, 1-12 the calendar
+// month. Metric points are UTC-midnight day-granular (ParseTS), so the
+// month's last day at 23:59:59Z covers the full window under the ts <=
+// comparison CountPointsOfResource uses.
+func periodWindow(year, month int) (string, string) {
+	if month == 0 {
+		return fmt.Sprintf("%04d-01-01T00:00:00Z", year),
+			fmt.Sprintf("%04d-12-31T23:59:59Z", year)
+	}
+	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, -1) // the month's last day
+	return start.Format(time.RFC3339), end.Format("2006-01-02") + "T23:59:59Z"
 }
 
 // finishClues is the shared tail: sort, cap, fetch the evidence anchors,

@@ -532,11 +532,12 @@ func TestAPIFeesLinkJourney(t *testing.T) {
 	}
 }
 
-// TestFeesRisksEndpoint pins the six-scenario surface's HTTP contract on
+// TestFeesRisksEndpoint pins the risk-scenario surface's HTTP contract on
 // default builds: the closed scenario/parameter validation (400s, firing
 // before the engine gate) and the honest 501 engine_not_built across all
-// six scenarios (#64 acceptance) — the duckdb-tagged fees package tests
-// cover the real preset outputs.
+// scenarios (#64 acceptance + #114's idle-billing — the loop derives from
+// the closed enum) — the duckdb-tagged fees package tests cover the real
+// preset outputs.
 func TestFeesRisksEndpoint(t *testing.T) {
 	srv := newAPITestServer(t)
 
@@ -560,7 +561,7 @@ func TestFeesRisksEndpoint(t *testing.T) {
 		}
 	}
 
-	// valid parameters on the default build → 501 engine_not_built (all six).
+	// valid parameters on the default build → 501 engine_not_built (every scenario).
 	// On a -tags duckdb build the engine answers the real preset — empty
 	// results against the empty test dir (the analysisEmpty guard), never
 	// the refusal — so this half skips explicitly; the duckdb-tagged fees

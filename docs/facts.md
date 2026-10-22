@@ -28,7 +28,7 @@
 
 - 资源类型**清单**（`domain.AllResourceTypes()` ↔ SQL CHECK ↔ `/api/schema` ↔ web 镜像四点一致性）——§1 只钉**数量**，清单本身派生；
 - CLI 顶层子命令清单（usage 从 dispatch 切片 join，go/ast 闭集测试）；
-- 校验规则目录（E/W/I 13 条）、风险六场景目录、检测规则目录——各自有闭集断言；
+- 校验规则目录（E/W/I 13 条）、风险七场景目录（#114 加 idle-billing）、检测规则目录——各自有闭集断言；
 - OpenAPI 文档与路由表同源生成（`TestOpenAPISpecMatchesLiveServer` 反向行走）。
 
 ## 3. 测试计数（无静态断言——口径 + 当前值 + 更新纪律）

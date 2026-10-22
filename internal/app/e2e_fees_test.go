@@ -132,7 +132,7 @@ func TestCLIFeesFlow(t *testing.T) {
 	}
 }
 
-// TestCLIFeesRisksContract pins the six-scenario CLI surface on the
+// TestCLIFeesRisksContract pins the risk-scenario CLI surface on the
 // default build (#64): usage errors exit 2, the missing --type/--year
 // exit 2, and every valid scenario answers the honest engine-unavailable
 // failure (exit 1) — the duckdb-tagged fees package tests cover the real
@@ -159,8 +159,9 @@ func TestCLIFeesRisksContract(t *testing.T) {
 	}
 
 	// every valid scenario: the engine-unavailable failure carries the
-	// duckdb build hint (exit 1, single JSON error object).
-	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked"} {
+	// duckdb build hint (exit 1, single JSON error object). #114 added
+	// idle-billing to the closed set.
+	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked", "idle-billing"} {
 		stdout, code := runCLI(t, "fees", "--db", db, "--data", tmp,
 			"risks", sc, "--type", "electricity", "--year", "2024")
 		if code != 1 {

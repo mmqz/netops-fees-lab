@@ -106,12 +106,13 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-// cmdFeesRisks implements `fees risks <scenario>` — the six risk-scenario
-// presets of #64 (#58 stage 4): retired-billing / duplicate-settlement /
-// ledger-mismatch / spike / outlier / unlinked. Every threshold flag maps
-// to a RiskQuery field with a documented default; the output is the
-// single-JSON RiskResult envelope (clues carry row-level evidence
-// anchors pointing back into the snapshot layer).
+// cmdFeesRisks implements `fees risks <scenario>` — the risk-scenario
+// presets of #64 (#58 stage 4) plus #114's scenario 7: retired-billing /
+// duplicate-settlement / ledger-mismatch / spike / outlier / unlinked /
+// idle-billing. Every threshold flag maps to a RiskQuery field with a
+// documented default; the output is the single-JSON RiskResult envelope
+// (clues carry row-level evidence anchors pointing back into the
+// snapshot layer).
 func cmdFeesRisks(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return &usageError{msg: "fees risks 需要场景参数：" + strings.Join(fees.RiskScenarios(), " / ")}

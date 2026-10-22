@@ -353,7 +353,7 @@ netopslab testdata --out testdata
 | `graph_context` | 只读 | 资源关系上下文 |
 | `alerts_query` | 只读 | 质量告警查询（含根因/次生关联裁定，AI 分诊证据通道） |
 | `metrics_query` | 只读 | 指标时序查询（ts/value/quality，劣化趋势证据通道） |
-| `fee_risks` | 只读 | 费用风险六场景查询（场景+费用类型+账期 → 风险线索 + 行级证据锚点；阈值恒用治理默认值，AI 不可调参；账单存在 ≠ 认定结论） |
+| `fee_risks` | 只读 | 费用风险七场景查询（场景+费用类型+账期 → 风险线索 + 行级证据锚点；阈值恒用治理默认值，AI 不可调参；账单存在 ≠ 认定结论） |
 
 AI 改仿真态只能经这 4 个 lab 工具（每个变更显式携带 workspaceId、走引擎校验）；MCP **无建删工作区工具**、无 SQL/Shell/SSH/文件工具；`restore_*` 引擎内部操作码在 HTTP/MCP/CLI 三边界均被拒；图分析域与费用风险域（后 6 个）全部只读。
 

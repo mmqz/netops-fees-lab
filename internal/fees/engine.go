@@ -80,7 +80,8 @@ type QueryEngine interface {
 	// whose rows span more than one import batch.
 	Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error)
 
-	// ---- the six risk scenarios (#64, #58 stage 4) ----
+	// ---- the risk scenarios' engine presets (#64, #58 stage 4; the
+	// cross-layer scenarios 1/6/7 compose these primitives in Go) ----
 	// The four pure-Parquet presets return BARE clues (no evidence
 	// anchors — the service fetches those uniformly); the second return
 	// is the excluded multi-batch (site, period) count (scenarios 4/5;

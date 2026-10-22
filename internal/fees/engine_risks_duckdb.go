@@ -3,7 +3,8 @@
 package fees
 
 // engine_risks_duckdb.go — the four pure-Parquet risk presets and the
-// evidence primitives of the six-scenario surface (#64, #58 stage 4).
+// evidence primitives of the risk-scenario surface (#64, #58 stage 4;
+// #114's scenario 7 reuses SitePeriodTotals — a cross-layer Go composition).
 //
 // SQL shape discipline (unchanged from the two existing presets): every
 // statement is a FIXED template; the only interpolations are the analysis

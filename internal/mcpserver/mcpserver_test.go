@@ -981,7 +981,7 @@ func TestMCPFeeRisks(t *testing.T) {
 	if fees.Query(context.Background()).Available() {
 		t.Skip("engine built into this binary (-tags duckdb) — the engine-not-built refusal half belongs to the default build; engine behavior is owned by the duckdb-tagged fees tests")
 	}
-	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked"} {
+	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked", "idle-billing"} {
 		got := callToolError(t, session, "fee_risks", map[string]any{
 			"scenario": sc, "feeType": "electricity", "year": 2024,
 		})

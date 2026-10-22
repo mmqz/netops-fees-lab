@@ -974,3 +974,13 @@ run `39403484430`（`4f00a71`）：workflow 解析正常（go/web/duckdb/windows
 **契约闭环**：#75「持久化相对路径 = 跨平台契约」的两个产品侧落点（fee `snapshot_path` → v31 / checkpoint `file_path` → v32）与测试侧镜像（#79）全部收口；持久化路径列普查确认无剩余违规点（`workbook_path` 为调用方本地路径原样记录，不同类）。
 
 **门禁**（两轮同集）：25 包 ok / 0 FAIL · gofmt 空 · vet 0 · -race sim+repo 0 race · tsc 0 · vitest 40/40 · demo.sh + demo-lab.sh 回归绿。镜像文档：[issue-79](issue-79-snapshot-test-missed.md) · [issue-80](issue-80-checkpoint-path-contract.md)。
+
+### #114 修复轮（2026-10-22，v0.15.2 后 main）
+
+v0.15.2 全仓调研定位的费用×指标交叉验证整块缺口：六场景的跨层组合只交叉资源 `status`（retired-billing）与关联面（unlinked），原始需求「停电/无业务量在账」中**费用台账 × 业务量台账**的交叉无场景承载——一个站点可同时"账期计费在流"与"指标面该账期零采集点"而不可见。
+
+| 项 | 内容 | 提交 |
+| --- | --- | --- |
+| **#114**（新增能力，本轮立案+修复+关闭） | 第七场景 `idle-billing`「有费无量」：引擎 `SitePeriodTotals`（费用面）× confirmed 关联 → 新读原语 `MetricRepo.CountPointsOfResource`（指标面，一次索引 join），**账期窗口内零点触发**、无阈值（零点是确定性信号）；窗口 = 自然月 RFC3339 字典序（与 `ParseTS` 归一约定一致），month=0 整年口径逐 (站址,账期) 开窗；`#85` 双 memo（link 一站一查、计数一 (资源,账期) 一查）；线索 note 恒携带告诫——**采集缺失与空置不可区分，仅供人工核实**（"账单存在≠认定结论"的指标面镜像）；消费面闭集六→七同步（MCP 描述+schema / 路由摘要 / CLI usage 自动派生 / /fees 下拉+i18n 常量 / fees-layer.md §8 场景表+诚实注意义务段 / api.md / facts.md / README） | 本轮 |
+
+**门禁**（本地执行，CI 配额外部阻塞不依赖）：25 包 ok · 0 FAIL（默认 + duckdb 双构建）· gofmt 空 · vet 0（双构建）· vitest 188/188 · tsc 0 · `make web` 重建 dist 后 webui/app/fees 复测 ok。组合逻辑单测（窗口内外/无关联/整年逐月开窗/#93 空锚点非 null）+ 窗口数学单测（平/闰年边界）+ 封闭集三面（fees/mcpserver/e2e）+ duckdb 真实引擎 e2e（RETIRED-SITE 零点触发 vs ACTIVE-SITE 有 6 月点静默 + 单月诚实空）。镜像文档：[issue-114](issue-114-fees-idle-billing.md)。CHANGELOG 入账待发布轮（AppVersion 门禁约束：非发布轮不动 CHANGELOG 头部）。

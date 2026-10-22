@@ -125,7 +125,7 @@ func (s *Server) apiRoutes() []route {
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/query/duplicates", Tag: "fees", Summary: "费用分析：跨批次重复结算候选（风险线索 + 证据锚点）", Handler: s.handleFeesQueryDuplicates,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
-		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险六场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks,
+		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险七场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked/idle-billing；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "POST", Pattern: "/api/fees/links/scan", Tag: "fees", Summary: "费用-资源分级关联扫描（精确→规则自动确认，模糊出提案；人类通道确认）", Handler: s.handleFeesLinksScan},
 		{Method: "GET", Pattern: "/api/fees/links", Tag: "fees", Summary: "费用-资源关联列表（status/grade/code/resource_id 过滤，含资源侧 join）", Handler: s.handleFeesLinksList},

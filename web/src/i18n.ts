@@ -860,7 +860,7 @@ export const NAV_FEES = '费用分析';
 
 // 费用分析页（#58 阶段 5）
 export const FEES_TITLE = '费用分析';
-export const FEES_DESC = '费用数据的风险分析入口：导入费用文件（CSV/Excel）→ 分析层 Parquet 分区 → 风险六场景查询。线索是待核实差异而非认定结论（账单存在 ≠ 重复付款认定），每条线索携带行级证据锚点。';
+export const FEES_DESC = '费用数据的风险分析入口：导入费用文件（CSV/Excel）→ 分析层 Parquet 分区 → 风险七场景查询。线索是待核实差异而非认定结论（账单存在 ≠ 重复付款认定），每条线索携带行级证据锚点。';
 export const FEES_IMPORT_TITLE = '导入费用文件';
 export const FEES_IMPORT_TYPE = '费用类型';
 export const FEES_IMPORT_YEAR = '年份';
@@ -893,7 +893,7 @@ export const FEES_BATCHES_FAILED_ROWS = (a: number) => `失败 ${a}`;
 export const FEES_BATCHES_ROLLBACK_CONFIRM = (a: string, b: string) =>
   `回滚批次 ${a}（${b}）？分析行将删除，快照证据保留，同文件可再导入。`;
 export const FEES_BATCHES_ROLLBACK_BUSY = '回滚中…';
-export const FEES_RISKS_TITLE = '风险六场景';
+export const FEES_RISKS_TITLE = '风险七场景';
 export const FEES_RISKS_SCENARIO = '场景';
 export const FEES_RISKS_RUN = '查询';
 export const FEES_RISKS_LIMIT = '线索上限';
@@ -950,6 +950,7 @@ export const RISK_SCENARIO_LEDGER_MISMATCH = '合同账单金额差异';
 export const RISK_SCENARIO_SPIKE = '电费环比异常上涨';
 export const RISK_SCENARIO_OUTLIER = '同类站单位成本离群';
 export const RISK_SCENARIO_UNLINKED = '零资源计费';
+export const RISK_SCENARIO_IDLE_BILLING = '有费无量';
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

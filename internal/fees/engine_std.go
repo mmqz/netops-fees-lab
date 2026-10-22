@@ -24,7 +24,7 @@ func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeTyp
 	return nil, ErrEngineNotBuilt
 }
 
-// ---- the six risk scenarios + cross-layer primitives on the std stub:
+// ---- the risk-scenario presets + cross-layer primitives on the std stub:
 // every method answers the honest 501 contract (#64 acceptance: default
 // builds refuse, duckdb builds answer). ----
 

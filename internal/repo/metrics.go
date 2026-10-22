@@ -225,6 +225,32 @@ func (r *MetricRepo) PointsOfSeries(ctx context.Context, seriesID, from, to stri
 	return r.scanPoints(ctx, query, args...)
 }
 
+// CountPointsOfResource counts the metric points a resource carries
+// within [from, to] — across ALL of its series (the idle-billing
+// cross-layer composition, #114: the fee face says "money flowing" while
+// the measurement face says "no records at all"; the zero count is the
+// deterministic signal, no magic threshold). from/to are the same
+// normalized-RFC3339 lexicographic bounds PointsOfSeries uses ("" =
+// unbounded on that side); a resource with no series counts as zero
+// points. One indexed (series_id → resource_id) join per call.
+func (r *MetricRepo) CountPointsOfResource(ctx context.Context, resourceID, from, to string) (int, error) {
+	query := `SELECT COUNT(*) FROM metrics m JOIN metric_series s ON s.series_id = m.series_id WHERE s.resource_id = ?`
+	args := []any{resourceID}
+	if from != "" {
+		query += ` AND m.ts >= ?`
+		args = append(args, from)
+	}
+	if to != "" {
+		query += ` AND m.ts <= ?`
+		args = append(args, to)
+	}
+	var n int
+	if err := r.q.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("repo: count points of resource %s: %w", resourceID, err)
+	}
+	return n, nil
+}
+
 // LatestPointOfSeries returns the newest point of one series — a single
 // seek on the (series_id, ts) WITHOUT ROWID key (#95: graph_context used
 // to materialize EVERY raw point of EVERY series just to keep the last

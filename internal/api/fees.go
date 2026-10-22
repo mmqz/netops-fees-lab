@@ -595,7 +595,7 @@ func (s *Server) feesLinkDecide(w http.ResponseWriter, r *http.Request, op strin
 
 // handleFeesRisks implements GET /api/fees/risks/{scenario}?feeType=&year=
 // [&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=] —
-// the six risk-scenario presets (#64, #58 stage 4). Closed parameter set
+// the risk-scenario presets (#64, #58 stage 4 + #114's scenario 7). Closed parameter set
 // (every threshold explicit, defaults documented in fees-layer.md §7);
 // default builds answer 501 engine_not_built like every engine preset.
 func (s *Server) handleFeesRisks(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 package fees
 
-// risks_test.go — the six-scenario surface's build-independent tests:
+// risks_test.go — the risk-scenario surface's build-independent tests:
 // the closed scenario enum, the parameter normalization (documented
 // defaults, never magic numbers), the honest 501 contract on default
 // builds, and the two CROSS-LAYER compositions (retired-billing and
@@ -61,8 +61,8 @@ func (f *fakeRiskEngine) EvidenceFor(ctx context.Context, analysisDir string, fe
 
 // TestParseRiskScenario pins the closed enum and its rejection contract.
 func TestParseRiskScenario(t *testing.T) {
-	if len(RiskScenarios()) != 6 {
-		t.Fatalf("scenario count = %d, want 6", len(RiskScenarios()))
+	if len(RiskScenarios()) != 7 {
+		t.Fatalf("scenario count = %d, want 7", len(RiskScenarios()))
 	}
 	for _, s := range riskScenarios {
 		got, err := ParseRiskScenario(string(s))
@@ -272,6 +272,125 @@ func TestRisksUnlinkedComposition(t *testing.T) {
 	}
 	if result.Clues[0].EvidenceTotal != 3 {
 		t.Errorf("DISMISSED-1 evidenceTotal = %d, want 3", result.Clues[0].EvidenceTotal)
+	}
+}
+
+// seedMetricPoints seeds one metric series + its points on a resource
+// via a real metric batch (the metrics.batch_id FK needs the parent
+// row). The key is the catalog's first registered one — the migration
+// seed guarantees it exists.
+func seedMetricPoints(t *testing.T, db *repo.DB, batchID, resourceID string, ts ...string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.MetricBatches.Create(ctx, domain.MetricBatch{
+		ID: batchID, WorkbookName: "perf.xlsx", WorkbookSHA256: "sha" + batchID,
+		Status: domain.BatchStatusCompleted, Mapping: "{}", StartedAt: simTSLink,
+	}); err != nil {
+		t.Fatalf("seed metric batch %s: %v", batchID, err)
+	}
+	seriesID, _, err := db.Metrics.FindOrCreateSeries(ctx, resourceID, "optical_power_rx_avg_dbm", nil, ts[0], ts[len(ts)-1])
+	if err != nil {
+		t.Fatalf("seed series %s: %v", resourceID, err)
+	}
+	pts := make([]domain.MetricPoint, 0, len(ts))
+	for _, s := range ts {
+		pts = append(pts, domain.MetricPoint{
+			SeriesID: seriesID, TS: s, Value: -18.5,
+			Quality: domain.PointQualityOk, BatchID: batchID,
+		})
+	}
+	if err := db.Metrics.InsertPoints(ctx, pts); err != nil {
+		t.Fatalf("seed points %s: %v", resourceID, err)
+	}
+}
+
+// TestRisksIdleBillingComposition pins scenario 7's cross-layer rule
+// (#114): a clue fires when the linked resource carries ZERO metric
+// points inside the billed period's window — points outside the window
+// do not save it, points inside any series silence it, an unlinked
+// code never reaches the metric face (unlinked's business), and the
+// whole-year scope windows each (site, period) row on its own month.
+func TestRisksIdleBillingComposition(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	seedLinkResource(t, db, "res_alive", "ALIVE-1", "在网")     // points in May
+	seedLinkResource(t, db, "res_dead", "DEAD-1", "在网")       // no points at all
+	seedLinkResource(t, db, "res_shifted", "SHIFTED-1", "在网") // points only in April
+	// NOLINK-1 has fees but no link — never measured here
+	seedMetricPoints(t, db, "mbat_alive", "res_alive", "2024-05-01T00:00:00Z", "2024-05-15T00:00:00Z")
+	seedMetricPoints(t, db, "mbat_shifted", "res_shifted", "2024-04-10T00:00:00Z")
+
+	engine := &fakeRiskEngine{
+		periodTotals: []SitePeriodTotal{
+			{SiteCode: "ALIVE-1", Year: 2024, Month: 5, Rows: 1, TotalCents: 15000},
+			{SiteCode: "DEAD-1", Year: 2024, Month: 5, Rows: 2, TotalCents: 80000},
+			{SiteCode: "SHIFTED-1", Year: 2024, Month: 5, Rows: 1, TotalCents: 60000}, // April points don't cover May
+			{SiteCode: "NOLINK-1", Year: 2024, Month: 5, Rows: 1, TotalCents: 99000},  // unlinked's business
+		},
+	}
+	result, err := svc.Risks(ctx, engine, RiskIdleBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(idle-billing): %v", err)
+	}
+	// metric desc: DEAD-1 (80000) before SHIFTED-1 (60000); ALIVE-1 has
+	// May points, NOLINK-1 has no confirmed link — both stay silent.
+	if result.Total != 2 {
+		t.Fatalf("clue total = %d, want 2 (DEAD-1 + SHIFTED-1): %+v", result.Total, result.Clues)
+	}
+	if result.Clues[0].SiteCode != "DEAD-1" || result.Clues[1].SiteCode != "SHIFTED-1" {
+		t.Fatalf("clue order = %s, %s, want DEAD-1, SHIFTED-1", result.Clues[0].SiteCode, result.Clues[1].SiteCode)
+	}
+	if result.Clues[0].EvidenceTotal != 2 {
+		t.Errorf("DEAD-1 evidenceTotal = %d, want 2", result.Clues[0].EvidenceTotal)
+	}
+	if result.Clues[0].Evidence == nil || len(result.Clues[0].Evidence) != 0 {
+		t.Errorf("#93: anchor-less clue must carry an empty list, got %+v", result.Clues[0].Evidence)
+	}
+	if result.Note == "" || result.ScenarioCn != "有费无量" {
+		t.Errorf("envelope = %q / %q, want a note + 有费无量", result.Note, result.ScenarioCn)
+	}
+
+	// the same resource's points silence the SAME period but not another
+	// month of the same year-scope query: ALIVE-1 May silent, June (no
+	// points, no May rows) fires only if the fee face has a June row.
+	engine.periodTotals = append(engine.periodTotals, SitePeriodTotal{SiteCode: "ALIVE-1", Year: 2024, Month: 6, Rows: 1, TotalCents: 7000})
+	result, err = svc.Risks(ctx, engine, RiskIdleBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 0})
+	if err != nil {
+		t.Fatalf("Risks(idle-billing, whole-year): %v", err)
+	}
+	var aliveMay, aliveJune int
+	for _, c := range result.Clues {
+		if c.SiteCode != "ALIVE-1" {
+			continue
+		}
+		if c.Month == 5 {
+			aliveMay++
+		}
+		if c.Month == 6 {
+			aliveJune++
+		}
+	}
+	if aliveMay != 0 || aliveJune != 1 {
+		t.Fatalf("ALIVE-1 clues: May %d (want 0, has points), June %d (want 1, no points)", aliveMay, aliveJune)
+	}
+}
+
+// TestPeriodWindowBounds pins the window math: the calendar month and
+// the whole-year shape, month 0 spanning Jan 1 through Dec 31.
+func TestPeriodWindowBounds(t *testing.T) {
+	for _, tc := range []struct {
+		y, m     int
+		from, to string
+	}{
+		{2024, 5, "2024-05-01T00:00:00Z", "2024-05-31T23:59:59Z"},
+		{2024, 2, "2024-02-01T00:00:00Z", "2024-02-29T23:59:59Z"}, // leap year
+		{2023, 12, "2023-12-01T00:00:00Z", "2023-12-31T23:59:59Z"},
+		{2024, 0, "2024-01-01T00:00:00Z", "2024-12-31T23:59:59Z"},
+	} {
+		from, to := periodWindow(tc.y, tc.m)
+		if from != tc.from || to != tc.to {
+			t.Errorf("periodWindow(%d, %d) = (%q, %q), want (%q, %q)", tc.y, tc.m, from, to, tc.from, tc.to)
+		}
 	}
 }
 

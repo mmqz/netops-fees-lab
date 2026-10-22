@@ -5,7 +5,7 @@
  * - 费用批次列表（最新在前）+ 回滚（ConfirmDialog：删分析行、保快照证据）；
  * - 费用-资源关联（#63 分级关联的前端人类通道）：重新扫描 + 状态/级别筛选 +
  *   模糊提案的确认/驳回（驳回走 ConfirmDialog——审计保留不可撤）；
- * - 风险六场景查询（GET /api/fees/risks/{scenario}）：线索表（站址/账期/触发指标/
+ * - 风险七场景查询（GET /api/fees/risks/{scenario}）：线索表（站址/账期/触发指标/
  *   显式阈值）+ 行展开证据锚点（sourceFile+sourceRow+importBatch+整数分）+
  *   excluded 计数说明；501 engine_not_built 渲染为引导横幅而非裸错误。
  *
@@ -127,6 +127,7 @@ import {
   RISK_SCENARIO_RETIRED_BILLING,
   RISK_SCENARIO_SPIKE,
   RISK_SCENARIO_UNLINKED,
+  RISK_SCENARIO_IDLE_BILLING,
 } from '../i18n';
 
 /** 线索行键与金额展示逻辑见 fees-format.ts（#68 抽出纯函数，表测钉死） */
@@ -145,6 +146,7 @@ const SCENARIOS = [
   { value: 'spike', label: RISK_SCENARIO_SPIKE },
   { value: 'outlier', label: RISK_SCENARIO_OUTLIER },
   { value: 'unlinked', label: RISK_SCENARIO_UNLINKED },
+  { value: 'idle-billing', label: RISK_SCENARIO_IDLE_BILLING },
 ];
 
 interface FeeBatchRow {
@@ -324,7 +326,7 @@ export function FeesPage() {
   const [riskYear, setRiskYear] = useState(String(new Date().getFullYear()));
   const [riskMonth, setRiskMonth] = useState('');
   const [riskLimit, setRiskLimit] = useState('50');
-  // #89: the six-scenario thresholds — visible only for their scenario, so
+  // #89: the per-scenario thresholds — visible only for their scenario, so
   // the human channel can tune exactly what the scenario tunes.
   const [riskDiffCents, setRiskDiffCents] = useState('');
   const [riskRatio, setRiskRatio] = useState('');

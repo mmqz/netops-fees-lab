@@ -926,7 +926,7 @@ export interface IssuesQuery {
 }
 
 // ---------------------------------------------------------------------------
-// 费用分析层（#58 阶段 5）：导入 / 批次 / 回滚 / 风险六场景
+// 费用分析层（#58 阶段 5）：导入 / 批次 / 回滚 / 风险七场景
 // ---------------------------------------------------------------------------
 
 /** POST /api/fees/imports（multipart：file + feeType + year + month） */
@@ -960,7 +960,7 @@ export function rollbackFeeBatch(batchId: string): Promise<FeeBatchItem> {
   );
 }
 
-/** GET /api/fees/risks/{scenario}（六场景之一；501 engine_not_built = 默认构建未编译引擎） */
+/** GET /api/fees/risks/{scenario}（七场景之一；501 engine_not_built = 默认构建未编译引擎） */
 export function fetchFeeRisks(
   scenario: string,
   params: {

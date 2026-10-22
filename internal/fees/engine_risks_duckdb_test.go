@@ -3,7 +3,7 @@
 package fees
 
 // engine_risks_duckdb_test.go — the #64 acceptance proof on the REAL
-// engine: all six scenarios over data imported through the real
+// engine: all seven scenarios over data imported through the real
 // pipeline, with the determinism ruling pinned (scenario 4/5 exclude
 // multi-batch (site, period) pairs and REPORT the exclusion — a re-run
 // on dirty data returns byte-identical results).
@@ -18,7 +18,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/repo"
 )
 
-// importRiskFixture seeds the analysis table for the six-scenario suite:
+// importRiskFixture seeds the analysis table for the risk-scenario suite:
 //
 //   - S-SPIKE: 2024-05 = 100.00 → 2024-06 = 250.00 (rise ratio 1.5 → clue)
 //   - S-FLAT:  2024-05 = 100.00 → 2024-06 = 105.00 (5% → silent)
@@ -31,10 +31,14 @@ import (
 //   - S-OUT:   1000.00 in 2024-05 (z ≈ 4.3 against the 14 peers → clue)
 //   - S-WILD:  900.00 in 2024-06 (no resource at all — unlinked)
 //
-// Resource side (the scenario-1/6 compositions): RETIRED-SITE seeded 停用
+// Resource side (the scenario-1/6/7 compositions): RETIRED-SITE seeded 停用
 // with a confirmed link bills on; ACTIVE-SITE 在网 with a link stays
 // silent; PENDING-SITE has a pending proposal (human channel) and stays
-// silent in unlinked.
+// silent in unlinked. Scenario 7 (#114) reuses the pair from the metric
+// face: RETIRED-SITE's resource carries NO metric points (fires), while
+// ACTIVE-SITE's resource gets June points seeded in the scenario-7 block
+// (stays silent) — the fee face says both bill, the measurement face
+// only contradicts one.
 func importRiskFixture(t *testing.T, svc *Service) {
 	t.Helper()
 	ctx := context.Background()
@@ -66,7 +70,7 @@ func importRiskFixture(t *testing.T, svc *Service) {
 	}
 }
 
-// TestRiskPresetsDuck runs all six scenarios on the real engine and pins
+// TestRiskPresetsDuck runs all seven scenarios on the real engine and pins
 // the #64 acceptance surface: clue sets, integer-cent metrics, explicit
 // thresholds, the determinism exclusion, evidence anchors, and a re-run
 // returning identical results.
@@ -237,6 +241,34 @@ func TestRiskPresetsDuck(t *testing.T) {
 		if c.SiteCode == "RETIRED-SITE" || c.SiteCode == "ACTIVE-SITE" || c.SiteCode == "PENDING-SITE" {
 			t.Errorf("unlinked must skip covered codes, found %s", c.SiteCode)
 		}
+	}
+
+	// ---- scenario 7: idle-billing (cross-layer, #114) ----
+	// The fee face bills BOTH linked sites in 2024-06; the metric face
+	// only has records for ACTIVE-SITE — RETIRED-SITE's resource carries
+	// zero points in the window, so exactly one clue fires.
+	seedMetricPoints(t, db, "mbat_active_site", "res_active_site", "2024-06-10T00:00:00Z", "2024-06-20T00:00:00Z")
+	res, err = svc.Risks(ctx, engine, RiskIdleBilling, base)
+	if err != nil {
+		t.Fatalf("idle-billing: %v", err)
+	}
+	if res.Total != 1 || res.Clues[0].SiteCode != "RETIRED-SITE" || res.Clues[0].MetricValue != 77700 || res.Clues[0].Month != 6 {
+		t.Fatalf("idle-billing clues = %+v, want RETIRED-SITE 2024-06 77700", res.Clues)
+	}
+	if res.Clues[0].EvidenceTotal != 1 || len(res.Clues[0].Evidence) != 1 {
+		t.Errorf("idle-billing anchors = %+v", res.Clues[0].Evidence)
+	}
+	// the month-6 window sees the June points: ACTIVE-SITE never fires
+	for _, c := range res.Clues {
+		if c.SiteCode == "ACTIVE-SITE" {
+			t.Errorf("idle-billing must skip ACTIVE-SITE (June points exist), found %+v", c)
+		}
+	}
+	// a single-month query on 2024-05: no May metric points anywhere, but
+	// the fee face has no linked-site May rows either — honest empty.
+	res, err = svc.Risks(ctx, engine, RiskIdleBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil || res.Total != 0 {
+		t.Fatalf("idle-billing month-5 = %+v (err %v), want the honest empty (no linked-site May bills)", res.Clues, err)
 	}
 
 	// ---- determinism: re-run everything, byte-identical clue sets ----
