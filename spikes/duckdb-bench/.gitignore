@@ -1,0 +1,5 @@
+data/
+build.log
+duckdb-minimal
+*.sqlite
+*.duckdb
