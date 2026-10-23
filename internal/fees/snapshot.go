@@ -137,6 +137,17 @@ func WriteSnapshot(dataDir, srcPath string, feeType FeeType, year, month int, sh
 	}
 	if err := os.Rename(tmpName, dst); err != nil {
 		_ = os.Remove(tmpName)
+		// #124 (the storeUpload sibling race): on Windows, rename over a
+		// target another request is reading (the evidence read-back of a
+		// concurrent same-content import) answers ACCESS_DENIED. The
+		// content-addressed snapshot name means the winner landed the
+		// identical bytes — the fast path at the top of this function
+		// already trusts exactly that shape, so the loser accepts the
+		// winner's file instead of failing the whole import over a race
+		// the design itself created.
+		if _, statErr := os.Stat(dst); statErr == nil {
+			return rel, nil
+		}
 		return "", fmt.Errorf("fees: 提交快照: %w", err)
 	}
 	return rel, nil

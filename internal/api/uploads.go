@@ -21,19 +21,52 @@ package api
 // shape, same fix, now one implementation).
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
+
+// uploadTargetMatches reports whether the content-addressed target path
+// already holds exactly the bytes being staged — the Windows-race
+// fallback (#124). On POSIX, rename-over-an-open-file replaces it
+// atomically; on Windows the same rename answers ERROR_ACCESS_DENIED
+// while any other handle (the analyze/ingest read-back of the request
+// that WON the race) is open. The content-addressed name means the
+// winner staged the IDENTICAL bytes, so losing that race is success,
+// not a 500: the size gate is cheap, the full hash re-read closes the
+// torn-debris corner (a crash-left file at the target name with a
+// matching size but wrong bytes must never pass as "already staged").
+func uploadTargetMatches(path string, size int64, wantSHA [sha256.Size]byte) bool {
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() != size {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return false
+	}
+	return bytes.Equal(h.Sum(nil), wantSHA[:])
+}
 
 // storeUpload stages data on disk under the content-addressed name
 // <sha256>_<name> inside dir (created when missing) and returns the final
 // path. Identical content replaces itself safely: concurrent same-content
 // submissions each write their own temp and RENAME over the target —
-// rename is atomic per file, so the racers replace each other with whole
-// identical files and no reader ever observes a partial one. (Both the
+// atomic per file on POSIX, so the racers replace each other with whole
+// identical files and no reader ever observes a partial one. On Windows
+// (#124) rename-over-an-open-target answers ACCESS_DENIED instead; the
+// fallback at the rename site accepts the racing winner's byte-identical
+// file (see uploadTargetMatches) so the race resolves to the idempotent
+// success the content-addressed name already promised. (Both the
 // resource and metrics channels used to write in place with O_TRUNC: one
 // request's truncate+write interleaved with the other request's read-back,
 // so the analyze/ingest step could hash a torn file and record a lying
@@ -77,6 +110,19 @@ func storeUpload(dir string, data []byte, name string) (string, error) {
 	}
 	path := filepath.Join(dir, hex.EncodeToString(sum[:])+"_"+name)
 	if err := os.Rename(tmp.Name(), path); err != nil {
+		// #124: on Windows, rename-over-a-target-that-another-
+		// request-is-reading answers ACCESS_DENIED — the POSIX
+		// "rename replaces atomically" assumption this staging
+		// design rode does not hold there. In the concurrent
+		// same-content race the winner already landed the exact
+		// bytes under this content-addressed name: accepting the
+		// winner's file IS the idempotent semantics the name
+		// promises (and it never answers a lying 500 to the
+		// operator for a race the design itself created).
+		if uploadTargetMatches(path, int64(len(data)), sum) {
+			_ = os.Remove(tmp.Name())
+			return path, nil
+		}
 		_ = os.Remove(tmp.Name())
 		return "", fmt.Errorf("保存上传文件: %w", err)
 	}
