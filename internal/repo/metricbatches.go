@@ -174,28 +174,6 @@ func (r *MetricBatchRepo) MarkFailed(ctx context.Context, id string, msg string)
 	return requireUpdated(res, "metric batch", id)
 }
 
-// SetMapping stores the confirmed ingest mapping JSON on a metric batch.
-func (r *MetricBatchRepo) SetMapping(ctx context.Context, id string, mappingJSON string) error {
-	if mappingJSON == "" {
-		mappingJSON = "{}"
-	}
-	res, err := r.q.ExecContext(ctx, `UPDATE metric_batches SET mapping = ? WHERE id = ?`, mappingJSON, id)
-	if err != nil {
-		return fmt.Errorf("repo: set mapping of metric batch %s: %w", id, err)
-	}
-	return requireUpdated(res, "metric batch", id)
-}
-
-// CountMetricBatches returns the total number of metric batches (governance
-// / stats aggregation).
-func (r *MetricBatchRepo) Count(ctx context.Context) (int, error) {
-	var n int
-	if err := r.q.QueryRowContext(ctx, `SELECT COUNT(*) FROM metric_batches`).Scan(&n); err != nil {
-		return 0, fmt.Errorf("repo: count metric batches: %w", err)
-	}
-	return n, nil
-}
-
 // MarkInterruptedImportsFailed heals the metric channel's crash window
 // (#87, the RecoverInterrupted precedent from the resource channel): a
 // metric ingest writes its terminal status INSIDE the ingest transaction,

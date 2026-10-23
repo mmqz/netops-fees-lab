@@ -145,14 +145,3 @@ func (r *LayerNodeRepo) CountByWorkspace(ctx context.Context, workspaceID string
 	}
 	return n, nil
 }
-
-// DeleteByWorkspace removes every overlay node of the workspace (the
-// workspace row cascade already does this; the explicit path exists for
-// re-materialization hygiene inside a transaction).
-func (r *LayerNodeRepo) DeleteByWorkspace(ctx context.Context, workspaceID string) error {
-	if _, err := r.q.ExecContext(ctx,
-		`DELETE FROM virtual_nodes WHERE workspace_id = ?`, workspaceID); err != nil {
-		return fmt.Errorf("repo: delete layer nodes of workspace %s: %w", workspaceID, err)
-	}
-	return nil
-}

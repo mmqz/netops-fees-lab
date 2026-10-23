@@ -97,12 +97,3 @@ func (r *LayerLinkRepo) CountByWorkspace(ctx context.Context, workspaceID string
 	}
 	return n, nil
 }
-
-// DeleteByWorkspace removes every overlay edge of the workspace.
-func (r *LayerLinkRepo) DeleteByWorkspace(ctx context.Context, workspaceID string) error {
-	if _, err := r.q.ExecContext(ctx,
-		`DELETE FROM virtual_layer_links WHERE workspace_id = ?`, workspaceID); err != nil {
-		return fmt.Errorf("repo: delete layer links of workspace %s: %w", workspaceID, err)
-	}
-	return nil
-}

@@ -289,20 +289,6 @@ func nullableFloat(f float64) any {
 	return f
 }
 
-// DeleteByID removes one link row (the scan's dropout sweep — auto links
-// whose code left the live universe).
-func (r *FeeSiteLinkRepo) DeleteByID(ctx context.Context, id string) (bool, error) {
-	res, err := r.q.ExecContext(ctx, `DELETE FROM fee_site_links WHERE id = ?`, id)
-	if err != nil {
-		return false, fmt.Errorf("repo: delete fee site link %s: %w", id, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("repo: delete fee site link %s: rows affected: %w", id, err)
-	}
-	return n > 0, nil
-}
-
 // PairDecided reports whether a (code, resource) pair already has a
 // decided-or-proposed row — pending (no duplicate proposals), dismissed
 // (a human-rejected pair never resurrects automatically), or confirmed

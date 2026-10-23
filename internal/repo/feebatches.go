@@ -29,13 +29,6 @@ const feeBatchColumns = `id, workbook_name, sha256, sheet, fee_type, fee_year, f
 // surfaces it as domain.FeeBatch.
 var ErrFeeIdempotentDuplicate = errors.New("repo: 幂等键已被 completed 批次占用")
 
-// feeBatchScanTargets returns the scan targets matching feeBatchColumns.
-func feeBatchScanTargets(b *domain.FeeBatch) []any {
-	return []any{&b.ID, &b.WorkbookName, &b.SHA256, &b.Sheet, &b.FeeType, &b.FeeYear, &b.FeeMonth,
-		&b.SnapshotPath, &b.Mapping, &b.Status, &b.RowsTotal, &b.RowsImported, &b.RowsFailed,
-		&b.Error, &b.CreatedAt, &b.CompletedAt}
-}
-
 // scanFeeBatch scans one fee_batches row (the exact column order of
 // feeBatchColumns) into a domain.FeeBatch.
 func scanFeeBatch(s scanner) (domain.FeeBatch, error) {

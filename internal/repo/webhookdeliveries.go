@@ -57,16 +57,3 @@ type DeliveryJoin struct {
 	HTTPStatus int
 	Error      string
 }
-
-// deliveryJoinOf scans one LEFT-JOIN projection row.
-func deliveryJoinOf(scan func(...any) error) (DeliveryJoin, error) {
-	var (
-		status string
-		j      DeliveryJoin
-	)
-	if err := scan(&status, &j.Attempts, &j.HTTPStatus, &j.Error); err != nil {
-		return DeliveryJoin{}, err
-	}
-	j.Status = domain.WebhookDeliveryStatus(status)
-	return j, nil
-}
