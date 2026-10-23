@@ -2,6 +2,27 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.16.0] — 2026-10-23
+
+**真实台账形态落地 + 趋势预测还愿 + Windows 三类修复版**（#125 P0 多 sheet 台账全链 + #123 ADR-0011 D4 预测 + #124 三根因修复；v0.15.2 后 main 十二个提交的 minor 发布）。
+
+### 功能 — 多 sheet 台账导入（#125，P0，migration v34）
+- 真实月度台账是一个工作簿多张 sheet（电费/铁塔租费/修理费各一张）——v34 前的通道只读第一张且静默丢其余（P0 实测三分之二数据消失零警告）。**v34**：`fee_batches` 加 `sheet` 列（默认 ''）并重建幂等唯一索引为 `(sha256, sheet, fee_type, 账期, 映射)`——历史单 sheet 批次键逐字节保留。
+- `ImportSheets` 通道（#125 方案 A+C 全量）：每 sheet 按自身证据判定类型（表名 +2/表头 +1，唯一最高分）、全部 sheet 先分类后落地（不可判定全拒、落地数=0）、装饰性 sheet 按名列出、证据锚点带 `#<sheet>` 后缀；`crossCheckDeclaredType` 拒声明与表头矛盾（换 feeType 污染账本不可能）；`refuseModeConflict` 双向互斥（双通道幂等键形态不同，都落地必重复入账）。修掉 WIP 的 mode 参数自拒 bug。
+- 消费面三件：HTTP `POST /api/fees/imports/sheets`（api-routes 84→86、fees 13→14）、CLI `fees import-sheets`、web 费用页「导入模式」开关（.xls 陈旧文案一并修正）。验收钉死：塔租分区金额=铁塔租费 sheet 的 5000.00，绝无电费 sheet 的 12345.67。
+
+### 功能 — 指标趋势预测（#123，ADR-0011 D4 最后未还承诺）
+- `internal/metrics/predict.go`：日均值最小二乘线性趋势（斜率/截距/残差 SE/斜率 SE）+ N 天到阈值（Direction→advisory bound：higher_is_better→min/lower_is_better→max；neutral/无界/远离/零斜率→null 诚实留白；已越限→0 天）+ 80% 预测带（1.282）；**<14 天拒算**（D4 原话「数据不足时上预测是自欺」）；note 恒为「外推参考，非承诺」。Ceil 带 1e-9 epsilon 卫兵（浮点噪声不许多诺一天）。
+- 消费面：HTTP `GET /api/metrics/forecast`、CLI `metrics forecast`、MCP `metrics_query` 可选 forecast 模式（**不加第 14 个工具**，D5 冻结红线不破）。「劣化→保养」故事线（§10）有终点：检测报今天，预测报还剩几天。
+
+### 修复 — Windows 全量测试三类根因（#124，实测 5/5 必现的 500 + 自相矛盾门禁 + 句柄泄漏）
+- **产品缺陷**：`storeUpload`（三通道共用）`os.Rename` 在 Windows 目标被读时答 ACCESS_DENIED 而非原子覆盖——并发同内容上传 100% 500。方案 A+：rename 失败校验目标（大小+全量重哈希逐字节一致才认赢者的文件；撕裂残骸绝不放行）；`WriteSnapshot` 同族竞争面同修。
+- **测试缺陷**：api.md 文档门禁正则不排 CR——Windows 检出的 CRLF 让 `GET /api/health` 同被判「缺失」+「多余」。双保险（TrimRight + 字符集排除 ）+ CR 自检测试；`.gitattributes`（`* text=auto eol=lf`）从仓库层封死 #118/#124 两代 CRLF 伤。
+- **真句柄泄漏**：`readBatchSiteCodes` 的 os.Open 在 parquet-go 构造器对损坏文件 panic 时永不关闭（defer 注册在构造器后）——实测 "batch-*.parquet 正被另一进程使用" 的真凶。defer 提前；全仓四处调用点审计。TempDir 清理切 `testsupport.TempDir` 重试容忍封装。
+
+### 归档 — DuckDB 技术验证证据（#59 spike 合入）
+- `spikes/duckdb-bench`：237 万行六场景双引擎基准（DuckDB ×2.5-×53）、Parquet 分区裁剪 ×2.4、go-duckdb/v2 CGO 17s 构建、重复结算行使窗口函数非确定（支持 #60 显式处理决策）。独立目录+嵌套模块，主模块零触碰。
+
 ## [0.15.2] — 2026-10-20
 
 **发布渠道修复 + 跨平台路径契约版**（#74 发布断档第二轮修复 + #75 P1；v0.15.1 后 main 上八个提交的 patch 发布——发布渠道自 v0.8.0 起停摆九个版本，本版把渠道修到可下载、可复用、带引擎）。
