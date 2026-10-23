@@ -3,12 +3,12 @@ package repo
 import (
 	"context"
 	"errors"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 func newTestDB(t *testing.T) *DB {

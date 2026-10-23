@@ -8,14 +8,14 @@ package repo
 
 import (
 	"context"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // seedBackupSource creates a database with one workspace + one device (data

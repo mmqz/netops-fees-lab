@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // reportTemplateHTML is the standalone HTML template of the quality report;

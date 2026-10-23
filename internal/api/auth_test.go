@@ -7,9 +7,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/app"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/app"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
+
+// gateProbeBody is the well-formed risk-clue decision the write-gate tests
+// POST: valid closed-set scenario/feeType/status + in-range period, so the
+// ONLY variable under test is the gate itself (the decision UPSERTs
+// standalone — engine-independent, #119).
+const gateProbeBody = `{"scenario":"spike","feeType":"electricity","siteCode":"GATE-PROBE","year":2026,"month":1,"status":"verified","note":"write-gate probe"}`
 
 // newAuthTestServer boots a server with the write gate configured.
 func newAuthTestServer(t *testing.T, token string) (*http.Client, string) {
@@ -28,16 +34,16 @@ func newAuthTestServer(t *testing.T, token string) (*http.Client, string) {
 	return srv.Client(), srv.URL
 }
 
-// TestAuthTokenWriteGate pins the v0.11-R13 opt-in write gate matrix:
-// POSTs without a token are 401 unauthorized; the correct Bearer passes;
-// a wrong token fails; reads / health / OpenAPI / the SPA root never
-// require the token; and the 401 uses the standard error envelope.
+// TestAuthTokenWriteGate pins the opt-in write gate matrix: POSTs without a
+// token are 401 unauthorized; the correct Bearer passes; a wrong token
+// fails; reads / health / OpenAPI / the SPA root never require the token;
+// and the 401 uses the standard error envelope.
 func TestAuthTokenWriteGate(t *testing.T) {
 	const token = "r13-secret-token"
 	client, base := newAuthTestServer(t, token)
 
 	// The 401 envelope: standard error shape, code unauthorized.
-	resp, err := client.Post(base+"/api/detection/run", "application/json", bytes.NewReader([]byte(`{}`)))
+	resp, err := client.Post(base+"/api/fees/risk-clue-decisions", "application/json", bytes.NewReader([]byte(gateProbeBody)))
 	if err != nil {
 		t.Fatalf("post without token: %v", err)
 	}
@@ -59,7 +65,7 @@ func TestAuthTokenWriteGate(t *testing.T) {
 	}
 
 	// Reads stay open (the demo/AI surface).
-	for _, path := range []string{"/api/health", "/api/alerts", "/api/alerts/stats", "/api/openapi.json", "/"} {
+	for _, path := range []string{"/api/health", "/api/fees/batches", "/api/openapi.json", "/"} {
 		resp, err := client.Get(base + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -70,8 +76,8 @@ func TestAuthTokenWriteGate(t *testing.T) {
 		}
 	}
 
-	// The correct Bearer passes the gate and runs.
-	req, err := http.NewRequest(http.MethodPost, base+"/api/detection/run", bytes.NewReader([]byte(`{}`)))
+	// The correct Bearer passes the gate and records the decision.
+	req, err := http.NewRequest(http.MethodPost, base+"/api/fees/risk-clue-decisions", bytes.NewReader([]byte(gateProbeBody)))
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -85,19 +91,19 @@ func TestAuthTokenWriteGate(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST with correct token: status = %d, want 200", resp.StatusCode)
 	}
-	var run struct {
-		RunID string `json:"runId"`
+	var saved struct {
+		ID string `json:"id"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
-		t.Fatalf("decode run: %v", err)
+	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
+		t.Fatalf("decode decision: %v", err)
 	}
-	if run.RunID == "" {
-		t.Error("run envelope runId empty, want the receipt")
+	if saved.ID == "" {
+		t.Error("decision envelope id empty, want the receipt")
 	}
 
 	// A wrong token is still 401 (constant-time compare, but the verdict
 	// is the same).
-	req, err = http.NewRequest(http.MethodPost, base+"/api/detection/run", bytes.NewReader([]byte(`{}`)))
+	req, err = http.NewRequest(http.MethodPost, base+"/api/fees/risk-clue-decisions", bytes.NewReader([]byte(gateProbeBody)))
 	if err != nil {
 		t.Fatalf("build wrong-token request: %v", err)
 	}
@@ -113,7 +119,7 @@ func TestAuthTokenWriteGate(t *testing.T) {
 	}
 
 	// Non-Bearer schemes do not pass either.
-	req, err = http.NewRequest(http.MethodPost, base+"/api/detection/run", bytes.NewReader([]byte(`{}`)))
+	req, err = http.NewRequest(http.MethodPost, base+"/api/fees/risk-clue-decisions", bytes.NewReader([]byte(gateProbeBody)))
 	if err != nil {
 		t.Fatalf("build basic-auth request: %v", err)
 	}
@@ -130,10 +136,10 @@ func TestAuthTokenWriteGate(t *testing.T) {
 }
 
 // TestAuthOffByDefault pins the OFF channel: no --auth-token means the
-// v0.10 behavior — a bare POST succeeds (zero-diff for existing users).
+// ungated behavior — a bare POST succeeds (zero-diff for existing users).
 func TestAuthOffByDefault(t *testing.T) {
 	srv := newAPITestServer(t)
-	resp, body := doRequest(t, srv, http.MethodPost, "/api/detection/run", []byte(`{}`), "application/json")
+	resp, body := doRequest(t, srv, http.MethodPost, "/api/fees/risk-clue-decisions", []byte(gateProbeBody), "application/json")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("bare POST on ungated server: %d\n%s", resp.StatusCode, body)
 	}

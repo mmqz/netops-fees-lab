@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 func TestBatchCRUDRoundtrip(t *testing.T) {

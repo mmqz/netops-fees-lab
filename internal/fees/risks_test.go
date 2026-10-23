@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // fakeRiskEngine is the canned fee side for the composition tests: it

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // Service orchestrates the fee import pipeline (#61): read → recognize →
@@ -839,7 +839,7 @@ func (s *Service) EvidenceRow(ctx context.Context, batchID string, row int) (Evi
 // gcOrphanGrace is how long an unaccounted Parquet file or staging dir
 // must have been idle before the sweep may delete it (#106-C). The two
 // trigger placements (serve startup before the listener, the manual
-// `netopslab gc` subcommand) share no process with an in-flight HTTP
+// `netopsfees gc` subcommand) share no process with an in-flight HTTP
 // import — but the fees CLI is a separate process that MAY be importing
 // while serve starts: a batch's Parquet files are renamed into their
 // live partitions BEFORE the batch row flips to completed, so a graceless

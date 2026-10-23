@@ -30,7 +30,7 @@ import (
 // per file); the SQLite batch row's completed flip is the commit point.
 // Files without a completed batch row are GC orphans by definition (the
 // keep-set is exactly the completed batch ids — see GCAnalysis in
-// service.go, wired to serve startup + `netopslab gc` with an mtime
+// service.go, wired to serve startup + `netopsfees gc` with an mtime
 // milestone since #106).
 //
 // Deletion gets the same discipline (#107): Rollback used to unlink the

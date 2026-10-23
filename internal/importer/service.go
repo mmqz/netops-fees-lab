@@ -12,7 +12,7 @@ package importer
 import (
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // Service is the import pipeline service. All persistence goes through the

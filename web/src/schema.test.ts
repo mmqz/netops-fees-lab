@@ -107,13 +107,4 @@ describe('TYPE_META 层序（#113-B：单一手抄面 + 派生闭集）', () => 
       if (content.includes('物理层·')) offenders.push(key);
     }
     expect(offenders, '含漂移层名词形的文件').toEqual([]);
-  });
-  it('GraphAnalysisTab 消费 layerIdName（接线钉：层 chip 不再本地下拉）', () => {
-    const graphTab = Object.entries(RAW_SOURCES).find(([key]) =>
-      key.endsWith('/GraphAnalysisTab.tsx'),
-    );
-    expect(graphTab, '扫描器应能找到 GraphAnalysisTab.tsx').toBeDefined();
-    expect(graphTab?.[1]).toContain("from '../schema'");
-    expect(graphTab?.[1]).toContain('layerIdName(');
-  });
-});
+  });});

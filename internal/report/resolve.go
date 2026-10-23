@@ -3,8 +3,8 @@ package report
 import (
 	"context"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // ResolveIssues converts stored domain issues into report.Issue values with

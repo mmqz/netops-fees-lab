@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // TestPTPPortSpec pins the structural contract of the ptp_port schema.

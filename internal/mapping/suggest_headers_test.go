@@ -10,7 +10,7 @@ package mapping
 import (
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // portSheet1Headers is the issue's repro shape: a 端口 export with the

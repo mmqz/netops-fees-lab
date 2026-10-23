@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // TestW21CrossLayerChainFixture is the W21 acceptance test: the full

@@ -4,17 +4,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/importer"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/workbook"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/importer"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/workbook"
 )
 
 // readAllFiles returns dir's regular files (name → bytes), sorted by name
@@ -92,7 +92,7 @@ func TestSynthDeterminism(t *testing.T) {
 	// The README states the synthetic origin and the exact regeneration
 	// command (§12-A5 / the task's origin-statement requirement).
 	readme := string(filesA["README.md"])
-	for _, needle := range []string{"合成数据", "netopslab synthdata", "--seed 42", "scenario: degrade"} {
+	for _, needle := range []string{"合成数据", "netopsfees synthdata", "--seed 42", "scenario: degrade"} {
 		if !bytes.Contains([]byte(readme), []byte(needle)) {
 			t.Errorf("README.md misses %q", needle)
 		}

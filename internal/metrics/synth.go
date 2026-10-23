@@ -12,7 +12,7 @@ import (
 )
 
 // SynthOptions parameterize the synthetic data generator (CLI
-// `netopslab synthdata`). Defaults are small demo scale (20 devices × 2
+// `netopsfees synthdata`). Defaults are small demo scale (20 devices × 2
 // ports, 30 days, scenario normal, seed 42) — the volume runs raise
 // --devices/--ports/--metrics explicitly.
 type SynthOptions struct {
@@ -36,7 +36,7 @@ type SynthOptions struct {
 	Metrics int
 }
 
-// SynthSummary is the JSON envelope of `netopslab synthdata`.
+// SynthSummary is the JSON envelope of `netopsfees synthdata`.
 type SynthSummary struct {
 	Out      string   `json:"out"`
 	Files    []string `json:"files"`
@@ -435,13 +435,13 @@ func writeXLSXFile(f *excelize.File, path string) error {
 func writeSynthREADME(o SynthOptions, files []string) error {
 	var sb strings.Builder
 	sb.WriteString("# 合成数据（synthdata）\n\n")
-	sb.WriteString("本目录全部文件由 NetOps Lab 合成数据生成器产出（`netopslab synthdata`），\n")
+	sb.WriteString("本目录全部文件由 NetOps Lab 合成数据生成器产出（`netopsfees synthdata`），\n")
 	sb.WriteString("非真实网络数据、非任何第三方数据源——无第三方许可约束（设计 §8/§12-A5）。\n")
 	sb.WriteString("生成参数：\n\n")
 	fmt.Fprintf(&sb, "- devices: %d\n- ports/device: %d\n- days: %d\n- scenario: %s\n- seed: %d\n- metric columns: %d\n\n",
 		o.Devices, o.Ports, o.Days, o.Scenario, o.Seed, o.Metrics)
 	sb.WriteString("再生成命令（同种子 → 字节级相同输出；README 所在目录即数据目录，故 --out 用 `.`）：\n\n")
-	fmt.Fprintf(&sb, "    netopslab synthdata --out . --devices %d --ports %d --days %d --scenario %s --seed %d --metrics %d\n\n",
+	fmt.Fprintf(&sb, "    netopsfees synthdata --out . --devices %d --ports %d --days %d --scenario %s --seed %d --metrics %d\n\n",
 		o.Devices, o.Ports, o.Days, o.Scenario, o.Seed, o.Metrics)
 	sb.WriteString("文件清单：\n\n")
 	for _, name := range files {

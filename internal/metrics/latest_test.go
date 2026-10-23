@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // seedSeriesWithPoints seeds one resource × metric series with one

@@ -34,7 +34,7 @@ package mapping
 import (
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // rackSpec is the 机架 schema (L0 空间层): rack_code keyed; machine_room_id

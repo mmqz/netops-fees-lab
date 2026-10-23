@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/workbook"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/workbook"
 )
 
 // Analysis is the result of Analyze: the workbook structure, per-column

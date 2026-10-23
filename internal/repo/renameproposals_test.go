@@ -2,13 +2,13 @@ package repo
 
 import (
 	"context"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // newRenameDB opens a fresh database seeded with two batches and an old +

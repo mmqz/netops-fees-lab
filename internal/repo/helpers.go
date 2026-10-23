@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // formatTime renders t as the storage representation: UTC RFC3339

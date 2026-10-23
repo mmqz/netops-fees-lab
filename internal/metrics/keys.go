@@ -10,7 +10,7 @@
 //   - service.go: the ingest/rollback/batch-listing service (separate
 //     metric_batches table family, value-semantics upsert);
 //   - synth.go: the deterministic synthetic data generator (CLI
-//     `netopslab synthdata`).
+//     `netopsfees synthdata`).
 //
 // The package never speaks SQL — everything goes through internal/repo —
 // and the MCP tool surface stays untouched (HTTP + CLI only, ADR-0011 D5).
@@ -19,7 +19,7 @@ package metrics
 import (
 	"fmt"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // MetricKeySpec is one entry of the closed metric registry: the definition

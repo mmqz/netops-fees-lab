@@ -24,9 +24,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/app"
-	"github.com/mmqz/netops-lab/internal/fees"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/app"
+	"github.com/mmqz/netops-fees-lab/internal/fees"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"github.com/xuri/excelize/v2"
 )
 

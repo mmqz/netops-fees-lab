@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // seedDevices inserts n device resources DEV-001..DEV-00n belonging to bat_1

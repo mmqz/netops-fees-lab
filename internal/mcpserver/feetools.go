@@ -24,8 +24,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmqz/netops-lab/internal/fees"
-	"github.com/mmqz/netops-lab/internal/services"
+	"github.com/mmqz/netops-fees-lab/internal/fees"
+	"github.com/mmqz/netops-fees-lab/internal/services"
 )
 
 const (

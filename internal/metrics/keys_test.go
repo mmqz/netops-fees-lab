@@ -2,11 +2,11 @@ package metrics
 
 import (
 	"context"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // TestRegistryShape pins the closed registry's own consistency: 14 keys,

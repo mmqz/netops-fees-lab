@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 // withoutV21 temporarily removes migration v21 (and any later) from the

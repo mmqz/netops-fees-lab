@@ -1,6 +1,32 @@
 # Changelog
 
-本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
+本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
+
+## [0.17.0] — 2026-10-23
+
+**费用仓拆分**：本仓库自此从 [mmqz/netops-lab](https://github.com/mmqz/netops-lab) fork 而来（fork 时点 v0.16.1 / 2223101），定位为**纯费用域**仓库——IPRAN 网络域（仿真工作台/拓扑图查询/告警检测/维护窗口/webhook 通知/身份治理/治理总览/资源导出/PTP 配置脚本）整面移出，留在主仓演进。决策与裁剪清单：[docs/fees-repo-split-plan.md](docs/fees-repo-split-plan.md) + [docs/fees-split-review.md](docs/fees-split-review.md)（评审 A–E 五项修订全部落实）；主仓侧移除红线见 [docs/fees-code-removal-plan.md](docs/fees-code-removal-plan.md)。
+
+### 移除（IPRAN 域整面）
+- 整包删除：internal/sim（5,330 行）、internal/topology（1,005 行）、internal/detect（1,272 行）、internal/notify、internal/renames、internal/changes、internal/governance、internal/exporter、internal/ptpconfig。
+- MCP 工具面 13 → 4（砍 lab 四件套 + 图三件套 + alerts/metrics 查询；保留 resource_search + 费用三件）。
+- HTTP 路由 86 → 40（砍 graph 四条 / run-state 两条 / detection 六条 / maintenance 三条 / alerts 四条 / exports / governance 总览与拓扑检查 / attribute-changes 三条 / renames 三条 / lab 二十条）；api.md 契约基线同轮重写（46 个死路由段落清除，双向门禁钉死）。
+- CLI 子命令 20 → 13（砍 synthdata/detect/export/query/changes/renames/lab）；serve 移除 --webhook-url/--detect-interval。
+- importer 断开治理通道：改名提案检测（rename.go）与属性变更提案记录（recordAttributeDiff）不再生成（评审 B 项）；批次回滚不再计数治理提案。
+- 前端：13 页面 → 7（砍 alerts/rules/maintenance/lab×2）；资源抽屉收敛为 属性/来源/性能指标 三页签；概览移除治理面板与告警统计卡；MCP 描述与 i18n 文案随行重定基线；离线地图资产（DEM 瓦片/真实网络图层）移除。
+- 仓库卫生：.github/workflows 与 CI 相关脚本移除（本仓测试全本地）；IPRAN 浏览器回归/维护窗口/webhook 回归脚本移除。
+
+### 保留（费用线全量依赖，评审修订 A–E）
+- internal/repo 存储层 + **迁移链 v1–v34 完整保留**（评审 A 项红线级：迁移文件与其测试原样保留，历史库可无冲突升级）；v11/v12/v17/v18/v22-v28 的表与访问器作为迁移链验证面共存（业务层零引用）。
+- internal/metrics 指标摄入面按数据源依赖豁免（评审 C 项）——双账本交叉场景的氧气。
+- internal/importer 保留为资源宇宙建设通道（评审 B 项）。
+- 门禁分仓重定（评审 E 项）：api-routes 40 / api-fees-routes 14 / mcp-tools 4 / repo-migrations 34 / resource-types 33；go 顶层测试 438、包 16、vitest 129（复算命令见 docs/facts.md §3）。
+
+### 验证（拆分标准五条全过）
+- `go build ./...` + `go test ./...` 16 包全绿；`-tags duckdb` 全量 16 包全绿。
+- 费用导入 + 8 场景 + 双账本交叉功能不变（e2e 全绿 + 实机 spot：spike 环比识别/合计/totals/link-scan）。
+- IPRAN 治理面业务代码零残留（grep 验证；迁移链与指标摄入按评审豁免）。
+- 空库迁移 v0 → v34 实机通过。
+- 前端 tsc+vite 构建通过、vitest 129 全绿、/fees 工作台可访问。
 
 ## [0.16.1] — 2026-10-23
 
@@ -49,7 +75,8 @@
 
 ### 修复 — Windows 全量测试三类根因（#124，实测 5/5 必现的 500 + 自相矛盾门禁 + 句柄泄漏）
 - **产品缺陷**：`storeUpload`（三通道共用）`os.Rename` 在 Windows 目标被读时答 ACCESS_DENIED 而非原子覆盖——并发同内容上传 100% 500。方案 A+：rename 失败校验目标（大小+全量重哈希逐字节一致才认赢者的文件；撕裂残骸绝不放行）；`WriteSnapshot` 同族竞争面同修。
-- **测试缺陷**：api.md 文档门禁正则不排 CR——Windows 检出的 CRLF 让 `GET /api/health` 同被判「缺失」+「多余」。双保险（TrimRight + 字符集排除 ）+ CR 自检测试；`.gitattributes`（`* text=auto eol=lf`）从仓库层封死 #118/#124 两代 CRLF 伤。
+- **测试缺陷**：api.md 文档门禁正则不排 CR——Windows 检出的 CRLF 让 `GET /api/health` 同被判「缺失」+「多余」。双保险（TrimRight + 字符集排除 
+）+ CR 自检测试；`.gitattributes`（`* text=auto eol=lf`）从仓库层封死 #118/#124 两代 CRLF 伤。
 - **真句柄泄漏**：`readBatchSiteCodes` 的 os.Open 在 parquet-go 构造器对损坏文件 panic 时永不关闭（defer 注册在构造器后）——实测 "batch-*.parquet 正被另一进程使用" 的真凶。defer 提前；全仓四处调用点审计。TempDir 清理切 `testsupport.TempDir` 重试容忍封装。
 
 ### 归档 — DuckDB 技术验证证据（#59 spike 合入）

@@ -18,9 +18,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/services"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/services"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 func TestAPIRouteCountsMatchFactsFile(t *testing.T) {

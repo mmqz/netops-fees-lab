@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/workbook"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/workbook"
 )
 
 // DefaultAnomalyThreshold is the |delta| threshold of the anomaly scan when
@@ -89,7 +89,7 @@ const maxSamples = 3
 // AnalyzeOffline parses the performance workbook at path and builds the
 // IngestAnalysis — suggested mapping via the catalog synonym engine plus
 // per-column stats — WITHOUT touching the database. The CLI's
-// `netopslab ingest --suggest` and the HTTP POST /api/metrics/analyze use
+// `netopsfees ingest --suggest` and the HTTP POST /api/metrics/analyze use
 // it (the metric channel's analyze is stateless: the confirmed mapping and
 // the file travel together in the one-shot import call, so no
 // awaiting_mapping batch is parked in the database).

@@ -15,7 +15,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -30,13 +30,13 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/api"
-	"github.com/mmqz/netops-lab/internal/app"
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/services"
-	"github.com/mmqz/netops-lab/internal/testfixtures"
+	"github.com/mmqz/netops-fees-lab/internal/api"
+	"github.com/mmqz/netops-fees-lab/internal/app"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/services"
+	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
 )
 
 // newAPITestServer wires the full application (DB + services + HTTP routes)
@@ -232,27 +232,12 @@ type resourceDetail struct {
 	RelationCount int         `json:"relationCount"`
 }
 
-// graphNode mirrors the nodes[] entry of the relations subgraph.
-type graphNode struct {
-	ID         string `json:"id"`
-	Type       string `json:"type"`
-	NaturalKey string `json:"naturalKey"`
-	Name       string `json:"name"`
-}
-
 // graphEdge mirrors the edges[] entry of the relations subgraph.
 type graphEdge struct {
 	ID           string `json:"id"`
 	RelationType string `json:"relationType"`
 	FromID       string `json:"fromId"`
 	ToID         string `json:"toId"`
-}
-
-// relationsResp mirrors GET /api/resources/{id}/relations.
-type relationsResp struct {
-	Center graphNode   `json:"center"`
-	Nodes  []graphNode `json:"nodes"`
-	Edges  []graphEdge `json:"edges"`
 }
 
 // statsResp mirrors GET /api/stats.
@@ -665,52 +650,6 @@ func TestAPIImportFlow(t *testing.T) {
 		t.Errorf("resource detail: sourceRef raw 设备编码 = %q, want DEV-001", ref.Raw["设备编码"])
 	}
 
-	// GET /api/resources/{id}/relations: default depth 1.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+dev001+"/relations", nil, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("relations default: status = %d, want 200", resp.StatusCode)
-	}
-	var rel relationsResp
-	decodeJSON(t, "relations depth default", body, &rel)
-	if rel.Center.NaturalKey != "DEV-001" || rel.Center.ID != dev001 {
-		t.Errorf("relations default: center = %+v, want DEV-001", rel.Center)
-	}
-	depth1 := nodeKeys(rel.Nodes)
-	for _, key := range []string{"DEV-002", "CKT-001", "POOL-01"} {
-		if !depth1[key] {
-			t.Errorf("relations depth 1: DEV-002/CKT-001/POOL-01 missing node %s (nodes %v)", key, rel.Nodes)
-		}
-	}
-	if depth1["DEV-003"] {
-		t.Errorf("relations depth 1: DEV-003 must not appear (1 device hop away is 2)")
-	}
-
-	// depth=2: DEV-003 joins the neighborhood (task-pinned).
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+dev001+"/relations?depth=2", nil, "")
-	decodeJSON(t, "relations depth 2", body, &rel)
-	depth2 := nodeKeys(rel.Nodes)
-	for _, key := range []string{"DEV-002", "DEV-003", "CKT-001", "CKT-002", "POOL-01"} {
-		if !depth2[key] {
-			t.Errorf("relations depth 2: missing node %s", key)
-		}
-	}
-	if depth2["DEV-004"] {
-		t.Errorf("relations depth 2: DEV-004 must not appear (3 device hops)")
-	}
-	// One a_end edge lands on DEV-001 (CKT-001).
-	aEndToDev001 := false
-	for _, e := range rel.Edges {
-		if e.RelationType == "a_end" && e.ToID == dev001 && e.FromID != "" {
-			aEndToDev001 = true
-		}
-		if e.FromID == "" || e.ToID == "" || e.ID == "" {
-			t.Fatalf("relations depth 2: malformed edge %+v", e)
-		}
-	}
-	if !aEndToDev001 {
-		t.Errorf("relations depth 2: no a_end edge ending at DEV-001 (edges: %d)", len(rel.Edges))
-	}
-
 	// GET /api/issues?severity=error: the 13 error issues with evidence.
 	resp, body = doRequest(t, srv, http.MethodGet, "/api/issues?severity=error&pageSize=100", nil, "")
 	var ip issuesPage
@@ -836,39 +775,6 @@ func TestAPIImportFlow(t *testing.T) {
 		}
 	}
 
-	// GET /api/topology/check: DEV-001 → DEV-003 is a 2-hop path.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/topology/check?fromDevice=DEV-001&toDevice=DEV-003", nil, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("topology check: status = %d, want 200\nbody: %s", resp.StatusCode, body)
-	}
-	var check checkResp
-	decodeJSON(t, "topology check", body, &check)
-	if !check.Reachable || check.PathLength != 2 || len(check.Hops) != 3 {
-		t.Fatalf("topology check DEV-001→DEV-003: reachable=%v pathLength=%d hops=%d, want true/2/3",
-			check.Reachable, check.PathLength, len(check.Hops))
-	}
-	wantPath := []string{"DEV-001", "DEV-002", "DEV-003"}
-	for i, h := range check.Hops {
-		if h.DeviceCode != wantPath[i] || h.DeviceID == "" {
-			t.Errorf("topology check: hops[%d] = %+v, want deviceCode %s", i, h, wantPath[i])
-		}
-	}
-
-	// DEV-001 → DEV-025 with maxHops=2: DEV-025 carries no circuit edge.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/topology/check?fromDevice=DEV-001&toDevice=DEV-025&maxHops=2", nil, "")
-	decodeJSON(t, "topology unreachable", body, &check)
-	if check.Reachable || check.PathLength != 0 || len(check.Hops) != 0 {
-		t.Errorf("topology check DEV-001→DEV-025 maxHops=2: reachable=%v pathLength=%d hops=%d, want false/0/0",
-			check.Reachable, check.PathLength, len(check.Hops))
-	}
-
-	// Same device: trivially reachable with a single-node path.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/topology/check?fromDevice=DEV-001&toDevice=DEV-001", nil, "")
-	decodeJSON(t, "topology self", body, &check)
-	if !check.Reachable || check.PathLength != 0 || len(check.Hops) != 1 || check.Hops[0].DeviceCode != "DEV-001" {
-		t.Errorf("topology check DEV-001→DEV-001: %+v, want reachable/0 hops [DEV-001]", check)
-	}
-
 	// GET /api/batches: newest first (circuits, ippools, devices).
 	resp, body = doRequest(t, srv, http.MethodGet, "/api/batches", nil, "")
 	var bp batchesPage
@@ -978,15 +884,6 @@ func TestAPIImportFlow(t *testing.T) {
 	if er.Error.Code != "batch_in_use" || er.Error.Message == "" {
 		t.Errorf("rollback devices: error = %+v, want code batch_in_use with a message", er.Error)
 	}
-}
-
-// nodeKeys indexes a node list by natural key.
-func nodeKeys(nodes []graphNode) map[string]bool {
-	keys := make(map[string]bool, len(nodes))
-	for _, n := range nodes {
-		keys[n.NaturalKey] = true
-	}
-	return keys
 }
 
 // TestAPIHealthAndSPA covers GET /api/health, the embedded SPA root, its
@@ -1300,8 +1197,6 @@ func TestAPIErrorPaths(t *testing.T) {
 		{"/api/resources?pageSize=abc", "pageSize non-numeric"},
 		{"/api/issues?severity=bogus", "bad severity"},
 		{"/api/report?format=xml", "bad format"},
-		{"/api/resources/whatever/relations?depth=3", "bad depth"},
-		{"/api/topology/check?fromDevice=DEV-001", "missing toDevice"},
 	}
 	for _, tc := range cases {
 		resp, body = doRequest(t, srv, http.MethodGet, tc.path, nil, "")
@@ -1518,47 +1413,6 @@ func TestAPISiteMachineRoomBelongsTo(t *testing.T) {
 	}
 	if len(detail.SourceRefs) != 1 || detail.SourceRefs[0].Sheet != "机房局站表" || detail.SourceRefs[0].RowNumber != 2 {
 		t.Errorf("source refs = %+v, want one ref at 机房局站表 row 2", detail.SourceRefs)
-	}
-
-	// GET /api/resources/{id}/relations → the belongs_to edge is passed
-	// through verbatim (relationType, fromId, toId).
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+room.ID+"/relations", nil, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("relations: status = %d, want 200", resp.StatusCode)
-	}
-	var rel relationsResp
-	decodeJSON(t, "relations", body, &rel)
-	if rel.Center.ID != room.ID || rel.Center.Type != "machine_room" {
-		t.Errorf("relations center = %s/%s, want the machine_room %s", rel.Center.Type, rel.Center.ID, room.ID)
-	}
-	if len(rel.Nodes) != 1 || len(rel.Edges) != 1 {
-		t.Fatalf("relations graph = %d nodes / %d edges, want 1/1", len(rel.Nodes), len(rel.Edges))
-	}
-	edge := rel.Edges[0]
-	if edge.RelationType != "belongs_to" || edge.FromID != room.ID || rel.Nodes[0].Type != "site" ||
-		rel.Nodes[0].NaturalKey != "231001824048" || edge.ToID != rel.Nodes[0].ID {
-		t.Errorf("belongs_to edge = %+v (node %+v), want belongs_to from the room to site 231001824048", edge, rel.Nodes[0])
-	}
-
-	// The site side of the graph: undirected traversal reaches the room.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=site", nil, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("site resources: status = %d, want 200", resp.StatusCode)
-	}
-	var sites resourcesPage
-	decodeJSON(t, "site resources", body, &sites)
-	if sites.Total != 1 || sites.Items[0].NaturalKey != "231001824048" || sites.Items[0].Name != "源" {
-		t.Fatalf("site resources = %+v, want one site 231001824048/源", sites.Items)
-	}
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+sites.Items[0].ID+"/relations", nil, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("site relations: status = %d, want 200", resp.StatusCode)
-	}
-	var siteRel relationsResp
-	decodeJSON(t, "site relations", body, &siteRel)
-	if len(siteRel.Edges) != 1 || siteRel.Edges[0].RelationType != "belongs_to" ||
-		siteRel.Edges[0].FromID != room.ID || siteRel.Edges[0].ToID != sites.Items[0].ID {
-		t.Errorf("site-side belongs_to edge = %+v, want the same stored edge (undirected traversal)", siteRel.Edges)
 	}
 
 	// GET /api/stats → both new types counted, belongs_to in byRelationType.

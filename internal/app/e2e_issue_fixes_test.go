@@ -11,7 +11,7 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,34 +90,5 @@ func TestCLIReportOutStdoutSummary(t *testing.T) {
 		if info, err := os.Stat(out); err != nil || info.Size() == 0 {
 			t.Errorf("report %s artifact: %v (size %d), want a non-empty file at %s", format, err, info.Size(), out)
 		}
-	}
-}
-
-// TestCLILabCreateCarriesDB pins the issue #8 output field: the workspace
-// create JSON answers db — the absolute path of the database the workspace
-// was materialized into.
-func TestCLILabCreateCarriesDB(t *testing.T) {
-	tmp := testsupport.TempDir(t)
-	db := filepath.Join(tmp, "netops.db")
-
-	importFixtures(t, db)
-
-	stdout, code := runCLI(t, "lab", "workspace", "create",
-		"--db", db, "--name", "跨库演示", "--all-batches")
-	if code != 0 {
-		t.Fatalf("lab workspace create: exit %d, want 0\nstdout: %s", code, stdout)
-	}
-	var create struct {
-		WorkspaceID string `json:"workspaceId"`
-		DB          string `json:"db"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &create); err != nil {
-		t.Fatalf("lab workspace create: stdout is not one JSON object: %v\nstdout: %s", err, stdout)
-	}
-	if create.WorkspaceID == "" {
-		t.Fatalf("lab workspace create: workspaceId is empty: %s", stdout)
-	}
-	if abs, err := filepath.Abs(db); err != nil || create.DB != abs {
-		t.Errorf("lab workspace create: db = %q, want the absolute path %q", create.DB, abs)
 	}
 }

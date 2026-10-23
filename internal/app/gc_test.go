@@ -7,7 +7,7 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // gcTestBatch inserts one batch row with the given workbook_path and status.
@@ -348,7 +348,7 @@ func TestGCOrphanFeeStagingUploads(t *testing.T) {
 // name — an interrupted temp is never recorded in any workbook_path, so
 // it is orphan crash debris exactly like the fee staging temps (#106-B).
 // The temps here are FRESH (not backdated) on purpose: a manual
-// `netopslab gc` overlapping a live serve may legitimately collect an
+// `netopsfees gc` overlapping a live serve may legitimately collect an
 // in-flight request's temp — the upload then fails loudly (rename ENOENT
 // → 500, operator retries) and can never yield a torn file or a lying
 // hash, the same accepted window the fee staging sweep already pins

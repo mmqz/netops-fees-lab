@@ -3,7 +3,7 @@ package mapping
 import (
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // This file pins the type/relation registry (issue #26, B5): TypeSpec.Layer

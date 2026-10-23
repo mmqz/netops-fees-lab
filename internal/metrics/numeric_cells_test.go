@@ -17,8 +17,8 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 // TestIngestNumericCells writes the canonical perf sheet with NUMERIC

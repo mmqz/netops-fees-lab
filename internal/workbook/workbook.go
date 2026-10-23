@@ -9,14 +9,6 @@
 //
 // Since v0.5 W8-D the package also fronts the PTP configuration-script
 // channel: a .txt/.cfg file whose content carries the PTP script
-// fingerprint is parsed by internal/ptpconfig and synthesized into one
-// virtual sheet (see script.go) — the sheet/row model downstream is
-// identical, so the importer pipeline needs no script-specific code.
-//
-// Parsing is bounded (zip-bomb guard, R2-P2-2): sheets are streamed row by
-// row instead of being materialized whole, and two limits abort the parse —
-// MaxRowsPerSheet rows per sheet and MaxCellsPerWorkbook cells across the
-// whole workbook. Exceeding a limit returns (wrapped) ErrWorkbookTooLarge.
 package workbook
 
 import (
@@ -105,27 +97,16 @@ type Row struct {
 // Read parses the .xlsx file at path — or, when the extension is .txt/.cfg
 // AND the content carries the PTP script fingerprint (see
 // ptpconfig.IsScriptText), parses the PTP configuration script and
-// synthesizes the virtual workbook of the script channel (W8-D; the
-// details and error contract live in script.go). It returns a workbook
-// whose SHA256 is the hash of the file bytes. Errors wrap ErrNotXLSX for
-// unreadable xlsx files, ErrEmptyWorkbook for files without any data,
-// ErrWorkbookTooLarge when the file exceeds the parse limits and — on the
-// script path — ErrUnsupportedScript / ptpconfig.ErrSyntax as documented
-// in script.go.
+// channel. It returns a workbook whose SHA256 is the hash of the file
+// bytes. Errors wrap ErrNotXLSX for unreadable xlsx files, ErrEmptyWorkbook
+// for files without any data, ErrWorkbookTooLarge when the file exceeds the
+// parse limits.
 func Read(path string) (*Workbook, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("workbook: read %s: %w", path, err)
 	}
 	sum := sha256.Sum256(data)
-	if isScriptExtension(filepath.Ext(path)) {
-		wb, err := scriptWorkbook(path, data)
-		if err != nil {
-			return nil, err
-		}
-		wb.SHA256 = hex.EncodeToString(sum[:])
-		return wb, nil
-	}
 	wb, err := parseBytes(data)
 	if err != nil {
 		return nil, err

@@ -1,6 +1,5 @@
 // Package query implements the read-side query services of NetOps Lab over
 // the repository layer: resource search with pagination, resource detail
-// with source provenance, the relations subgraph (via internal/topology),
 // database statistics, and the deterministic topology reachability check
 // (PROJECT_BRIEF §9). The package performs no writes.
 package query
@@ -10,10 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/topology"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // DefaultPageSize / MaxPageSize pin the pagination contract of §9.
@@ -265,102 +262,6 @@ func (s *Service) ResourceDetail(ctx context.Context, id string) (ResourceDetail
 	}, nil
 }
 
-// RelationsResult is the relations subgraph of one resource (§9):
-// {"center", "nodes", "edges"} — the center resource, its neighbors within
-// depth device-hops and the stored relations among them.
-type RelationsResult struct {
-	Center topology.Node   `json:"center"`
-	Nodes  []topology.Node `json:"nodes"`
-	Edges  []topology.Edge `json:"edges"`
-}
-
-// MaxRelationDepth pins the depth limit of the relations endpoint (§9).
-const MaxRelationDepth = 2
-
-// graph loads the whole resource/relation inventory and builds the topology
-// graph. Phase 1 datasets are small (tens to hundreds of resources); a
-// per-request build is deterministic and avoids cache invalidation concerns.
-func (s *Service) graph(ctx context.Context) (*topology.Graph, error) {
-	resources, _, err := s.db.Resources.Search(ctx, repo.ResourceSearchFilter{})
-	if err != nil {
-		return nil, fmt.Errorf("query: load resources: %w", err)
-	}
-	relations, err := s.db.Relations.ListAll(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query: load relations: %w", err)
-	}
-	return topology.Build(ctx, resources, relations), nil
-}
-
-// Relations returns the BFS neighborhood subgraph of the resource id within
-// depth device-hops (depth must be 1 or 2; MaxRelationDepth caps it). An
-// unknown id returns an error wrapping domain.ErrNotFound.
-func (s *Service) Relations(ctx context.Context, id string, depth int) (RelationsResult, error) {
-	if depth < 1 || depth > MaxRelationDepth {
-		return RelationsResult{}, fmt.Errorf("query: relations depth %d out of range [1, %d]", depth, MaxRelationDepth)
-	}
-	g, err := s.graph(ctx)
-	if err != nil {
-		return RelationsResult{}, err
-	}
-	center, ok := g.NodeByID(id)
-	if !ok {
-		return RelationsResult{}, fmt.Errorf("query: resource %s: %w", id, domain.ErrNotFound)
-	}
-	nodes, edges, found := g.Neighbors(id, depth)
-	if !found {
-		return RelationsResult{}, fmt.Errorf("query: resource %s: %w", id, domain.ErrNotFound)
-	}
-	if nodes == nil {
-		nodes = []topology.Node{}
-	}
-	if edges == nil {
-		edges = []topology.Edge{}
-	}
-	return RelationsResult{Center: center, Nodes: nodes, Edges: edges}, nil
-}
-
-// AllByTypes loads EVERY resource of the given types for the export
-// channel (W12-D): types is the empty list for "all types", else the
-// selected types (normalized to mapping.Specs order). Each type is read
-// with an unlimited search (repo orders by natural key), so the result is
-// the complete, deterministic inventory the exporter projects — types with
-// no resources simply contribute nothing (the export sheet is absent).
-// An unknown type value is rejected (it cannot reach here through
-// exporter.ParseTypes; the guard keeps the method safe for direct callers).
-func (s *Service) AllByTypes(ctx context.Context, types []domain.ResourceType) ([]domain.Resource, error) {
-	// selected never aliases the input slice (the [:0:0] reset drops the
-	// backing array): appending must not write into the caller's memory.
-	selected := types[:0:0]
-	if len(types) == 0 {
-		for _, spec := range mapping.Specs {
-			selected = append(selected, spec.Type)
-		}
-	} else {
-		wanted := make(map[domain.ResourceType]bool, len(types))
-		for _, t := range types {
-			wanted[t] = true
-		}
-		for _, spec := range mapping.Specs {
-			if wanted[spec.Type] {
-				selected = append(selected, spec.Type)
-			}
-		}
-	}
-	var all []domain.Resource
-	for _, t := range selected {
-		if !t.IsValid() {
-			return nil, fmt.Errorf("query: export resources: invalid type %q: %w", t, domain.ErrNotFound)
-		}
-		resources, _, err := s.db.Resources.Search(ctx, repo.ResourceSearchFilter{Type: t})
-		if err != nil {
-			return nil, fmt.Errorf("query: export type %s: %w", t, err)
-		}
-		all = append(all, resources...)
-	}
-	return all, nil
-}
-
 // Stats is the /api/stats aggregate (§9): resource counts by type and
 // status, relation counts by type, issue counts by severity, the W22
 // run-state snapshot counts and the newest batch id. The three legacy
@@ -468,46 +369,4 @@ func (s *Service) Stats(ctx context.Context) (Stats, error) {
 		IssuesBySeverity: issuesJSON,
 		LatestBatchID:    latest,
 	}, nil
-}
-
-// TopologyHop is one device on the reachability path (§9:
-// {deviceId, deviceCode}).
-type TopologyHop struct {
-	DeviceID   string `json:"deviceId"`
-	DeviceCode string `json:"deviceCode"`
-}
-
-// CheckResult is the /api/topology/check response (§9).
-type CheckResult struct {
-	Reachable  bool          `json:"reachable"`
-	Hops       []TopologyHop `json:"hops"`
-	PathLength int           `json:"pathLength"`
-}
-
-// TopologyCheck answers whether toDevice is reachable from fromDevice within
-// maxHops device links, returning the BFS shortest path. Devices are
-// identified by device_code; an unknown code returns an error wrapping
-// domain.ErrNotFound (mapped to HTTP 404 by the API layer).
-func (s *Service) TopologyCheck(ctx context.Context, fromDevice, toDevice string, maxHops int) (CheckResult, error) {
-	from, err := s.db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, fromDevice)
-	if err != nil {
-		return CheckResult{}, fmt.Errorf("query: device %s: %w", fromDevice, err)
-	}
-	to, err := s.db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, toDevice)
-	if err != nil {
-		return CheckResult{}, fmt.Errorf("query: device %s: %w", toDevice, err)
-	}
-	g, err := s.graph(ctx)
-	if err != nil {
-		return CheckResult{}, err
-	}
-	reachable, nodes, length := g.Reachable(from.ID, to.ID, maxHops)
-	if !reachable {
-		return CheckResult{Reachable: false, Hops: []TopologyHop{}, PathLength: 0}, nil
-	}
-	hops := make([]TopologyHop, 0, len(nodes))
-	for _, n := range nodes {
-		hops = append(hops, TopologyHop{DeviceID: n.ID, DeviceCode: n.NaturalKey})
-	}
-	return CheckResult{Reachable: true, Hops: hops, PathLength: length}, nil
 }

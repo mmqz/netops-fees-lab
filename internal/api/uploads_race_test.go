@@ -36,9 +36,9 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/app"
-	"github.com/mmqz/netops-lab/internal/metrics"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/app"
+	"github.com/mmqz/netops-fees-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 // raceResult is one request's outcome of the concurrent-upload harness.
@@ -258,7 +258,7 @@ func TestAPIImportConcurrentSameUpload(t *testing.T) {
 // exactly where it lives; the workbook's rows deliberately resolve against
 // an EMPTY resource table (every row fails resolution, the ingest
 // completes with rowsFailed — the metrics.go doctrine: the stored upload
-// stays content-addressed and the next `netopslab gc` collects it), which
+// stays content-addressed and the next `netopsfees gc` collects it), which
 // keeps this pin light while exercising the full store → read-back →
 // hash-record path. Same content every round is deliberate: the metrics
 // channel has no same-content dedup, every POST is a fresh batch, and all

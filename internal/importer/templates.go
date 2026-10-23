@@ -31,9 +31,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/workbook"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/workbook"
 )
 
 // TemplateMatch describes the stored mapping template that matched one

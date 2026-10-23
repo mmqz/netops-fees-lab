@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/testfixtures"
-	"github.com/mmqz/netops-lab/internal/workbook"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
+	"github.com/mmqz/netops-fees-lab/internal/workbook"
 
 	"github.com/xuri/excelize/v2"
 )

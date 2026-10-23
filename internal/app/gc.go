@@ -29,7 +29,7 @@ type GCResult struct {
 	// it is never referenced. Serve startup (the primary trigger) is
 	// unambiguous — the sweep runs before the listener, no request of THIS
 	// process can be mid-write, so any temp found is crash debris. A
-	// manual `netopslab gc` overlapping a live serve MAY collect an
+	// manual `netopsfees gc` overlapping a live serve MAY collect an
 	// in-flight request's fresh temp — the upload then fails loudly
 	// (rename ENOENT → 500, the operator retries); it can never produce a
 	// torn file or a lying hash: the same accepted window the fee staging
@@ -71,7 +71,7 @@ type GCResult struct {
 //   - serve startup, serially BEFORE the listener starts — no concurrent
 //     upload can be in flight, so a file being written now cannot be
 //     misjudged (the RecoverInterrupted precedent: cmd layer, own process);
-//   - the explicit `netopslab gc --db --data` CLI subcommand (manual run).
+//   - the explicit `netopsfees gc --db --data` CLI subcommand (manual run).
 //
 // The MCP process never triggers it (mcp owns no serve loop); the HTTP API
 // layer never triggers it either (no GC route — GC is a maintenance action
@@ -221,7 +221,7 @@ func (a *App) feeStagingRefs(ctx context.Context) (map[string]struct{}, error) {
 // fees CLI imports in a separate process that may overlap a serve start;
 // GCAnalysis's mtime milestone (service.go) covers that cross-process
 // window. Failures are logged and NEVER fatal: a broken sweep must not
-// keep the server down — the operator can retry with `netopslab gc`.
+// keep the server down — the operator can retry with `netopsfees gc`.
 // Split out of cmdServe so the placement and failure doctrine is pinned
 // by tests; the MCP process never reaches this (it owns no serve loop).
 func (a *App) gcSweep(ctx context.Context) {
@@ -240,7 +240,7 @@ func (a *App) gcSweep(ctx context.Context) {
 	}
 }
 
-// gcResponse is the single JSON object the `netopslab gc` subcommand prints
+// gcResponse is the single JSON object the `netopsfees gc` subcommand prints
 // (the §10 stdout contract: exactly one JSON object). The analysisFiles /
 // analysisStaging fields are the fee analysis tree's sweep counts (#106-C):
 // orphan Parquet files without a completed batch row, stale .staging dirs.
@@ -253,7 +253,7 @@ type gcResponse struct {
 	AnalysisStaging int `json:"analysisStaging"`
 }
 
-// cmdGC implements `netopslab gc --db --data`: manual garbage collection —
+// cmdGC implements `netopsfees gc --db --data`: manual garbage collection —
 // the serve-startup sweep, on demand: the uploads/fees staging areas plus
 // the fee analysis tree (#106). Success prints the GC counts as one JSON
 // object on stdout; the n>0 counts are ALSO slog-logged to stderr (info)

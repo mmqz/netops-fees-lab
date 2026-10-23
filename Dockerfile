@@ -45,9 +45,9 @@ COPY --from=web /src/internal/webui/dist ./internal/webui/dist
 ARG BUILD_TAGS=duckdb
 ENV CGO_ENABLED=1 GOOS=linux
 RUN if [ -n "$BUILD_TAGS" ]; then \
-        go build -trimpath -tags "$BUILD_TAGS" -ldflags="-s -w" -o /out/netopslab ./cmd/netopslab; \
+        go build -trimpath -tags "$BUILD_TAGS" -ldflags="-s -w" -o /out/netopsfees ./cmd/netopsfees; \
     else \
-        CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/netopslab ./cmd/netopslab; \
+        CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/netopsfees ./cmd/netopsfees; \
     fi
 
 # ---------- 阶段 3：运行时 ----------
@@ -61,7 +61,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=build /out/netopslab /app/netopslab
+COPY --from=build /out/netopsfees /app/netopsfees
 
 # 数据库与上传文件目录（挂载卷以持久化）
 RUN mkdir -p /data
@@ -70,5 +70,5 @@ VOLUME ["/data"]
 EXPOSE 8080
 
 # 默认以 serve 启动，数据库位于卷内
-ENTRYPOINT ["/app/netopslab"]
+ENTRYPOINT ["/app/netopsfees"]
 CMD ["serve", "--addr", ":8080", "--db", "/data/netops.db", "--data-dir", "/data"]

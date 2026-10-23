@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // seedGraph inserts two batches: bat_1 with devices A, B and bat_2 with a

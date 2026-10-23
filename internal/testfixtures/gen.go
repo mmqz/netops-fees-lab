@@ -8,7 +8,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // GeneratedFiles are the artifacts WriteAll produces, in write order.
@@ -16,7 +16,7 @@ var GeneratedFiles = []string{"devices.xlsx", "ippools.xlsx", "circuits.xlsx", "
 
 // WriteAll writes the three deterministic synthetic workbooks plus the
 // expected import summary into out (created when missing). It is the shared
-// generator behind both cmd/testdatagen and `netopslab testdata`, so the two
+// generator behind both cmd/testdatagen and `netopsfees testdata`, so the two
 // commands always produce byte-identical output. Fixture counts are
 // sanity-checked before anything is written so a drifted literal fails
 // loudly instead of silently downstream.

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // RenameProposalRepo persists rename proposals (migration v12, W6-D). Insert

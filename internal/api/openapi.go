@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // openAPIResponse is one method entry of the document.

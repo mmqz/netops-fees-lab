@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // WorkspaceRepo persists simulation workspaces (PROJECT_BRIEF_P2 §3).

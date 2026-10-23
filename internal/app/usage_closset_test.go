@@ -34,8 +34,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/mmqz/netops-lab/internal/domain"
 )
 
 // TestTopLevelUsageListsEveryDispatchedSubcommand pins both top-level usage
@@ -79,11 +77,7 @@ func TestDispatcherUsageListsEveryDispatchedSubcommand(t *testing.T) {
 		noSubArgs   []string
 		unknownArgs []string
 	}{
-		{"query", "cli.go", "cmdQuery", cmdQuery, nil, []string{"--db", db, "__nope__"}},
-		{"changes", "cli.go", "cmdChanges", cmdChanges, nil, []string{"--db", db, "__nope__"}},
-		{"renames", "cli.go", "cmdRenames", cmdRenames, nil, []string{"--db", db, "__nope__"}},
 		{"metrics", "metrics_cli.go", "cmdMetrics", cmdMetrics, nil, []string{"--db", db, "__nope__"}},
-		{"lab", "cli.go", "cmdLab", cmdLab, nil, []string{"__nope__"}},
 		{"templates", "cli.go", "cmdTemplates", cmdTemplates, nil, []string{"__nope__"}},
 		{"fees", "fees_cli.go", "cmdFees", cmdFees, nil, []string{"--db", db, "--data", dir, "__nope__"}},
 	}
@@ -98,126 +92,6 @@ func TestDispatcherUsageListsEveryDispatchedSubcommand(t *testing.T) {
 			err = d.fn(d.unknownArgs, &bytes.Buffer{}, &bytes.Buffer{})
 			assertSameSet(t, d.name+" unknown-subcommand usage", want,
 				claimedSubcommands(usageErrorMessage(t, err)))
-		})
-	}
-}
-
-// TestCLITypeErrorsListRegistryClosedSet pins the three --type validation
-// errors to the domain registry, bidirectionally: every registry type must
-// appear in the error, and nothing else may. The help texts point at these
-// errors for the full closed set (see TestTypeFlagHelpsPointAtRegistry),
-// so the errors not listing the set would make the whole doctrine hollow.
-func TestCLITypeErrorsListRegistryClosedSet(t *testing.T) {
-	dir := t.TempDir()
-	db := filepath.Join(dir, "netops.db")
-	// 33-pin, four-point style: extending the registry must fail here until
-	// the count is consciously revisited (mapping's four-point gate holds
-	// the registry itself to the same number).
-	all := domain.AllResourceTypes()
-	if len(all) != 33 {
-		t.Fatalf("domain registry holds %d resource types, want 33 — if the closed set changed, update this pin (and the four-point gate in internal/mapping)", len(all))
-	}
-	want := make([]string, 0, len(all))
-	for _, rt := range all {
-		want = append(want, rt.String())
-	}
-
-	cases := []struct {
-		name string
-		args []string
-	}{
-		{"query resources", []string{"query", "--db", db, "resources", "--type", "__bogus__"}},
-		{"query nearest", []string{"query", "--db", db, "nearest", "--type", "__bogus__"}},
-		{"renames list", []string{"renames", "--db", db, "list", "--type", "__bogus__"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			if code := CLI(tc.args, &stdout, &stderr); code != exitUsage {
-				t.Fatalf("exit = %d, want %d (usage); stdout: %s", code, exitUsage, stdout.String())
-			}
-			msg := cliErrorMessage(t, &stdout)
-			got := typesClaimedInError(t, msg)
-			if len(got) == 0 {
-				t.Fatalf("--type error does not list the closed set: %q", msg)
-			}
-			g := slices.Clone(got)
-			slices.Sort(g)
-			w := slices.Clone(want)
-			slices.Sort(w)
-			if !slices.Equal(w, g) {
-				t.Errorf("--type error lists %d types, registry holds %d (symmetric diff would fail the HTTP twin of this gate)", len(got), len(want))
-			}
-			// The two halves of the old lie: a pre-W21 type and a W21 type
-			// must BOTH be there — the pre-#108 messages froze at the 8.
-			for _, pin := range []string{"ptp_port", "pon_port"} {
-				if !slices.Contains(got, pin) {
-					t.Errorf("--type error omits registry type %q: %q", pin, msg)
-				}
-			}
-		})
-	}
-}
-
-// TestTypeFlagHelpsPointAtRegistryClosedSet pins the flag help texts to the
-// #91 doctrine: no hand-copied type enumeration (they froze at the pre-W21
-// 8 types and lied per extension), just "registered type" + a pointer at
-// the validation error that lists the full derived closed set.
-func TestTypeFlagHelpsPointAtRegistryClosedSet(t *testing.T) {
-	dir := t.TempDir()
-	db := filepath.Join(dir, "netops.db")
-	// The exact stale signature the pre-#108 help texts carried — kept
-	// verbatim so a revert of the doctrine fails loudly here.
-	const staleList = "device / ip_pool / circuit / port / base_station / site / machine_room / ptp_port"
-	const staleCommaList = "device, ip_pool, circuit, port, base_station, site, machine_room, ptp_port"
-	cases := []struct {
-		name     string
-		args     []string
-		doctrine []string
-		stale    []string
-	}{
-		{
-			name:     "export --types",
-			args:     []string{"export", "--definitely-not-a-flag"},
-			doctrine: []string{"缺省导出全部注册类型", "非法值报错并列出注册闭集"},
-			stale:    []string{staleCommaList},
-		},
-		{
-			name:     "query resources --type",
-			args:     []string{"query", "--db", db, "resources", "--definitely-not-a-flag"},
-			doctrine: []string{"注册资源类型之一", "完整闭集在 --type 校验错误信息里自动列出"},
-			stale:    []string{staleList},
-		},
-		{
-			name:     "query nearest --type",
-			args:     []string{"query", "--db", db, "nearest", "--definitely-not-a-flag"},
-			doctrine: []string{"注册类型之一", "完整闭集在 --type 校验错误信息里自动列出"},
-			stale:    []string{staleList},
-		},
-		{
-			name:     "renames list --type",
-			args:     []string{"renames", "--db", db, "list", "--definitely-not-a-flag"},
-			doctrine: []string{"注册资源类型之一", "完整闭集在 --type 校验错误信息里自动列出"},
-			stale:    []string{staleList},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			if code := CLI(tc.args, &stdout, &stderr); code != exitUsage {
-				t.Fatalf("exit = %d, want %d (usage); stdout: %s stderr: %s", code, exitUsage, stdout.String(), stderr.String())
-			}
-			usage := stderr.String()
-			for _, d := range tc.doctrine {
-				if !strings.Contains(usage, d) {
-					t.Errorf("flag help lacks the #91-doctrine phrase %q:\n%s", d, usage)
-				}
-			}
-			for _, s := range tc.stale {
-				if strings.Contains(usage, s) {
-					t.Errorf("flag help still hand-copies the stale pre-W21 type list:\n%s", usage)
-				}
-			}
 		})
 	}
 }

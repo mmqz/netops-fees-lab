@@ -2,13 +2,13 @@ package repo
 
 import (
 	"context"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // withoutV9 temporarily removes migration v9 AND every later migration

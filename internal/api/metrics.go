@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/metrics"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // The timeseries metric channel endpoints (W20, design §7.3 first three +
@@ -301,7 +301,7 @@ func (s *Server) handleMetricsImport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// A mapping FieldError leaves no batch (nothing was imported); the
 		// stored upload file stays content-addressed and is collected by the
-		// next `netopslab gc` orphan sweep, exactly like the resource
+		// next `netopsfees gc` orphan sweep, exactly like the resource
 		// channel's failed analyses.
 		s.respondErrorFor(w, r, err, "")
 		return

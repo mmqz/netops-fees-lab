@@ -3,7 +3,7 @@ package mapping
 import (
 	"fmt"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // Layer constants for the seven-layer model of docs/design/data-model-v1.md

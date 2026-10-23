@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"context"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -10,9 +10,9 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/importer"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/importer"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // fixedClock is the deterministic bookkeeping clock of the metric service

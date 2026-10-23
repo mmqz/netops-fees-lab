@@ -27,7 +27,7 @@ func writeFeeCSV(t *testing.T, dir, name, content string) string {
 
 func TestCLIFeesFlow(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := t.TempDir()
 	db := filepath.Join(tmp, "netops.db")
@@ -141,7 +141,7 @@ func TestCLIFeesFlow(t *testing.T) {
 // outputs end to end.
 func TestCLIFeesRisksContract(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := t.TempDir()
 	db := filepath.Join(tmp, "netops.db")
@@ -189,7 +189,7 @@ func TestCLIFeesRisksContract(t *testing.T) {
 // binary runs the scenario.
 func TestCLIFeesClueDecisions(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := t.TempDir()
 	db := filepath.Join(tmp, "netops.db")
@@ -319,7 +319,7 @@ func writeFeeLedgerXLSX(t *testing.T, dir, name string) string {
 // exiting non-zero with the honest pointer to the single-sheet channel.
 func TestCLIFeesImportSheets(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := t.TempDir()
 	db := filepath.Join(tmp, "netops.db")

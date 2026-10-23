@@ -1,6 +1,6 @@
 # NetOps Lab — 机读事实源（facts）
 
-> **本文件是「当前代码实数」的单一事实源**（issue #110 叙事漂移第三批的裁决产物）。
+> **本文件是「当前代码实数」的单一事实源**（issue #110 叙事漂移第三批的裁决产物；随费用仓拆分随行重定基线——拆分评审 E 项，fork 自 netops-lab v0.16.1 / 2223101）。
 > 教义：一个冻结在散文里的数字是一句**每次演进都在撒谎**的句子——#66 清扫 14 处「恒 5 个工具」、#110 再清 4 处「恰好 5/十个」证明了纯文字清扫追不上代码。本文件把会漂移的数字集中到一处，并配 Go 漂移门禁测试把「可静态断言的数字」钉死在注册表/路由表/迁移表的**实数**上（先例：`TestAppVersionMatchesChangelogHead` 的版本号双锚定——常量与 CHANGELOG 头互锁，改一处不改另一处测试即红）。
 > 实测基准：2026-10-20（v0.15.2 收口后、#106–#111 修复轮）。测试类数字随测试增删天然变化，无静态门禁，口径与更新纪律见 §3。
 
@@ -10,15 +10,15 @@
 
 | key | 当前值 | 断言方式（代码实数 → 本表声明数） |
 | --- | --- | --- |
-| `mcp-tools` | 13 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
-| `api-routes` | 86 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `mcp-tools` | 4 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
+| `api-routes` | 40 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
 | `api-fees-routes` | 14 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
 | `repo-migrations` | 34 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |
 
-**MCP 工具清单（13 个，2026-10-23 实测）**：`resource_search` + 仿真域 4 个 `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`（PROJECT_BRIEF_P2 §8）+ 只读分析域 5 个 `graph_traverse` / `graph_impact` / `graph_context` / `alerts_query` / `metrics_query`（v0.9 R4）+ 费用域 3 个 `fee_risks`（v0.15.0，#58 阶段 5）/ `fee_totals` / `fee_duplicates`（#120）。全部只读或仿真写封闭面：无 SQL/Shell/SSH/文件工具、无建删工作区工具、告警 ack/clear 与检测运行留在人类/HTTP/CLI 侧。
+**MCP 工具清单（4 个，费用仓拆分后实况）**：`resource_search`（资源宇宙检索，AI 发现面）+ 费用域 3 个 `fee_risks` / `fee_totals` / `fee_duplicates`。全部只读：无 SQL/Shell/SSH/文件工具；风险线索裁定与关联确认留在人类/HTTP/CLI 侧。
 
-**费用域路由清单（`fees` tag 13 条）**：`POST /api/fees/imports`、`POST /api/fees/imports/sheets`（#125 多 sheet 台账整本导入）、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`、`GET /api/fees/batches/{id}/evidence`（#86）、`GET /api/fees/query/totals`、`GET /api/fees/query/duplicates`、`GET /api/fees/risks/{scenario}`、`POST /api/fees/risk-clue-decisions`（#119）、`GET /api/fees/risk-clue-decisions`（#119）、`POST /api/fees/links/scan`、`GET /api/fees/links`、`POST /api/fees/links/{id}/confirm`、`POST /api/fees/links/{id}/dismiss`。
+**费用域路由清单（`fees` tag 14 条）**：`POST /api/fees/imports`、`POST /api/fees/imports/sheets`（#125 多 sheet 台账整本导入）、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`、`GET /api/fees/batches/{id}/evidence`（#86）、`GET /api/fees/query/totals`、`GET /api/fees/query/duplicates`、`GET /api/fees/risks/{scenario}`、`POST /api/fees/risk-clue-decisions`（#119）、`GET /api/fees/risk-clue-decisions`（#119）、`POST /api/fees/links/scan`、`GET /api/fees/links`、`POST /api/fees/links/{id}/confirm`、`POST /api/fees/links/{id}/dismiss`。
 
 **迁移版本（v1–v34）**：v1–v3 核心表（migrations.go 字面量）起，逐版本单事务追加；当前头 v34（#125 fee_batches 加 sheet 坐标并重建幂等索引——`schema_migrations` 头由 repo 层迁移测试钉死）。
 
@@ -37,9 +37,9 @@
 
 | key | 当前值 | 口径（复算命令，仓库根目录执行） |
 | --- | --- | --- |
-| `go-top-level-tests` | 681 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
-| `go-test-packages` | 25 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
-| `vitest-tests` | 188 | `cd web && npx vitest run` 的 `Tests` 计数（13 文件） |
+| `go-top-level-tests` | 431 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
+| `go-test-packages` | 16 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
+| `vitest-tests` | 129 | `cd web && npx vitest run` 的 `Tests` 计数（7 文件） |
 
 **更新纪律**：改动测试面的提交（新增/删除/迁移任何测试）按门禁流程顺手更新本表三行与 README 的测试计数行；漏更不会让任何本地门禁变红——所以散文里的测试数字永远只作快照读，裁决权在复算命令。CHANGELOG 各版本段的测试数是**历史记录**（当轮实测），不随本表回改。
 

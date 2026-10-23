@@ -3,11 +3,11 @@ package repo
 import (
 	"context"
 	"errors"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // rewindV8 emulates a database left at schema v7: the v8 bookkeeping row is

@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/fees"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/fees"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // feesSubcommands lists the fees dispatcher's cases; both usage surfaces
@@ -70,7 +70,7 @@ func splitFeeArgs(args []string) (dbPath, dataDir, sub string, subArgs []string,
 	return "", "", "", nil, &usageError{msg: "缺少 fees 子命令（" + strings.Join(feesSubcommands, " / ") + "）"}
 }
 
-// cmdFees implements `netopslab fees --db <path> --data <dir> import|list|rollback|query …`.
+// cmdFees implements `netopsfees fees --db <path> --data <dir> import|list|rollback|query …`.
 func cmdFees(args []string, stdout, stderr io.Writer) error {
 	dbPath, dataDir, sub, subArgs, err := splitFeeArgs(args)
 	if err != nil {

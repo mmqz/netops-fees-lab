@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // seedIssues inserts a mix of issues: 3 row-phase batch issues, 3 set-level

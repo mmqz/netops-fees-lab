@@ -14,7 +14,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/testfixtures"
+	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
 )
 
 // generatedXLSX resolves a file under testdata/ relative to this package's

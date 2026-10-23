@@ -9,7 +9,7 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +17,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
 )
 
 // w24Sheet / w24Headers mirror the api-test fixture shape (the
@@ -80,7 +80,7 @@ func itoaE2E(n int) string {
 // mutually exclusive (exit 2).
 func TestCLITemplatesUnattended(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")

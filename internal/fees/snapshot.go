@@ -13,7 +13,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // The SNAPSHOT LAYER (#60): every imported fee file is copied, byte for

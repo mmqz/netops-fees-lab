@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // simIDOrderDesc orders global per-kind sequence ids ("<kind>-<n>", fixed

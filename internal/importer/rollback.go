@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // ErrBatchInUse reports the §8/§9 rollback refusal: entities created by the
@@ -72,31 +72,6 @@ func (s *Service) Rollback(ctx context.Context, batchID string) error {
 		// resources then cascades any relations that survive — none, per
 		// the in-use check above.
 		if _, err := tx.Relations.DeleteByBatch(ctx, batchID); err != nil {
-			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
-		}
-		// Attribute change proposals (W4-D): only this batch's
-		// PENDING proposals are deleted — unconfirmed suggestions
-		// die with their import batch. APPLIED/DISMISSED proposals
-		// survive the rollback (the human decision is an audit
-		// trail decoupled from the batch lifecycle); proposals whose
-		// resource is deleted below are removed by the resource_id
-		// ON DELETE CASCADE regardless of status, which is the
-		// correct outcome — the audited resource no longer exists.
-		// Deleted BEFORE the resources so the deleted-count
-		// accounting above reflects every pending row of the batch,
-		// not just those the cascade would have missed (proposals
-		// targeting OTHER batches' resources).
-		if _, err := tx.AttributeChanges.DeletePendingByBatch(ctx, batchID); err != nil {
-			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
-		}
-		// Pending rename proposals (W6-D): same asymmetric lifecycle — the
-		// batch's unconfirmed suggestions die with it (the NEW resource the
-		// proposal pointed at disappears with the batch too, so a dangling
-		// proposal would be meaningless); applied/rejected proposals stay
-		// as the human-decision audit trail. Proposals whose OLD resource
-		// is deleted below are removed by the resource_id ON DELETE CASCADE
-		// regardless of status — the audited resource no longer exists.
-		if _, err := tx.RenameProposals.DeletePendingByBatch(ctx, batchID); err != nil {
 			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
 		}
 		if _, err := tx.Resources.DeleteByBatch(ctx, batchID); err != nil {

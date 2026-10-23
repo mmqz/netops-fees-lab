@@ -1,4 +1,4 @@
-module github.com/mmqz/netops-lab
+module github.com/mmqz/netops-fees-lab
 
 go 1.27
 

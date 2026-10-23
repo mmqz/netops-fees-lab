@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // defaultRulesSeedTS is the FIXED created_at/updated_at of the default rule

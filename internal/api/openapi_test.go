@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // This file pins the v0.10-R9 OpenAPI contract: the document at
@@ -79,8 +79,8 @@ func TestOpenAPISpecBasics(t *testing.T) {
 	if missing > 0 {
 		t.Fatalf("%d operations without summaries", missing)
 	}
-	if len(doc.Paths) < 50 {
-		t.Errorf("paths = %d, want the full surface (>= 50)", len(doc.Paths))
+	if len(doc.Paths) < 30 {
+		t.Errorf("paths = %d, want the full fee surface (>= 30)", len(doc.Paths))
 	}
 }
 
@@ -136,8 +136,8 @@ func TestOpenAPISpecMatchesLiveServer(t *testing.T) {
 			}
 		}
 	}
-	if probed < 50 {
-		t.Errorf("probed %d operations, want the full surface", probed)
+	if probed < 30 {
+		t.Errorf("probed %d operations, want the full fee surface", probed)
 	}
 }
 
@@ -192,12 +192,9 @@ func TestOpenAPISpecStatusProjection(t *testing.T) {
 
 	// The success-status truths verified against the handlers (2026-10-21):
 	created := []struct{ path, method string }{
-		{"/api/detection/rules", "post"},
 		{"/api/fees/imports", "post"},
-		{"/api/maintenance/windows", "post"},
+		{"/api/fees/imports/sheets", "post"},
 		{"/api/imports/{id}/template", "post"},
-		{"/api/workspaces", "post"},
-		{"/api/workspaces/{id}/checkpoints", "post"},
 	}
 	for _, c := range created {
 		if _, ok := get(c.path, c.method)["201"]; !ok {
@@ -234,9 +231,6 @@ func TestOpenAPISpecStatusProjection(t *testing.T) {
 	}
 	// 409 on the conflict-carrying mutations.
 	for _, tc := range []struct{ path, method string }{
-		{"/api/attribute-changes/{id}/apply", "post"},
-		{"/api/renames/{id}/apply", "post"},
-		{"/api/workspaces/{id}/checkpoints/{cpId}/restore", "post"},
 		{"/api/batches/{id}", "delete"},
 	} {
 		if _, ok := get(tc.path, tc.method)["409"]; !ok {
@@ -250,8 +244,8 @@ func TestOpenAPISpecStatusProjection(t *testing.T) {
 	if _, ok := get("/api/batches/{id}", "get")["401"]; ok {
 		t.Error("GET /api/batches/{id}: 401 must not appear on read routes")
 	}
-	if _, ok := get("/api/workspaces", "post")["401"]; !ok {
-		t.Error("POST /api/workspaces: no 401 — the --auth-token write gate covers mutations")
+	if _, ok := get("/api/fees/imports", "post")["401"]; !ok {
+		t.Error("POST /api/fees/imports: no 401 — the --auth-token write gate covers mutations")
 	}
 	if _, ok := get("/api/health", "get")["400"]; !ok {
 		t.Error("GET /api/health: no 400")
@@ -259,12 +253,12 @@ func TestOpenAPISpecStatusProjection(t *testing.T) {
 	if _, ok := get("/api/health", "get")["500"]; !ok {
 		t.Error("GET /api/health: no 500")
 	}
-	// Read routes never claim 401; the detection-rules DELETE carries the
-	// audit-protection 409.
+	// Read routes never claim 401; the batches DELETE carries the
+	// in-use protection 409.
 	if _, ok := get("/api/resources", "get")["401"]; ok {
 		t.Error("GET /api/resources: 401 must not appear on read routes")
 	}
-	if _, ok := get("/api/detection/rules/{id}", "delete")["409"]; !ok {
-		t.Error("DELETE /api/detection/rules/{id}: no 409 — the audit protection answers conflicts")
+	if _, ok := get("/api/batches/{id}", "delete")["409"]; !ok {
+		t.Error("DELETE /api/batches/{id}: no 409 — the in-use protection answers conflicts")
 	}
 }

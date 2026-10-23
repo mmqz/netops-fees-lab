@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/testfixtures"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
 )
 
 // refsByBatch partitions the entity's source refs by their batch id.
@@ -126,79 +126,6 @@ func TestSkipAppendsSourceRefVersion(t *testing.T) {
 		if rr.RuleCode != domain.RuleDuplicateKey {
 			t.Errorf("skipped row %d rule code = %q, want E001 (unchanged)", rr.RowNumber, rr.RuleCode)
 		}
-	}
-}
-
-// TestSkipVersionW005DiffSkip pins the second skip form: the W005 diff-skip
-// (same key, changed attribute) appends its source ref version exactly like
-// the pure skip — the version row records what the CURRENT workbook said
-// (raw new value), even though the attribute change is still a pending
-// proposal awaiting human confirmation. Refs and pending proposals coexist.
-func TestSkipVersionW005DiffSkip(t *testing.T) {
-	svc, db := newService(t)
-	ctx := context.Background()
-
-	b1, sum1 := importSheet(t, svc, [][]string{
-		attrChangeHeaders,
-		attrChangeRow("DEV-001", "核心路由1", "杭州", "华为", "NE40E", "10.0.0.1", "在网"),
-		attrChangeRow("DEV-002", "核心路由2", "宁波", "中兴", "ZXR10", "10.0.1.1", "在网"),
-	})
-	if sum1.RowsImported != 2 {
-		t.Fatalf("run 1 imported = %d, want 2", sum1.RowsImported)
-	}
-	_ = b1
-	b2, sum2 := importSheet(t, svc, [][]string{
-		attrChangeHeaders,
-		attrChangeRow("DEV-001", "核心路由1", "杭州", "华为", "NE40E", "10.0.0.9", "在网"),
-		attrChangeRow("DEV-002", "核心路由2", "宁波", "中兴", "ZXR10", "10.0.1.1", "在网"),
-	})
-	if sum2.RowsImported != 0 || sum2.RowsSkipped != 2 {
-		t.Fatalf("run 2 = %d/%d, want 0 imported / 2 skipped (diff-skip)", sum2.RowsImported, sum2.RowsSkipped)
-	}
-
-	// Both rows append their version: the diff-skip (DEV-001) AND the pure
-	// identical skip (DEV-002). Each version points at its own sheet row.
-	for code, wantRow := range map[string]int{"DEV-001": 2, "DEV-002": 3} {
-		dev, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, code)
-		if err != nil {
-			t.Fatalf("GetByTypeKey(%s): %v", code, err)
-		}
-		refs, err := db.SourceRefs.ListByEntity(ctx, domain.EntityKindResource, dev.ID)
-		if err != nil {
-			t.Fatalf("ListByEntity(%s): %v", code, err)
-		}
-		if len(refs) != 2 {
-			t.Fatalf("%s has %d source refs, want 2 (diff-skip appends too)", code, len(refs))
-		}
-		byBatch := refsByBatch(t, refs)
-		if byBatch[b2].RowNumber != wantRow || byBatch[b2].Sheet != "设备清单" {
-			t.Errorf("%s skip version = sheet %q row %d, want 设备清单 row %d", code, byBatch[b2].Sheet, byBatch[b2].RowNumber, wantRow)
-		}
-	}
-
-	// The diff-skip version records the NEW workbook value (10.0.0.9) as raw
-	// evidence, while the pending proposal and the untouched attribute keep
-	// their W005 semantics — versioning and diff proposal coexist.
-	dev1, err := db.Resources.GetByTypeKey(ctx, domain.ResourceTypeDevice, "DEV-001")
-	if err != nil {
-		t.Fatalf("GetByTypeKey(DEV-001): %v", err)
-	}
-	refs, err := db.SourceRefs.ListByEntity(ctx, domain.EntityKindResource, dev1.ID)
-	if err != nil {
-		t.Fatalf("ListByEntity(DEV-001): %v", err)
-	}
-	if refs[1].Raw["管理IP"] != "10.0.0.9" {
-		t.Errorf("diff-skip version raw 管理IP = %q, want 10.0.0.9 (the new workbook value)", refs[1].Raw["管理IP"])
-	}
-	if chs := pendingChanges(t, db); len(chs) != 1 || chs[0].Field != "mgmt_ip" ||
-		chs[0].NewValue != "10.0.0.9" || chs[0].BatchID != b2 {
-		t.Fatalf("pending changes = %+v, want the single mgmt_ip 10.0.0.9 proposal of batch 2", chs)
-	}
-	if dev1.Attributes["mgmt_ip"] != "10.0.0.1" {
-		t.Fatalf("DEV-001 mgmt_ip = %q, want 10.0.0.1 (skip never writes the resource)", dev1.Attributes["mgmt_ip"])
-	}
-	if n := len(w005Issues(t, db)); n != 1 {
-		t.Fatalf("W005 issues = %d, want 1", n)
 	}
 }
 

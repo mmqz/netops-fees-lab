@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // TestResourcesTypeErrorListsRegistryClosedSet pins the bad-type 400 to the

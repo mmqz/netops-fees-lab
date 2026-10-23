@@ -1,19 +1,17 @@
-// Wiring tests of the W9-D composition root: the App, the HTTP API server
-// and the MCP server consume ONE *Services instance — the "single assembly"
+// Wiring tests of the composition root: the App, the HTTP API server and the
+// MCP server consume ONE *Services instance — the "single assembly"
 // guarantee is asserted here by POINTER IDENTITY (Go comparability of
 // pointers), because behavior alone cannot distinguish one shared service
 // instance from two coincidentally identical ones.
 package services_test
 
 import (
-	"github.com/mmqz/netops-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/mmqz/netops-lab/internal/app"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/services"
+	"github.com/mmqz/netops-fees-lab/internal/app"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 // TestAppSharesOneServiceComposition pins the single-instance pass-through:
@@ -21,8 +19,7 @@ import (
 // composition (no dead second assembly), the HTTP API server was wired from
 // that very instance (a.API.Services() == a.Services, so the handlers'
 // query/importer/validation/… instances are the App's), and the composition
-// is bound to the App's repository. Before W9-D the API built its own service
-// set from the bare db and these identities did not hold.
+// is bound to the App's repository.
 func TestAppSharesOneServiceComposition(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	a, err := app.New(app.Config{
@@ -52,53 +49,44 @@ func TestAppSharesOneServiceComposition(t *testing.T) {
 		{"Importer", a.Importer, svc.Importer},
 		{"Validation", a.Validation, svc.Validation},
 		{"Query", a.Query, svc.Query},
-		{"Changes", a.Changes, svc.Changes},
-		{"Renames", a.Renames, svc.Renames},
-		{"Governance", a.Governance, svc.Governance},
-		{"Lab", a.Lab, svc.Lab},
 		{"Report", a.Report, svc.Report},
+		{"Metrics", a.Metrics, svc.Metrics},
+		{"Fees", a.Fees, svc.Fees},
 	} {
 		if tc.got != tc.want {
-			t.Errorf("App.%s is NOT the composition's instance (different pointers) — a second assembly exists", tc.name)
+			t.Errorf("App.%s is not the composition's instance (pointer identity broken)", tc.name)
 		}
 	}
 
-	// The single-instance pass-through the task named explicitly: the query
-	// service the HTTP API uses is the App's query service.
-	if apiSvc := a.API.Services(); apiSvc != svc {
-		t.Fatalf("a.API was wired from a DIFFERENT *services.Services instance than a.Services — the dead assembly is back")
+	// The API server consumes the same composition.
+	if a.API.Services() != svc {
+		t.Error("a.API was not wired from a.Services — the handlers would run a second assembly")
 	}
 
-	// The composition is bound to the App's repository (handlers with thin
-	// repo-passthrough read paths fetch it via Services.DB()).
+	// The composition is bound to the App's repository.
 	if svc.DB() != a.DB {
-		t.Errorf("Services.DB() is not the App's repository (different pointers)")
+		t.Error("Services.DB() is not the App's repository")
 	}
 }
 
-// TestNewWiresClockOption pins the WithClock knob: the injected clock
-// propagates to both confirmation services' Now hooks (deterministic
-// decided-at stamps in tests); the default wiring keeps time.Now.
-func TestNewWiresClockOption(t *testing.T) {
-	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
+// TestOpenBindsRepo pins the repo wiring of New's composition: the fee
+// service and the metric service both read through the same repository the
+// App opened (the fee snapshots root at the data dir; the DB at the db
+// path).
+func TestOpenBindsRepo(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	dbPath := filepath.Join(dir, "netops.db")
+	a, err := app.New(app.Config{DBPath: dbPath, DataDir: dir})
 	if err != nil {
-		t.Fatalf("repo.Open: %v", err)
+		t.Fatalf("app.New: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	fixed := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
-	svc := services.New(db, services.WithClock(func() time.Time { return fixed }))
-	if got := svc.Changes.Now(); !got.Equal(fixed) {
-		t.Errorf("Changes.Now() = %v, want the injected fixed clock %v", got, fixed)
+	t.Cleanup(func() {
+		if err := a.Close(); err != nil {
+			t.Errorf("app.Close: %v", err)
+		}
+	})
+	if a.DB.Path() != dbPath {
+		t.Errorf("a.DB.Path() = %q, want %q", a.DB.Path(), dbPath)
 	}
-	if got := svc.Renames.Now(); !got.Equal(fixed) {
-		t.Errorf("Renames.Now() = %v, want the injected fixed clock %v", got, fixed)
-	}
-
-	// Default wiring: the hooks are live clocks (non-nil, advancing service
-	// of time.Now — a nil hook would also fall back, but New installs one).
-	def := services.New(db)
-	if def.Changes.Now == nil || def.Renames.Now == nil {
-		t.Error("default wiring left a nil Now hook on a confirmation service")
-	}
+	var _ *repo.DB = a.Services.DB()
 }

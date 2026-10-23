@@ -16,12 +16,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/metrics"
 )
 
 func TestCLIMetricsBatchLifecycle(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := t.TempDir()
 	db := filepath.Join(tmp, "netops.db")

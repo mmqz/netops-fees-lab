@@ -12,7 +12,7 @@ package repo
 import (
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 func TestMigrationCountMatchesFactsFile(t *testing.T) {

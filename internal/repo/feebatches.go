@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // FeeBatchRepo persists fee_batches rows.

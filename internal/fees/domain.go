@@ -28,7 +28,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // The shared domain types (see internal/domain/fees.go).

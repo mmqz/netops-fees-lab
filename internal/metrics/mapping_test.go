@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // perfHeaders is the canonical synthetic perf-sheet header row (the same

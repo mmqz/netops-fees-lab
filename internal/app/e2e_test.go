@@ -1,5 +1,5 @@
-// End-to-end CLI tests: TestMain builds the real netopslab binary once
-// (go build -o <tmp>/netopslab ./cmd/netopslab from the repo root); the
+// End-to-end CLI tests: TestMain builds the real netopsfees binary once
+// (go build -o <tmp>/netopsfees ./cmd/netopsfees from the repo root); the
 // TestCLIEndToEnd then drives it as a subprocess through the §10 journey —
 // analyze (offline) → import ×3 → validate → report → query — asserting the
 // single-JSON-object stdout contract, the seeded outcome counts and the exit
@@ -11,7 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +31,7 @@ func exeSuffix() string {
 	return ""
 }
 
-// e2eBin is the netopslab binary TestMain builds; empty when the build is
+// e2eBin is the netopsfees binary TestMain builds; empty when the build is
 // skipped (only when the go tool is unavailable).
 var e2eBin string
 
@@ -50,18 +50,18 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "netopslab-e2e-*")
+	tmp, err := os.MkdirTemp("", "netopsfees-e2e-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir temp: %v\n", err)
 		os.Exit(1)
 	}
-	bin := filepath.Join(tmp, "netopslab"+exeSuffix())
+	bin := filepath.Join(tmp, "netopsfees"+exeSuffix())
 
 	// Build the real binary once for all CLI e2e tests.
-	build := exec.Command("go", "build", "-o", bin, "./cmd/netopslab")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/netopsfees")
 	build.Dir = mustRepoRoot()
 	if out, err := build.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "building netopslab: %v\n%s", err, out)
+		fmt.Fprintf(os.Stderr, "building netopsfees: %v\n%s", err, out)
 		os.RemoveAll(tmp)
 		os.Exit(1)
 	}
@@ -123,7 +123,7 @@ func runCLIJSON(t *testing.T, ctx string, args ...string) (map[string]any, int) 
 // testdata import → validate → report → query with JSON summary assertions.
 func TestCLIEndToEnd(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	root := repoRoot(t)
 	tmp := testsupport.TempDir(t)
@@ -281,59 +281,6 @@ func TestCLIEndToEnd(t *testing.T) {
 		if got := [4]int{b.RowsTotal, b.RowsImported, b.RowsSkipped, b.RowsFailed}; got != want {
 			t.Errorf("report: batch %s rows = %+v, want %+v", b.Workbook, got, want)
 		}
-	}
-
-	// query stats: the CLI's read-side summary.
-	stats, code := runCLIJSON(t, "query stats", "query", "--db", db, "stats")
-	if code != 0 {
-		t.Fatalf("query stats: exit %d, want 0", code)
-	}
-	if got, _ := stats["totalResources"].(float64); got != 64 {
-		t.Errorf("query stats: totalResources = %v, want 64", stats["totalResources"])
-	}
-	byType, _ := stats["byType"].(map[string]any)
-	for typ, want := range map[string]int{"device": 27, "ip_pool": 16, "circuit": 21} {
-		if got := int(byType[typ].(float64)); got != want {
-			t.Errorf("query stats: byType[%s] = %d, want %d", typ, got, want)
-		}
-	}
-	sev, _ := stats["issuesBySeverity"].(map[string]any)
-	for s, want := range map[string]int{"error": 13, "warning": 3, "info": 1} {
-		if got := int(sev[s].(float64)); got != want {
-			t.Errorf("query stats: issuesBySeverity[%s] = %d, want %d", s, got, want)
-		}
-	}
-
-	// query resources: paginated search over the CLI surface.
-	resources, code := runCLIJSON(t, "query resources", "query", "--db", db, "resources", "--q", "DEV-001", "--type", "device")
-	if code != 0 {
-		t.Fatalf("query resources: exit %d, want 0", code)
-	}
-	if got, _ := resources["total"].(float64); got != 1 {
-		t.Errorf("query resources: total = %v, want 1", resources["total"])
-	}
-	if items, _ := resources["items"].([]any); len(items) != 1 {
-		t.Errorf("query resources: %d items, want 1", len(items))
-	}
-
-	// query relations: the 2-hop neighborhood of DEV-001 in JSON.
-	devicePage, _ := resources["items"].([]any)
-	dev001, _ := devicePage[0].(map[string]any)
-	devID, _ := dev001["id"].(string)
-	relations, code := runCLIJSON(t, "query relations", "query", "--db", db, "relations", "--id", devID, "--depth", "2")
-	if code != 0 {
-		t.Fatalf("query relations: exit %d, want 0", code)
-	}
-	nodes, _ := relations["nodes"].([]any)
-	sawDEV003 := false
-	for _, rawNode := range nodes {
-		node, _ := rawNode.(map[string]any)
-		if node["naturalKey"] == "DEV-003" {
-			sawDEV003 = true
-		}
-	}
-	if !sawDEV003 {
-		t.Errorf("query relations depth 2: DEV-003 missing from DEV-001 neighborhood (%d nodes)", len(nodes))
 	}
 
 	// Failure case: importing a non-xlsx file exits 1 with a not_xlsx error.

@@ -8,7 +8,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 // TestWriteParquetPartitionsLayout pins the analysis layer's physical

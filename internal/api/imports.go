@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/detect"
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/importer"
-	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/importer"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
 )
 
 // handleHealth implements GET /api/health. dbPath is the ABSOLUTE path of
@@ -29,40 +28,27 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			dbPath = abs
 		}
 	}
-	// The scheduler block (v0.11-R11) is ALWAYS present — the nil-safe
-	// Status() of an unset *detect.Scheduler reports the disabled
-	// snapshot, so a browser reads "scheduler.enabled=false" instead of
-	// branching on a missing key (the closed-shape discipline of the
-	// alert stats endpoint).
 	respondJSON(w, http.StatusOK, struct {
-		Status      string                 `json:"status"`
-		Version     string                 `json:"version"`
-		RuleVersion string                 `json:"ruleVersion"`
-		DBPath      string                 `json:"dbPath"`
-		Scheduler   detect.SchedulerStatus `json:"scheduler"`
+		Status      string `json:"status"`
+		Version     string `json:"version"`
+		RuleVersion string `json:"ruleVersion"`
+		DBPath      string `json:"dbPath"`
 	}{
 		Status:      "ok",
 		Version:     domain.AppVersion,
 		RuleVersion: domain.RuleVersion,
 		DBPath:      dbPath,
-		Scheduler:   s.Schedule.Status(),
 	})
 }
 
 // handleImportUpload implements POST /api/imports: multipart field "file",
-// .xlsx workbook or PTP configuration script (.txt/.cfg), ≤10MB. The
-// upload is stored at
+// .xlsx workbook, ≤10MB. The upload is stored at
 // dataDir/uploads/<sha256>_<name> (content-addressed; identical content
 // replaces itself — staged via temp + atomic rename, #112, so concurrent
 // same-content submissions replace each other with whole files) and then
 // analyzed via the importer with the user's
 // original file name as the batch's display name (202 + Analysis JSON).
-// Script uploads enter the same analyze → confirm → import pipeline: the
-// workbook layer parses the script and synthesizes the virtual sheet (W8-D).
-// Content errors surface as 422 script_parse_error (malformed script, the
-// message carries the script line number) or 422 unsupported_script (a
-// .txt/.cfg without the PTP fingerprint) from the analyze step; an
-// extension outside .xlsx/.txt/.cfg is rejected up front with 422 not_xlsx.
+// An extension outside .xlsx is rejected up front with 422 not_xlsx.
 // An unconfigured (empty) dataDir fails fast with 500: the analyze step
 // reads the workbook back from the stored path, so a relative "uploads/…"
 // path could never work (AUD1-10 residue, now guarded at the entry).

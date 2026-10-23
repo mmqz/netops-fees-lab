@@ -2,11 +2,10 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/query"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/query"
 )
 
 // handleResourcesList implements GET /api/resources?type=&q=&status=&page=&pageSize=
@@ -58,25 +57,4 @@ func (s *Server) handleResourceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, detail)
-}
-
-// handleResourceRelations implements GET /api/resources/{id}/relations?depth=1|2
-// (default 1, max 2): {"center", "nodes", "edges"} via internal/topology.
-func (s *Server) handleResourceRelations(w http.ResponseWriter, r *http.Request) {
-	depth := 1
-	if raw := r.URL.Query().Get("depth"); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 || v > query.MaxRelationDepth {
-			respondErrorf(w, http.StatusBadRequest, "bad_request",
-				"depth 参数 %q 必须是 1 或 2", raw)
-			return
-		}
-		depth = v
-	}
-	result, err := s.query.Relations(r.Context(), r.PathValue("id"), depth)
-	if err != nil {
-		s.respondErrorFor(w, r, err, "")
-		return
-	}
-	respondJSON(w, http.StatusOK, result)
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
 // TestMigrationV22HotPathIndexes pins the R14 audit outcome:

@@ -9,14 +9,14 @@ import (
 	"strings"
 )
 
-// backupResponse is the `netopslab backup` stdout contract: one JSON
+// backupResponse is the `netopsfees backup` stdout contract: one JSON
 // object naming the snapshot's path and size.
 type backupResponse struct {
 	Out   string `json:"out"`
 	Bytes int64  `json:"bytes"`
 }
 
-// cmdBackup implements `netopslab backup --db path --out file.db`: a
+// cmdBackup implements `netopsfees backup --db path --out file.db`: a
 // byte-consistent snapshot of the WHOLE database (every table, every
 // migration's data) written via the SQLite Online Backup API — never a
 // raw file copy of the live database (PROJECT_BRIEF_P2 §1.6; the same

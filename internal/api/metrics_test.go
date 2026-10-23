@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/metrics"
 )
 
 // This file pins the HTTP contracts of the W20 metric endpoints (design

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
 )
 
 // IngestMapping is the confirmed mapping of one performance workbook to

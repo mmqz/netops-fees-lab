@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // FieldKind is the value type of a target field (PROJECT_BRIEF §6).
@@ -859,10 +859,6 @@ func SpecByType(t domain.ResourceType) (TypeSpec, bool) {
 // codebase (v0.6.0 W13-D moved it here from the importer's private
 // relationTypeFor so a second consumer could exist without a second copy):
 // the importer calls it when creating the derived edge at import time, and
-// the attribute-change apply flow (internal/changes) calls the same mapping
-// to decide which edge a confirmed ref-field change must retarget — same
-// field, same direction (from = the owning resource), same type, never a
-// divergent second table.
 func RelationTypeFor(rt domain.ResourceType, field string) domain.RelationType {
 	switch {
 	case rt == domain.ResourceTypeIPPool && field == "assigned_device":

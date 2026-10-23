@@ -1,7 +1,7 @@
 package app
 
 // metrics_cli.go — the CLI side of the metric batch lifecycle (#115):
-// list and rollback. The ingest channel itself is `netopslab ingest`
+// list and rollback. The ingest channel itself is `netopsfees ingest`
 // (one-shot, W20); this command closes the debt api.md carried since
 // v0.7 — POST /api/metrics/batches/{id}/rollback stayed HTTP-only while
 // the resource and fee channels both had CLI rollbacks, leaving the
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/metrics"
 )
 
 // metricsSubcommands lists the metrics dispatcher's cases; both usage
@@ -25,7 +25,7 @@ import (
 // the closed-set test pins it against the switch via go/ast).
 var metricsSubcommands = []string{"list", "forecast", "rollback"}
 
-// cmdMetrics implements `netopslab metrics --db <path> list|rollback …`.
+// cmdMetrics implements `netopsfees metrics --db <path> list|rollback …`.
 func cmdMetrics(args []string, stdout, stderr io.Writer) error {
 	dbPath, sub, subArgs, err := splitSubArgs("metrics", strings.Join(metricsSubcommands, " / "), args)
 	if err != nil {
@@ -59,7 +59,7 @@ func cmdMetrics(args []string, stdout, stderr io.Writer) error {
 func cmdMetricsForecast(ctx context.Context, svc *metrics.Service, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("metrics forecast")
 	resource := fs.String("resource", "", "资源 id（uuid；端口类资源有性能序列），必填")
-	key := fs.String("key", "", "指标键（封闭目录，netopslab metrics 或 GET /api/metrics/keys 可查），必填")
+	key := fs.String("key", "", "指标键（封闭目录，netopsfees metrics 或 GET /api/metrics/keys 可查），必填")
 	window := fs.Int("window", 30, "外推天数（1–90，缺省 30）")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}

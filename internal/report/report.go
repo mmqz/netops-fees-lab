@@ -31,13 +31,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // Report is one rendered data-quality report. The JSON shape is the
 // contract consumed by the HTTP API (GET /api/report?format=json) and the
-// CLI (netopslab report --format json); the HTML rendering derives from the
+// CLI (netopsfees report --format json); the HTML rendering derives from the
 // same struct.
 type Report struct {
 	// GeneratedAt is the report creation time (UTC).

@@ -2,11 +2,10 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/report"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/report"
 )
 
 // handleStats implements GET /api/stats.
@@ -104,40 +103,4 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, rep)
-}
-
-// defaultTopologyMaxHops / maxTopologyHops pin the topology check bounds
-// (§9: default 2, max 5).
-const (
-	defaultTopologyMaxHops = 2
-	maxTopologyMaxHops     = 5
-)
-
-// handleTopologyCheck implements GET /api/topology/check?fromDevice=&toDevice=&maxHops=:
-// {"reachable", "hops":[{deviceId,deviceCode}], "pathLength"}. Unknown
-// device codes answer 404.
-func (s *Server) handleTopologyCheck(w http.ResponseWriter, r *http.Request) {
-	fromDevice := r.URL.Query().Get("fromDevice")
-	toDevice := r.URL.Query().Get("toDevice")
-	if fromDevice == "" || toDevice == "" {
-		respondError(w, http.StatusBadRequest, "bad_request", "缺少 fromDevice 或 toDevice 参数")
-		return
-	}
-	maxHops := defaultTopologyMaxHops
-	if raw := r.URL.Query().Get("maxHops"); raw != "" {
-		v, err := strconv.Atoi(raw)
-		if err != nil || v < 1 || v > maxTopologyMaxHops {
-			respondErrorf(w, http.StatusBadRequest, "bad_request",
-				"maxHops 参数 %q 必须是 1..%d 的整数", raw, maxTopologyMaxHops)
-			return
-		}
-		maxHops = v
-	}
-
-	result, err := s.query.TopologyCheck(r.Context(), fromDevice, toDevice, maxHops)
-	if err != nil {
-		s.respondErrorFor(w, r, err, "")
-		return
-	}
-	respondJSON(w, http.StatusOK, result)
 }

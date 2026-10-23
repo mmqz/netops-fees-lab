@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
 )
 
 // handleSchema implements GET /api/schema (W5-D, v0.4.0): dynamic schema

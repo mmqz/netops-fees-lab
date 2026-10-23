@@ -13,7 +13,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/mmqz/netops-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
 )
 
 // ---------------------------------------------------------------------------

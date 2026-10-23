@@ -11,7 +11,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // AlertEventDeliveryRepo persists the alert lifecycle notification

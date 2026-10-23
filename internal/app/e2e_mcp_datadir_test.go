@@ -2,7 +2,7 @@ package app
 
 // e2e_mcp_datadir_test.go — #97 regression suite: the MCP entry point must
 // root the fee analysis layer at the SAME data dir the serve/fees channels
-// use. Before the fix, `netopslab mcp` built the composition without a
+// use. Before the fix, `netopsfees mcp` built the composition without a
 // DataDir, so fee_risks answered from a CWD-relative "analysis" tree —
 // silently zero clues for real data, the shipped docker image included.
 //
@@ -43,13 +43,13 @@ func mcpcsvFixture(t *testing.T, dir string) string {
 	return path
 }
 
-// TestMCPCreatesDefaultDataDir pins the composition default: `netopslab mcp`
+// TestMCPCreatesDefaultDataDir pins the composition default: `netopsfees mcp`
 // resolves its data dir to ./data (the same default serve and the fees CLI
 // use). Before #97 the MCP composition ran with an empty DataDir — no ./data
 // next to the CWD, analysis rooted at the bare CWD-relative "analysis".
 func TestMCPCreatesDefaultDataDir(t *testing.T) {
 	if e2eBin == "" {
-		t.Skip("netopslab binary was not built (go tool unavailable)")
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
 	tmp := t.TempDir()
 	cwd := filepath.Join(tmp, "cwd")
@@ -103,14 +103,14 @@ var duckdbE2EBin struct {
 func buildDuckdbE2E(t *testing.T) string {
 	t.Helper()
 	duckdbE2EBin.once.Do(func() {
-		tmp, err := os.MkdirTemp("", "netopslab-duckdb-e2e-*")
+		tmp, err := os.MkdirTemp("", "netopsfees-duckdb-e2e-*")
 		if err != nil {
 			return
 		}
-		bin := filepath.Join(tmp, "netopslab-duckdb"+exeSuffix())
+		bin := filepath.Join(tmp, "netopsfees-duckdb"+exeSuffix())
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 		defer cancel()
-		build := exec.CommandContext(ctx, "go", "build", "-tags", "duckdb", "-o", bin, "./cmd/netopslab")
+		build := exec.CommandContext(ctx, "go", "build", "-tags", "duckdb", "-o", bin, "./cmd/netopsfees")
 		build.Dir = mustRepoRoot()
 		build.Env = append(os.Environ(), "CGO_ENABLED=1")
 		if _, err := build.CombinedOutput(); err != nil {
@@ -125,7 +125,7 @@ func buildDuckdbE2E(t *testing.T) string {
 	return duckdbE2EBin.path
 }
 
-// mcpJSONRPC runs `netopslab mcp` over real stdio, speaks the raw MCP
+// mcpJSONRPC runs `netopsfees mcp` over real stdio, speaks the raw MCP
 // JSON-RPC handshake (initialize → WAIT for the response → initialized → the
 // tools/call — the go-sdk rejects pipelined notifications: "initialized
 // before initialize") and returns the decoded result object of the call.
@@ -218,7 +218,7 @@ func mcpJSONRPC(t *testing.T, bin, db, dataDir string, callArgs map[string]any) 
 
 // TestMCPFeesDataDirRoundTrip — the deep routing pin (#97 acceptance): a fee
 // batch imported through the CLI (into --data D) must surface as non-zero
-// unlinked clues through a REAL `netopslab mcp --data D` process; the same
+// unlinked clues through a REAL `netopsfees mcp --data D` process; the same
 // call against an EMPTY data dir must answer an honest zero. Before #97 the
 // mcp entry had no --data at all and read a CWD-relative tree.
 func TestMCPFeesDataDirRoundTrip(t *testing.T) {

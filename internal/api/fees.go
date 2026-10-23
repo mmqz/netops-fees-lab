@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/fees"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/fees"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // handleFeesImport implements POST /api/fees/imports: multipart fields

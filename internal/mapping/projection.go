@@ -1,7 +1,7 @@
 package mapping
 
 import (
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // This file is the schema-discovery projection behind GET /api/schema

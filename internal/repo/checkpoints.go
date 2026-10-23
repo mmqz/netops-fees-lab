@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // CheckpointRepo persists checkpoint markers. The snapshot database files

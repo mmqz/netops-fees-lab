@@ -3,7 +3,7 @@ package mapping
 import (
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // Confidence ladder of the suggestion engine (PROJECT_BRIEF §6): exact

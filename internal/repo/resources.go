@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // ResourceRepo persists normalized resources. Insert is deliberately the

@@ -29,25 +29,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/changes"
-	"github.com/mmqz/netops-lab/internal/detect"
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/fees"
-	"github.com/mmqz/netops-lab/internal/governance"
-	"github.com/mmqz/netops-lab/internal/importer"
-	"github.com/mmqz/netops-lab/internal/mapping"
-	"github.com/mmqz/netops-lab/internal/metrics"
-	"github.com/mmqz/netops-lab/internal/notify"
-	"github.com/mmqz/netops-lab/internal/ptpconfig"
-	"github.com/mmqz/netops-lab/internal/query"
-	"github.com/mmqz/netops-lab/internal/renames"
-	"github.com/mmqz/netops-lab/internal/repo"
-	"github.com/mmqz/netops-lab/internal/report"
-	"github.com/mmqz/netops-lab/internal/services"
-	"github.com/mmqz/netops-lab/internal/sim"
-	"github.com/mmqz/netops-lab/internal/validation"
-	"github.com/mmqz/netops-lab/internal/webui"
-	"github.com/mmqz/netops-lab/internal/workbook"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/fees"
+	"github.com/mmqz/netops-fees-lab/internal/importer"
+	"github.com/mmqz/netops-fees-lab/internal/mapping"
+	"github.com/mmqz/netops-fees-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/query"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/report"
+	"github.com/mmqz/netops-fees-lab/internal/services"
+	"github.com/mmqz/netops-fees-lab/internal/validation"
+	"github.com/mmqz/netops-fees-lab/internal/webui"
+	"github.com/mmqz/netops-fees-lab/internal/workbook"
 )
 
 // maxUploadBytes is the request body limit of the import upload route
@@ -70,29 +63,10 @@ type Server struct {
 	validation *validation.Engine
 	query      *query.Service
 	report     *report.Generator
-	sim        *sim.Service
-	lab        *report.LabGenerator
-	changes    *changes.Service
-	renames    *renames.Service
-	governance *governance.Service
 	// fees is the fee analysis layer service (#58/#60/#61): the same
 	// instance the CLI fee commands use (the composition root's Fees,
 	// rooted at the app's DataDir).
 	fees *fees.Service
-	// detect is the W23 alert detection engine (the SAME instance the
-	// CLI's `netopslab detect` uses — the composition root hands it to
-	// both, no bypass).
-	detect *detect.Engine
-	// Webhook is the outbound notification channel (v0.10-R8 run
-	// summaries, v0.13-R19 alert lifecycle events): nil means the
-	// channel is off (no --webhook-url). The nil receiver is a no-op,
-	// so handlers never branch on it.
-	Webhook *notify.Webhook
-	// Schedule is the serve-mode detection interval scheduler (v0.11-R11):
-	// nil / unset means the patrol is off (explicit-trigger-only, the
-	// v0.10 behavior). Status() is nil-safe, so the health handler never
-	// branches on it either.
-	Schedule *detect.Scheduler
 	// AuthToken is the opt-in write gate (v0.11-R13): non-empty turns
 	// every mutating /api request (POST/PATCH/DELETE/PUT) into a
 	// Bearer-token check; reads, /api/health, /api/openapi.json and the
@@ -121,12 +95,6 @@ func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 		validation: svc.Validation,
 		query:      svc.Query,
 		report:     svc.Report,
-		sim:        svc.Lab,
-		lab:        svc.LabReport,
-		changes:    svc.Changes,
-		renames:    svc.Renames,
-		governance: svc.Governance,
-		detect:     svc.Detect,
 		fees:       svc.Fees,
 	}
 }
@@ -141,7 +109,7 @@ func (s *Server) Services() *services.Services { return s.svc }
 // Routes builds the full HTTP handler: the §9 API routes with logging and
 // recovery middleware, the JSON 404 envelope for unknown /api/ paths, and
 // the embedded SPA for everything else. The returned handler is what
-// cmd/netopslab serve and the httptest-based tests mount.
+// cmd/netopsfees serve and the httptest-based tests mount.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
@@ -288,11 +256,6 @@ func mapServiceError(err error) (status int, code string, message string) {
 	switch {
 	case errors.Is(err, workbook.ErrNotXLSX):
 		return http.StatusUnprocessableEntity, "not_xlsx", "文件不是有效的 xlsx 工作簿"
-	case errors.Is(err, workbook.ErrUnsupportedScript):
-		return http.StatusUnprocessableEntity, "unsupported_script",
-			"文件不是可识别的 PTP 配置脚本（.txt/.cfg 仅支持中兴 VRP 风格 PTP 配置脚本）"
-	case errors.Is(err, ptpconfig.ErrSyntax):
-		return http.StatusUnprocessableEntity, "script_parse_error", err.Error()
 	case errors.Is(err, workbook.ErrEmptyWorkbook):
 		return http.StatusUnprocessableEntity, "empty_workbook", "工作簿不包含任何数据行"
 	case errors.Is(err, workbook.ErrWorkbookTooLarge):

@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/testfixtures"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
 )
 
 // seededAPIServer is a newAPITestServer with the three canonical workbooks
@@ -160,32 +160,5 @@ func TestHealthCarriesDBPath(t *testing.T) {
 	}
 	if !strings.HasSuffix(health.DBPath, "netops.db") {
 		t.Errorf("health: dbPath = %q, want it to end with the test database name", health.DBPath)
-	}
-}
-
-// TestWorkspace404HintsCrossDB pins the issue #8 envelope: an unknown
-// workspace's not_found message names the server's database binding so a
-// CLI-created workspace in another --db is diagnosable in one look.
-func TestWorkspace404HintsCrossDB(t *testing.T) {
-	srv := newAPITestServer(t)
-	resp, body := doRequest(t, srv, http.MethodGet, "/api/workspaces/ws-does-not-exist", nil, "")
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unknown workspace: status = %d, want 404 (body %s)", resp.StatusCode, body)
-	}
-	var env struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	decodeJSON(t, "404 envelope", body, &env)
-	if env.Error.Code != "not_found" {
-		t.Errorf("code = %q, want not_found", env.Error.Code)
-	}
-	if !strings.Contains(env.Error.Message, "cross-database mismatch") {
-		t.Errorf("message = %q, want the cross-database hint", env.Error.Message)
-	}
-	if !strings.Contains(env.Error.Message, "netops.db") {
-		t.Errorf("message = %q, want it to name the bound database path", env.Error.Message)
 	}
 }

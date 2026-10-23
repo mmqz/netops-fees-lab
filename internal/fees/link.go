@@ -34,8 +34,8 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
 // LinkableResourceTypes is the closed set of site-like resource types

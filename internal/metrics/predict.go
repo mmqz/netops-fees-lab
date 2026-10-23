@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // forecastMinPoints is the D4 minimum: 14 daily averages before any fit

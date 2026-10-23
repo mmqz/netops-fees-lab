@@ -1,7 +1,7 @@
 // Command testdatagen writes the deterministic synthetic test workbooks and
 // the expected import summary into an output directory (default
 // "testdata"). The generator logic lives in internal/testfixtures
-// (WriteAll) and is shared with `netopslab testdata`, so both commands
+// (WriteAll) and is shared with `netopsfees testdata`, so both commands
 // produce byte-identical artifacts.
 //
 // It produces exactly four files:
@@ -32,7 +32,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mmqz/netops-lab/internal/testfixtures"
+	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
 )
 
 func main() {

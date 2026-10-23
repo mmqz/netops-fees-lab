@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // VirtualDeviceRepo persists the virtual devices of the simulation

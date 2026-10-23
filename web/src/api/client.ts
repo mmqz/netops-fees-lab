@@ -8,32 +8,9 @@
  */
 
 import type {
-  AlertAckResponse,
-  AlertClearResponse,
-  AlertItem,
-  AlertStats,
-  AlertsQuery,
-  ApplyResult,
-  AttributeChangeItem,
-  AttributeChangeList,
   BatchDetail,
   BatchListItem,
   BatchRow,
-  ChangeSetItem,
-  CheckRunDetail,
-  CheckRunItem,
-  CheckpointList,
-  CheckpointResult,
-  DeleteWorkspaceResult,
-  DetectionRuleCreateRequest,
-  DetectionRuleDeleteResponse,
-  DetectionRuleItem,
-  DetectionRulePatchRequest,
-  DetectionRulesListResponse,
-  DetectionRunItem,
-  DetectionRunResponse,
-  DetectionRunsQuery,
-  DiffResult,
   FeeBatchItem,
   FeeBatchesList,
   FeeImportSummary,
@@ -41,34 +18,21 @@ import type {
   FeeLinkItem,
   FeeLinkScanResult,
   FeeLinksList,
-  GovernanceSummary,
   HealthResponse,
-  ImpactDocument,
   ImportAnalysisResponse,
   ImportResultResponse,
   IssueCounts,
   IssueItem,
-  LayerMembersPage,
-  MaintenanceWindow,
-  MaintenanceWindowCreated,
-  MaintenanceWindowDeleted,
-  MaintenanceWindowRequest,
   MappingModel,
-  MaterializeResult,
   MetricKeyItem,
   MetricSeriesResult,
-  OpRequest,
   OpenApiSpec,
   Paged,
   PartialIssueCounts,
-  RelationGraph,
-  RenameList,
-  RenameProposalItem,
   ResourceDetail,
   ResourceItem,
   ResourceMetricsResponse,
   ResourceType,
-  RestoreResult,
   ClueDecisionItem,
   FeeDuplicatesResult,
   FeeTotalsResult,
@@ -76,20 +40,9 @@ import type {
   RollbackResponse,
   RowStatus,
   RuleCode,
-  RunResult,
-  RunStateHistoryResponse,
   Severity,
-  SimPathResult,
-  SimTopology,
   StatsResponse,
-  TopologyCheckResponse,
-  TraverseDirection,
-  TraverseDocument,
-  UndoResult,
   ValidateResponse,
-  WorkspaceCreateRequest,
-  WorkspaceDetail,
-  WorkspaceSummary,
 } from './types';
 import { ERR_API_CHECKPOINT_MISSING_FILE, ERR_API_CONFLICT, ERR_API_INVALID_REQUEST, ERR_API_NOT_FOUND, ERR_API_NOT_LATEST, ERR_API_OP_FAILED, ERR_BAD_RESPONSE, ERR_HTTP_FALLBACK, ERR_NETWORK, format } from '../i18n';
 
@@ -445,13 +398,6 @@ export function getResource(id: string): Promise<ResourceDetail> {
   return requestJson<ResourceDetail>(`/resources/${encodeURIComponent(id)}`);
 }
 
-/** GET /api/resources/{id}/relations?depth=1|2 */
-export function getResourceRelations(id: string, depth: 1 | 2): Promise<RelationGraph> {
-  return requestJson<RelationGraph>(
-    `/resources/${encodeURIComponent(id)}/relations${buildQuery({ depth })}`,
-  );
-}
-
 /** GET /api/stats */
 export function getStats(): Promise<StatsResponse> {
   return requestJson<StatsResponse>('/stats');
@@ -461,10 +407,6 @@ export function getStats(): Promise<StatsResponse> {
  * GET /api/governance/summary（v0.6.0 W14-D 治理总览）：待确认队列 + 决策审计 +
  * 问题分布 + 资源/关系/批次形态的一屏聚合（只读、无参数、空库恒全零）。
  */
-export function getGovernanceSummary(): Promise<GovernanceSummary> {
-  return requestJson<GovernanceSummary>('/governance/summary');
-}
-
 /** GET /api/issues?batchId=&severity=&ruleCode=&page=&pageSize= */
 export function listIssues(query: IssuesQuery): Promise<Paged<IssueItem>> {
   return requestJson<Paged<IssueItem>>(
@@ -497,17 +439,6 @@ export function getReportJson(batchId?: string): Promise<string> {
   return requestText(`/report${buildQuery({ batchId, format: 'json' })}`);
 }
 
-/** GET /api/topology/check?fromDevice=&toDevice=&maxHops= */
-export function checkTopology(
-  fromDevice: string,
-  toDevice: string,
-  maxHops?: number,
-): Promise<TopologyCheckResponse> {
-  return requestJson<TopologyCheckResponse>(
-    `/topology/check${buildQuery({ fromDevice, toDevice, maxHops })}`,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // 属性变更确认（W4-D，migration v11）
 // ---------------------------------------------------------------------------
@@ -520,35 +451,6 @@ export interface AttributeChangesQuery {
   offset?: number;
 }
 
-/** GET /api/attribute-changes?status=&resource_id=&batch_id=&limit=&offset= */
-export function listAttributeChanges(query: AttributeChangesQuery): Promise<AttributeChangeList> {
-  return requestJson<AttributeChangeList>(
-    `/attribute-changes${buildQuery({
-      status: query.status,
-      resource_id: query.resourceId,
-      batch_id: query.batchId,
-      limit: query.limit,
-      offset: query.offset,
-    })}`,
-  );
-}
-
-/** POST /api/attribute-changes/{id}/apply（非 pending 409；旧值漂移 409 attribute_conflict） */
-export function applyAttributeChange(id: string): Promise<AttributeChangeItem> {
-  return requestJson<AttributeChangeItem>(
-    `/attribute-changes/${encodeURIComponent(id)}/apply`,
-    { method: 'POST' },
-  );
-}
-
-/** POST /api/attribute-changes/{id}/dismiss（非 pending 409） */
-export function dismissAttributeChange(id: string): Promise<AttributeChangeItem> {
-  return requestJson<AttributeChangeItem>(
-    `/attribute-changes/${encodeURIComponent(id)}/dismiss`,
-    { method: 'POST' },
-  );
-}
-
 /** W6-D：疑似改名提案列表（GET /api/renames）。 */
 export interface RenamesQuery {
   status?: string;
@@ -558,35 +460,6 @@ export interface RenamesQuery {
   limit?: number;
   offset?: number;
 }
-export function listRenames(query: RenamesQuery): Promise<RenameList> {
-  return requestJson<RenameList>(
-    `/renames${buildQuery({
-      status: query.status,
-      resource_id: query.resourceId,
-      resource_type: query.resourceType,
-      batch_id: query.batchId,
-      limit: query.limit,
-      offset: query.offset,
-    })}`,
-  );
-}
-
-/** 确认改名（POST /api/renames/{id}/apply）：合并身份，旧资源保留 ID 并接管新键。 */
-export function applyRename(id: string): Promise<RenameProposalItem> {
-  return requestJson<RenameProposalItem>(
-    `/renames/${encodeURIComponent(id)}/apply`,
-    { method: 'POST' },
-  );
-}
-
-/** 拒绝改名（POST /api/renames/{id}/reject）：两个资源维持独立。 */
-export function rejectRename(id: string): Promise<RenameProposalItem> {
-  return requestJson<RenameProposalItem>(
-    `/renames/${encodeURIComponent(id)}/reject`,
-    { method: 'POST' },
-  );
-}
-
 // ---------------------------------------------------------------------------
 // 仿真工作台端点（PROJECT_BRIEF_P2 §7）
 // ---------------------------------------------------------------------------
@@ -600,177 +473,18 @@ export function filledSeverityCounts(counts: PartialIssueCounts | undefined | nu
   };
 }
 
-function postJson<T>(path: string, body: unknown): Promise<T> {
-  return requestJson<T>(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
-/** GET /api/workspaces?page=&pageSize= */
-export function listWorkspaces(page = 1, pageSize = 20): Promise<Paged<WorkspaceSummary>> {
-  return requestJson<Paged<WorkspaceSummary>>(
-    `/workspaces${buildQuery({ page, pageSize })}`,
-  );
-}
-
-/** POST /api/workspaces（物化默认取全部 completed 批次）→ 201 */
-export function createWorkspace(req: WorkspaceCreateRequest): Promise<MaterializeResult> {
-  return postJson<MaterializeResult>('/workspaces', req);
-}
-
-/** GET /api/workspaces/{id} */
-export function getWorkspace(id: string): Promise<WorkspaceDetail> {
-  return requestJson<WorkspaceDetail>(`/workspaces/${encodeURIComponent(id)}`);
-}
-
-/** DELETE /api/workspaces/{id} → 200 级联删除结果 */
-export function deleteWorkspace(id: string): Promise<DeleteWorkspaceResult> {
-  return requestJson<DeleteWorkspaceResult>(`/workspaces/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
-}
-
-/** GET /api/workspaces/{id}/topology */
-export function getTopology(id: string): Promise<SimTopology> {
-  return requestJson<SimTopology>(`/workspaces/${encodeURIComponent(id)}/topology`);
-}
-
 /**
  * GET /api/workspaces/{id}/layer-members?cluster=&page=&pageSize=
  * （#51：基站聚簇成员下钻分页；cluster = 聚合节点的 anchorDeviceId）。
  */
-export function getLayerMembers(
-  workspaceId: string,
-  cluster: string,
-  page: number,
-  pageSize: number,
-): Promise<LayerMembersPage> {
-  return requestJson<LayerMembersPage>(
-    `/workspaces/${encodeURIComponent(workspaceId)}/layer-members${buildQuery({
-      cluster,
-      page: String(page),
-      pageSize: String(pageSize),
-    })}`,
-  );
-}
-
-/** POST /api/workspaces/{id}/topology/path body {fromDevice,toDevice}（设备编码） */
-export function topologyPath(id: string, fromDevice: string, toDevice: string): Promise<SimPathResult> {
-  return postJson<SimPathResult>(
-    `/workspaces/${encodeURIComponent(id)}/topology/path`,
-    { fromDevice, toDevice },
-  );
-}
-
-/** POST /api/workspaces/{id}/ops（语义失败 → 422 op_failed，状态不变） */
-export function applyOps(id: string, req: OpRequest): Promise<ApplyResult> {
-  return postJson<ApplyResult>(`/workspaces/${encodeURIComponent(id)}/ops`, req);
-}
-
-/** POST /api/workspaces/{id}/checks/run → 200 全量运行结果 */
-export function runChecks(id: string): Promise<RunResult> {
-  return postJson<RunResult>(`/workspaces/${encodeURIComponent(id)}/checks/run`, {});
-}
-
-/** GET /api/workspaces/{id}/checks?page=&pageSize=（按 run id 倒序） */
-export function listChecks(id: string, page = 1, pageSize = 20): Promise<Paged<CheckRunItem>> {
-  return requestJson<Paged<CheckRunItem>>(
-    `/workspaces/${encodeURIComponent(id)}/checks${buildQuery({ page, pageSize })}`,
-  );
-}
-
-/** GET /api/workspaces/{id}/checks/{runId}（findings 在前，基线在后） */
-export function getCheckRun(id: string, runId: string): Promise<CheckRunDetail> {
-  return requestJson<CheckRunDetail>(
-    `/workspaces/${encodeURIComponent(id)}/checks/${encodeURIComponent(runId)}`,
-  );
-}
-
-/** GET /api/workspaces/{id}/checks/{runId}/diff?compareTo=<runId2> */
-export function diffRuns(id: string, runId: string, compareTo: string): Promise<DiffResult> {
-  return requestJson<DiffResult>(
-    `/workspaces/${encodeURIComponent(id)}/checks/${encodeURIComponent(runId)}/diff${buildQuery({ compareTo })}`,
-  );
-}
-
-/** GET /api/workspaces/{id}/changesets?page=&pageSize=（倒序） */
-export function listChangeSets(id: string, page = 1, pageSize = 20): Promise<Paged<ChangeSetItem>> {
-  return requestJson<Paged<ChangeSetItem>>(
-    `/workspaces/${encodeURIComponent(id)}/changesets${buildQuery({ page, pageSize })}`,
-  );
-}
-
-/** POST /api/workspaces/{id}/undo body {changesetId?}（默认最新已应用） */
-export function undo(id: string, changesetId?: string): Promise<UndoResult> {
-  return postJson<UndoResult>(`/workspaces/${encodeURIComponent(id)}/undo`, { changesetId });
-}
-
-/** POST /api/workspaces/{id}/checkpoints body {label} → 201 */
-export function createCheckpoint(id: string, label: string): Promise<CheckpointResult> {
-  return postJson<CheckpointResult>(`/workspaces/${encodeURIComponent(id)}/checkpoints`, { label });
-}
-
-/** GET /api/workspaces/{id}/checkpoints（信封仅 items + total） */
-export function listCheckpoints(id: string): Promise<CheckpointList> {
-  return requestJson<CheckpointList>(`/workspaces/${encodeURIComponent(id)}/checkpoints`);
-}
-
-/** POST /api/workspaces/{id}/checkpoints/{cpId}/restore */
-export function restoreCheckpoint(id: string, checkpointId: string): Promise<RestoreResult> {
-  return postJson<RestoreResult>(
-    `/workspaces/${encodeURIComponent(id)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
-    {},
-  );
-}
-
 // ---------------------------------------------------------------------------
 // 告警中心（GET /api/alerts + ack/clear，v0.7 检测告警）
 // ---------------------------------------------------------------------------
-
-/** GET /api/alerts?state=&severity=&resource_id=&page=&pageSize= */
-export function listAlerts(query: AlertsQuery): Promise<Paged<AlertItem>> {
-  return requestJson<Paged<AlertItem>>(
-    `/alerts${buildQuery({
-      state: query.state,
-      severity: query.severity,
-      resource_id: query.resourceId,
-      role: query.role || undefined,
-      page: query.page,
-      pageSize: query.pageSize,
-    })}`,
-  );
-}
 
 /**
  * POST /api/alerts/{id}/ack — firing→acked（人类确认边）。
  * ackedBy 必填（确认人，告警审计字段）。
  */
-export function ackAlert(id: string, ackedBy: string): Promise<AlertAckResponse> {
-  return postJson<AlertAckResponse>(`/alerts/${encodeURIComponent(id)}/ack`, { ackedBy });
-}
-
-/** POST /api/alerts/{id}/clear — firing|acked→cleared（人类清除边，空体合法）。 */
-export function clearAlert(id: string): Promise<AlertClearResponse> {
-  return requestJson<AlertClearResponse>(`/alerts/${encodeURIComponent(id)}/clear`, {
-    method: 'POST',
-  });
-}
-
-/** GET /api/alerts/stats — 告警分布（三态计数 + 待处置级别矩阵，闭集零填充）。 */
-export function getAlertStats(): Promise<AlertStats> {
-  return requestJson<AlertStats>('/alerts/stats');
-}
-
-/** GET /api/detection/runs — 检测运行历史（每次扫描的落库回执，最新在前）。 */
-export function listDetectionRuns(query: DetectionRunsQuery): Promise<Paged<DetectionRunItem>> {
-  const params = new URLSearchParams();
-  params.set('page', String(query.page));
-  params.set('pageSize', String(query.pageSize));
-  return requestJson<Paged<DetectionRunItem>>(`/detection/runs?${params.toString()}`);
-}
-
 /** GET /api/openapi.json — 路由表投影的 OpenAPI 3 文档（发现性入口）。 */
 export function getOpenApiSpec(): Promise<OpenApiSpec> {
   return requestJson<OpenApiSpec>('/openapi.json');
@@ -780,65 +494,9 @@ export function getOpenApiSpec(): Promise<OpenApiSpec> {
 // 检测规则管理（GET/POST/PATCH/DELETE /api/detection/rules，v0.10-R6）
 // ---------------------------------------------------------------------------
 
-/** GET /api/detection/rules — 全量规则（含禁用，rule_id 顺序，懒播种默认规则）。 */
-export function listDetectionRules(): Promise<DetectionRulesListResponse> {
-  return requestJson<DetectionRulesListResponse>('/detection/rules');
-}
-
-/** POST /api/detection/rules — 新建规则（201；重复 rule_id 409）。 */
-export function createDetectionRule(
-  req: DetectionRuleCreateRequest,
-): Promise<DetectionRuleItem> {
-  return postJson<DetectionRuleItem>('/detection/rules', req);
-}
-
-/** PATCH /api/detection/rules/{id} — 部分更新（metricKey 身份不可改，400）。 */
-export function patchDetectionRule(
-  id: string,
-  req: DetectionRulePatchRequest,
-): Promise<DetectionRuleItem> {
-  return requestJson<DetectionRuleItem>(`/detection/rules/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-}
-
-/** DELETE /api/detection/rules/{id} — 有告警的规则 409（审计保护）。 */
-export function deleteDetectionRule(id: string): Promise<DetectionRuleDeleteResponse> {
-  return requestJson<DetectionRuleDeleteResponse>(`/detection/rules/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
-}
-
-/** POST /api/detection/run — 一次全库扫描（from/to 可选 RFC3339 窗口）。 */
-export function runDetection(from?: string, to?: string): Promise<DetectionRunResponse> {
-  const body: Record<string, string> = {};
-  if (from !== undefined && from !== '') body.from = from;
-  if (to !== undefined && to !== '') body.to = to;
-  return postJson<DetectionRunResponse>('/detection/run', body);
-}
-
 // ---------------------------------------------------------------------------
 // 维护窗口（/api/maintenance/windows，v0.12-R15）
 // ---------------------------------------------------------------------------
-
-/** GET /api/maintenance/windows — 维护窗口全量列表（最新开始时间在前）。 */
-export function listMaintenanceWindows(): Promise<{ items: MaintenanceWindow[]; total: number }> {
-  return requestJson<{ items: MaintenanceWindow[]; total: number }>('/maintenance/windows');
-}
-
-/** POST /api/maintenance/windows — 新建维护窗口（RFC3339 起止，空 resourceIds = 全局）。 */
-export function createMaintenanceWindow(req: MaintenanceWindowRequest): Promise<MaintenanceWindowCreated> {
-  return postJson<MaintenanceWindowCreated>('/maintenance/windows', req);
-}
-
-/** DELETE /api/maintenance/windows/{id} — 删除维护窗口（未知 id 404）。 */
-export function deleteMaintenanceWindow(id: string): Promise<MaintenanceWindowDeleted> {
-  return requestJson<MaintenanceWindowDeleted>(`/maintenance/windows/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
-}
 
 // ---------------------------------------------------------------------------
 // 指标时序（GET /api/metrics/keys + GET /api/resources/{id}/metrics）
@@ -865,29 +523,11 @@ export type { MetricSeriesResult };
 // 图查询（v0.9-R3：traverse / impact；context 留作 R4+）
 // ---------------------------------------------------------------------------
 
-/** GET /api/resources/{id}/traverse?direction=down|up|both（默认 down）。 */
-export function getTraverse(id: string, direction: TraverseDirection): Promise<TraverseDocument> {
-  return requestJson<TraverseDocument>(
-    `/resources/${encodeURIComponent(id)}/traverse${buildQuery({ direction })}`,
-  );
-}
-
 /**
  * GET /api/resources/{id}/impact?direction=up|down — 影响面 + 根因候选。
  * down = 根因追查（§10.5③：从疑点向下找异常根因）；up = 影响面收集
  * （§10.6②：从异常源向上汇总业务受损面——后端默认）。
  */
-export function getImpact(id: string, direction: 'up' | 'down'): Promise<ImpactDocument> {
-  return requestJson<ImpactDocument>(
-    `/resources/${encodeURIComponent(id)}/impact${buildQuery({ direction })}`,
-  );
-}
-
-/** GET /api/resources/{id}/run-state/history?from=&to= — 状态时序（ts 升序）。 */
-export function getRunStateHistory(id: string): Promise<RunStateHistoryResponse> {
-  return requestJson<RunStateHistoryResponse>(`/resources/${encodeURIComponent(id)}/run-state/history`);
-}
-
 // ---------------------------------------------------------------------------
 // 防抖工具
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import "fmt"
 
 // RunSource is the closed origin set of a detection run record (v0.11-R11,
 // migration v21): WHO triggered the sweep. The HTTP trigger
-// (POST /api/detection/run → api), the CLI twin (`netopslab detect` → cli)
+// (POST /api/detection/run → api), the CLI twin (`netopsfees detect` → cli)
 // and the serve-mode interval scheduler (→ scheduler). The MCP face is the
 // read-only analysis red line and can NEVER appear here — v0.9.0 pins the
 // forbidden tool names (detection_run / alerts_ack / alerts_clear) in

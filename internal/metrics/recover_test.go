@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // TestRecoverInterruptedHealsCrashWindow pins the heal's full behavior:

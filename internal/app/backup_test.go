@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmqz/netops-lab/internal/domain"
-	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+	"github.com/mmqz/netops-fees-lab/internal/repo"
 )
 
-// TestCLIBackup pins `netopslab backup --db --out`: the snapshot is a
+// TestCLIBackup pins `netopsfees backup --db --out`: the snapshot is a
 // byte-consistent, OPENABLE database carrying the source's data; the
 // stdout contract is one JSON object {out, bytes}; --out in a
 // not-yet-existing directory is created; a missing --out is a usage
