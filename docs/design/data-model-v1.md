@@ -550,15 +550,32 @@ WHERE s.resource_id = ? AND s.metric_key = 'optical_power_rx_dbm'
   AND m.ts >= ?
 ORDER BY m.ts;
 
--- Q2: 哪些设备的指标在持续下降（全库扫描，用于每日巡检）
-SELECT s.resource_id, s.metric_key,
-       COUNT(*) AS n,
-       -- 线性回归斜率（SQLite 无内置，可用首末差分近似）
-       (MAX(m.value) - MIN(m.value)) AS delta
-FROM metrics m JOIN metric_series s USING (series_id)
-WHERE s.metric_key = 'optical_power_rx_dbm' AND m.ts >= ?
-GROUP BY s.resource_id, s.metric_key
-HAVING delta < -1.0;   -- 下降超过阈值
+-- Q2: 哪些设备的指标在持续下降（每日巡检）
+-- [#122 修正]：原稿的 (MAX - MIN) < 0 是潜伏缺陷——MAX >= MIN 恒成立，
+-- 该谓词永不触发。巡检的正确形态是「首末差分」，且在 §5.6 实测后
+-- 有两个可运行形态：
+--   Q2a（全扫形态，仅诊断用——量级实测 17.9s/360 万行，超阈值）：
+SELECT DISTINCT series_id, decline FROM (
+  SELECT series_id,
+         FIRST_VALUE(value) OVER w - LAST_VALUE(value) OVER w AS decline
+  FROM metrics
+  WHERE ts >= ?
+  WINDOW w AS (PARTITION BY series_id ORDER BY ts
+               ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+) WHERE decline > 1.0;   -- 下降超过阈值（首 - 末）
+--   Q2b（序列驱动 seek 形态，巡检应跑这个——同数据 159ms，快 113×）：
+SELECT s.resource_id FROM metric_series s
+WHERE (
+  (SELECT m1.value FROM metrics m1
+    WHERE m1.series_id = s.series_id AND m1.ts >= ?
+    ORDER BY m1.ts ASC LIMIT 1)
+  -
+  (SELECT m2.value FROM metrics m2
+    WHERE m2.series_id = s.series_id AND m2.ts >= ?
+    ORDER BY m2.ts DESC LIMIT 1)
+) > 1.0;
+-- 注意窗口函数在分组之后求值：与 COUNT(*) 混在同一 SELECT 会让
+-- first/last 静默退化为分组后单行（#122 实测探针踩过）。
 
 -- Q3: 某资源一次拿全所有指标的最新值（AI 上下文组装）
 SELECT k.label, k.unit, m.value, m.ts
@@ -569,8 +586,47 @@ WHERE s.resource_id = ?
   AND m.ts = (SELECT MAX(ts) FROM metrics WHERE series_id = s.series_id);
 ```
 
-**结论**：Q1/Q2 走索引；Q3 是 N 次子查询，
-建议实施时提供**物化视图或 API 端点**（§7.3）。
+**结论**：Q1/Q2 走索引（Q2 必须用上面的序列驱动形态——全扫形态量级实测超阈，见 §5.6）；
+Q3 是 N 次子查询，实施提供 **API 端点**（§7.3，#95 的 LatestPointOfSeries 单次 seek 已落地）。
+
+### 5.6 量级实测与保留策略（#27 阶段 2 收口，2026-10-22/23 实测）
+
+**探针**：`internal/repo/metrics_scale_probe_test.go`（env 守卫 `METRICS_SCALE_PROBE=<series>,<days>`，
+输出单行 JSON；两规模跑线性验证）。实测环境：linux/amd64 2 核沙箱，Go 1.27.2，
+modernc.org/sqlite v1.60.1，WAL 模式。
+
+| 指标 | 1 万序列×90 天（90 万点） | 4 万序列×90 天（360 万点） | 线性外推 §3.2 满配（200 万序列×365 天 = 7.3 亿点） |
+| --- | --- | --- | --- |
+| 每日批量 upsert（1 点/序列/日） | P50 242ms / P95 265ms（1 万行/日） | P50 1318ms / P95 1504ms（4 万行/日） | 20 万行/日 ≈ P95 7.5s（**< 30s 目标，4× 余量**）；200 万行/日 ≈ 75s（超——触发条件见下） |
+| Q1 单序列趋势 | <1ms | <1ms | <1ms（聚簇索引 seek，规模无关） |
+| Q2a 全扫形态 | 3993ms | 17925ms | 90 天窗 1.8 亿行 ≈ **15 分钟（超阈 180×，禁用于巡检）** |
+| Q2b 序列驱动 seek | 37ms | 159ms | 200 万序列 ≈ 8s（全量扫序列时贴阈；实际巡检按指标/局站子集，远低） |
+| Q3 最新值 | <1ms | <1ms | <1ms（#95 单 seek；N 序列资源 ×N） |
+| DB 体积 | 236MB（262 B/行） | 944MB（262 B/行，线性） | 7.3 亿点 ≈ **191 GB**；90 天保留口径 1.8 亿点 ≈ 47 GB |
+| 保留删除（30 天切片） | 5572ms（22 万点） | 25587ms（80 万点） | ≈ 7 µs/行；日删 1 天量 200 万行 ≈ 14s（非高峰可接受）；**文件不缩小——SQLite 释放页入 freelist，缩文件需 VACUUM** |
+
+**体积注记**：262 B/行远大于行本体（~70B）——`idx_metrics_ts` 与 `idx_metrics_ts_key`
+两条 ts 索引把行近似复制了两次（series_id 40 字符 UUID 是主要载体）。若体积成为现实
+约束，第一杠杆是**序列 id 换短形态**（如 8 字节整数代理键，估计 -40%），不是聚合表。
+
+**决策（数据依据版）**：
+
+1. **保留策略 = 显式运维命令，不做自动删除**。理由（教义）：指标点是告警证据链的一环
+   （§5.5 的异常回溯、W21 的证据锚点），自动删除违背「快照不可变、证据可回读」的
+   证据链教义；删除必须像批次回滚一样是**人类的显式决定**（`metrics prune --before
+   <ts>` 形态，含 --dry-run 与行数回执，独立 issue 跟踪）。
+2. **日聚合表暂缓**。理由：Q1/Q3 规模无关（seek），Q2b 已把巡检做到序列复杂度，
+   当前产品没有任何跨序列年度分析消费面；建一张无人查询的聚合表是投机设计。
+   **触发条件（任一满足即立项）**：① 出现真实的跨序列长期分析需求（如全网年度
+   报表）；② Q2b 在真实巡检范围实测 > 5s；③ 单库体积 > 100 GB。
+3. **体积第一杠杆登记**：序列 id 短形态（-40% 估计），第二杠杆才是分层保留的
+   自动化（90 天滚动删除 + VACUUM 计划）。
+4. **摄入**：验收口径（20 万行/日 < 30s）以 4× 余量通过；200 万行/日的满配口径
+   超标——触发条件：真实数据面达到满配口径时，摄入通道需要并行分片或加大
+   `insertChunk`（当前 500）——同为独立 issue。
+
+**结论回写**：#27 的四个验收框全部闭合（实测数字、体积曲线、决策含依据、本文档）；
+日聚合与保留命令的触发条件如上，不在本收口轮投机实现。
 
 
 ---
