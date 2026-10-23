@@ -2,6 +2,38 @@
 
 本项目所有显著变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.16.1] — 2026-10-23
+
+**质量与负载免疫加固版**（#124 关闭收口 + 性能门禁 CPU 化 + Windows 回滚竞争容忍 + 零覆盖生产路径两批清零；纯加固无功能面变化，patch 发布）。
+
+### 修复 — 性能门禁负载免疫化（#82 教训第二版）
+- **实测证据**：同一份 v0.16.0 代码，模糊扫描性能门禁在本机空闲 1.38s、`go test -cover` 并行竞争下 15.2s——墙钟摆幅 11×，零代码变化的假红。4 个抢核进程复测：墙钟 1.38→4.19s（3×）而 **CPU 时间 2.067→2.086s（0.9%）**。
+- `testsupport.CPUTime()`：Unix `Getrusage(RUSAGE_SELF)` / Windows `GetProcessTimes` 双平台（纯 stdlib syscall，零新依赖，交叉编译验证）；fees 模糊门禁 8 CPU-s（优化路径 2.07 / 朴素底线 15.5+，两向余量 3.9×/1.9×）；sim PERF-P2 四门禁 4 CPU-s（实测 0.4–8.9ms）。墙钟改记日志、永不门禁。
+
+### 修复 — 回滚隔离 rename 的 Windows 竞争容忍（#124 同类）
+- `quarantineFile`（live→隔离区）暴露于并发 DuckDB 查询持有 live 分区文件的毫秒级窗口（Windows `os.Rename` 对被持有文件答 ACCESS_DENIED 而非 POSIX 原子覆盖）→ `renameWithRetry` 有界重试（25ms/100ms 退避，最坏增时 125ms）；ENOENT 快速失败（幂等语义答案），持续失败原样透传给既有 abort/undo（#107 语义不变）。
+- 暴露面精确分析留档：commit rename 目标含唯一 batch-id 无预存、restore 目标槽位不存在——仅 quarantine 一处需要容忍。seam 注入测试在 Linux 钉死三条重试策略 + 穿窗落位 + ENOENT 幂等不回归。
+
+### 加固 — 零覆盖生产路径两批清零（全局跨包覆盖 78.0%）
+- **第一批**：`importer.AnalyzeOffline`（CLI analyze 全部工作——真工作簿无副作用/缺文件/垃圾字节）；`topology.deepestNode`（§10.3 决胜梯：深度→层→类型→自然键五子测试）；`NoMatchingTemplateError.Error` 双拒答码文案；metrics `Basename`/`joinKeys`/`ValidScenario`。
+- **第二批**：fees std 引擎 9 方法 501 合约全钉死（引擎级直调永不假装空结果）；`readSnapshotRowXLSX`（真实台账即 .xlsx——导入→EvidenceRow 表头+数据行逐字校验+越界 not-found）；domain 闭集四组（RunSource/WebhookDeliveryStatus/ClueDecisionStatus/metrics 三枚举的 IsValid+Parse 全对）；`statusRecorder.Flush/Unwrap`（流式端点降级面）；exporter `assignSplit` 四案例；fees 小助手三件。
+- **repo 共用底座死代码清扫**：7 个零调用函数移除（feeBatchScanTargets/deliveryJoinOf/FeeSiteLinkRepo.DeleteByID/Layer×2.DeleteByWorkspace/MetricBatchRepo.SetMapping+Count），跨包覆盖 80.4%→81.1%；`LatestPointOfSeries` 补测（#95 尾查优化 0%→80%，生产路径 services/graph.go）。
+- **测量方法论修正**：缓存包不重跑导致覆盖块缺失 → 函数假 0%；强制 `-count=1` 后的真实清单驱动第二批选题。CLI cmd* 函数为子进程 E2E 盲区（已由 E2E 覆盖），不计缺口。
+
+### 修复 — api 包 duckdb-tag 全量首跑
+- 验证矩阵真发现：`-tags duckdb` 下 api 包全量首次运行即红——`TestAPIFeesClueDecisionEndpoints` 的 includeDecided=1→501 断言 tag 无感知（#59 验证当年只跑 fees 包）。按同文件既有 `engine.Available()` 房式分支修复：默认构建断 501、duckdb 构建断 200。
+
+### 验证矩阵（2026-10-23，linux/amd64 · 2 核沙箱）
+- `go test -race -count=1`：**25 包全绿、零数据竞争**（含全部并发上传/费用并发/引擎并发压力测试）；
+- `CGO_ENABLED=1 go test -tags duckdb`：25 包全绿（api 包首次）；
+- 交叉编译：windows/amd64 + darwin/amd64 + linux/arm64 全过；
+- vitest：188/188（13 文件）；gofmt/vet 全仓清零。
+
+### 工程卫生
+- #124 关闭（三类修复逐条核验 + Linux 全量绿留档，Windows 复测欢迎 reopen）；
+- 本轮新增文件 gofmt tab 归一（提交门禁复盘补课）；
+- 测试计数 655→681（顶层函数口径，facts.md §3 与 README 同步）。
+
 ## [0.16.0] — 2026-10-23
 
 **真实台账形态落地 + 趋势预测还愿 + Windows 三类修复版**（#125 P0 多 sheet 台账全链 + #123 ADR-0011 D4 预测 + #124 三根因修复；v0.15.2 后 main 十二个提交的 minor 发布）。
