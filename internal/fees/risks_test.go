@@ -62,8 +62,8 @@ func (f *fakeRiskEngine) EvidenceFor(ctx context.Context, analysisDir string, fe
 
 // TestParseRiskScenario pins the closed enum and its rejection contract.
 func TestParseRiskScenario(t *testing.T) {
-	if len(RiskScenarios()) != 7 {
-		t.Fatalf("scenario count = %d, want 7", len(RiskScenarios()))
+	if len(RiskScenarios()) != 8 {
+		t.Fatalf("scenario count = %d, want 8", len(RiskScenarios()))
 	}
 	for _, s := range riskScenarios {
 		got, err := ParseRiskScenario(string(s))
@@ -413,6 +413,78 @@ func TestPeriodWindowBounds(t *testing.T) {
 		from, to := periodWindow(tc.y, tc.m)
 		if from != tc.from || to != tc.to {
 			t.Errorf("periodWindow(%d, %d) = (%q, %q), want (%q, %q)", tc.y, tc.m, from, to, tc.from, tc.to)
+		}
+	}
+}
+
+// TestRisksMissingBillingComposition pins scenario 8's cross-layer rule
+// (#118), the mirror of scenario 7: a clue fires when a CONFIRMED-linked,
+// non-retired resource carries metric points in a month whose fee side
+// holds no record of the queried type. Billed site-months stay silent,
+// retired-status resources stay silent (not billing them is correct),
+// link rows whose resource vanished stay silent (rollback cascade is a
+// business state), pointless months stay silent, and the whole-year
+// scope walks each month on its own window.
+func TestRisksMissingBillingComposition(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	seedLinkResource(t, db, "res_unbilled", "UNBILLED-1", "在网")           // May points, no bill → fires
+	seedLinkResource(t, db, "res_billed", "BILLED-1", "在网")               // May points, billed → silent
+	seedLinkResource(t, db, "res_retired_alive", "RETIRED-ALIVE-1", "停用") // May points, no bill → suppressed (retired)
+	seedLinkResource(t, db, "res_pointless", "POINTLESS-1", "在网")         // no points, no bill → silent
+	// NOTE the vanished-resource shape (link row without its resource)
+	// cannot be seeded: fee_site_links.resource_id carries a real FK, and
+	// deleting a resource cascades its links away — the ErrNotFound branch
+	// in risksMissingBilling is defensive symmetry with scenario 7, kept
+	// for the same reason (a future FK-shape change must not abort the
+	// report), but is unreachable through today's schema.
+	seedMetricPoints(t, db, "mbat_unbilled", "res_unbilled", "2024-05-01T00:00:00Z", "2024-05-15T00:00:00Z")
+	seedMetricPoints(t, db, "mbat_billed", "res_billed", "2024-05-03T00:00:00Z")
+	seedMetricPoints(t, db, "mbat_retired", "res_retired_alive", "2024-05-07T00:00:00Z")
+
+	engine := &fakeRiskEngine{
+		periodTotals: []SitePeriodTotal{
+			{SiteCode: "BILLED-1", Year: 2024, Month: 5, Rows: 1, TotalCents: 15000},
+		},
+	}
+	result, err := svc.Risks(ctx, engine, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(missing-billing): %v", err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("clue total = %d, want 1 (UNBILLED-1 only): %+v", result.Total, result.Clues)
+	}
+	c := result.Clues[0]
+	if c.SiteCode != "UNBILLED-1" || c.Month != 5 || c.MetricValue != 2 || c.MetricLabel != "metricPoints" {
+		t.Fatalf("clue = %+v, want UNBILLED-1 2024-05 metricPoints=2", c)
+	}
+	if c.Threshold != nil {
+		t.Errorf("clue threshold = %v, want nil (points>0 is the deterministic signal)", c.Threshold)
+	}
+	if c.EvidenceTotal != 0 {
+		t.Errorf("evidenceTotal = %d, want 0 (zero fee rows IS the finding)", c.EvidenceTotal)
+	}
+	if c.Evidence == nil || len(c.Evidence) != 0 {
+		t.Errorf("#93: the anchor-less clue must carry an empty list, got %+v", c.Evidence)
+	}
+	if c.Note == "" || result.Note == "" || result.ScenarioCn != "有量无费" {
+		t.Errorf("envelope = %q / note %q / %q, want the caveat notes + 有量无费", c.Note, result.Note, result.ScenarioCn)
+	}
+
+	// the whole-year scope walks each month on its own window: add June
+	// points for the unbilled resource — May (2 points) then June (1)
+	// both fire, sorted metric-desc; every other shape stays silent.
+	seedMetricPoints(t, db, "mbat_unbilled6", "res_unbilled", "2024-06-05T00:00:00Z")
+	result, err = svc.Risks(ctx, engine, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 0})
+	if err != nil {
+		t.Fatalf("Risks(missing-billing, whole-year): %v", err)
+	}
+	if result.Total != 2 || result.Clues[0].Month != 5 || result.Clues[1].Month != 6 {
+		t.Fatalf("whole-year clues = %+v, want May(2 pts) then June(1 pt) for UNBILLED-1", result.Clues)
+	}
+	for _, clue := range result.Clues {
+		if clue.SiteCode != "UNBILLED-1" {
+			t.Errorf("whole-year clue site = %s, want UNBILLED-1 only", clue.SiteCode)
 		}
 	}
 }

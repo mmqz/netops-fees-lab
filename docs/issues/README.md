@@ -1014,3 +1014,7 @@ v0.15.2 全仓调研定位的费用×指标交叉验证整块缺口：六场景�
 | **#117**（口径诚实化，本轮立案+修复+关闭） | 裁决**诚实优先**：单位成本归一化需规模基数字段而当前数据面不存在（任何默认基数都是发明数据），且需跨层重构——标签对齐实现（六面同步：Go 标签/MCP 描述/api.md/fees-layer §8/project-overview/前端 i18n）；场景 note 增补规模告诫；`TestRiskOutlierLabelAndNote` 钉死新标签 + note 三要素；归一化登记为显式参数化未来增强（`normBasis`，前置 = 基数字段落地），历史文档按教义不改写 | 本轮 |
 
 **门禁**（本地执行）：25 包 ok × 双构建 · 0 FAIL · gofmt 空 · vet 0（双构建）· vitest + tsc（i18n 常量变更必跑）。镜像文档：[issue-117](issue-117-outlier-label-honesty.md)。
+
+| **#118**（新增能力，本轮立案+修复+关闭） | 第八场景 `missing-billing`「有量无费」：`FeeSiteLinks.List(confirmed)` 关联宇宙（人类裁决过的配对才可测量）→ 退休状态排除（不给退休资源计费是正确形态，场景 1 管反向）→ (资源, 账期) memo 点数（#85 双 memo 纪律）→ 引擎 `SitePeriodTotals` 一次调用的有账集合反查；**点数>0 且无账触发**、无阈值（与场景 7 零点信号对称）；零行证据形态（evidenceTotal 恒 0、空锚点非 null——费用侧零行即异常本体）；note 恒携带告诫——**账期无记录 ≠ 漏收认定**（季度/年度结算、费用类型未导入、挂账他编码全部同相）；消费面闭集八处同步（枚举计数 7→8 / MCP 描述+schema / 路由摘要 / api.md / facts.md / fees-layer §8 / /fees 下拉+i18n / mcpserver 501 循环 / README） | 本轮 |
+
+**门禁**（本地执行）：默认 + duckdb 双构建全绿 · 0 FAIL · gofmt 空 · vet 0（双构建）· tsc 0 · vitest 188/188。镜像文档：[issue-118](issue-118-fees-missing-billing.md)。

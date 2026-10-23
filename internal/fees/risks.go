@@ -77,12 +77,28 @@ const (
 	// idle equipment OR broken/absent collection coverage — the clue is a
 	// to-be-verified signal, never an idleness verdict.
 	RiskIdleBilling RiskScenario = "idle-billing"
+	// RiskMissingBilling (scenario 8, #118): the mirror of scenario 7 —
+	// the measurement face says the resource is ALIVE (metric points
+	// exist in the period window) while the fee face has NO billing
+	// record of the queried type for the linked site code in that
+	// period. 有量无费 is the direct revenue-loss shape (漏收嫌疑):
+	// traffic without a bill. The deterministic signal is points > 0
+	// with a zero-row fee side — no threshold to tune. Resources whose
+	// status is in the retired set (default 停用/退网) are EXCLUDED
+	// from the universe: not billing a retired resource is the CORRECT
+	// state (scenario 1 owns the reverse direction). The honest caveat
+	// is part of the contract: no monthly bill is NOT a missing-payment
+	// verdict — quarterly/annual settlement, a fee type not imported
+	// yet, or a settlement body billed under another code all look the
+	// same from here.
+	RiskMissingBilling RiskScenario = "missing-billing"
 )
 
 // riskScenarios lists every scenario in canonical order (usage + docs).
 var riskScenarios = []RiskScenario{
 	RiskRetiredBilling, RiskDuplicateSettlement, RiskLedgerMismatch,
 	RiskSpike, RiskOutlier, RiskUnlinked, RiskIdleBilling,
+	RiskMissingBilling,
 }
 
 // RiskScenarioLabels is the Chinese display name of each scenario.
@@ -94,6 +110,7 @@ var RiskScenarioLabels = map[RiskScenario]string{
 	RiskOutlier:             "同类站月度金额离群",
 	RiskUnlinked:            "零资源计费",
 	RiskIdleBilling:         "有费无量",
+	RiskMissingBilling:      "有量无费",
 }
 
 // RiskScenarios lists every scenario id (CLI usage text).
@@ -290,6 +307,10 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 	case RiskIdleBilling:
 		var c cluesPack
 		c, err = s.risksIdleBilling(ctx, engine, q)
+		clues, excluded, note = c.clues, c.excluded, c.note
+	case RiskMissingBilling:
+		var c cluesPack
+		c, err = s.risksMissingBilling(ctx, engine, q)
 		clues, excluded, note = c.clues, c.excluded, c.note
 	default:
 		return RiskResult{}, fmt.Errorf("fees: 未实现的风险场景 %q", scenario)
@@ -488,6 +509,103 @@ func (s *Service) risksIdleBilling(ctx context.Context, engine QueryEngine, q Ri
 // month. Metric points are UTC-midnight day-granular (ParseTS), so the
 // month's last day at 23:59:59Z covers the full window under the ts <=
 // comparison CountPointsOfResource uses.
+// risksMissingBilling composes scenario 8 (#118), the mirror of scenario
+// 7: walk the CONFIRMED-link universe (the human-ruled pairs) → skip
+// retired-status resources (not billing them is correct; scenario 1 owns
+// the reverse) → count metric points per (resource, month) window
+// (SQLite metrics, deterministic points>0, no threshold) → look the
+// (site, month) up in the fee face's billed set (ONE engine call —
+// SitePeriodTotals over the scope, the set of pairs WITH rows). A clue
+// fires when the resource is measured ALIVE in a month whose fee side
+// holds no record of the queried type. The composition runs link-side →
+// fee-side because the anomaly's subject is a RESOURCE with traffic, not
+// a billed row — the universe is every confirmed link, months the scope
+// selects (1..12 for the whole-year shape, one for the single month).
+//
+// #85's memo discipline applies twice: one resource fetch per distinct
+// resource id (two site codes may share a resource) and one point count
+// per (resource, period). Point-query misses that are business states
+// (resource vanished → rollback cascade) stay silent; real DB failures
+// abort the report, never silently dropping links from it.
+func (s *Service) risksMissingBilling(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	rows, err := engine.SitePeriodTotals(ctx, s.analysisDir(), q.FeeType, q.Year, q.Month)
+	if err != nil {
+		return cluesPack{}, err
+	}
+	billed := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		key := fmt.Sprintf("%s|%04d-%02d", r.SiteCode, r.Year, r.Month)
+		billed[key] = struct{}{}
+	}
+	links, err := s.db.FeeSiteLinks.List(ctx, repo.FeeLinkFilter{Status: domain.LinkStatusConfirmed})
+	if err != nil {
+		return cluesPack{}, fmt.Errorf("fees: missing-billing 列关联: %w", err)
+	}
+	months := []int{q.Month}
+	if q.Month == 0 {
+		months = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	}
+	retired := make(map[string]struct{}, len(q.Statuses))
+	for _, st := range q.Statuses {
+		retired[st] = struct{}{}
+	}
+	type resInfo struct {
+		ok     bool
+		key    string
+		status string
+	}
+	resMemo := make(map[string]resInfo, len(links))
+	countMemo := make(map[string]int, len(links))
+	var clues []RiskClue
+	for _, link := range links {
+		ri, seen := resMemo[link.ResourceID]
+		if !seen {
+			res, rerr := s.db.Resources.GetByID(ctx, link.ResourceID)
+			if rerr == nil {
+				ri = resInfo{ok: true, key: res.NaturalKey, status: res.Status}
+			} else if !errors.Is(rerr, domain.ErrNotFound) {
+				return cluesPack{}, fmt.Errorf("fees: missing-billing 查资源 %s: %w", link.ResourceID, rerr)
+			}
+			resMemo[link.ResourceID] = ri
+		}
+		if !ri.ok {
+			continue
+		}
+		if _, hit := retired[ri.status]; hit {
+			continue
+		}
+		for _, m := range months {
+			countKey := fmt.Sprintf("%s|%04d-%02d", link.ResourceID, q.Year, m)
+			n, seen := countMemo[countKey]
+			if !seen {
+				from, to := periodWindow(q.Year, m)
+				n, err = s.db.Metrics.CountPointsOfResource(ctx, link.ResourceID, from, to)
+				if err != nil {
+					return cluesPack{}, fmt.Errorf("fees: missing-billing 统计指标点 %s: %w", link.ResourceID, err)
+				}
+				countMemo[countKey] = n
+			}
+			if n == 0 {
+				continue
+			}
+			billKey := fmt.Sprintf("%s|%04d-%02d", link.FeeSiteCode, q.Year, m)
+			if _, ok := billed[billKey]; ok {
+				continue
+			}
+			clues = append(clues, RiskClue{
+				SiteCode: link.FeeSiteCode, Year: q.Year, Month: m,
+				MetricValue: float64(n), MetricLabel: "metricPoints",
+				EvidenceTotal: 0,
+				Note:          fmt.Sprintf("关联资源 %s 在 %04d-%02d 账期窗口内有 %d 个指标采集点，但费用侧该账期无任何本类型计费记录——两条台账反向矛盾，疑似漏收线索仅供人工核实（无月度账单不等于漏收认定：可能季度/年度结算、该费用类型未导入或结算主体挂账在其他编码）", ri.key, q.Year, m, n),
+			})
+		}
+	}
+	return cluesPack{
+		clues: clues,
+		note:  "线索口径：已确认关联的在网/在建资源在该账期窗口内有指标采集点，而费用侧同账期无该类型计费记录（跨层组合：SQLite 关联与指标面 × 引擎费用面反查）；账期无记录 ≠ 漏收认定，请人工核实",
+	}, nil
+}
+
 func periodWindow(year, month int) (string, string) {
 	if month == 0 {
 		return fmt.Sprintf("%04d-01-01T00:00:00Z", year),

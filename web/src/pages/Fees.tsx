@@ -128,6 +128,7 @@ import {
   RISK_SCENARIO_SPIKE,
   RISK_SCENARIO_UNLINKED,
   RISK_SCENARIO_IDLE_BILLING,
+  RISK_SCENARIO_MISSING_BILLING,
 } from '../i18n';
 
 /** 线索行键与金额展示逻辑见 fees-format.ts（#68 抽出纯函数，表测钉死） */
@@ -147,6 +148,7 @@ const SCENARIOS = [
   { value: 'outlier', label: RISK_SCENARIO_OUTLIER },
   { value: 'unlinked', label: RISK_SCENARIO_UNLINKED },
   { value: 'idle-billing', label: RISK_SCENARIO_IDLE_BILLING },
+  { value: 'missing-billing', label: RISK_SCENARIO_MISSING_BILLING },
 ];
 
 interface FeeBatchRow {

@@ -1169,9 +1169,9 @@ multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进�
 
 仅 pending 可驳回：`dismissed`（审计保留，编码与资源对不再自动复提）；非 pending → 409；未知 id 404。CLI 等价：`netopslab fees links confirm|dismiss --id <id>`。
 
-## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence= — 费用风险七场景（#58 阶段 4；#114 加场景 7）
+## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence= — 费用风险八场景（#58 阶段 4；#114 加场景 7；#118 加场景 8）
 
-**固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
+**固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）/ `missing-billing`（有量无费——已确认关联的在网/在建资源该账期窗口内有指标采集点而费用侧无该类型计费记录，跨层组合 #118，账期无记录 ≠ 漏收认定，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
 
 返回 `RiskResult`（金额均为整数分；线索按 metric 降序、(站址, 账期) 升序确定序；`evidence` 为行级证据锚点，可回读快照原文）：
 

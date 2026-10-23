@@ -108,11 +108,11 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
 | `GET /api/fees/links?status=&grade=&code=&resource_id=` | 关联列表（资源侧 join） |
 | `POST /api/fees/links/{id}/confirm \| dismiss` | 人工确认/驳回模糊提案（人类优先于扫描） |
-| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=` | 风险七场景（#64/阶段 4 + #114 场景 7；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501） |
+| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=` | 风险八场景（#64/阶段 4 + #114 场景 7 + #118 场景 8；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501） |
 
 写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 11 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
-## 8. 风险七场景（#64，#58 阶段 4；#114 加场景 7）
+## 8. 风险八场景（#64，#58 阶段 4；#114 加场景 7；#118 加场景 8）
 
 **输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，经 `GET /api/fees/batches/{id}/evidence?row=N` 可回读快照原文——#86 起该承诺有通道兑现，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, note}`。
 
@@ -125,12 +125,15 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `outlier` | 同类站月度金额离群 | 同期同费用类型单批次站址集合的**月度总额** z-score（双侧，符号在 metric）——**非单位成本口径**（#117：规模归一化需基数字段，当前数据面不存在，见下） | `z`（默认 3.0）、`minSites`（默认 8） |
 | `unlinked` | 零资源计费 | 费用编码既无 confirmed 关联也无 pending 提案（dismissed 视为无匹配；跨层组合） | 无阈值 |
 | `idle-billing` | 有费无量 | 已确认关联的站址在该账期窗口内**指标点数为零**且费用仍在流（跨层组合 #114：引擎费用面 × SQLite 指标面；窗口 = 账期自然月 [1日, 末日] 的 RFC3339 字典序；原始需求「停电/无业务量在账」的交叉验证落点） | 无阈值（零点是确定性信号） |
+| `missing-billing` | 有量无费 | 已确认关联的**在网/在建**资源在该账期窗口内**有指标采集点**，而费用侧同账期无该类型计费记录（跨层组合 #118，场景 7 的镜像：SQLite 关联与指标面 × 引擎费用面反查；退休状态资源排除——不给他们计费是正确形态，场景 1 管反向；原始需求「漏收资损」的交叉验证落点） | 无阈值（点数>0 是确定性信号） |
 
 **确定性裁决（#59 落地）**：`spike`/`outlier` 只在**单批次** (站址, 账期) 口径上计算——重复行令窗口函数与分布统计非确定；跨批次对被**排除并在信封 `excluded` 计数**（它们是 duplicate-settlement/ledger-mismatch 的线索域），绝不静默丢弃。`spike` 的单月查询收窄**线索窗口**不收窄环比基期（上期恒取全年序列的上一个有账单月）。z-score 用 `stddev_samp` 且同期同类站数 < `minSites` 时该期不出线索（小样本不产统计结论；数学上 n≤11 时单点 |z| 无法达 3，`minSites` 默认 8 + 场景内其余站址会抬高 n，仍以参数为门槛诚实声明）；**指标输出的跨运行稳定性**：DuckDB 向量化多项聚合按块序求和、原始浮点在末位 ULP 摆动——线索集恒确定，z 在 SQL 内取整到 10 位小数使输出字节稳定（比价类单次除法无此问题，不取整）（小样本不产统计结论；数学上 n≤11 时单点 |z| 无法达 3，`minSites` 默认 8 + 场景内其余站址会抬高 n，仍以参数为门槛诚实声明）。
 
 **场景 7 的诚实注意义务（#114）**：`idle-billing` 交叉的是**两条独立台账**——费用面（Parquet：该账期有计费记录）与指标面（SQLite：关联资源在该账期窗口内零采集点）。零点数为确定性信号、无阈值可调；但线索 note 恒携带告诫：**无采集也可能是采集覆盖缺失或采集断链，与真正空置在该证据形态下不可区分**——线索仅供人工核实，不作空置/闲置认定。无 confirmed 关联的编码不在本场景测量（那是 `unlinked` 的业务）。
 
-**默认构建诚实契约**：七场景与查询预设同走引擎面——未编译（默认构建）一律 501 `engine_not_built`（CLI exit 1 + 文案携带 Docker/WSL2 指引）；参数校验先于引擎检查（坏场景/坏类型/坏阈值 → 400/exit 2）。
+**场景 8 的诚实注意义务（#118）**：`missing-billing` 交叉的是同两条台账的**反向矛盾**——指标面说资源活着（账期窗口内有采集点），费用面却无该类型计费记录。点数>0 为确定性信号、无阈值可调；metric = 窗口内指标点数（`metricPoints`），`evidenceTotal` 恒 0 且锚点列表为空——**费用侧零行即异常本体**，回读通道指向快照层而非不存在的行。线索 note 恒携带告诫：**账期无记录 ≠ 漏收认定**——季度/年度结算、该费用类型尚未导入、结算主体挂账在其他编码，在该证据形态下全部同相；线索仅供人工核实。退休状态（默认 `停用,退网`）资源不在本场景测量（不给他们计费是正确形态；`retired-billing` 管反向），pending 关联的编码同样不在（人类尚未裁决）。
+
+**默认构建诚实契约**：八场景与查询预设同走引擎面——未编译（默认构建）一律 501 `engine_not_built`（CLI exit 1 + 文案携带 Docker/WSL2 指引）；参数校验先于引擎检查（坏场景/坏类型/坏阈值 → 400/exit 2）。
 
 ### CLI
 ```

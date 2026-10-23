@@ -32,9 +32,10 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name: feeRisksName,
-		Description: "只读·费用风险七场景查询：运行一个固定风险预设（" +
+		Description: "只读·费用风险八场景查询：运行一个固定风险预设（" +
 			"retired-billing 退租后仍在计费 / duplicate-settlement 跨批次重复结算 / ledger-mismatch 合同账单金额差异 / " +
-			"spike 电费环比异常上涨 / outlier 同类站月度金额离群 / unlinked 零资源计费 / idle-billing 有费无量（账期在计费但指标面零采集点）），返回风险线索" +
+			"spike 电费环比异常上涨 / outlier 同类站月度金额离群 / unlinked 零资源计费 / idle-billing 有费无量（账期在计费但指标面零采集点）/ " +
+			"missing-billing 有量无费（资源有采集点但费用面无该类型计费记录，疑似漏收）），返回风险线索" +
 			"（触发指标、显式阈值、行级证据锚点 sourceFile+sourceRow+importBatch 可回读快照原文）。" +
 			"阈值用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网），AI 不可调——调参是人类通道（HTTP/CLI）。" +
 			"输出是待核实线索而非认定结论（账单存在 ≠ 重复付款认定）。默认构建未编译分析引擎时本工具明确报错。" +
@@ -46,7 +47,7 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 
 // feeRisksInput is the typed input: scenario + scope + size only.
 type feeRisksInput struct {
-	Scenario string `json:"scenario" jsonschema:"风险场景（必填）：retired-billing（退用仍计费）/ duplicate-settlement（跨批次重复）/ ledger-mismatch（台账金额差异）/ spike（环比突增）/ outlier（同批离群）/ unlinked（零资源计费）/ idle-billing（有费无量——账期在计费但指标面零采集点，采集缺失与空置不可区分仅供人工核实）"`
+	Scenario string `json:"scenario" jsonschema:"风险场景（必填）：retired-billing（退用仍计费）/ duplicate-settlement（跨批次重复）/ ledger-mismatch（台账金额差异）/ spike（环比突增）/ outlier（同批离群）/ unlinked（零资源计费）/ idle-billing（有费无量——账期在计费但指标面零采集点，采集缺失与空置不可区分仅供人工核实）/ missing-billing（有量无费——资源有采集点但费用面无该类型计费记录，无月度账单不等于漏收认定仅供人工核实）"`
 	FeeType  string `json:"feeType" jsonschema:"费用类型（必填）：electricity（电费）/ tower_lease（铁塔租费）/ repair（修理费）/ maintenance（综维费）"`
 	Year     *int   `json:"year" jsonschema:"年份（必填，2000–2100）"`
 	Month    *int   `json:"month,omitempty" jsonschema:"月份（可选 1–12，缺省整年各月）"`

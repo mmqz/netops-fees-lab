@@ -951,6 +951,7 @@ export const RISK_SCENARIO_SPIKE = '电费环比异常上涨';
 export const RISK_SCENARIO_OUTLIER = '同类站月度金额离群';
 export const RISK_SCENARIO_UNLINKED = '零资源计费';
 export const RISK_SCENARIO_IDLE_BILLING = '有费无量';
+export const RISK_SCENARIO_MISSING_BILLING = '有量无费';
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

@@ -82,6 +82,8 @@ func TestRiskPresetsDuck(t *testing.T) {
 	// resource side for the cross-layer scenarios
 	seedLinkResource(t, db, "res_retired_site", "RETIRED-SITE", "停用")
 	seedLinkResource(t, db, "res_active_site", "ACTIVE-SITE", "在网")
+	// #118: the missing-billing mirror — June points, NO bills at all.
+	seedLinkResource(t, db, "res_unbilled_site", "UNBILLED-SITE", "在网")
 	if err := db.Do(ctx, func(tx *repo.Tx) error {
 		return tx.FeeSiteLinks.InsertProposal(ctx, domain.FeeSiteLink{
 			ID: "fsl_pending_site", FeeSiteCode: "PENDING-SITE", ResourceID: "res_active_site",
@@ -271,8 +273,38 @@ func TestRiskPresetsDuck(t *testing.T) {
 		t.Fatalf("idle-billing month-5 = %+v (err %v), want the honest empty (no linked-site May bills)", res.Clues, err)
 	}
 
+	// ---- scenario 8: missing-billing (cross-layer, #118) ----
+	// UNBILLED-SITE's resource carries June points while the fee face has
+	// no rows for the code at all — the mirror asymmetry fires exactly
+	// once. ACTIVE-SITE has June points too but IS billed (silent);
+	// RETIRED-SITE is outside the universe (retired = not-billed is the
+	// correct state) and pointness-free anyway; PENDING-SITE's link is not
+	// confirmed (the human has not ruled yet).
+	seedMetricPoints(t, db, "mbat_unbilled_site", "res_unbilled_site", "2024-06-10T00:00:00Z")
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, base)
+	if err != nil {
+		t.Fatalf("missing-billing: %v", err)
+	}
+	if res.Total != 1 || res.Clues[0].SiteCode != "UNBILLED-SITE" || res.Clues[0].Month != 6 || res.Clues[0].MetricValue != 1 {
+		t.Fatalf("missing-billing clues = %+v, want UNBILLED-SITE 2024-06 metricPoints=1", res.Clues)
+	}
+	if res.Clues[0].MetricLabel != "metricPoints" || res.Clues[0].Threshold != nil {
+		t.Errorf("missing-billing clue shape = %+v, want metricPoints + nil threshold", res.Clues[0])
+	}
+	// the zero-row evidence shape: no fee rows exist behind the clue —
+	// EvidenceTotal 0 and an EMPTY (never null, #93) anchor list.
+	if res.Clues[0].EvidenceTotal != 0 || len(res.Clues[0].Evidence) != 0 {
+		t.Errorf("missing-billing evidence = %+v (total %d), want the zero-row shape", res.Clues[0].Evidence, res.Clues[0].EvidenceTotal)
+	}
+	// single-month honest empty: no May points anywhere among the linked
+	// resources — nothing to cross-check, the answer is an empty list.
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil || res.Total != 0 {
+		t.Fatalf("missing-billing month-5 = %+v (err %v), want the honest empty (no May points)", res.Clues, err)
+	}
+
 	// ---- determinism: re-run everything, byte-identical clue sets ----
-	for _, sc := range []RiskScenario{RiskDuplicateSettlement, RiskLedgerMismatch, RiskSpike, RiskOutlier} {
+	for _, sc := range []RiskScenario{RiskDuplicateSettlement, RiskLedgerMismatch, RiskSpike, RiskOutlier, RiskMissingBilling} {
 		q := base
 		if sc == RiskOutlier {
 			q.Month = 5
