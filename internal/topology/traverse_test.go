@@ -490,3 +490,61 @@ func setRunState(t *testing.T, db *repo.DB, id string, state domain.RunState, ts
 		t.Fatalf("UpsertStatus(%s, %s): %v", id, state, err)
 	}
 }
+
+// TestDeepestNodeTiebreaking pins §10.3's canonical-path resolution —
+// the documented ladder max depth → lowest layer → lowest type →
+// lowest natural key. The ladder is what makes "the" root→deepest path
+// deterministic; a silent reorder (say, layer before depth) would
+// change the canonical path of every tie case without any other test
+// noticing.
+func TestDeepestNodeTiebreaking(t *testing.T) {
+	mk := func(id string, layer, depth int, typ, key string) *visitState {
+		return &visitState{info: NodeInfo{ID: id, Type: domain.ResourceType(typ), NaturalKey: key}, layer: layer, depth: depth}
+	}
+
+	t.Run("empty answers nil", func(t *testing.T) {
+		if got := deepestNode(map[string]*visitState{}); got != nil {
+			t.Fatalf("deepestNode({}) = %v, want nil", got)
+		}
+	})
+
+	t.Run("depth beats layer", func(t *testing.T) {
+		visited := map[string]*visitState{
+			"shallow-low-layer": mk("shallow-low-layer", 1, 2, "site", "S"),
+			"deep-high-layer":   mk("deep-high-layer", 6, 3, "device", "D"),
+		}
+		if got := deepestNode(visited); got.info.ID != "deep-high-layer" {
+			t.Fatalf("picked %s, want the deeper node regardless of layer", got.info.ID)
+		}
+	})
+
+	t.Run("depth tie resolves to lowest layer", func(t *testing.T) {
+		visited := map[string]*visitState{
+			"l5": mk("l5", 5, 3, "device", "A"),
+			"l2": mk("l2", 2, 3, "device", "Z"),
+		}
+		if got := deepestNode(visited); got.info.ID != "l2" {
+			t.Fatalf("picked %s, want the lowest layer among equal depth", got.info.ID)
+		}
+	})
+
+	t.Run("depth+layer tie resolves to lowest type", func(t *testing.T) {
+		visited := map[string]*visitState{
+			"device": mk("device", 2, 3, "device", "Z"),
+			"board":  mk("board", 2, 3, "board", "A"),
+		}
+		if got := deepestNode(visited); got.info.ID != "board" {
+			t.Fatalf("picked %s, want the lowest type among equal depth+layer", got.info.ID)
+		}
+	})
+
+	t.Run("full tie resolves to lowest natural key", func(t *testing.T) {
+		visited := map[string]*visitState{
+			"beta":  mk("beta", 2, 3, "device", "DEV-B"),
+			"alpha": mk("alpha", 2, 3, "device", "DEV-A"),
+		}
+		if got := deepestNode(visited); got.info.ID != "alpha" {
+			t.Fatalf("picked %s, want the lowest natural key as the last tiebreak", got.info.ID)
+		}
+	})
+}

@@ -428,3 +428,20 @@ func countResources(t *testing.T, db *repo.DB, typ domain.ResourceType) int {
 	}
 	return len(rows)
 }
+
+// TestNoMatchingTemplateErrorMessages pins both refusal codes'
+// operator-facing text (the CLI surfaces Error() verbatim): the
+// no-importable-sheet variant names its code, the fingerprint variant
+// lists the unmatched sheets.
+func TestNoMatchingTemplateErrorMessages(t *testing.T) {
+	e := &NoMatchingTemplateError{Code: AutoRefusalNoImportSheets}
+	if msg := e.Error(); !strings.Contains(msg, "no_import_sheets") || strings.Contains(msg, "fingerprint") {
+		t.Errorf("no_import_sheets message = %q, want its code and no fingerprint text", msg)
+	}
+
+	e2 := &NoMatchingTemplateError{Code: "no_matching_template", UnmatchedSheets: []string{"SheetA", "SheetB"}}
+	msg := e2.Error()
+	if !strings.Contains(msg, "no_matching_template") || !strings.Contains(msg, "SheetA") || !strings.Contains(msg, "SheetB") {
+		t.Errorf("no_matching_template message = %q, want the code and both unmatched sheet names", msg)
+	}
+}
