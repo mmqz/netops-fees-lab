@@ -1,0 +1,13 @@
+# 统一行尾（#124 的反复伤：api.md 的 CRLF 检出骗过文档门禁、
+# #118 的 README CRLF——同一件事栽两次就该在仓库层堵死）。
+# 文本文件一律 LF 进库、LF 检出：Windows 工作区与门禁读到的字节
+# 完全一致，Go/TS/文档生态对 LF 零障碍。
+* text=auto eol=lf
+
+# 二进制：禁掉任何转换/合并尝试。
+*.png binary
+*.xlsx binary
+*.gz binary
+*.db binary
+*.parquet binary
+*.wasm binary

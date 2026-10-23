@@ -76,8 +76,16 @@ func TestAPIMDocHeadingsMatchRouteTable(t *testing.T) {
 	// parse the method headings: ^#{2,4} METHOD /path(…)— api.md uses ##
 	// and ### levels for route sections; deeper levels and prose lists
 	// never open a line with a bare METHOD + /-path the regex captures.
+	// #124: a Windows checkout (core.autocrlf) hands this file over with
+	// CRLF line endings — splitting on "\n" leaves the trailing "\r" on
+	// the LAST cell of the line, and a path-only heading (no " — title"
+	// suffix for the character class to stop at) captured "/api/health\r":
+	// the route was reported missing AND dead in the same breath. Trim
+	// the CR here AND keep it out of the class — both, so either defense
+	// alone survives a future edit of the other.
 	doc := make(map[string]bool)
 	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimRight(line, "\r")
 		m := apiDocHeading.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -125,5 +133,44 @@ func TestAPIMDocHeadingsMatchRouteTable(t *testing.T) {
 // apiDocHeading matches one api.md route section heading, capturing the
 // METHOD and the bare path (query strings are contract detail, not
 // identity; the " — title" suffix is prose). \x60 is a backtick — the
-// heading path never contains one, but the character class must stop there.
-var apiDocHeading = regexp.MustCompile("^#{2,4} (GET|POST|PUT|DELETE|PATCH) ([^ ?\\x60—]+)")
+// heading path never contains one, but the character class must stop
+// there. \r is excluded for the #124 CRLF checkout shape (the caller
+// trims it too — belt and braces).
+var apiDocHeading = regexp.MustCompile("^#{2,4} (GET|POST|PUT|DELETE|PATCH) ([^ ?\\x60—\\r]+)")
+
+// TestAPIDocHeadingCRProof is the #124 self-check: a Windows checkout
+// (core.autocrlf) hands api.md over with CRLF endings, and the heading
+// extraction must never capture a trailing CR into the path — the
+// "\r" would make the same route appear BOTH missing and dead, a
+// self-contradictory verdict that itself should smell like gate bugs.
+func TestAPIDocHeadingCRProof(t *testing.T) {
+	lines := []string{
+		"## GET /api/health\r",                  // path-only heading: the #124 victim shape
+		"### POST /api/fees/imports — 费用数据导入\r", // titled heading: the class stops at "—" anyway
+		"#### PUT /api/x?query=1\r",             // query string: identity strips at ?
+		"not a heading at all\r",
+	}
+	got := make(map[string]bool)
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if m := apiDocHeading.FindStringSubmatch(line); m != nil {
+			if strings.Contains(m[2], "\r") {
+				t.Errorf("captured path %q carries a CR — the gate would report the route missing AND dead", m[2])
+			}
+			got[m[1]+" "+m[2]] = true
+		}
+	}
+	want := map[string]bool{
+		"GET /api/health":        true,
+		"POST /api/fees/imports": true,
+		"PUT /api/x":             true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("extracted %v, want %v", got, want)
+	}
+	for key := range want {
+		if !got[key] {
+			t.Errorf("extraction missing %q (got %v)", key, got)
+		}
+	}
+}
