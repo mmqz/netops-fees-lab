@@ -30,7 +30,9 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 | 工具 | 类别 | 一句话职责 |
 | --- | --- | --- |
 | `resource_search` | 只读 | 检索导入资源（P1，不变） |
-| `fee_risks` | 只读分析 | 费用风险六场景查询（#58 阶段 5：场景+费用类型+账期→线索+行级证据锚点；阈值恒用治理默认值，AI 不可调参；默认构建未编译引擎时明确报错） |
+| `fee_risks` | 只读分析 | 费用风险八场景查询（#58 阶段 5 + #114 场景 7 + #118 场景 8：场景+费用类型+账期→线索+行级证据锚点+人工裁定标记；阈值恒用治理默认值，AI 不可调参；已驳回线索默认隐藏并计数；默认构建未编译引擎时明确报错） |
+| `fee_totals` | 只读分析 | 费用汇总查询（#120：费用类型+账期→各站址合计，整数分；与 HTTP query/totals 同形；limit 缺省 20 上限 50） |
+| `fee_duplicates` | 只读分析 | 跨批次重复结算候选查询（#120：同形 HTTP query/duplicates；候选供人工核对，账单存在 ≠ 认定结论） |
 | `graph_traverse` | 只读分析 | 纵向穿透（§10.3 层序 BFS，down/up/both） |
 | `graph_impact` | 只读分析 | 根因候选 + 影响面分类（§10.5/§10.6） |
 | `graph_context` | 只读分析 | 一站式分析上下文（详情 + 邻接 + 最新指标 + 异常） |
@@ -93,7 +95,7 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 
 ## 3. 安全边界（供宿主审计）
 
-- MCP 工具面 = 11 个（上表；`TestMCPToolRegistry` 断言恰好 11 个、无第十二个；数量另由 `TestMCPToolCountMatchesFactsFile` 对照 [facts.md](facts.md) 机读事实源钉死）；`lab_create_workspace` / `run_sql` 等名字 → 协议级 unknown-tool 错误；
+- MCP 工具面 = 13 个（上表；`TestMCPToolRegistry` 断言恰好 13 个、无第十四个；数量另由 `TestMCPToolCountMatchesFactsFile` 对照 [facts.md](facts.md) 机读事实源钉死）；`lab_create_workspace` / `run_sql` 等名字 → 协议级 unknown-tool 错误；
 - 仿真写只能经 `lab_apply_ops` 的 10 个类型化前向操作（`restore_*` 引擎内部码被 schema + 引擎双重拒绝）；AI 的自然语言**永不**成为仿真状态；
 - CLI 无 SQL/Shell/SSH 子命令；`import` 只消费 xlsx + 映射 JSON；
 - 无生产网络凭证；仓库数据除 `samples/` 真实样例（项目所有者授权、仅限本私有仓库，见 [samples/README.md](../samples/README.md)）外均为合成测试数据——工具面接触不到 `samples/` 目录本身（MCP 无文件工具，导入须经用户主动走 HTTP/CLI 上传）。

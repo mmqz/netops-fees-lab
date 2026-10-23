@@ -150,8 +150,9 @@ netopslab fees --db <path> --data <dir> risks <scenario> --type <t> --year <Y> [
 
 ### 消费面（阶段 5，v0.15.0——三通道同契约）
 
-- **Web 工作台 `/fees`**（嵌入式 UI 导航「费用分析」）：导入（multipart，201/200 双形态 toast）/ 批次列表 / 回滚（ConfirmDialog）；风险六场景钻取（线索表 + 行展开证据锚点 + `excluded` 计数，整数分自动 /100 展示；501 `engine_not_built` 渲染为 Docker/WSL2 引导横幅）；**关联人工确认通道**（重新扫描六计数回执 + 状态/级别筛选 pending 优先 + 确认/驳回——驳回走 ConfirmDialog，配对不再自动复提 + 审计保留）。
+- **Web 工作台 `/fees`**（嵌入式 UI 导航「费用分析」）：导入（multipart，201/200 双形态 toast）/ 批次列表 / 回滚（ConfirmDialog）；风险八场景钻取（线索表 + 行展开证据锚点 + `excluded`/`dismissed` 计数 + 人工裁定按钮与决策 chip + 审计开关，整数分自动 /100 展示；501 `engine_not_built` 渲染为 Docker/WSL2 引导横幅）；**关联人工确认通道**（重新扫描六计数回执 + 状态/级别筛选 pending 优先 + 确认/驳回——驳回走 ConfirmDialog，配对不再自动复提 + 审计保留）。
 - **MCP `fee_risks`**（tool #11，只读）：跑同一固定预设，但阈值恒用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网）——**AI 不可调统计阈值**（调参是人类通道 HTTP/CLI）；场景/费用类型/账期/条数（≤50）四参数；wire shape = HTTP shape（`fees.RiskResult` 原样透传）。工具清单见 [teleagent-integration.md](teleagent-integration.md)。
+- **MCP `fee_totals` / `fee_duplicates`**（tool #12/#13，只读，#120）：聚合面对 AI 开放——各站址账期合计与跨批次重复候选，wire shape = HTTP shape（同信封原样透传）；条数治理边界与 `fee_risks` 同款（缺省 20、上限 50，比 HTTP 的 500 更紧）；`fee_totals` 是「这个站今年电费多少」类基础问句的入口，`fee_risks` 的线索下钻配对面。工具清单见 [teleagent-integration.md](teleagent-integration.md)。
 - **CLI**：见 §6/§8 CLI 段。
 
 ## 9. 路线（#58 阶段表 —— 终局，跟踪 issue 已关闭）

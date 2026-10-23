@@ -29,14 +29,22 @@ type fakeRiskEngine struct {
 	periodTotals []SitePeriodTotal
 	siteTotals   []SiteTotal
 	evidence     map[EvidenceKey][]EvidenceAnchor
+	totals       []TotalsRow
+	duplicates   []DuplicateRow
 }
 
 func (f *fakeRiskEngine) Available() bool { return true }
 func (f *fakeRiskEngine) Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
-	return nil, errors.New("not used")
+	if f.totals == nil {
+		return nil, errors.New("not used")
+	}
+	return f.totals, nil
 }
 func (f *fakeRiskEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
-	return nil, errors.New("not used")
+	if f.duplicates == nil {
+		return nil, errors.New("not used")
+	}
+	return f.duplicates, nil
 }
 func (f *fakeRiskEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("not used")
@@ -708,4 +716,105 @@ func TestDecideClueValidation(t *testing.T) {
 	if err != nil || len(items) != 0 {
 		t.Fatalf("clamped list err = %v items = %d (want empty, fresh ledger)", err, len(items))
 	}
+}
+
+// TestQueryPresetsViaService pins #120's service wrappers: validation
+// (closed fee type, period bounds, positive limit) precedes the engine
+// gate; the unavailable engine answers the honest refusal; the available
+// one returns the rows through the service's own analysis dir.
+func TestQueryPresetsViaService(t *testing.T) {
+	svc, _, _ := newService(t)
+	ctx := context.Background()
+	engine := &fakeRiskEngine{
+		totals:     []TotalsRow{{SiteCode: "S-1", Rows: 3, TotalCents: 123456}},
+		duplicates: []DuplicateRow{{SiteCode: "S-2", Year: 2024, Month: 5, Batches: 2, Rows: 2, TotalCents: 20000}},
+	}
+
+	// validation precedes the engine gate (the Risks entry shape).
+	for _, tc := range []struct {
+		call   string
+		callFn func() error
+		want   string
+	}{
+		{"totals bogus type", func() error {
+			_, err := svc.QueryTotals(ctx, engine, FeeType("bogus"), 2024, 5, 20)
+			return err
+		}, "未知费用类型"},
+		{"duplicates bogus type", func() error {
+			_, err := svc.QueryDuplicates(ctx, engine, FeeType("bogus"), 2024, 5, 20)
+			return err
+		}, "未知费用类型"},
+		{"totals bad year", func() error {
+			_, err := svc.QueryTotals(ctx, engine, FeeTypeElectricity, 1999, 0, 20)
+			return err
+		}, "不在合法范围"},
+		{"totals bad month", func() error {
+			_, err := svc.QueryTotals(ctx, engine, FeeTypeElectricity, 2024, 13, 20)
+			return err
+		}, "不在合法范围"},
+		{"duplicates zero limit", func() error {
+			_, err := svc.QueryDuplicates(ctx, engine, FeeTypeElectricity, 2024, 5, 0)
+			return err
+		}, "limit 必须是"},
+	} {
+		if err := tc.callFn(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error = %v, want containing %q", tc.call, err, tc.want)
+		}
+	}
+
+	// the unavailable engine refuses honestly, validation already passed
+	// (the default build's shape; the duckdb-tagged tests own the real
+	// engine).
+	_, err := svc.QueryTotals(ctx, unavailableEngine{}, FeeTypeElectricity, 2024, 5, 20)
+	if !errors.Is(err, ErrEngineNotBuilt) {
+		t.Fatalf("totals on unavailable engine = %v, want ErrEngineNotBuilt", err)
+	}
+	_, err = svc.QueryDuplicates(ctx, unavailableEngine{}, FeeTypeElectricity, 2024, 5, 20)
+	if !errors.Is(err, ErrEngineNotBuilt) {
+		t.Fatalf("duplicates on unavailable engine = %v, want ErrEngineNotBuilt", err)
+	}
+
+	// the available engine returns the rows.
+	rows, err := svc.QueryTotals(ctx, engine, FeeTypeElectricity, 2024, 5, 20)
+	if err != nil || len(rows) != 1 || rows[0].SiteCode != "S-1" || rows[0].TotalCents != 123456 {
+		t.Fatalf("QueryTotals = %+v (err %v)", rows, err)
+	}
+	dups, err := svc.QueryDuplicates(ctx, engine, FeeTypeElectricity, 2024, 5, 20)
+	if err != nil || len(dups) != 1 || dups[0].Batches != 2 {
+		t.Fatalf("QueryDuplicates = %+v (err %v)", dups, err)
+	}
+}
+
+// unavailableEngine implements the QueryEngine face with Available()
+// false — the default build's shape (the duckdb-tagged tests own the
+// real engine).
+type unavailableEngine struct{}
+
+func (unavailableEngine) Available() bool { return false }
+func (unavailableEngine) Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
+	return nil, errors.New("unreachable")
+}
+func (unavailableEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
+	return nil, errors.New("unreachable")
+}
+func (unavailableEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, errors.New("unreachable")
+}
+func (unavailableEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, errors.New("unreachable")
+}
+func (unavailableEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, errors.New("unreachable")
+}
+func (unavailableEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+	return nil, 0, errors.New("unreachable")
+}
+func (unavailableEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {
+	return nil, errors.New("unreachable")
+}
+func (unavailableEngine) SiteTotalsAll(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SiteTotal, error) {
+	return nil, errors.New("unreachable")
+}
+func (unavailableEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
+	return nil, errors.New("unreachable")
 }

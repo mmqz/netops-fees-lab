@@ -228,12 +228,13 @@ func TestMCPServerResourceSearch(t *testing.T) {
 }
 
 // TestMCPToolRegistry is the §11 SEC-P2 acceptance test: tools/list exposes
-// EXACTLY the eleven contract tools — resource_search + lab_apply_ops +
+// EXACTLY the thirteen contract tools — resource_search + lab_apply_ops +
 // lab_run_checks + lab_diff_undo + lab_checkpoint (PROJECT_BRIEF_P2 §8) +
 // graph_traverse + graph_impact + graph_context + alerts_query +
-// metrics_query (v0.9 R4) + fee_risks (v0.15, #58 stage 5) —
-// and nothing else: no SQL, shell, file or production tools, and no tool
-// that could create or delete a workspace (§1.4). The COUNT is additionally
+// metrics_query (v0.9 R4) + fee_risks (v0.15, #58 stage 5) + fee_totals /
+// fee_duplicates (#120) — and nothing else: no SQL, shell, file or
+// production tools, and no tool that could create or delete a workspace
+// (§1.4). The COUNT is additionally
 // pinned against docs/facts.md by TestMCPToolCountMatchesFactsFile (#110 —
 // the facts-file gate), so the number quoted in prose can never drift from
 // the registry silently.
@@ -261,9 +262,9 @@ func TestMCPToolRegistry(t *testing.T) {
 	// The eleven contract tools, SORTED for comparison (§8 pins the set,
 	// the registry order is unspecified). #58 stage 5 added fee_risks.
 	want := []string{
-		"alerts_query", "fee_risks", "graph_context", "graph_impact", "graph_traverse",
-		"lab_apply_ops", "lab_checkpoint", "lab_diff_undo", "lab_run_checks",
-		"metrics_query", "resource_search",
+		"alerts_query", "fee_duplicates", "fee_risks", "fee_totals", "graph_context",
+		"graph_impact", "graph_traverse", "lab_apply_ops", "lab_checkpoint",
+		"lab_diff_undo", "lab_run_checks", "metrics_query", "resource_search",
 	}
 	names := make([]string, 0, len(list.Tools))
 	for _, tool := range list.Tools {
@@ -279,8 +280,8 @@ func TestMCPToolRegistry(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 11 {
-		t.Fatalf("tools/list exposes %d tools (%v), want exactly the eleven contract tools %v", len(names), names, want)
+	if len(names) != 13 {
+		t.Fatalf("tools/list exposes %d tools (%v), want exactly the thirteen contract tools %v", len(names), names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {
@@ -987,6 +988,31 @@ func TestMCPFeeRisks(t *testing.T) {
 		})
 		if !strings.Contains(got, "分析查询引擎未编译") {
 			t.Errorf("fee_risks(%s) on default build error = %q, want the engine-not-built refusal", sc, got)
+		}
+	}
+
+	// #120: the two query tools join the same refusal contract — and their
+	// input validation fires BEFORE the engine gate (bad fee type / year /
+	// month / limit refuse with their own texts).
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+		want string
+	}{
+		{feeTotalsName, map[string]any{"feeType": "electricity", "year": 2024}, "分析查询引擎未编译"},
+		{feeDuplicatesName, map[string]any{"feeType": "electricity", "year": 2024}, "分析查询引擎未编译"},
+		{feeTotalsName, map[string]any{"feeType": "bogus", "year": 2024}, "未知费用类型"},
+		// the SDK's schema validation refuses the missing required year
+		// BEFORE the handler (its own vocabulary); the in-handler check
+		// stays as defense in depth.
+		{feeTotalsName, map[string]any{"feeType": "electricity"}, "year"},
+		{feeTotalsName, map[string]any{"feeType": "electricity", "year": 1999}, "2000–2100"},
+		{feeTotalsName, map[string]any{"feeType": "electricity", "year": 2024, "month": 13}, "1–12"},
+		{feeDuplicatesName, map[string]any{"feeType": "electricity", "year": 2024, "limit": 0}, "limit 必须是"},
+	} {
+		got := callToolError(t, session, tc.tool, tc.args)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%s(%v) error = %q, want containing %q", tc.tool, tc.args, got, tc.want)
 		}
 	}
 }

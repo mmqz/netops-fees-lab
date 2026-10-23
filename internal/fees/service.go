@@ -738,6 +738,47 @@ func (s *Service) DismissLink(ctx context.Context, id string) (domain.FeeSiteLin
 	return s.db.FeeSiteLinks.GetByID(ctx, id)
 }
 
+// QueryTotals runs the per-site totals preset against the service's own
+// analysis dir (#120): the MCP face's entry into the aggregate half of
+// the fee domain. The dir knowledge stays in ONE place — the HTTP face
+// joins dataDir/analysis itself (unchanged), the MCP face goes through
+// here and never learns a path. Validation mirrors Risks: the closed
+// fee-type enum, the period bounds, then the honest engine gate.
+func (s *Service) QueryTotals(ctx context.Context, engine QueryEngine, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
+	if _, err := ParseFeeType(string(feeType)); err != nil {
+		return nil, err
+	}
+	if !validQueryPeriod(year, month) {
+		return nil, fmt.Errorf("fees: 账期 %04d-%02d 不在合法范围", year, month)
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("fees: limit 必须是 ≥ 1 的整数，收到 %d", limit)
+	}
+	if !engine.Available() {
+		return nil, ErrEngineNotBuilt
+	}
+	return engine.Totals(ctx, s.analysisDir(), feeType, year, month, limit)
+}
+
+// QueryDuplicates runs the cross-batch duplicate-settlement preset the
+// same way (#120) — candidates with per-batch counters, never payment-
+// duplicate verdicts (the same 账单存在 ≠ 认定结论 doctrine).
+func (s *Service) QueryDuplicates(ctx context.Context, engine QueryEngine, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
+	if _, err := ParseFeeType(string(feeType)); err != nil {
+		return nil, err
+	}
+	if !validQueryPeriod(year, month) {
+		return nil, fmt.Errorf("fees: 账期 %04d-%02d 不在合法范围", year, month)
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("fees: limit 必须是 ≥ 1 的整数，收到 %d", limit)
+	}
+	if !engine.Available() {
+		return nil, ErrEngineNotBuilt
+	}
+	return engine.Duplicates(ctx, s.analysisDir(), feeType, year, month, limit)
+}
+
 // The clue-decision ledger's pagination bounds — PROJECT_BRIEF §9 (limit
 // defaults to 20, clamps at 100), the same contract as the attribute
 // change list.
