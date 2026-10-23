@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/parquet-go/parquet-go"
 )
@@ -313,6 +314,42 @@ func quarantinedFiles(analysisDir, batchID string) ([]rollbackPlan, error) {
 	return out, nil
 }
 
+// quarantineBackoff is the small bounded backoff between quarantine-rename
+// retries (see renameWithRetry). Total worst added latency is 125ms — an
+// operator rollback tolerates that; a FAILING rollback does not get better
+// by failing faster.
+var quarantineBackoff = []time.Duration{25 * time.Millisecond, 100 * time.Millisecond}
+
+// renameWithRetrySeam is os.Rename as a var so tests can inject the
+// Windows-only transient (a sharing violation no Linux box can produce
+// natively — see TestQuarantineFileRidesTransientRename).
+var renameWithRetrySeam = os.Rename
+
+// renameWithRetry renames src→dst with a bounded retry for the Windows
+// sharing-violation window (#124's class, rollback edition): on POSIX,
+// renaming a file some reader has open Just Works (the reader keeps the
+// old inode); on Windows the same rename answers ERROR_SHARING_VIOLATION /
+// ACCESS_DENIED while a concurrent fee query's DuckDB read_parquet handle
+// holds the live file open. Those queries are millisecond-scale, so a
+// couple of tiny-backoff retries rides out the overlap. Rename's other
+// failure classes (real faults: permissions, disk state) do not improve
+// with retries and pass through after the bounded attempts — the caller's
+// abort/undo semantics (#107) then handle them exactly as before. ENOENT
+// fails fast with no retry burn: a vanished source is a semantic answer
+// (the idempotence dance treats it as success), never a transient.
+func renameWithRetry(rename func(string, string) error, backoff []time.Duration, src, dst string) error {
+	var err error
+	for attempt := 0; ; attempt++ {
+		if err = rename(src, dst); err == nil || os.IsNotExist(err) {
+			return err
+		}
+		if attempt >= len(backoff) {
+			return err
+		}
+		time.Sleep(backoff[attempt])
+	}
+}
+
 // quarantineFile executes one plan step (live → quarantine). A missing
 // source is tolerated — the file is already gone, which is where the
 // delete wants it (the idempotence RemoveParquetFiles always had); any
@@ -321,7 +358,15 @@ func quarantineFile(p rollbackPlan) error {
 	if err := os.MkdirAll(filepath.Dir(p.quarantine), 0o755); err != nil {
 		return fmt.Errorf("fees: 创建回滚隔离目录: %w", err)
 	}
-	if err := os.Rename(p.live, p.quarantine); err != nil {
+	// renameWithRetry (not the raw os.Rename): on Windows a concurrent
+	// fee query can hold the live file open for the milliseconds this
+	// dance overlaps with it — the #124 storeUpload race, seen from the
+	// rollback side. (The reverse move, restoreQuarantinedFile, renames
+	// INTO a slot no query can glob — the quarantine tree sits outside
+	// the read_parquet pattern — and the commit rename in
+	// writeParquetFiles targets a fresh batch-<id> path, so neither
+	// shares this window; both keep their plain os.Rename.)
+	if err := renameWithRetry(renameWithRetrySeam, quarantineBackoff, p.live, p.quarantine); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}

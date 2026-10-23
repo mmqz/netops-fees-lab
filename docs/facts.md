@@ -37,7 +37,7 @@
 
 | key | 当前值 | 口径（复算命令，仓库根目录执行） |
 | --- | --- | --- |
-| `go-top-level-tests` | 655 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
+| `go-top-level-tests` | 658 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
 | `go-test-packages` | 25 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
 | `vitest-tests` | 188 | `cd web && npx vitest run` 的 `Tests` 计数（13 文件） |
 
