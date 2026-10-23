@@ -98,8 +98,17 @@ type ImportSummary struct {
 	ExistingBatch    string   `json:"existingBatch,omitempty"`
 }
 
-// Import runs the full pipeline for one file. The order of operations is
-// the crash-safety design:
+// Import runs the full pipeline for one file the way it always worked
+// (#125 keeps this channel byte-compatible): the operator DECLARES the
+// fee type, the first sheet (xlsx) or the file itself (CSV) is the data.
+// New since #125: the declared type is cross-checked against the sheet's
+// own evidence (sheet name + headers) — a declared tower_lease on a sheet
+// named 电费 refuses instead of polluting the type's ledger; and a file
+// already imported in multi-sheet mode refuses (the two modes have
+// different idempotency keys by construction — importing both would
+// double-count the data silently, the exact pollution #125 closes).
+//
+// The crash-safety design lives in importSheet (both channels share it):
 //
 //  1. hash + read the file (nothing written yet);
 //  2. pre-flight idempotency check (completed batch with the same key →
@@ -135,27 +144,60 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if _, err := SnapshotExt(name); err != nil {
 		return ImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
 	}
-	headers, rows, err := ReadFeeFile(opts.Path)
+	sheet, err := ReadFeeFileFirst(opts.Path)
 	if err != nil {
 		// #104: a bad file shape is the operator's to fix — 422 class, not a
 		// server fault. The reader's texts are the CLI contract already.
 		return ImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
 	}
 
+	// #125 plan C: the declared type must not contradict the sheet's own
+	// evidence (a sheet named 电费 with an 电费(元) amount column declared
+	// as tower_lease used to import the electricity rows INTO the tower
+	// ledger — same file, re-typed, double-counted).
+	if err := crossCheckDeclaredType(opts.FeeType, sheet); err != nil {
+		return ImportSummary{}, err
+	}
+
+	// #125 mode guard: this IS the single-sheet channel, so the mode
+	// being entered is single — the guard then refuses when the same
+	// file has MULTI-sheet batches (sheet names in the key, invisible
+	// to this channel's idempotency check).
+	if err := s.refuseModeConflict(ctx, sha, name, singleSheetBatch); err != nil {
+		return ImportSummary{}, err
+	}
+
+	// The single-sheet channel keeps the pre-v34 batch coordinate (sheet
+	// '') so its idempotency keys survive the migration byte-for-byte;
+	// the runtime cross-check above still USES the sheet's name.
+	return s.importSheet(ctx, opts, sheet, sha, name, "")
+}
+
+// importSheet runs steps 2-7 for ONE sheet's data. sheetKey is the
+// idempotency/evidence sheet coordinate: "" for the single-sheet channel
+// (CSV and pre-#125 compatibility) and the sheet's own name for the
+// multi-sheet channel; the evidence's source_file gains a "#<sheet>"
+// suffix exactly when sheetKey is non-empty (rows of different sheets
+// share sheet-local row numbers — the anchor must name its sheet).
+func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet SheetData,
+	sha, name, sheetKey string) (ImportSummary, error) {
+
+	rows := sheet.Rows
+
 	// 2. mapping resolution (explicit mapping wins; recognizer fills the
 	// gaps; siteCode + amount are mandatory).
 	mapping := opts.Mapping
 	if mapping == nil {
-		_, suggested := Recognize(headers)
+		_, suggested := Recognize(sheet.Headers)
 		mapping = suggested
 	}
 	if mapping["siteCode"] == "" || mapping["amount"] == "" {
-		return ImportSummary{}, refusef("缺少必需列映射（siteCode / amount）——请提供映射 JSON 或修正表头；识别到的表头：%v", headers)
+		return ImportSummary{}, refusef("缺少必需列映射（siteCode / amount）——请提供映射 JSON 或修正表头；识别到的表头：%v", sheet.Headers)
 	}
 	canonical := FeeMapping{FeeType: opts.FeeType, Columns: mapping}.CanonicalMapping()
 
 	// 3. pre-flight idempotency.
-	existing, preflightErr := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical)
+	existing, preflightErr := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical, sheetKey)
 	if preflightErr != nil && !errors.Is(preflightErr, domain.ErrNotFound) {
 		// #104: a real DB failure used to read as "no duplicate" and the
 		// import proceeded — the idempotency guarantee silently void.
@@ -181,7 +223,7 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	// leaves a failed row + (at worst) GC-able orphans.
 	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
 		return tx.FeeBatches.Create(ctx, FeeBatch{
-			ID: batchID, WorkbookName: name, SHA256: sha, FeeType: opts.FeeType,
+			ID: batchID, WorkbookName: name, SHA256: sha, Sheet: sheetKey, FeeType: opts.FeeType,
 			FeeYear: opts.Year, FeeMonth: opts.Month, SnapshotPath: snapRel, Mapping: canonical,
 			Status: FeeStatusFailed, CreatedAt: s.clock(),
 		})
@@ -190,17 +232,23 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	}
 
 	// 5. normalize.
-	siteIdx := headerIndex(headers, mapping["siteCode"])
-	amountIdx := headerIndex(headers, mapping["amount"])
-	periodIdx := headerIndex(headers, mapping["period"])
-	dateIdx := headerIndex(headers, mapping["date"])
+	siteIdx := headerIndex(sheet.Headers, mapping["siteCode"])
+	amountIdx := headerIndex(sheet.Headers, mapping["amount"])
+	periodIdx := headerIndex(sheet.Headers, mapping["period"])
+	dateIdx := headerIndex(sheet.Headers, mapping["date"])
 	if siteIdx < 0 || amountIdx < 0 {
-		errMsg := fmt.Sprintf("映射列不在表头中：siteCode=%q amount=%q（表头：%v）", mapping["siteCode"], mapping["amount"], headers)
+		errMsg := fmt.Sprintf("映射列不在表头中：siteCode=%q amount=%q（表头：%v）", mapping["siteCode"], mapping["amount"], sheet.Headers)
 		_ = s.db.FeeBatches.MarkFailed(ctx, batchID, len(rows), 0, errMsg)
 		return ImportSummary{}, refusef("%s", errMsg)
 	}
 
 	sourceFile := SnapshotSourceFile(name, sha)
+	if sheetKey != "" {
+		// Multi-sheet evidence: rows of different sheets share sheet-local
+		// numbers — the anchor names its sheet or it points at the wrong
+		// ledger page.
+		sourceFile += "#" + sheetKey
+	}
 	normalized := make([]NormalizedRow, 0, len(rows))
 	var importErrs []*ImportError
 	for _, row := range rows {
@@ -245,7 +293,7 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 		if err == repo.ErrFeeIdempotentDuplicate {
 			_ = RemoveParquetFiles(filePaths(s.analysisDir(), files))
 			_ = s.db.FeeBatches.MarkFailed(ctx, batchID, len(rows), 0, "幂等竞态：同键批次已先完成")
-			existing, gerr := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical)
+			existing, gerr := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical, sheetKey)
 			if gerr == nil {
 				return ImportSummary{
 					BatchID: existing.ID, Status: "completed", SHA256: sha,
@@ -268,6 +316,247 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 		RowsTotal: len(rows), RowsImported: len(normalized), RowsFailed: len(importErrs),
 		Files: relFiles, Errors: errs,
 	}, nil
+}
+
+// batchMode names the import channel for the mode-conflict guard: the two
+// channels give the same file DIFFERENT idempotency keys by construction
+// (sheet ” vs the sheet names), so neither can see the other through the
+// per-key duplicate check — the guard looks at the file hash instead.
+type batchMode string
+
+const (
+	singleSheetBatch batchMode = "single"
+	multiSheetBatch  batchMode = "multi"
+)
+
+// SheetsImportOptions is one multi-sheet import request (#125): the file
+// and the declared period. No fee type and no explicit mapping — each
+// sheet's type comes from its own evidence (sheet name + header markers,
+// RecognizeSheetType) and each sheet's mapping from its own header row
+// (the columns differ per sheet; one operator-pinned mapping for the whole
+// book would be wrong by construction).
+type SheetsImportOptions struct {
+	Path         string
+	OriginalName string
+	Year         int
+	Month        int
+}
+
+// SheetBatchResult is one sheet's import outcome inside the multi-sheet
+// envelope: the batch identity (sheet + feeType + batchId), the row
+// accounting, and the idempotency skip marker — the shape the issue's
+// acceptance pins (three sheets → three batches, each type correct).
+type SheetBatchResult struct {
+	Sheet            string   `json:"sheet"`
+	FeeType          string   `json:"feeType"`
+	BatchID          string   `json:"batchId"`
+	Status           string   `json:"status"`
+	RowsTotal        int      `json:"rowsTotal"`
+	RowsImported     int      `json:"rowsImported"`
+	RowsFailed       int      `json:"rowsFailed"`
+	Files            []string `json:"files,omitempty"`
+	Errors           []string `json:"errors,omitempty"`
+	SkippedDuplicate bool     `json:"skippedDuplicate"`
+	ExistingBatch    string   `json:"existingBatch,omitempty"`
+}
+
+// SheetsImportSummary is the multi-sheet envelope: the workbook identity,
+// the per-sheet batch results in workbook order, and the cosmetic sheets
+// that were skipped (named, never silently dropped — the full accounting).
+type SheetsImportSummary struct {
+	WorkbookName  string             `json:"workbookName"`
+	SHA256        string             `json:"sha256"`
+	Year          int                `json:"year"`
+	Month         int                `json:"month"`
+	Status        string             `json:"status"`
+	Batches       []SheetBatchResult `json:"batches"`
+	SkippedSheets []string           `json:"skippedSheets,omitempty"`
+}
+
+// ImportSheets runs the multi-sheet channel (#125): one workbook, one fee
+// type per sheet — the real monthly ledger shape. Every sheet with data is
+// classified from its own evidence and imported as its OWN batch (own
+// feeType, own mapping, own evidence chain with "#<sheet>" anchors, own
+// idempotency key). Nothing is silently dropped: cosmetic sheets are
+// reported by name, and a sheet that cannot be classified REFUSES THE
+// WHOLE IMPORT before any sheet lands (a partial multi-sheet import with
+// a "completed" face would be the P0's silent-drop in a new costume).
+//
+// Refusals (ErrImportRefused, all listing every offending sheet):
+//   - an unclassifiable sheet (no unique type evidence);
+//   - a sheet whose mandatory columns (siteCode/amount) cannot be mapped;
+//   - a CSV in multi-sheet mode (a CSV has one pseudo-sheet and no sheet
+//     names — the type evidence the channel exists to read is absent;
+//     the single-sheet channel with its declared type is the honest path);
+//   - a file already imported through the single-sheet channel (mode
+//     conflict — the double-count guard).
+//
+// Per-sheet outcomes are honest even mid-failure: an IO/server fault on
+// sheet N leaves sheets 1..N-1 completed (their batches stand, each
+// queryable and rollback-able), the faulting sheet's summary entry says
+// failed, and the error comes back — the caller sees exactly what landed.
+func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (SheetsImportSummary, error) {
+	if opts.Path == "" {
+		return SheetsImportSummary{}, fmt.Errorf("fees: 缺少导入文件路径")
+	}
+	if !validPeriod(opts.Year, opts.Month) {
+		return SheetsImportSummary{}, fmt.Errorf("fees: 账期 %04d-%02d 不在合法范围", opts.Year, opts.Month)
+	}
+
+	sha, err := HashFile(opts.Path)
+	if err != nil {
+		return SheetsImportSummary{}, err
+	}
+	name := opts.OriginalName
+	if name == "" {
+		name = filepath.Base(opts.Path)
+	}
+	if _, err := SnapshotExt(name); err != nil {
+		return SheetsImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
+	}
+	sheets, skipped, err := ReadFeeFileSheets(opts.Path)
+	if err != nil {
+		return SheetsImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
+	}
+	// The CSV pseudo-sheet has no name — the multi-sheet channel's whole
+	// premise (sheet names as type declarations) is absent; refuse rather
+	// than run a header-guess fallback the single-sheet channel already
+	// does better with its declared type.
+	if len(sheets) == 1 && sheets[0].Name == "" {
+		return SheetsImportSummary{}, refusef("多 sheet 导入模式不支持 CSV（CSV 没有工作表名可判定费用类型）——请用单 sheet 模式显式声明 feeType")
+	}
+
+	// Mode guard: this IS the multi-sheet channel, so the mode being
+	// entered is multi — the guard then refuses when the same file has
+	// single-sheet batches (sheet '' keys, invisible to the per-sheet
+	// idempotency check about to run).
+	if err := s.refuseModeConflict(ctx, sha, name, multiSheetBatch); err != nil {
+		return SheetsImportSummary{}, err
+	}
+
+	// Classification pre-pass: EVERY sheet must resolve (type + mandatory
+	// columns) before ANY sheet imports — the all-or-nothing refusal that
+	// makes "completed with missing data" impossible.
+	type sheetPlan struct {
+		sheet   SheetData
+		feeType FeeType
+	}
+	plans := make([]sheetPlan, 0, len(sheets))
+	var refusals []string
+	for _, sd := range sheets {
+		typ, _ := RecognizeSheetType(sd.Name, sd.Headers)
+		if typ == "" {
+			refusals = append(refusals, fmt.Sprintf("工作表 %q：无法从表名/表头唯一判定费用类型", sd.Name))
+			continue
+		}
+		_, mapping := Recognize(sd.Headers)
+		if mapping["siteCode"] == "" || mapping["amount"] == "" {
+			refusals = append(refusals, fmt.Sprintf("工作表 %q（%s）：缺少必需列映射（siteCode=%q amount=%q，表头：%v）",
+				sd.Name, typ, mapping["siteCode"], mapping["amount"], sd.Headers))
+			continue
+		}
+		plans = append(plans, sheetPlan{sheet: sd, feeType: typ})
+	}
+	if len(refusals) > 0 {
+		return SheetsImportSummary{}, refusef("多 sheet 导入被拒绝（先修复以下工作表，或从文件中移除无关工作表；本导入未写入任何数据）：%s", strings.Join(refusals, "；"))
+	}
+
+	out := SheetsImportSummary{
+		WorkbookName: name, SHA256: sha, Year: opts.Year, Month: opts.Month,
+		Status: "completed", SkippedSheets: skipped,
+	}
+	fatal := false
+	for _, p := range plans {
+		summary, err := s.importSheet(ctx, ImportOptions{
+			Path: opts.Path, OriginalName: opts.OriginalName,
+			FeeType: p.feeType, Year: opts.Year, Month: opts.Month,
+			// Mapping intentionally nil: each sheet's columns differ — the
+			// recognizer runs per sheet inside importSheet.
+		}, p.sheet, sha, name, p.sheet.Name)
+		result := SheetBatchResult{
+			Sheet: p.sheet.Name, FeeType: string(p.feeType),
+			RowsTotal: summary.RowsTotal, RowsImported: summary.RowsImported,
+			RowsFailed: summary.RowsFailed, Files: summary.Files, Errors: summary.Errors,
+			SkippedDuplicate: summary.SkippedDuplicate, ExistingBatch: summary.ExistingBatch,
+		}
+		if result.SkippedDuplicate && result.BatchID == "" {
+			result.BatchID = summary.ExistingBatch
+		} else {
+			result.BatchID = summary.BatchID
+		}
+		switch {
+		case err == nil && summary.Status == "completed":
+			result.Status = "completed"
+		case errors.As(err, new(*ErrDuplicateImport)):
+			// the informational skip: the existing completed batch IS the answer
+			result.Status = "completed"
+		case summary.Status == "failed":
+			// every row failed normalization — the sheet's batch row is the record
+			result.Status = "failed"
+			fatal = true
+		default:
+			// snapshot IO / DB / Parquet fault: the sheet did not land; earlier
+			// sheets stand, this entry tells the caller exactly that
+			result.Status = "failed"
+			result.Errors = append(result.Errors, err.Error())
+			fatal = true
+		}
+		out.Batches = append(out.Batches, result)
+	}
+	if fatal {
+		out.Status = "partial"
+		return out, refusef("多 sheet 导入部分失败（成功批次的批次号见 batches；失败原因见对应条目）")
+	}
+	return out, nil
+}
+
+// crossCheckDeclaredType refuses a declared fee type that CONTRADICTS the
+// sheet's own evidence (#125 plan C): the classifier needs score ≥ 2 — a
+// sheet-name hit alone or ≥2 header marker hits — to overrule the
+// operator; agreeing or silent evidence never refuses (the operator's
+// declaration always wins when the file says nothing).
+func crossCheckDeclaredType(declared FeeType, sheet SheetData) error {
+	recognized, score := RecognizeSheetType(sheet.Name, sheet.Headers)
+	if recognized == "" || recognized == declared || score < 2 {
+		return nil
+	}
+	return refusef("声明的费用类型 %s 与工作表自身证据矛盾（工作表 %q 的表名/表头指向 %s）——同一文件换类型重导会把 %s 的数据计入 %s 账本；请修正 feeType 或改用多 sheet 导入模式",
+		declared, sheet.Name, recognized, recognized, declared)
+}
+
+// refuseModeConflict refuses an import whose file was already imported
+// through the OTHER channel (#125): the two channels key the same data
+// differently (sheet ” vs sheet names), so both landing would double-
+// count rows the per-key idempotency check cannot see. mode is the
+// channel being ENTERED; the guard looks for completed batches of the
+// OTHER channel's shape. A refused operator has the honest paths: roll
+// back the old batches, or keep using the channel that already imported.
+func (s *Service) refuseModeConflict(ctx context.Context, sha, name string, mode batchMode) error {
+	completed, err := s.db.FeeBatches.CompletedBySHA(ctx, sha)
+	if err != nil {
+		// #104 discipline: a failed guard check must not read as "no
+		// conflict" — the guarantee would be silently void.
+		return fmt.Errorf("fees: 导入模式冲突预检: %w", err)
+	}
+	for _, b := range completed {
+		conflict := false
+		switch mode {
+		case singleSheetBatch:
+			conflict = b.Sheet != "" // multi-sheet batches exist for this file
+		case multiSheetBatch:
+			conflict = b.Sheet == "" // single-sheet batches exist for this file
+		}
+		if !conflict {
+			continue
+		}
+		other := "多 sheet"
+		if mode == multiSheetBatch {
+			other = "单 sheet"
+		}
+		return refusef("文件 %s 曾按%s模式导入过（批次 %s，类型 %s，%d-%02d）——两种模式的幂等键不同，重复经两种模式导入会把同一数据重复入账；请先回滚旧批次，或继续沿用原模式",
+			name, other, b.ID, b.FeeType, b.FeeYear, b.FeeMonth)
+	}
+	return nil
 }
 
 // normalizeRow converts one source row into a NormalizedRow. Period

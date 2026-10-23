@@ -532,7 +532,11 @@ func TestImportPreflightPropagatesDBErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("Import with a dead database must fail")
 	}
-	if !strings.Contains(err.Error(), "幂等性预检") {
+	// #125: the mode-conflict guard is now the FIRST database touch
+	// (it runs before the per-sheet idempotency preflight), so a dead
+	// DB surfaces there — same doctrine: loud, preflight-classified,
+	// and a server fault, not an operator refusal.
+	if !strings.Contains(err.Error(), "导入模式冲突预检") && !strings.Contains(err.Error(), "幂等性预检") {
 		t.Fatalf("Import error = %v, want the honest preflight classification (the DB failed, not the file)", err)
 	}
 	if errors.Is(err, ErrImportRefused) {

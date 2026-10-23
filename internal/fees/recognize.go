@@ -30,23 +30,82 @@ type SourceRow struct {
 	Cells  []string
 }
 
+// SheetData is one sheet's parsed content: the sheet name ("" for the CSV
+// pseudo-sheet — CSV files have no sheets) plus the header and the data
+// rows in source order (#125: a real monthly ledger is ONE workbook with
+// one fee type per sheet, so the sheet is a first-class coordinate of the
+// import, the evidence and the idempotency key).
+type SheetData struct {
+	Name    string
+	Headers []string
+	Rows    []SourceRow
+}
+
 // ReadFeeFile streams the data rows of a CSV or xlsx fee file. The FIRST
 // non-empty row is the header (multi-row headers are out of scope for the
 // MVP — the real fee samples carry one header row; the recognizer refuses
 // files whose header cannot be mapped, which surfaces the case loudly).
-// CSV: UTF-8 with BOM tolerated; xlsx: the first sheet only.
+// CSV: UTF-8 with BOM tolerated; xlsx: the first sheet only (the
+// backward-compatible single-sheet channel — see ReadFeeFileFirst).
 func ReadFeeFile(path string) (headers []string, rows []SourceRow, err error) {
+	sheet, err := ReadFeeFileFirst(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sheet.Headers, sheet.Rows, nil
+}
+
+// ReadFeeFileFirst reads ONE sheet — the first sheet for xlsx, the file
+// itself as a nameless pseudo-sheet for CSV. It is the single-sheet
+// import channel's reader and keeps the pre-#125 behavior byte-for-byte
+// while surfacing the sheet name (the fee-type cross-check needs it: a
+// sheet named 电费 in a file declared tower_lease is a contradiction to
+// refuse, not to trust).
+func ReadFeeFileFirst(path string) (SheetData, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
 	switch ext {
 	case "csv":
-		return readCSV(path)
+		headers, rows, err := readCSV(path)
+		if err != nil {
+			return SheetData{}, err
+		}
+		return SheetData{Headers: headers, Rows: rows}, nil
 	case "xlsx":
-		return readXLSX(path)
+		return readXLSXFirst(path)
 	case "xls":
 		// #92: honest refusal — .xls is the pre-2007 BINARY format; excelize
 		// only reads xlsx (zip+XML), so routing .xls there surfaced a
 		// misleading "zip: not a valid zip file" from deep inside the
 		// library instead of telling the operator what to do.
+		return SheetData{}, fmt.Errorf("fees: .xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试：%s", path)
+	default:
+		return SheetData{}, fmt.Errorf("fees: 文件 %s 的扩展名不受支持（可用：csv / xlsx）", path)
+	}
+}
+
+// ReadFeeFileSheets reads EVERY sheet of an xlsx workbook that carries
+// data (a header plus at least one data row). The second return lists the
+// sheets SKIPPED as cosmetic (no data rows at all — a cover page, a
+// legend): nothing to import, but the caller reports them so the operator
+// sees the full accounting, never a silent drop (#125). CSV answers
+// exactly one nameless pseudo-sheet and an empty skip list. The sheet
+// order is the workbook's own order (deterministic); each sheet's rows
+// keep their 1-based sheet-local row numbers (the evidence coordinate).
+// #125: the sheets the caller cannot classify are the CALLER's refusal to
+// make, not this reader's to drop silently: everything with data comes
+// back.
+func ReadFeeFileSheets(path string) (sheets []SheetData, skipped []string, err error) {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	switch ext {
+	case "csv":
+		headers, rows, err := readCSV(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return []SheetData{{Headers: headers, Rows: rows}}, nil, nil
+	case "xlsx":
+		return readXLSXAll(path)
+	case "xls":
 		return nil, nil, fmt.Errorf("fees: .xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试：%s", path)
 	default:
 		return nil, nil, fmt.Errorf("fees: 文件 %s 的扩展名不受支持（可用：csv / xlsx）", path)
@@ -172,7 +231,46 @@ func isThousandsTail(s string) bool {
 	return len(intPart) == 3 && allDigits(intPart) && (frac == "" || allDigits(frac))
 }
 
-func readXLSX(path string) ([]string, []SourceRow, error) {
+// readXLSXFirst opens the workbook and reads the FIRST sheet (the
+// pre-#125 single-sheet behavior, now also surfacing the sheet name).
+// A first sheet without a recognizable header refuses here — including
+// the pointer to the multi-sheet channel when the workbook carries more
+// sheets (the data may live in sheet 2+; the reader will not guess).
+func readXLSXFirst(path string) (SheetData, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return SheetData{}, fmt.Errorf("fees: 打开工作簿 %s: %w", path, err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		return SheetData{}, fmt.Errorf("fees: 打开工作簿 %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return SheetData{}, fmt.Errorf("fees: 工作簿 %s 没有工作表", path)
+	}
+	sd, err := readSheet(data, f, sheets[0])
+	if err != nil {
+		return SheetData{}, err
+	}
+	if sd.Headers == nil {
+		if len(sheets) > 1 {
+			return SheetData{}, fmt.Errorf("fees: 工作簿 %s 的首个工作表 %q 没有可识别的表头行（全书共 %d 个工作表）——若各 sheet 是不同费用类型，请改用多 sheet 导入模式（sheets=auto）",
+				path, sheets[0], len(sheets))
+		}
+		return SheetData{}, fmt.Errorf("fees: 工作表 %q 没有可识别的表头行", sheets[0])
+	}
+	return sd, nil
+}
+
+// readXLSXAll opens the workbook and reads EVERY sheet that carries data
+// (#125). Cosmetic sheets (no non-blank row at all — the header IS the
+// first non-blank row, so headers == nil ⇔ nothing human-visible) come
+// back in the skipped list for the caller to report. The tail check (#81)
+// covers the whole workbook: a truncated zip member anywhere must not
+// read as a clean prefix.
+func readXLSXAll(path string) ([]SheetData, []string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fees: 打开工作簿 %s: %w", path, err)
@@ -182,14 +280,39 @@ func readXLSX(path string) ([]string, []SourceRow, error) {
 		return nil, nil, fmt.Errorf("fees: 打开工作簿 %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
+	sheetNames := f.GetSheetList()
+	if len(sheetNames) == 0 {
 		return nil, nil, fmt.Errorf("fees: 工作簿 %s 没有工作表", path)
 	}
-	sheet := sheets[0]
+	var out []SheetData
+	var skipped []string
+	for _, name := range sheetNames {
+		sd, err := readSheet(data, f, name)
+		if err != nil {
+			return nil, nil, err
+		}
+		// Headers == nil ⇔ the sheet holds no non-blank row at all: a
+		// cosmetic sheet — nothing to import, so nothing silently dropped;
+		// a header-only sheet likewise carries zero data rows.
+		if sd.Headers == nil || len(sd.Rows) == 0 {
+			skipped = append(skipped, name)
+			continue
+		}
+		out = append(out, sd)
+	}
+	if len(out) == 0 {
+		return nil, nil, fmt.Errorf("fees: 工作簿 %s 的 %d 个工作表均无数据行", path, len(sheetNames))
+	}
+	return out, skipped, nil
+}
+
+// readSheet reads one sheet: the first non-blank row is the header, the
+// rest are data rows with their 1-based sheet-local numbers. The #81
+// tail check runs once per workbook (the caller passes the raw bytes).
+func readSheet(data []byte, f *excelize.File, sheet string) (SheetData, error) {
 	it, err := f.Rows(sheet)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fees: 读取工作表 %s: %w", sheet, err)
+		return SheetData{}, fmt.Errorf("fees: 读取工作表 %s: %w", sheet, err)
 	}
 	defer func() { _ = it.Close() }()
 
@@ -200,7 +323,7 @@ func readXLSX(path string) ([]string, []SourceRow, error) {
 		rowNum++
 		cells, err := it.Columns()
 		if err != nil {
-			return nil, nil, fmt.Errorf("fees: 读取工作表 %s 第 %d 行: %w", sheet, rowNum, err)
+			return SheetData{}, fmt.Errorf("fees: 读取工作表 %s 第 %d 行: %w", sheet, rowNum, err)
 		}
 		strs := make([]string, len(cells))
 		for i, c := range cells {
@@ -220,10 +343,13 @@ func readXLSX(path string) ([]string, []SourceRow, error) {
 	// surface the iterator exposes — not checking it reads corruption as
 	// a clean end-of-file.
 	if err := it.Error(); err != nil {
-		return nil, nil, fmt.Errorf("fees: 读取工作表 %s: %w", sheet, err)
+		return SheetData{}, fmt.Errorf("fees: 读取工作表 %s: %w", sheet, err)
 	}
 	if headers == nil {
-		return nil, nil, fmt.Errorf("fees: 工作表 %s 没有可识别的表头行", sheet)
+		// No header row found: distinguish "cosmetic sheet" (nothing at
+		// all) from "data without a header" upstream — both sides are
+		// reported, neither is silently read.
+		return SheetData{Name: sheet}, nil
 	}
 	// #81: same honest-import guard as the resource channel — excelize's
 	// iterator has no error surface for mid-stream XML corruption, so a
@@ -231,9 +357,9 @@ func readXLSX(path string) ([]string, []SourceRow, error) {
 	// fee channel's evidence chain (row anchors into the snapshot) is only
 	// as trustworthy as the row count.
 	if err := workbook.CheckWorksheetTails(data); err != nil {
-		return nil, nil, fmt.Errorf("fees: %s: %w", path, err)
+		return SheetData{}, fmt.Errorf("fees: %s: %w", sheet, err)
 	}
-	return headers, rows, nil
+	return SheetData{Name: sheet, Headers: headers, Rows: rows}, nil
 }
 
 func isBlankRow(cells []string) bool {
@@ -280,6 +406,75 @@ var feeTypeMarkers = map[FeeType][]string{
 	FeeTypeTowerLease:  {"塔租", "铁塔", "塔类", "起租", "塔桅", "挂高"},
 	FeeTypeRepair:      {"工单", "故障", "维修", "抢修", "材料费", "修理"},
 	FeeTypeMaintenance: {"综维", "驻场", "巡检", "代维", "维护费", "人员"},
+}
+
+// sheetNameMarkers scores the SHEET NAME against each fee type (#125): a
+// real monthly ledger names its sheets exactly by fee type (电费 /
+// 铁塔租费 / 修理费), so the sheet name is the operator's own type
+// declaration sitting in the file. Same contains-match folding as the
+// header markers (headerMatchKey — full-width spaces removed,
+// case-folded), covering the English exports too.
+var sheetNameMarkers = map[FeeType][]string{
+	FeeTypeElectricity: {"电费", "用电", "电量", "电价", "electricity", "electric"},
+	FeeTypeTowerLease:  {"铁塔", "塔租", "塔费", "tower", "lease"},
+	FeeTypeRepair:      {"修理", "维修", "抢修", "repair"},
+	FeeTypeMaintenance: {"综维", "维护", "驻场", "代维", "巡检", "maintenance"},
+}
+
+// scoredFeeTypes is feeTypeMarkers' key set in sorted name order — every
+// scoring loop must iterate THIS slice, never the map directly (Go map
+// iteration order is random: a tie broken by "first iterated wins" would
+// make the recognizer nondeterministic, violating the project-wide ACC-4
+// determinism doctrine; the pre-#125 Recognize had exactly this latent
+// defect on tie scores and #125's classifier inherits the fixed order).
+var scoredFeeTypes = []FeeType{FeeTypeElectricity, FeeTypeMaintenance, FeeTypeRepair, FeeTypeTowerLease}
+
+// RecognizeSheetType types one sheet from its name + headers (#125).
+// Score = 2×(sheet-name marker hits) + 1×(header marker hits) — the
+// sheet name is the operator's own naming and outweighs any single
+// header coincidence. The winner must be UNIQUE (strictly above every
+// other type) and score ≥ 2, else the answer is "" (unclassified: an
+// ambiguous or silent sheet is the caller's explicit refusal, never a
+// guess). Deterministic: types visited in scoredFeeTypes order, markers
+// in declaration order.
+func RecognizeSheetType(sheetName string, headers []string) (FeeType, int) {
+	nameKey := headerMatchKey(sheetName)
+	scores := make(map[FeeType]int, len(scoredFeeTypes))
+	for _, typ := range scoredFeeTypes {
+		score := 0
+		for _, m := range sheetNameMarkers[typ] {
+			if strings.Contains(nameKey, headerMatchKey(m)) {
+				score += 2 // the sheet name is a first-class declaration
+				break      // one hit per type suffices — the name is one string
+			}
+		}
+		for _, m := range feeTypeMarkers[typ] {
+			mk := headerMatchKey(m)
+			for _, h := range headers {
+				if strings.Contains(headerMatchKey(h), mk) {
+					score++
+					break // one hit per marker
+				}
+			}
+		}
+		scores[typ] = score
+	}
+	best, bestScore := FeeType(""), 0
+	for _, typ := range scoredFeeTypes {
+		if scores[typ] > bestScore {
+			best, bestScore = typ, scores[typ]
+		}
+	}
+	if bestScore < 2 {
+		return "", bestScore // silence beats a fuzzy guess
+	}
+	// Uniqueness: a tie means ambiguity — refuse to pick a side.
+	for _, typ := range scoredFeeTypes {
+		if typ != best && scores[typ] == bestScore {
+			return "", bestScore
+		}
+	}
+	return best, bestScore
 }
 
 // headerMatchKey folds a header (or synonym) into its comparison key:
@@ -346,10 +541,14 @@ func Recognize(headers []string) (FeeType, map[string]string) {
 		}
 	}
 	// fee type: count marker hits (contains-match — markers are word
-	// fragments of real headers)
+	// fragments of real headers). Iteration runs over scoredFeeTypes (the
+	// sorted key slice), NOT the map — a tie broken by random map order
+	// would make the suggestion nondeterministic (ACC-4; #125 fixed the
+	// latent defect while adding the sheet classifier).
 	best := FeeType("")
 	bestScore := 0
-	for typ, markers := range feeTypeMarkers {
+	for _, typ := range scoredFeeTypes {
+		markers := feeTypeMarkers[typ]
 		score := 0
 		for _, m := range markers {
 			mk := headerMatchKey(m)

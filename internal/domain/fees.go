@@ -86,13 +86,19 @@ const (
 )
 
 // FeeBatch is one fee import: the state-layer record of a snapshot +
-// Parquet conversion. Idempotency key = (sha256, fee_type, fee_year,
-// fee_month, mapping), enforced by a partial UNIQUE index over completed
-// batches only — failed/rolled_back attempts never block a clean retry.
+// Parquet conversion. Idempotency key = (sha256, sheet, fee_type,
+// fee_year, fee_month, mapping), enforced by a partial UNIQUE index over
+// completed batches only — failed/rolled_back attempts never block a
+// clean retry. Sheet is the workbook sheet the rows came from (#125,
+// migration v34): ” for CSV files and for every batch recorded before
+// the multi-sheet channel — a real monthly ledger carries ONE fee type
+// per sheet (电费/铁塔租费/修理费), and two same-type sheets of one file
+// are different data, not an idempotency duplicate.
 type FeeBatch struct {
 	ID           string
 	WorkbookName string
 	SHA256       string
+	Sheet        string // workbook sheet of origin ('' = CSV / pre-v34)
 	FeeType      FeeType
 	FeeYear      int
 	FeeMonth     int

@@ -61,7 +61,7 @@ func TestMigrationV33AddsRiskClueDecisions(t *testing.T) {
 		t.Fatalf("max version: %v", err)
 	}
 	if version != 33 {
-		t.Fatalf("MAX(version) = %d, want 33", version)
+		t.Fatalf("MAX(version) = %d, want 33 (this test reopens with v33 only — v34 is deliberately not yet in the registry)", version)
 	}
 
 	// the CHECK guards are the last line (the service validates first —

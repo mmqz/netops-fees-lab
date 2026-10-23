@@ -94,11 +94,11 @@ func TestMigrationV29AddsFeeBatches(t *testing.T) {
 	}
 
 	// CompletedByIdempotencyKey finds fee_1, not the failed twin.
-	hit, err := db.FeeBatches.CompletedByIdempotencyKey(ctx, "cafe01", domain.FeeTypeElectricity, 2024, 5, b.Mapping)
+	hit, err := db.FeeBatches.CompletedByIdempotencyKey(ctx, "cafe01", domain.FeeTypeElectricity, 2024, 5, b.Mapping, "")
 	if err != nil || hit.ID != "fee_1" {
 		t.Fatalf("idempotency lookup = %+v (err %v), want fee_1", hit, err)
 	}
-	if _, err := db.FeeBatches.CompletedByIdempotencyKey(ctx, "cafe01", domain.FeeTypeRepair, 2024, 5, b.Mapping); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := db.FeeBatches.CompletedByIdempotencyKey(ctx, "cafe01", domain.FeeTypeRepair, 2024, 5, b.Mapping, ""); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("lookup with a different type must be not found, got %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestMigrationV29AddsFeeBatches(t *testing.T) {
 	if err := db.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 33 {
-		t.Errorf("max schema version = %d, want 33", maxV)
+	if maxV != 34 {
+		t.Errorf("max schema version = %d, want 34", maxV)
 	}
 }
