@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xuri/excelize/v2"
 )
 
 func writeFeeCSV(t *testing.T, dir, name, content string) string {
@@ -265,5 +267,118 @@ func TestCLIFeesClueDecisions(t *testing.T) {
 	}
 	if ledger.Total != 0 {
 		t.Fatalf("verified filter = %d, want 0 (the flip left no verified rows)", ledger.Total)
+	}
+}
+
+// writeFeeLedgerXLSX builds the #125 multi-sheet ledger workbook on disk:
+// sheets in order 电费(2 rows) / 铁塔租费(1 row: 5000.00) / 修理费(1 row).
+func writeFeeLedgerXLSX(t *testing.T, dir, name string) string {
+	t.Helper()
+	f := excelize.NewFile()
+	if err := f.SetSheetName(f.GetSheetList()[0], "电费"); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []struct {
+		sheet string
+		rows  [][]string
+	}{
+		{"电费", [][]string{{"站址编码", "站址名称", "电费(元)", "账期"}, {"S1", "一站", "12345.67", "2024-05"}, {"S2", "二站", "678.90", "2024-05"}}},
+		{"铁塔租费", [][]string{{"站址编码", "站址名称", "塔租费(元)", "账期"}, {"S1", "一站", "5000.00", "2024-05"}}},
+		{"修理费", [][]string{{"站址编码", "站址名称", "修理费(元)", "账期", "工单号"}, {"S2", "二站", "999.99", "2024-05", "GD-001"}}},
+	} {
+		if spec.sheet != "电费" {
+			if _, err := f.NewSheet(spec.sheet); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, row := range spec.rows {
+			for j, cell := range row {
+				ref, err := excelize.CoordinatesToCellName(j+1, i+1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := f.SetCellValue(spec.sheet, ref, cell); err != nil {
+					t.Fatalf("set %s!%s: %v", spec.sheet, ref, err)
+				}
+			}
+		}
+	}
+	p := filepath.Join(dir, name)
+	if err := f.SaveAs(p); err != nil {
+		t.Fatalf("save workbook: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestCLIFeesImportSheets pins the #125 multi-sheet CLI contract end to
+// end: three batches with sheet-declared types, the cosmetic sheet
+// named, the idempotent re-import informational, and the CSV refusal
+// exiting non-zero with the honest pointer to the single-sheet channel.
+func TestCLIFeesImportSheets(t *testing.T) {
+	if e2eBin == "" {
+		t.Skip("netopslab binary was not built (go tool unavailable)")
+	}
+	tmp := t.TempDir()
+	db := filepath.Join(tmp, "netops.db")
+	src := writeFeeLedgerXLSX(t, tmp, "2024年05月费用.xlsx")
+
+	// import-sheets: 3 batches, one per fee-type sheet, workbook order.
+	summary, code := runCLIJSON(t, "fees import-sheets", "fees", "--db", db, "--data", tmp,
+		"import-sheets", "--file", src, "--year", "2024", "--month", "5")
+	if code != 0 {
+		t.Fatalf("fees import-sheets: exit %d, want 0", code)
+	}
+	batches, _ := summary["batches"].([]any)
+	if len(batches) != 3 {
+		t.Fatalf("batches = %v, want 3", summary["batches"])
+	}
+	for i, want := range []struct {
+		sheet, typ string
+		rows       float64
+	}{{"电费", "electricity", 2}, {"铁塔租费", "tower_lease", 1}, {"修理费", "repair", 1}} {
+		b, _ := batches[i].(map[string]any)
+		if b["sheet"] != want.sheet || b["feeType"] != want.typ || b["rowsImported"] != want.rows {
+			t.Fatalf("batches[%d] = %v, want %s/%s rows %.0f", i, b, want.sheet, want.typ, want.rows)
+		}
+	}
+	skipped, _ := summary["skippedSheets"].([]any)
+	if len(skipped) != 0 || summary["status"] != "completed" {
+		// this builder has no cosmetic sheet — the cover-sheet case is the
+		// service test's; here the shape must simply be complete.
+		if summary["status"] != "completed" {
+			t.Fatalf("status = %v", summary["status"])
+		}
+	}
+
+	// re-import: informational — every sheet a duplicate skip, exit 0.
+	dup, code := runCLIJSON(t, "fees import-sheets again", "fees", "--db", db, "--data", tmp,
+		"import-sheets", "--file", src, "--year", "2024", "--month", "5")
+	if code != 0 {
+		t.Fatalf("duplicate import-sheets must exit 0, got %d: %v", code, dup)
+	}
+	dupBatches, _ := dup["batches"].([]any)
+	if len(dupBatches) != 3 {
+		t.Fatalf("duplicate batches = %v", dup["batches"])
+	}
+	for i, b := range dupBatches {
+		m, _ := b.(map[string]any)
+		if m["skippedDuplicate"] != true {
+			t.Fatalf("duplicate batches[%d] = %v, want skippedDuplicate", i, m)
+		}
+	}
+
+	// CSV: no sheet names to classify from — non-zero exit with the
+	// honest pointer, NOT a silent first-sheet import.
+	csvPath := writeFeeCSV(t, tmp, "may.csv", "站址编码,账期,电费(元)\nS1,2024-05,10.00\n")
+	stdout, code := runCLI(t, "fees", "--db", db, "--data", tmp,
+		"import-sheets", "--file", csvPath, "--year", "2024", "--month", "5")
+	if code == 0 {
+		t.Fatalf("CSV import-sheets must refuse, got exit 0: %s", stdout)
+	}
+	if !strings.Contains(stdout, "单 sheet") {
+		t.Fatalf("CSV refusal must point at the single-sheet channel: %s", stdout)
 	}
 }

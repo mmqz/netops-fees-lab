@@ -30,7 +30,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions",
+	"import", "import-sheets", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -87,6 +87,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 	switch sub {
 	case "import":
 		return cmdFeesImport(ctx, svc, subArgs, stdout, stderr)
+	case "import-sheets":
+		return cmdFeesImportSheets(ctx, svc, subArgs, stdout, stderr)
 	case "list":
 		return cmdFeesList(ctx, svc, subArgs, stdout, stderr)
 	case "rollback":
@@ -214,6 +216,37 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 		}
 		// the idempotent duplicate is informational: exit 0, the summary
 		// carries skippedDuplicate + the existing batch id.
+	}
+	return writeJSON(stdout, summary)
+}
+
+// cmdFeesImportSheets implements `fees import-sheets` (#125): the
+// multi-sheet channel — one workbook, one fee type per sheet, types
+// recognized from each sheet's own evidence (name + header markers).
+// No --type flag: the whole point is that the ledger's sheet names ARE
+// the type declarations. Refusals (CSV / an unclassifiable sheet / a
+// cross-channel re-import) exit non-zero with the honest text naming
+// every offending sheet; the idempotent re-import is informational
+// (exit 0, every batch entry skippedDuplicate).
+func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees import-sheets")
+	file := fs.String("file", "", "多 sheet 台账工作簿路径（.xlsx；每 sheet 一种费用类型，类型按表名/表头自动判定），必填")
+	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
+	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *file == "" || *year == 0 || *month == 0 {
+		return &usageError{msg: "fees import-sheets 需要 --file、--year、--month", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees import-sheets 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	summary, err := svc.ImportSheets(ctx, fees.SheetsImportOptions{
+		Path: *file, OriginalName: filepath.Base(*file), Year: *year, Month: *month,
+	})
+	if err != nil {
+		return err
 	}
 	return writeJSON(stdout, summary)
 }
