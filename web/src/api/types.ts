@@ -1448,6 +1448,32 @@ export interface FeeImportSummary {
   existingBatch?: string;
 }
 
+/** POST /api/fees/imports/sheets 的单 sheet 批次结果 */
+export interface FeeSheetBatchResult {
+  sheet: string;
+  feeType: string;
+  batchId: string;
+  status: string;
+  rowsTotal: number;
+  rowsImported: number;
+  rowsFailed: number;
+  files?: string[];
+  errors?: string[];
+  skippedDuplicate: boolean;
+  existingBatch?: string;
+}
+
+/** POST /api/fees/imports/sheets 结果（201 整本 / 200 全幂等） */
+export interface FeeSheetsImportSummary {
+  workbookName: string;
+  sha256: string;
+  year: number;
+  month: number;
+  status: string;
+  batches: FeeSheetBatchResult[];
+  skippedSheets?: string[];
+}
+
 /** 风险线索的行级证据锚点（可回读快照原文） */
 export interface RiskEvidenceAnchor {
   sourceFile: string;

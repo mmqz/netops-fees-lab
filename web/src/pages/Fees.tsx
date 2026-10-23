@@ -31,6 +31,7 @@ import {
   rollbackFeeBatch,
   scanFeeLinks,
   uploadFeeFile,
+  uploadFeeSheetsFile,
 } from '../api/client';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -63,9 +64,14 @@ import {
   FEES_DESC,
   FEES_IMPORT_DUP,
   FEES_IMPORT_FILE,
+  FEES_IMPORT_MODE,
+  FEES_IMPORT_MODE_SHEETS,
+  FEES_IMPORT_MODE_SINGLE,
   FEES_IMPORT_MONTH,
   FEES_IMPORT_OK,
   FEES_IMPORT_PERIOD_INVALID,
+  FEES_IMPORT_SHEETS_DUP,
+  FEES_IMPORT_SHEETS_OK,
   FEES_IMPORT_SUBMIT,
   FEES_IMPORT_TITLE,
   FEES_IMPORT_TYPE,
@@ -229,6 +235,7 @@ export function FeesPage() {
 
   // ---- 导入 ----
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const [importMode, setImportMode] = useState<'single' | 'sheets'>('single');
   const [importType, setImportType] = useState('electricity');
   const [importYear, setImportYear] = useState(String(new Date().getFullYear()));
   const [importMonth, setImportMonth] = useState(String(new Date().getMonth() + 1));
@@ -245,13 +252,28 @@ export function FeesPage() {
     }
     setImporting(true);
     try {
-      const sum = await uploadFeeFile(file, importType, year, month);
-      if (sum.skippedDuplicate) {
-        toast.show(FEES_IMPORT_DUP(sum.existingBatch ?? sum.batchId), 'info');
+      if (importMode === 'sheets') {
+        // #125 多 sheet 台账：无 feeType，每 sheet 由表名/表头自动判型。
+        const sum = await uploadFeeSheetsFile(file, year, month);
+        const allDup = sum.batches.every((b) => b.skippedDuplicate);
+        if (allDup) {
+          toast.show(FEES_IMPORT_SHEETS_DUP, 'info');
+        } else {
+          const detail = sum.batches.map((b) => `${b.sheet} ${b.rowsImported} 行`).join(' / ');
+          toast.show(FEES_IMPORT_SHEETS_OK(sum.batches.length, detail), 'success');
+          if ((sum.skippedSheets?.length ?? 0) > 0) {
+            toast.show(`装饰性 sheet 已按名略过：${sum.skippedSheets?.join('、')}`, 'info');
+          }
+        }
       } else {
-        toast.show(FEES_IMPORT_OK(sum.batchId, sum.rowsImported), 'success');
-        if (sum.rowsFailed > 0 && sum.errors !== undefined && sum.errors.length > 0) {
-          toast.show(sum.errors[0], 'info');
+        const sum = await uploadFeeFile(file, importType, year, month);
+        if (sum.skippedDuplicate) {
+          toast.show(FEES_IMPORT_DUP(sum.existingBatch ?? sum.batchId), 'info');
+        } else {
+          toast.show(FEES_IMPORT_OK(sum.batchId, sum.rowsImported), 'success');
+          if (sum.rowsFailed > 0 && sum.errors !== undefined && sum.errors.length > 0) {
+            toast.show(sum.errors[0], 'info');
+          }
         }
       }
       if (fileInput.current !== null) fileInput.current.value = '';
@@ -261,7 +283,7 @@ export function FeesPage() {
     } finally {
       setImporting(false);
     }
-  }, [importType, importYear, importMonth, loadBatches, toast]);
+  }, [importMode, importType, importYear, importMonth, loadBatches, toast]);
 
   // ---- 关联（费用-资源分级关联的人类确认通道）----
   const [links, setLinks] = useState<FeeLinkItem[] | null>(null);
@@ -964,13 +986,22 @@ export function FeesPage() {
         <div className="panel__body">
           <div className="filters">
             <label className="field">
-              <span>{FEES_IMPORT_TYPE}</span>
-              <select value={importType} onChange={(e) => setImportType(e.target.value)}>
-                {FEE_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
+              <span>{FEES_IMPORT_MODE}</span>
+              <select value={importMode} onChange={(e) => setImportMode(e.target.value === 'sheets' ? 'sheets' : 'single')}>
+                <option value="single">{FEES_IMPORT_MODE_SINGLE}</option>
+                <option value="sheets">{FEES_IMPORT_MODE_SHEETS}</option>
               </select>
             </label>
+            {importMode === 'single' && (
+              <label className="field">
+                <span>{FEES_IMPORT_TYPE}</span>
+                <select value={importType} onChange={(e) => setImportType(e.target.value)}>
+                  {FEE_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="field field--xs">
               <span>{FEES_IMPORT_YEAR}</span>
               <input value={importYear} onChange={(e) => setImportYear(e.target.value)} inputMode="numeric" />
@@ -984,7 +1015,7 @@ export function FeesPage() {
               <input
                 ref={fileInput}
                 type="file"
-                accept=".csv,.xlsx"
+                accept={importMode === 'sheets' ? '.xlsx' : '.csv,.xlsx'}
               />
             </label>
             <button className="btn btn--primary" disabled={importing} onClick={() => void doImport()}>

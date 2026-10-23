@@ -865,10 +865,16 @@ export const FEES_IMPORT_TITLE = '导入费用文件';
 export const FEES_IMPORT_TYPE = '费用类型';
 export const FEES_IMPORT_YEAR = '年份';
 export const FEES_IMPORT_MONTH = '月份';
-export const FEES_IMPORT_FILE = '文件（.csv / .xlsx / .xls）';
+export const FEES_IMPORT_FILE = '文件（.csv / .xlsx）';
 export const FEES_IMPORT_SUBMIT = '导入';
 export const FEES_IMPORT_OK = (a: string, b: number) => `导入完成：${b} 行入库（批次 ${a}）`;
 export const FEES_IMPORT_DUP = (a: string) => `同一文件已于批次 ${a} 完成导入（幂等跳过，零新数据）`;
+// #125 多 sheet 台账导入：模式开关 + 各模式文案
+export const FEES_IMPORT_MODE = '导入模式';
+export const FEES_IMPORT_MODE_SINGLE = '单类型（CSV / 单 sheet）';
+export const FEES_IMPORT_MODE_SHEETS = '多 sheet 台账（每 sheet 自动判型）';
+export const FEES_IMPORT_SHEETS_OK = (n: number, detail: string) => `整本导入完成：${n} 个批次（${detail}）`;
+export const FEES_IMPORT_SHEETS_DUP = '该台账已于既有批次完成导入（逐 sheet 幂等跳过，零新数据）';
 /** #111-D：Fees 页原硬编码中文收编（表头/确认文案，~20 处）。 */
 export const FEES_IMPORT_PERIOD_INVALID = '账期必须是 2000–2100 年的 1–12 月';
 export const FEES_RISKS_YEAR_INVALID = '年份必须是 2000–2100';

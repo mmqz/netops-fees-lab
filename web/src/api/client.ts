@@ -37,6 +37,7 @@ import type {
   FeeBatchItem,
   FeeBatchesList,
   FeeImportSummary,
+  FeeSheetsImportSummary,
   FeeLinkItem,
   FeeLinkScanResult,
   FeeLinksList,
@@ -945,6 +946,18 @@ export function uploadFeeFile(
   form.append('year', String(year));
   form.append('month', String(month));
   return requestJson<FeeImportSummary>('/fees/imports', {
+    method: 'POST',
+    body: form,
+  });
+}
+
+/** POST /api/fees/imports/sheets（#125 多 sheet 台账：无 feeType，每 sheet 自动判型） */
+export function uploadFeeSheetsFile(file: File, year: number, month: number): Promise<FeeSheetsImportSummary> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('year', String(year));
+  form.append('month', String(month));
+  return requestJson<FeeSheetsImportSummary>('/fees/imports/sheets', {
     method: 'POST',
     body: form,
   });
