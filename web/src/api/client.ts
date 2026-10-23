@@ -69,6 +69,8 @@ import type {
   ResourceType,
   RestoreResult,
   ClueDecisionItem,
+  FeeDuplicatesResult,
+  FeeTotalsResult,
   RiskResult,
   RollbackResponse,
   RowStatus,
@@ -984,6 +986,30 @@ export function fetchFeeRisks(
       ...(rest as Record<string, string | number | undefined>),
       includeDecided: includeDecided === true ? '1' : undefined,
     })}`,
+  );
+}
+
+/** GET /api/fees/query/totals（站址账期合计；#121 浏览器通道补全） */
+export function fetchFeeTotals(params: {
+  feeType: string;
+  year: number;
+  month?: number;
+  limit?: number;
+}): Promise<FeeTotalsResult> {
+  return requestJson<FeeTotalsResult>(
+    `/fees/query/totals${buildQuery(params as Record<string, string | number | undefined>)}`,
+  );
+}
+
+/** GET /api/fees/query/duplicates（跨批次重复结算候选；#121 浏览器通道补全） */
+export function fetchFeeDuplicates(params: {
+  feeType: string;
+  year: number;
+  month?: number;
+  limit?: number;
+}): Promise<FeeDuplicatesResult> {
+  return requestJson<FeeDuplicatesResult>(
+    `/fees/query/duplicates${buildQuery(params as Record<string, string | number | undefined>)}`,
   );
 }
 

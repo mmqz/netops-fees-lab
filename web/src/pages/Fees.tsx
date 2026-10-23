@@ -5,23 +5,28 @@
  * - 费用批次列表（最新在前）+ 回滚（ConfirmDialog：删分析行、保快照证据）；
  * - 费用-资源关联（#63 分级关联的前端人类通道）：重新扫描 + 状态/级别筛选 +
  *   模糊提案的确认/驳回（驳回走 ConfirmDialog——审计保留不可撤）；
- * - 风险七场景查询（GET /api/fees/risks/{scenario}）：线索表（站址/账期/触发指标/
+ * - 风险八场景查询（GET /api/fees/risks/{scenario}）：线索表（站址/账期/触发指标/
  *   显式阈值）+ 行展开证据锚点（sourceFile+sourceRow+importBatch+整数分）+
- *   excluded 计数说明；501 engine_not_built 渲染为引导横幅而非裸错误。
+ *   excluded/dismissed 计数说明 + 人工裁定按钮与决策 chip（#119）；
+ *   501 engine_not_built 渲染为引导横幅而非裸错误。
+ * - 查询预设（GET /api/fees/query/totals|duplicates，#121 浏览器通道补全）：
+ *   站址账期合计与跨批次重复候选两表，整数分自动 /100 展示。
  *
  * 教义：线索是待核实差异而非认定结论（账单存在 ≠ 重复付款认定）——页面文案
  * 与 note 字段同源，均由后端契约携带。
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import type { FeeLinkItem, FeeLinkScanResult, RiskResult } from '../api/types';
+import type { FeeDuplicatesResult, FeeLinkItem, FeeLinkScanResult, FeeTotalsResult, RiskResult } from '../api/types';
 import {
   confirmFeeLink,
   dismissFeeLink,
   fetchFeeBatches,
   fetchFeeLinks,
   decideFeeRiskClue,
+  fetchFeeDuplicates,
   fetchFeeRisks,
+  fetchFeeTotals,
   formatApiErrorText,
   rollbackFeeBatch,
   scanFeeLinks,
@@ -137,6 +142,19 @@ import {
   FEES_RISKS_DECIDE_VERIFY,
   FEES_RISKS_DECIDE_DISMISS,
   FEES_RISKS_DECIDE_HINT,
+  FEES_QUERY_TITLE,
+  FEES_QUERY_DESC,
+  FEES_QUERY_PRESET,
+  FEES_QUERY_PRESET_TOTALS,
+  FEES_QUERY_PRESET_DUPLICATES,
+  FEES_QUERY_RUN,
+  FEES_QUERY_COL_SITE,
+  FEES_QUERY_COL_ROWS,
+  FEES_QUERY_COL_TOTAL,
+  FEES_QUERY_COL_PERIOD,
+  FEES_QUERY_COL_BATCHES,
+  FEES_QUERY_EMPTY,
+  FEES_QUERY_COUNT,
 } from '../i18n';
 
 /** 线索行键与金额展示逻辑见 fees-format.ts（#68 抽出纯函数，表测钉死） */
@@ -329,6 +347,52 @@ export function FeesPage() {
     setLinkGrade(next.grade);
     setLinkPage(next.page);
   }
+
+  // ---- 查询预设（#121：浏览器通道补全——汇总/重复候选两表面板） ----
+  const [qPreset, setQPreset] = useState<'totals' | 'duplicates'>('totals');
+  const [qType, setQType] = useState('electricity');
+  const [qYear, setQYear] = useState(String(new Date().getFullYear()));
+  const [qMonth, setQMonth] = useState('');
+  const [qTotals, setQTotals] = useState<FeeTotalsResult | null>(null);
+  const [qDuplicates, setQDuplicates] = useState<FeeDuplicatesResult | null>(null);
+  const [qRunning, setQRunning] = useState(false);
+  const [qError, setQError] = useState('');
+  const [qEngineMissing, setQEngineMissing] = useState(false);
+
+  const runQueryPreset = useCallback(async () => {
+    const year = Number(qYear);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      setQError(FEES_RISKS_YEAR_INVALID);
+      return;
+    }
+    setQRunning(true);
+    setQError('');
+    setQEngineMissing(false);
+    setQTotals(null);
+    setQDuplicates(null);
+    try {
+      const scope = {
+        feeType: qType,
+        year,
+        month: qMonth === '' ? undefined : Number(qMonth),
+        limit: 500, // the HTTP honest bound — the browser shows what exists
+      };
+      if (qPreset === 'totals') {
+        setQTotals(await fetchFeeTotals(scope));
+      } else {
+        setQDuplicates(await fetchFeeDuplicates(scope));
+      }
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? '';
+      if (code === 'engine_not_built') {
+        setQEngineMissing(true);
+      } else {
+        setQError(formatApiErrorText(err));
+      }
+    } finally {
+      setQRunning(false);
+    }
+  }, [qPreset, qType, qYear, qMonth]);
 
   // ---- 风险查询 ----
   const [scenario, setScenario] = useState('duplicate-settlement');
@@ -642,6 +706,108 @@ export function FeesPage() {
                       </Fragment>
                     );
                   })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2 className="panel__title">{FEES_QUERY_TITLE}</h2>
+        <p className="page__desc">{FEES_QUERY_DESC}</p>
+        <div className="filters">
+          <label className="field">
+            <span>{FEES_QUERY_PRESET}</span>
+            <select
+              value={qPreset}
+              onChange={(e) => {
+                setQPreset(e.target.value as 'totals' | 'duplicates');
+                setQTotals(null);
+                setQDuplicates(null);
+              }}
+            >
+              <option value="totals">{FEES_QUERY_PRESET_TOTALS}</option>
+              <option value="duplicates">{FEES_QUERY_PRESET_DUPLICATES}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{FEES_IMPORT_TYPE}</span>
+            <select value={qType} onChange={(e) => setQType(e.target.value)}>
+              <option value="electricity">{FEE_TYPE_ELECTRICITY}</option>
+              <option value="tower_lease">{FEE_TYPE_TOWER_LEASE}</option>
+              <option value="repair">{FEE_TYPE_REPAIR}</option>
+              <option value="maintenance">{FEE_TYPE_MAINTENANCE}</option>
+            </select>
+          </label>
+          <label className="field field--xs">
+            <span>{FEES_IMPORT_YEAR}</span>
+            <input value={qYear} onChange={(e) => setQYear(e.target.value)} inputMode="numeric" placeholder="2024" />
+          </label>
+          <label className="field field--xs">
+            <span>{FEES_IMPORT_MONTH}</span>
+            <input value={qMonth} onChange={(e) => setQMonth(e.target.value)} inputMode="numeric" placeholder={FEES_RISKS_MONTH_ALL} />
+          </label>
+          <button className="btn btn--primary" disabled={qRunning} onClick={() => void runQueryPreset()}>
+            {qRunning ? <Spinner /> : FEES_QUERY_RUN}
+          </button>
+        </div>
+
+        {qEngineMissing && <div className="banner banner--info">{FEES_501_HINT}</div>}
+        {qError !== '' && <ErrorBlock message={qError} />}
+        {qTotals !== null && (
+          <div className="panel__body">
+            <p className="muted">{FEES_QUERY_COUNT(qTotals.total)}</p>
+            {qTotals.items.length === 0 ? (
+              <p className="empty">{FEES_QUERY_EMPTY}</p>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{FEES_QUERY_COL_SITE}</th>
+                    <th>{FEES_QUERY_COL_ROWS}</th>
+                    <th>{FEES_QUERY_COL_TOTAL}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qTotals.items.map((r) => (
+                    <tr key={r.siteCode}>
+                      <td>{r.siteCode}</td>
+                      <td>{r.rows}</td>
+                      <td>¥{centsToYuan(r.totalCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+        {qDuplicates !== null && (
+          <div className="panel__body">
+            <p className="muted">{FEES_QUERY_COUNT(qDuplicates.total)}</p>
+            {qDuplicates.items.length === 0 ? (
+              <p className="empty">{FEES_QUERY_EMPTY}</p>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{FEES_QUERY_COL_SITE}</th>
+                    <th>{FEES_QUERY_COL_PERIOD}</th>
+                    <th>{FEES_QUERY_COL_BATCHES}</th>
+                    <th>{FEES_QUERY_COL_ROWS}</th>
+                    <th>{FEES_QUERY_COL_TOTAL}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qDuplicates.items.map((r) => (
+                    <tr key={`${r.siteCode}|${r.year}|${r.month}`}>
+                      <td>{r.siteCode}</td>
+                      <td>{r.month > 0 ? `${r.year}-${String(r.month).padStart(2, '0')}` : FEES_RISKS_PERIOD_ALL_YEAR(r.year)}</td>
+                      <td>{r.batches}</td>
+                      <td>{r.rows}</td>
+                      <td>¥{centsToYuan(r.totalCents)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             )}

@@ -1489,6 +1489,43 @@ export interface RiskResult {
   note: string;
 }
 
+/** 站址账期合计行（GET /api/fees/query/totals；整数分契约） */
+export interface FeeTotalsRow {
+  siteCode: string;
+  rows: number;
+  totalCents: number;
+}
+
+/** GET /api/fees/query/totals 信封 */
+export interface FeeTotalsResult {
+  preset: string;
+  feeType: string;
+  year: number;
+  month: number;
+  items: FeeTotalsRow[];
+  total: number;
+}
+
+/** 跨批次重复结算候选行（GET /api/fees/query/duplicates；候选非认定） */
+export interface FeeDuplicatesRow {
+  siteCode: string;
+  year: number;
+  month: number;
+  batches: number;
+  rows: number;
+  totalCents: number;
+}
+
+/** GET /api/fees/query/duplicates 信封 */
+export interface FeeDuplicatesResult {
+  preset: string;
+  feeType: string;
+  year: number;
+  month: number;
+  items: FeeDuplicatesRow[];
+  total: number;
+}
+
 /** #119 风险线索人工裁定（risk_clue_decisions 的 REST 形状） */
 export interface ClueDecisionItem {
   id: string;

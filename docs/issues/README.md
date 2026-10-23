@@ -1020,3 +1020,5 @@ v0.15.2 全仓调研定位的费用×指标交叉验证整块缺口：六场景�
 **门禁**（本地执行）：默认 + duckdb 双构建 25 包全绿 · 0 FAIL · gofmt 空 · vet 0（双构建）· tsc 0 · vitest 188/188 · dist 重建后 webui/app 复验 ok。镜像文档：[issue-119](issue-119-risk-clue-decisions.md)。
 | **#120**（新增能力，本轮立案+修复+关闭） | MCP 费用域工具 11→13：`fee_totals` / `fee_duplicates` 只读开放聚合面（一契约两传输——wire shape = HTTP shape、整数分、空数组非 null；limit 缺省 20 上限 50 比 HTTP 500 更紧）；实现下沉 `fees.Service.QueryTotals/QueryDuplicates`（analysisDir 知识单点化，MCP 永不拼路径）；默认构建 engine_not_built 契约 + #103 错误分派同款；**七处工具计数散文漂移一并清扫**（teleagent 的 fee_risks 描述停在六场景两轮滞后→修复） | 本轮 |
 **门禁**（本地执行）：默认 + duckdb 双构建全绿 · 0 FAIL · gofmt 空 · vet 0（双构建）· vitest 188/188 · tsc 0。镜像文档：[issue-120](issue-120-mcp-fee-query-tools.md)。
+| **#121**（消费面补全，本轮立案+修复+关闭） | Web /fees 查询预设面板：站址账期汇总 + 跨批次重复候选两表（三通道同契约对浏览器通道兑现——#120 开了 MCP 面、web 反而缺位）；整数分 /100 展示、501 引导横幅、limit 走 HTTP 500 诚实界（与 MCP 50 紧界分工：运营查全量、AI 拿要点）；预设切换即清空、面板状态与风险钻取解耦；i18n 12 常量全接线；后端零变更 | 本轮 |
+**门禁**（本地执行）：tsc 0 · vitest 188/188 · dist 重建后 webui/app 复验 ok · 双构建全绿。镜像文档：[issue-121](issue-121-web-fees-query-presets.md)。
