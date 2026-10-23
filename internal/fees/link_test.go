@@ -16,6 +16,7 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/repo"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 )
 
 // seedSiteResource inserts one site-like resource for the matcher tests
@@ -309,18 +310,27 @@ func TestSimilarityAtLeastEquivalence(t *testing.T) {
 }
 
 // TestFuzzyScanPerformance pins the #65 acceptance bound: a 10,000-code ×
-// 1,000-candidate topFuzzy sweep finishes under the budget on this
-// class of machine (the naive path extrapolated to 15.5s+ at the same
-// shape; the pre-filter + banded DP brings it under a second). The
-// generated corpus is deliberately adversarial for the length cut: all
-// candidates share the codes' length class, so only the DP-side cuts
-// (band + early abort) can deliver the speedup.
+// 1,000-candidate topFuzzy sweep costs under the CPU budget (the naive
+// path extrapolated to 15.5+ CPU-seconds at the same shape; the pre-filter
+// + banded DP brings it to ~1.3). The generated corpus is deliberately
+// adversarial for the length cut: all candidates share the codes' length
+// class, so only the DP-side cuts (band + early abort) can deliver the
+// speedup.
+//
+// The gate is CPU-seconds, not wall-seconds (#82 lesson, second edition):
+// the 8s wall bound still false-reds when sibling test processes steal the
+// cores — observed 1.38s (idle) vs 15.2s (loaded) for byte-identical code on
+// the same 2-core box, i.e. an 11× wall swing with zero code change. CPU
+// time is load-immune for CPU-bound work (stolen cores inflate waiting, not
+// computing), while a naive-path regression costs ~11× MORE CPU and stays
+// far above the bound. Cross-platform via testsupport.CPUTime (Getrusage /
+// GetProcessTimes). Wall time is logged for humans, gated never.
 func TestFuzzyScanPerformance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("performance smoke skipped in -short mode")
 	}
 	if raceEnabled {
-		t.Skip("wall-time bounds are meaningless under the race detector's instrumentation")
+		t.Skip("CPU bounds are meaningless under the race detector's instrumentation")
 	}
 	const nCodes, nCands = 10_000, 1_000
 	cands := make([]resourceCandidate, nCands)
@@ -329,7 +339,11 @@ func TestFuzzyScanPerformance(t *testing.T) {
 	}
 	// The scan's real shape (#65 P1-b): the decide phase runs a worker
 	// pool over the codes — this test mirrors it exactly so the measured
-	// wall time is the time a ScanLinks caller actually waits.
+	// time is the time a ScanLinks caller actually waits.
+	cpuStart, err := testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
+	}
 	start := time.Now()
 	proposed := make([]bool, nCodes)
 	var (
@@ -352,25 +366,21 @@ func TestFuzzyScanPerformance(t *testing.T) {
 	}
 	wg.Wait()
 	elapsed := time.Since(start)
+	cpuEnd, err := testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
+	}
+	cpu := cpuEnd - cpuStart
 	n := 0
 	for _, p := range proposed {
 		if p {
 			n++
 		}
 	}
-	if elapsed > 8*time.Second {
-		// #82: the bound was 2s, calibrated on idle single-package runs —
-		// but under full-package-parallel test execution (go test runs up
-		// to GOMAXPROCS packages at once, CI runners share cores with
-		// siblings) the SAME optimized code measured 5.56s on a loaded
-		// 2-core box. Wall-clock gates can never be load-immune; the honest
-		// calibration points are 1.38s (idle) / 5.56s (worst observed
-		// contention) / 15.5s (the naive-implementation floor this gate
-		// exists to catch, issue #65). 8s sits between the last two with
-		// margin on both sides.
-		t.Fatalf("10k×1k parallel fuzzy sweep took %v, want < 8s (#65 acceptance, #82 contention-calibrated; naive floor was 15.5s)", elapsed)
+	if cpu > 8*time.Second {
+		t.Fatalf("10k×1k parallel fuzzy sweep cost %v CPU-seconds, want < 8 (#65 acceptance; naive floor is 15.5+ CPU-s; wall was %v for reference)", cpu, elapsed)
 	}
-	t.Logf("10k codes × 1k same-length-class candidates (parallel, %d workers): %v, %d codes had proposals", workers, elapsed, n)
+	t.Logf("10k codes × 1k same-length-class candidates (parallel, %d workers): %v CPU-seconds, %v wall, %d codes had proposals", workers, cpu, elapsed, n)
 	if n == 0 {
 		t.Fatalf("no proposals at all — the corpus must contain near-matches for the sweep to be meaningful")
 	}

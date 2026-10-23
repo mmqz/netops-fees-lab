@@ -2,15 +2,14 @@ package sim
 
 // PERF-P2 — performance on the materialized 27-device workspace: the
 // materialization itself, a 10-op changeset, a full check run and a path
-// query must each stay under the CI-safe bound. The bounds are 6000 ms —
-// three times the originally calibrated 2000 ms (#82): wall-clock gates
-// are calibrated on idle single-package runs but execute under
-// full-package-parallel load (go test runs up to GOMAXPROCS packages at
-// once on shared runners), and the sibling test gates measured up to
-// 2.8x slower under that contention on a 2-core box. The bounds still
-// guard the order-of-magnitude class of regressions they were written
-// for. The measured numbers are logged with the PERF-P2 prefix and go
-// into the docs.
+// query must each stay under the CPU bound (4 CPU-seconds per step).
+// History: the bounds were wall-milliseconds — 2000 calibrated idle,
+// contention-scaled to 6000 after #82 observed 2.8× sibling-package
+// inflation — but wall gates can never be load-immune (the fees fuzzy
+// gate later measured 1.38 s idle vs 15.2 s loaded for byte-identical
+// code on the same box), so the gates moved to CPU-seconds, which stay
+// flat under core theft. The measured numbers are logged with the
+// PERF-P2 prefix (wall + CPU) and go into the docs.
 
 import (
 	"context"
@@ -18,7 +17,24 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-lab/internal/domain"
+	"github.com/mmqz/netops-lab/internal/testsupport"
 )
+
+// cpuBound gates one measured step on CPU-seconds instead of wall
+// milliseconds (#82 second edition: the 6000 ms wall bounds still
+// false-red when sibling test processes steal the cores — the fees
+// fuzzy gate observed 1.38 s idle vs 15.2 s loaded for byte-identical
+// code on the same box). CPU time is load-immune for this engine's
+// work (in-process SQLite via modernc is CPU-bound SQL work; stolen
+// cores inflate waiting, not computing) while order-of-magnitude
+// regressions cost proportionally more CPU and stay caught. Wall
+// milliseconds are still logged for the PERF-P2 docs lines.
+func cpuBound(t *testing.T, step string, cpu time.Duration, wall time.Duration) {
+	t.Helper()
+	if cpu > 4*time.Second {
+		t.Fatalf("%s cost %v CPU-seconds, bound is 4 (#82 load-immune re-calibration of the 6000 ms wall bound; wall was %v)", step, cpu, wall)
+	}
+}
 
 func TestSimulationPerformance(t *testing.T) {
 	svc, db := newEngine(t)
@@ -26,16 +42,23 @@ func TestSimulationPerformance(t *testing.T) {
 	ctx := context.Background()
 
 	// Materialize.
+	cpuStart, err := testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
+	}
 	start := time.Now()
 	res, err := svc.Materialize(ctx, "perf", "", batches)
 	elapsedMaterialize := time.Since(start)
 	if err != nil {
 		t.Fatalf("Materialize: %v", err)
 	}
-	if ms := elapsedMaterialize.Milliseconds(); ms >= 6000 {
-		t.Fatalf("Materialize took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
+	cpuEnd, err := testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
 	}
-	t.Logf("PERF-P2 Materialize (27 devices / 40 interfaces / 20 links): %d ms", elapsedMaterialize.Milliseconds())
+	cpuMaterialize := cpuEnd - cpuStart
+	cpuBound(t, "Materialize", cpuMaterialize, elapsedMaterialize)
+	t.Logf("PERF-P2 Materialize (27 devices / 40 interfaces / 20 links): %d ms wall, %v CPU", elapsedMaterialize.Milliseconds(), cpuMaterialize)
 
 	// A second materialization into the same database (fresh ids) to
 	// measure the read+write path on warm caches as well.
@@ -54,14 +77,20 @@ func TestSimulationPerformance(t *testing.T) {
 			"10.7."+itoa(i)+".1", 24))
 	}
 	start = time.Now()
+	cpuStart, err = testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
+	}
 	if _, err := svc.ApplyOps(ctx, res.WorkspaceID, ops, "perf: 10 ops", false); err != nil {
 		t.Fatalf("ApplyOps(10): %v", err)
 	}
 	elapsedApply := time.Since(start)
-	if ms := elapsedApply.Milliseconds(); ms >= 6000 {
-		t.Fatalf("ApplyOps of 10 ops took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
+	cpuEnd, err = testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
 	}
-	t.Logf("PERF-P2 ApplyOps (10 config ops, 1 transaction): %d ms", elapsedApply.Milliseconds())
+	cpuBound(t, "ApplyOps of 10 ops", cpuEnd-cpuStart, elapsedApply)
+	t.Logf("PERF-P2 ApplyOps (10 config ops, 1 transaction): %d ms wall, %v CPU", elapsedApply.Milliseconds(), cpuEnd-cpuStart)
 
 	// ApplyOps including the auto-check run (the full §4 pipeline).
 	start = time.Now()
@@ -74,31 +103,43 @@ func TestSimulationPerformance(t *testing.T) {
 
 	// Full check run.
 	start = time.Now()
+	cpuStart, err = testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
+	}
 	run, err := svc.RunChecks(ctx, res.WorkspaceID, domain.CheckTriggerManual)
 	if err != nil {
 		t.Fatalf("RunChecks: %v", err)
 	}
 	elapsedChecks := time.Since(start)
-	if ms := elapsedChecks.Milliseconds(); ms >= 6000 {
-		t.Fatalf("RunChecks took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
+	cpuEnd, err = testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
 	}
-	t.Logf("PERF-P2 RunChecks (%d result rows): %d ms", len(run.Results), elapsedChecks.Milliseconds())
+	cpuBound(t, "RunChecks", cpuEnd-cpuStart, elapsedChecks)
+	t.Logf("PERF-P2 RunChecks (%d result rows): %d ms wall, %v CPU", len(run.Results), elapsedChecks.Milliseconds(), cpuEnd-cpuStart)
 
 	// Path query (DEV-002 is down from the previous step, so route the
 	// query along the live segment DEV-003→DEV-014).
 	start = time.Now()
+	cpuStart, err = testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
+	}
 	p, err := svc.Path(ctx, res.WorkspaceID, "DEV-003", "DEV-014")
 	if err != nil {
 		t.Fatalf("Path: %v", err)
 	}
 	elapsedPath := time.Since(start)
-	if ms := elapsedPath.Milliseconds(); ms >= 6000 {
-		t.Fatalf("Path took %d ms, bound is 6000 ms (#82 contention-scaled from 2000)", ms)
+	cpuEnd, err = testsupport.CPUTime()
+	if err != nil {
+		t.Fatalf("read CPU time: %v", err)
 	}
+	cpuBound(t, "Path", cpuEnd-cpuStart, elapsedPath)
 	if !p.Reachable {
 		t.Fatalf("Path(DEV-003→DEV-014) must be reachable")
 	}
-	t.Logf("PERF-P2 Path (%d-hop BFS): %d ms", p.PathLength, elapsedPath.Milliseconds())
+	t.Logf("PERF-P2 Path (%d-hop BFS): %d ms wall, %v CPU", p.PathLength, elapsedPath.Milliseconds(), cpuEnd-cpuStart)
 
 	// Topology + hash (the payload assembly) for completeness.
 	start = time.Now()
