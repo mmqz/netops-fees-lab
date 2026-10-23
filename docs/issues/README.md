@@ -3,6 +3,82 @@
 > 来源：2026-10-12 全面测试（Windows + Linux/Docker，v0.6.0 @ 2033de8）；#12–#14 为 2026-10-12 用户现场反馈（v0.6.2 验收后）；#15 为 2026-10-12 用户现场反馈（v0.6.3 验收后）；#16 为 2026-10-12 数据模型评审（v0.6.4 之后，架构级）；#17–#29 为数据模型设计衍生的决策项与缺失项（见 [design/data-model-v1.md](../design/data-model-v1.md) §11）；**#38–#41 为 v0.7.0/v0.8.0 本地审计发现（见 [audit-v0.8.0.md](../audit-v0.8.0.md)）；**#42–#45 为 v0.8.0 真实数据演示的用户现场反馈与复核；**#46 为 v0.8.1 验证；#48 见 [audit-v0.11.0.md](../audit-v0.11.0.md)；#49–#52 为拓扑/地图/数据的用户现场反馈；#53 为 v0.11.0 图层覆盖层端到端实测（#51 修复后新暴露的缺陷）**
 > 完整报告：[test-report-windows-2026-10-12.md](../test-report-windows-2026-10-12.md)
 
+## Windows 全量测试发现（2026-10-23，v0.15.2 + 48 未发版提交）
+
+来源：同步至 `264d8e1` 后在 Windows 跑全量测试。
+**23 包 ok / 2 包 FAIL / 7 个断言失败**，三类根因性质完全不同：
+
+| # | 失败 | 性质 |
+| --- | --- | --- |
+| 1 | 三个并发上传测试（fees/imports/metrics） | **产品缺陷** |
+| 2 | TestAPIMDocHeadingsMatchRouteTable | **测试缺陷** |
+| 3 | TestSnapshotLayer / TestLinkScanFailsLoud | 环境（TempDir 清理） |
+
+### ① 并发同名上传在 Windows 上 100% 失败，返回 500
+
+连跑 5 次、5/5 必现。服务端日志：
+
+```
+rename ...\.tmp-2393708100 .../8cb427a0..._race-devices.xlsx: Access is denied.
+```
+
+根因：`internal/api/uploads.go:31-53` 的设计注释假设
+
+> concurrent same-content submissions each write their own temp and **RENAME over the target
+> — rename is atomic per file** … no reader ever observes a partial one
+
+**这个假设只在 POSIX 成立。** Windows 上目标文件被其他句柄打开时，`os.Rename` 返回
+`ERROR_ACCESS_DENIED`，**不是原子覆盖而是失败**。三个通道共用该原语，所以一起挂。
+
+影响：内容寻址本该「同内容→幂等」，用户看到 500；且把**可重试的并发竞争**归成了服务器故障，
+与 #104「operator refusals vs server faults」的分类方向相反。
+
+建议：rename 失败时若目标已存在且尺寸一致 → 视为成功返回（内容寻址语义本就如此）。
+
+### ② 文档门禁被 Windows CRLF 骗过
+
+```
+api.md is missing sections for 1 live route(s): [GET /api/health]
+api.md documents 1 route(s) that no longer exist: [GET /api/health
+]
+```
+
+同一路由既「缺失」又「多余」，自相矛盾。`docs/api.md:14` 确有此标题且是干净 ASCII。
+
+根因：`facts_gate_test.go` 的正则 `[^ ?\x60—]+` **没排除 CR**，
+CRLF 文件按 `\n` 切分后每行带 `\r`，提取到 `"/api/health\r"`。
+
+Python 复现（与 Go 同样只按 `\n` 切）：
+
+```
+提取数: 84
+含 health 的 key: 'GET /api/health\r'
+带 \r 的 key 数: 1 / 84      ← 只有 1 个！
+```
+
+其他 83 个标题是 `## GET /api/xxx — 中文标题` 形式，字符集在 `—` 处就停了；
+唯独 `## GET /api/health` 路径后直接换行，才把 CR 吃进去。
+
+建议：`strings.TrimRight(line, "\r")` + 字符集排除类补 CR。
+
+### ③ TempDir 清理失败（环境，非产品缺陷）
+
+断言本身通过，失败在 `t.TempDir()` 自动清理——Windows 上 SQLite 句柄释放慢于清理，
+是本仓库历史上反复出现的同一现象。建议持句柄的测试在 `t.Cleanup` 里先 Close。
+
+### 附：本轮其他确认
+
+| 项 | 结论 |
+| --- | --- |
+| #79 修复 | ✅ 已按建议改（字符串常量 + FromSlash），断言通过 |
+| #80 | ✅ 是我漏判的同类问题，云端修了并补了 v32 迁移测试 |
+| #123「零命中」声明 | ✅ 属实（命中项均为无关语义） |
+| CRLF | 📌 本仓库反复受伤（本 issue + #118），建议统一 |
+
+详细报告（含完整复现步骤与代码定位）：[issue-124](issue-124-windows-test-failures.md)
+
+---
+
 ## 按优先级
 
 | # | 优先级 | 标题 | 平台 | 影响 |
