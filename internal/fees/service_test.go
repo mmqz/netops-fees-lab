@@ -13,12 +13,19 @@ import (
 
 	"github.com/mmqz/netops-lab/internal/domain"
 	"github.com/mmqz/netops-lab/internal/repo"
+
+	"github.com/mmqz/netops-lab/internal/testsupport"
 )
 
 // newService opens a fresh DB + service rooted at a temp data dir.
 func newService(t *testing.T) (*Service, *repo.DB, string) {
 	t.Helper()
-	dir := t.TempDir()
+	// testsupport.TempDir over bare t.TempDir (#124): Windows releases
+	// file/DB handles slower than the test framework's RemoveAll — the
+	// retry-then-tolerate wrapper keeps that environment timing from
+	// failing assertions that already passed. (db.Close registers after
+	// this dir's cleanup → LIFO closes the DB before removal.)
+	dir := testsupport.TempDir(t)
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatalf("repo.Open: %v", err)

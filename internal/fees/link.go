@@ -703,11 +703,18 @@ func readBatchSiteCodes(path string, seen map[string]struct{}) (err error) {
 	if err != nil {
 		return fmt.Errorf("fees: 打开 %s: %w", path, err)
 	}
+	// The file handle closes BEFORE the panicking constructor ever runs:
+	// parquet-go's NewGenericReader panics on corrupt magic/footer, and a
+	// defer registered after it would never fire — the recovered error
+	// returned while the handle stayed open. On Windows that leak pins
+	// the parquet file until process exit (t.TempDir cleanup then fails
+	// with "being used by another process", #124's environment failure);
+	// on POSIX it burns an fd per corrupt-file scan.
+	defer func() { _ = f.Close() }()
 	r := parquet.NewGenericReader[feeParquetRow](f)
 	rows := make([]feeParquetRow, 256)
 	defer func() {
 		_ = r.Close()
-		_ = f.Close()
 	}()
 	for {
 		n, rerr := r.Read(rows)

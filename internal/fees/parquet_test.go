@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/parquet-go/parquet-go"
+
+	"github.com/mmqz/netops-lab/internal/testsupport"
 )
 
 // TestWriteParquetPartitionsLayout pins the analysis layer's physical
@@ -15,7 +17,7 @@ import (
 // path must not depend on the duckdb engine to be verifiable), staging
 // removed after commit.
 func TestWriteParquetPartitionsLayout(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	rows := []NormalizedRow{
 		{SiteCode: "S1", AmountCents: 10050, Year: 2024, Month: 5, SourceFile: "h_f.csv", SourceRow: 2, ImportBatch: "fee_b1"},
 		{SiteCode: "S2", AmountCents: 20000, Year: 2024, Month: 5, SourceFile: "h_f.csv", SourceRow: 3, ImportBatch: "fee_b1"},
@@ -98,7 +100,7 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 // coexistence ruling), and BatchParquetFiles isolates exactly one batch's
 // files.
 func TestBatchParquetFilesAndRemove(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	rowsB1 := []NormalizedRow{{SiteCode: "S1", AmountCents: 100, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b1"}}
 	rowsB2 := []NormalizedRow{{SiteCode: "S1", AmountCents: 200, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b2"}}
 	if _, err := writeParquetPartitions(dir, FeeTypeRepair, "fee_b1", rowsB1); err != nil {
@@ -131,7 +133,7 @@ func TestBatchParquetFilesAndRemove(t *testing.T) {
 // TestSnapshotLayer pins the snapshot layer: content-addressed path
 // shape, idempotent same-content writes, hash correctness.
 func TestSnapshotLayer(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := filepath.Join(dir, "bill.csv")
 	content := []byte("站址编码,电费\nS1,100\n")
 	if err := os.WriteFile(src, content, 0o644); err != nil {
