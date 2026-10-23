@@ -440,13 +440,21 @@ type metricsQueryInput struct {
 	From string `json:"from,omitempty" jsonschema:"窗口起点（RFC3339 时间戳，如 2024-05-01T00:00:00Z；缺省不设下界）"`
 	To   string `json:"to,omitempty" jsonschema:"窗口终点（RFC3339 时间戳；缺省不设上界；长窗口建议配 agg 降载荷）"`
 	Agg  string `json:"agg,omitempty" jsonschema:"聚合粒度：raw（原始点，缺省）/ daily_avg / daily_min / daily_max（按自然日聚合，长窗口首选）"`
+	// #123 (ADR-0011 D4): the forecast mode — same tool, no new tool (the
+	// D5 freeze). When set, keys must name exactly ONE metric and the
+	// output is the linear-trend forecast instead of raw series.
+	Forecast   bool `json:"forecast,omitempty" jsonschema:"趋势预测模式（ADR-0011 D4）：改为返回日均值最小二乘线性趋势 + N 天到阈值 + 80% 预测带；此时 keys 必须且只能指定一个指标；<14 天数据会得到诚实的拒算错误；外推参考，非承诺"`
+	WindowDays int  `json:"windowDays,omitempty" jsonschema:"预测模式的外推天数（1–90，缺省 30；仅 forecast=true 时有效）"`
 }
 
 // metricsQueryOutput mirrors the HTTP GET /api/resources/{id}/metrics
-// envelope: resourceId + series (each with points; always arrays).
+// envelope: resourceId + series (each with points; always arrays). The
+// #123 forecast mode keeps the same envelope with an empty series array
+// and the forecast object beside it — one tool, two read shapes.
 type metricsQueryOutput struct {
-	ResourceID string                 `json:"resourceId"`
-	Series     []metrics.SeriesResult `json:"series"`
+	ResourceID string                  `json:"resourceId"`
+	Series     []metrics.SeriesResult  `json:"series"`
+	Forecast   *metrics.ForecastResult `json:"forecast,omitempty"`
 }
 
 // metricsQuery reads through the SAME metrics.Service the HTTP handler
@@ -504,6 +512,19 @@ func metricsQuery(ctx context.Context, svc *services.Services, in metricsQueryIn
 		to = t.UTC().Format(time.RFC3339)
 	}
 
+	if in.Forecast {
+		// The forecast is single-series by definition: exactly one key.
+		if len(keys) != 1 {
+			return nil, metricsQueryOutput{}, fmt.Errorf("forecast 模式需要且只能指定一个指标键（keys=%d 个）——趋势是单序列的", len(keys))
+		}
+		fc, err := svc.Metrics.Forecast(ctx, in.ResourceID, keys[0], in.WindowDays)
+		if err != nil {
+			// The D4 refusal (<14 days / no series) is a HONEST tool error,
+			// the same text the HTTP 422 carries.
+			return nil, metricsQueryOutput{}, fmt.Errorf("趋势预测失败：%w", err)
+		}
+		return nil, metricsQueryOutput{ResourceID: in.ResourceID, Series: []metrics.SeriesResult{}, Forecast: &fc}, nil
+	}
 	series, err := svc.Metrics.ResourceSeries(ctx, in.ResourceID, keys, from, to, agg)
 	if err != nil {
 		return nil, metricsQueryOutput{}, fmt.Errorf("指标查询失败：%w", err)

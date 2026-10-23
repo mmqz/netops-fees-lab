@@ -11,7 +11,7 @@
 | key | 当前值 | 断言方式（代码实数 → 本表声明数） |
 | --- | --- | --- |
 | `mcp-tools` | 13 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
-| `api-routes` | 85 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `api-routes` | 86 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
 | `api-fees-routes` | 14 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
 | `repo-migrations` | 34 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |

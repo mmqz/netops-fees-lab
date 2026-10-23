@@ -441,3 +441,56 @@ func (s *Server) handleMetricBatchRollback(w http.ResponseWriter, r *http.Reques
 	}
 	respondJSON(w, http.StatusOK, res)
 }
+
+// handleMetricForecast implements GET /api/metrics/forecast
+// ?resourceId=&metricKey=&windowDays= (ADR-0011 D4, #123): the least-
+// squares linear trend over the series's daily averages with the N-days-
+// to-threshold projection (per the catalog's direction and advisory
+// bound) and an 80% prediction band. The D4 doctrine rides the contract:
+// <14 daily points answer 422 forecast_not_enough_data (数据不足时上预
+// 测是自欺), the note 恒为「外推参考，非承诺」.
+func (s *Server) handleMetricForecast(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "指标服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	resourceID := strings.TrimSpace(q.Get("resourceId"))
+	if resourceID == "" {
+		respondError(w, http.StatusBadRequest, "bad_request", "resourceId 必填")
+		return
+	}
+	if _, err := s.db.Resources.GetByID(r.Context(), resourceID); err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	metricKey := strings.TrimSpace(q.Get("metricKey"))
+	if metricKey == "" {
+		respondError(w, http.StatusBadRequest, "bad_request", "metricKey 必填（封闭目录："+strings.Join(metrics.KeySet(), ", ")+"）")
+		return
+	}
+	if _, known := metrics.SpecForKey(metricKey); !known {
+		respondErrorf(w, http.StatusBadRequest, "bad_request",
+			"metricKey %q 不在封闭目录（可用：%s）", metricKey, strings.Join(metrics.KeySet(), ", "))
+		return
+	}
+	windowDays := 30
+	if raw := strings.TrimSpace(q.Get("windowDays")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > 90 {
+			respondError(w, http.StatusBadRequest, "bad_request", "windowDays 必须是 1–90 的整数（缺省 30）")
+			return
+		}
+		windowDays = v
+	}
+	out, err := s.metrics.Forecast(r.Context(), resourceID, metricKey, windowDays)
+	if err != nil {
+		if errors.Is(err, metrics.ErrForecastNotEnoughData) {
+			respondError(w, http.StatusUnprocessableEntity, "forecast_not_enough_data", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, out)
+}

@@ -72,6 +72,8 @@ func (s *Server) apiRoutes() []route {
 
 		{Method: "GET", Pattern: "/api/resources/{id}/metrics", Tag: "metrics", Summary: "资源指标序列（原始点，keys/from/to 过滤）", Handler: s.handleResourceMetrics},
 		{Method: "GET", Pattern: "/api/metrics/keys", Tag: "metrics", Summary: "封闭指标目录（键 → 标签/单位/区间）", Handler: s.handleMetricKeys},
+		{Method: "GET", Pattern: "/api/metrics/forecast", Tag: "metrics", Summary: "指标趋势预测（ADR-0011 D4：日均值最小二乘线性趋势 + N 天到阈值 + 80% 预测带；<14 天数据 422 拒算；外推参考，非承诺）", Handler: s.handleMetricForecast,
+			ExtraStatuses: map[int]string{http.StatusUnprocessableEntity: "数据不足（日聚合点 < 14，预测拒绝自欺）"}},
 		{Method: "GET", Pattern: "/api/metrics/anomalies", Tag: "metrics", Summary: "指标异常点查询（越限/缺失/疑似）", Handler: s.handleMetricAnomalies},
 		{Method: "POST", Pattern: "/api/metrics/analyze", Tag: "metrics", Summary: "指标工作簿分析（映射建议，不落库）", Handler: s.handleMetricsAnalyze},
 		{Method: "POST", Pattern: "/api/metrics/imports", Tag: "metrics", Summary: "指标批次摄入（独立通道，含批次审计）", Handler: s.handleMetricsImport,

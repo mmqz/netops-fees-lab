@@ -908,11 +908,20 @@ HTTP/1.1 409 Conflict
 
 ## 时序指标端点（v0.7.0 W20 — 数据模型 v1.0 §5/§7.3）
 
-时序存储三表族（migration v14：`metric_keys` 指标目录 / `metric_series` 序列元数据 / `metrics` 窄表测量点，`(series_id, ts)` 主键 + `INSERT OR REPLACE`——**值语义**：同 (series, ts) 重导覆盖，与资源的 skip 语义并存见 ADR-0014）。**MCP 工具面不为此扩容**（metrics_query 是既有只读工具之一，共 11 个）：AI 经 HTTP 消费时序；写入通道独立于资源导入（`metric_batches` 独立批次表，ADR-0011 D1）。
+时序存储三表族（migration v14：`metric_keys` 指标目录 / `metric_series` 序列元数据 / `metrics` 窄表测量点，`(series_id, ts)` 主键 + `INSERT OR REPLACE`——**值语义**：同 (series, ts) 重导覆盖，与资源的 skip 语义并存见 ADR-0014）。**MCP 工具面不为此扩容**（metrics_query 是既有只读工具之一，工具计数由 docs/facts.md `mcp-tools` 门禁钉死）：AI 经 HTTP 消费时序；写入通道独立于资源导入（`metric_batches` 独立批次表，ADR-0011 D1）。
 
 ### GET /api/metrics/keys — 指标目录
 
 封闭注册的指标目录（迁移 v14 从代码注册表 `internal/metrics` 播种，目录表与注册表由测试钉死一致）。**AI 先查此端点知道有哪些指标可分析**。`items[]`：`metricKey`（snake_case 键，查询参数用它）、`label`（中文名）、`unit`（dBm/%/Mbps/count/℃/V/mA）、`valueKind`（gauge|counter|ratio）、`minValue`/`maxValue`（合理界，advisory——越限值入库存 `quality=suspect` 而非拒绝）、`direction`（higher_is_better|lower_is_better|neutral——判断劣化方向）。目录含 14 键：光功率收/发均值、谷值、丢包率收/发、带宽利用率收/发、速率收/发、错误包数收/发、光模块温度、供电电压、偏置电流。
+
+### GET /api/metrics/forecast?resourceId=&metricKey=&windowDays= — 指标趋势预测（ADR-0011 D4，#123）
+
+单序列日均值的**最小二乘线性趋势**：斜率/截距/残差 SE/斜率 SE 四个数 + **N 天后到达阈值**的投影（按目录 Direction 映射建议边界：higher_is_better → min、lower_is_better → max）+ **80% 预测带**（正态近似 1.282）。
+
+- `resourceId` + `metricKey` 必填（metricKey 走封闭目录校验）；`windowDays` 可选 1–90（缺省 30），是最后观测日之后外推的天数；
+- **<14 个日聚合点 → 422 `forecast_not_enough_data`**（D4 原话「数据不足时上预测是自欺」）；
+- `daysToThreshold`：null = 不可判定（neutral 方向 / 该侧无界 / 斜率远离阈值 / 斜率为零——诚实留白）；**0 = 已越限**（检测的事，预测不冒充）；
+- `note` 恒为「外推参考，非承诺——线性趋势基于历史日均值，未含季节性/突发/变更，越远越不可信」。
 
 ### POST /api/metrics/analyze — 指标工作簿分析（无状态）
 

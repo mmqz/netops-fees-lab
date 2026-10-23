@@ -23,7 +23,7 @@ import (
 // metricsSubcommands lists the metrics dispatcher's cases; both usage
 // surfaces derive from it (see cliSubcommands for the #108 rationale —
 // the closed-set test pins it against the switch via go/ast).
-var metricsSubcommands = []string{"list", "rollback"}
+var metricsSubcommands = []string{"list", "forecast", "rollback"}
 
 // cmdMetrics implements `netopslab metrics --db <path> list|rollback …`.
 func cmdMetrics(args []string, stdout, stderr io.Writer) error {
@@ -41,6 +41,8 @@ func cmdMetrics(args []string, stdout, stderr io.Writer) error {
 	switch sub {
 	case "list":
 		return cmdMetricsList(ctx, a.Metrics, subArgs, stdout, stderr)
+	case "forecast":
+		return cmdMetricsForecast(ctx, a.Metrics, subArgs, stdout, stderr)
 	case "rollback":
 		return cmdMetricsRollback(ctx, a.Metrics, subArgs, stdout, stderr)
 	default:
@@ -48,6 +50,31 @@ func cmdMetrics(args []string, stdout, stderr io.Writer) error {
 		// closed-set test keeps this honest anyway
 		return &usageError{msg: fmt.Sprintf("metrics 子命令必须是 %s，收到 %q", commandEnum(metricsSubcommands), sub)}
 	}
+}
+
+// cmdMetricsForecast implements `metrics forecast --resource --key
+// [--window N]` (ADR-0011 D4, #123): the least-squares linear trend over
+// the series's daily averages with N-days-to-threshold and the 80% band.
+// <14 daily points answer the honest refusal, exit non-zero.
+func cmdMetricsForecast(ctx context.Context, svc *metrics.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("metrics forecast")
+	resource := fs.String("resource", "", "资源 id（uuid；端口类资源有性能序列），必填")
+	key := fs.String("key", "", "指标键（封闭目录，netopslab metrics 或 GET /api/metrics/keys 可查），必填")
+	window := fs.Int("window", 30, "外推天数（1–90，缺省 30）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *resource == "" || *key == "" {
+		return &usageError{msg: "metrics forecast 需要 --resource、--key", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "metrics forecast 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	out, err := svc.Forecast(ctx, *resource, *key, *window)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, out)
 }
 
 // cmdMetricsList implements `metrics list [--page N] [--page-size N]` —

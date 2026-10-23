@@ -349,3 +349,150 @@ func TestMetricEndpointsContract(t *testing.T) {
 		t.Errorf("re-rollback: %d, want 409", resp.StatusCode)
 	}
 }
+
+// TestAPIMetricForecast pins the #123 HTTP contract: the D4 trend
+// forecast over the series's daily averages — shape, the honest
+// refusals (422 <14 days / no series), the closed-catalog 400, the
+// disclaimer that never leaves the payload.
+func TestAPIMetricForecast(t *testing.T) {
+	srv := newAPITestServer(t)
+	dir := testsupport.TempDir(t)
+	if _, err := metrics.WriteSynthData(metrics.SynthOptions{
+		Out: dir, Devices: 1, Ports: 1, Days: 20, Scenario: metrics.ScenarioNormal, Seed: 42, Metrics: 3,
+	}); err != nil {
+		t.Fatalf("synthdata: %v", err)
+	}
+	importResourcesWorkbook(t, srv, filepath.Join(dir, "resources.xlsx"))
+
+	// import all 20 perf days through the real analyze+import cycle.
+	for d := 1; d <= 20; d++ {
+		name := fmt.Sprintf("perf-day-%02d.xlsx", d)
+		perf, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		resp, body := uploadMetricFile(t, srv, "/api/metrics/analyze", name, perf, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("analyze %s: %d\n%s", name, resp.StatusCode, body)
+		}
+		var analysis metrics.IngestAnalysis
+		decodeJSON(t, "analyze "+name, body, &analysis)
+		mappingJSON, err := json.Marshal(analysis.SuggestedMapping)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, body = uploadMetricFile(t, srv, "/api/metrics/imports", name, perf, string(mappingJSON))
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("import %s: %d\n%s", name, resp.StatusCode, body)
+		}
+	}
+
+	// discover the port id and the device id (the device carries no
+	// series — metrics hang on ports — so it answers the 422 class).
+	var portID, deviceID string
+	resp, body := doRequest(t, srv, http.MethodGet, "/api/resources?pageSize=10", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resource list: %d\n%s", resp.StatusCode, body)
+	}
+	var list struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"items"`
+	}
+	decodeJSON(t, "resource list", body, &list)
+	for _, it := range list.Items {
+		switch it.Type {
+		case "port":
+			portID = it.ID
+		case "device":
+			deviceID = it.ID
+		}
+	}
+	if portID == "" || deviceID == "" {
+		t.Fatalf("need one port and one device, got %q/%q", portID, deviceID)
+	}
+
+	// the forecast: 200, 20 daily points, 31 projections (last observed
+	// day + the default 30 ahead), the D4 disclaimer always aboard.
+	resp, body = doRequest(t, srv, http.MethodGet,
+		"/api/metrics/forecast?resourceId="+portID+"&metricKey=optical_power_rx_avg_dbm", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("forecast: %d\n%s", resp.StatusCode, body)
+	}
+	var fc struct {
+		ResourceID      string  `json:"resourceId"`
+		MetricKey       string  `json:"metricKey"`
+		Points          int     `json:"points"`
+		Slope           float64 `json:"slopePerDay"`
+		DaysToThreshold *int    `json:"daysToThreshold"`
+		Projections     []struct {
+			Day    string  `json:"day"`
+			Value  float64 `json:"value"`
+			CiLow  float64 `json:"ciLow"`
+			CiHigh float64 `json:"ciHigh"`
+		} `json:"projections"`
+		Note string `json:"note"`
+	}
+	decodeJSON(t, "forecast", body, &fc)
+	if fc.ResourceID != portID || fc.MetricKey != "optical_power_rx_avg_dbm" || fc.Points != 20 {
+		t.Fatalf("forecast identity = %s/%s points %d, want the port 20-point series", fc.ResourceID, fc.MetricKey, fc.Points)
+	}
+	if len(fc.Projections) != 31 {
+		t.Fatalf("projections = %d, want 31 (windowDays default 30 + the last observed day)", len(fc.Projections))
+	}
+	if fc.Note != metrics.ForecastNote {
+		t.Fatalf("note = %q, want the D4 disclaimer", fc.Note)
+	}
+	if fc.Projections[0].CiLow > fc.Projections[0].Value || fc.Projections[0].CiHigh < fc.Projections[0].Value {
+		t.Fatalf("projection[0] band = [%.3f, %.3f] around %.3f — the band must straddle the fit", fc.Projections[0].CiLow, fc.Projections[0].CiHigh, fc.Projections[0].Value)
+	}
+
+	// windowDays narrows the projection horizon.
+	resp, body = doRequest(t, srv, http.MethodGet,
+		"/api/metrics/forecast?resourceId="+portID+"&metricKey=optical_power_rx_avg_dbm&windowDays=7", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("forecast windowDays=7: %d\n%s", resp.StatusCode, body)
+	}
+	decodeJSON(t, "forecast w7", body, &fc)
+	if len(fc.Projections) != 8 {
+		t.Fatalf("windowDays=7 projections = %d, want 8", len(fc.Projections))
+	}
+
+	// the device carries no series → the honest 422, not an empty 200.
+	resp, body = doRequest(t, srv, http.MethodGet,
+		"/api/metrics/forecast?resourceId="+deviceID+"&metricKey=optical_power_rx_avg_dbm", nil, "")
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("device forecast: %d, want 422\n%s", resp.StatusCode, body)
+	}
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeJSON(t, "device forecast", body, &env)
+	if env.Error.Code != "forecast_not_enough_data" {
+		t.Fatalf("device forecast code = %q, want forecast_not_enough_data", env.Error.Code)
+	}
+
+	// the closed-catalog and parameter 400s.
+	for _, bad := range []string{
+		"/api/metrics/forecast?metricKey=optical_power_rx_avg_dbm",
+		"/api/metrics/forecast?resourceId=" + portID,
+		"/api/metrics/forecast?resourceId=" + portID + "&metricKey=bogus_key",
+		"/api/metrics/forecast?resourceId=" + portID + "&metricKey=optical_power_rx_avg_dbm&windowDays=0",
+		"/api/metrics/forecast?resourceId=" + portID + "&metricKey=optical_power_rx_avg_dbm&windowDays=91",
+	} {
+		resp, body = doRequest(t, srv, http.MethodGet, bad, nil, "")
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("GET %s: %d, want 400\n%s", bad, resp.StatusCode, body)
+		}
+	}
+
+	// unknown resource → 404 (mapServiceError), never the data 422.
+	resp, body = doRequest(t, srv, http.MethodGet,
+		"/api/metrics/forecast?resourceId=res_nosuch&metricKey=optical_power_rx_avg_dbm", nil, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown resource forecast: %d, want 404\n%s", resp.StatusCode, body)
+	}
+}

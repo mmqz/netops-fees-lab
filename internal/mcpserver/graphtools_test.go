@@ -17,6 +17,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -335,4 +336,107 @@ func TestMCPInputBoundsRoundTrip(t *testing.T) {
 	if items := arr(validDoc, "series"); len(items) != 0 {
 		t.Errorf("metrics_query unknown resource: series = %d, want 0", len(items))
 	}
+}
+
+// TestMCPMetricsQueryForecast — the #123 forecast mode of metrics_query:
+// same tool (the D5 freeze holds — no 14th tool), one extra read shape.
+// The 15-day degradation workbook feeds the fit; the honest refusals
+// ride the tool-error channel exactly like the HTTP 422s.
+func TestMCPMetricsQueryForecast(t *testing.T) {
+	db := importSeededWorkbooks(t)
+	ctx := context.Background()
+	svc := services.New(db)
+
+	// import the real port sample (B2|bvi2.1008), then 15 days of
+	// -10 - 0.8·i dBm (crossing the -30 advisory min at x=25 → 11 days
+	// past the last observed day).
+	a, err := svc.Importer.Analyze(ctx, filepath.Join("..", "..", "samples", "telecom-port-multi-header.xlsx"))
+	if err != nil {
+		t.Fatalf("Analyze(port sample): %v", err)
+	}
+	if _, err := svc.Importer.Execute(ctx, a.BatchID, a.SuggestedMapping); err != nil {
+		t.Fatalf("Execute(port sample): %v", err)
+	}
+	dir := t.TempDir()
+	perfPath := filepath.Join(dir, "perf15.xlsx")
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]string{{"日期", "设备名称", "端口名称", "接收光功率均值"}}
+	for d := 1; d <= 15; d++ {
+		rows = append(rows, []string{
+			fmt.Sprintf("2026-10-%02d", d), "B2", "bvi2.1008", fmt.Sprintf("%.1f", -10-0.8*float64(d-1)),
+		})
+	}
+	for r, row := range rows {
+		for c, v := range row {
+			cell, _ := excelize.CoordinatesToCellName(c+1, r+1)
+			if err := f.SetCellValue(sheet, cell, v); err != nil {
+				t.Fatalf("SetCellValue: %v", err)
+			}
+		}
+	}
+	if err := f.SaveAs(perfPath); err != nil {
+		t.Fatalf("SaveAs: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ingestMap := metrics.IngestMapping{
+		TSField:      "日期",
+		ResourceType: "port",
+		ResolveBy:    []string{"device_name", "port_name"},
+		Metrics:      map[string]string{"optical_power_rx_avg_dbm": "接收光功率均值"},
+	}
+	if _, err := svc.Metrics.Ingest(ctx, perfPath, ingestMap, "perf15.xlsx"); err != nil {
+		t.Fatalf("Metrics.Ingest: %v", err)
+	}
+
+	session := startSession(t, db)
+	searchDoc := callTool(t, session, "resource_search", map[string]any{"q": "bvi2.1008", "type": "port", "limit": 1})
+	items, _ := searchDoc["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("resource_search(bvi2.1008): no items")
+	}
+	item, _ := items[0].(map[string]any)
+	portID, _ := item["id"].(string)
+
+	// the forecast read shape: series is an EMPTY array, forecast beside it.
+	doc := callTool(t, session, "metrics_query", map[string]any{
+		"resourceId": portID, "keys": "optical_power_rx_avg_dbm", "forecast": true, "windowDays": 7,
+	})
+	if _, ok := doc["series"].([]any); !ok || len(doc["series"].([]any)) != 0 {
+		t.Fatalf("forecast mode series = %T, want an empty JSON array", doc["series"])
+	}
+	fc, _ := doc["forecast"].(map[string]any)
+	if fc == nil {
+		t.Fatalf("forecast object missing: %+v", doc)
+	}
+	if fc["points"] != float64(15) {
+		t.Errorf("forecast points = %v, want 15", fc["points"])
+	}
+	if fc["daysToThreshold"] != float64(11) {
+		t.Errorf("forecast daysToThreshold = %v, want 11 (crossing x=25, last x=14)", fc["daysToThreshold"])
+	}
+	if fc["note"] != metrics.ForecastNote {
+		t.Errorf("forecast note = %v, want the D4 disclaimer", fc["note"])
+	}
+	projections, _ := fc["projections"].([]any)
+	if len(projections) != 8 { // last observed day + 7 ahead
+		t.Errorf("forecast projections = %d, want 8", len(projections))
+	}
+
+	// the honest refusals: no key (single-series requirement) and a
+	// resource that carries no metric series at all (the seeded circuit
+	// — relations live on it, performance series never do).
+	callToolError(t, session, "metrics_query", map[string]any{"resourceId": portID, "forecast": true})
+	cirDoc := callTool(t, session, "resource_search", map[string]any{"q": "CKT-001", "type": "circuit", "limit": 1})
+	cirItems, _ := cirDoc["items"].([]any)
+	if len(cirItems) == 0 {
+		t.Fatal("resource_search(CKT-001 circuit): no items")
+	}
+	cir, _ := cirItems[0].(map[string]any)
+	cirID, _ := cir["id"].(string)
+	callToolError(t, session, "metrics_query", map[string]any{
+		"resourceId": cirID, "keys": "optical_power_rx_avg_dbm", "forecast": true,
+	})
 }
