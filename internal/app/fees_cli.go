@@ -30,7 +30,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "list", "rollback", "evidence", "query", "link-scan", "links", "risks",
+	"import", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -101,6 +101,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesLinks(ctx, svc, subArgs, stdout, stderr)
 	case "risks":
 		return cmdFeesRisks(ctx, svc, dataDir, subArgs, stdout, stderr)
+	case "clue-decisions":
+		return cmdFeesClueDecisions(ctx, svc, subArgs, stdout, stderr)
 	default:
 		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 %s，收到 %q", commandEnum(feesSubcommands), sub)}
 	}
@@ -129,6 +131,7 @@ func cmdFeesRisks(ctx context.Context, svc *fees.Service, dataDir string, args [
 	minSites := fs.Int("min-sites", fees.DefaultMinSites, "outlier：同期最小同类站数（默认 8，不足则该期不出线索）")
 	limit := fs.Int("limit", 100, "线索条数上限（默认 100，最大 1000）")
 	maxEvidence := fs.Int("max-evidence", fees.DefaultMaxEvidence, "每条线索的证据锚点上限（默认 10，最大 50）")
+	includeDecided := fs.Bool("include-decided", false, "含已驳回线索（审计视图；缺省隐藏已驳回、信封 dismissed 计数）")
 	if err := fs.Parse(rest); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -155,6 +158,7 @@ func cmdFeesRisks(ctx context.Context, svc *fees.Service, dataDir string, args [
 		Statuses: fees.SplitComma(*status), DiffCents: *diffCents,
 		Ratio: *ratio, ZScore: *z, MinSites: *minSites,
 		Limit: *limit, MaxEvidence: *maxEvidence,
+		IncludeDecided: *includeDecided,
 	})
 	if err != nil {
 		return err
@@ -504,5 +508,145 @@ func cmdFeesLinksDecide(ctx context.Context, svc *fees.Service, op string, args 
 		Grade: string(l.Grade), Rule: l.Rule, Similarity: l.Similarity,
 		Status: string(l.Status), Source: string(l.Source), CreatedAt: l.CreatedAt,
 		DecidedAt: l.DecidedAt,
+	})
+}
+
+// cmdFeesClueDecisions implements `fees clue-decisions list|verify|dismiss`
+// (#119) — the human channel of the risk-clue verification loop. verify:
+// the clue is real, stays visible as the known-issues ledger; dismiss:
+// ruled out, suppressed from the default risk output and counted in the
+// envelope. Re-deciding flips the status (UPSERT); the decision survives
+// batch rollback (pure audit, no FK — the W005/W006 doctrine).
+func cmdFeesClueDecisions(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees clue-decisions 需要 list、verify 或 dismiss 子命令"}
+	}
+	sub, subArgs := args[0], args[1:]
+	switch sub {
+	case "list":
+		return cmdFeesClueDecisionsList(ctx, svc, subArgs, stdout, stderr)
+	case "verify", "dismiss":
+		return cmdFeesClueDecisionsDecide(ctx, svc, sub, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("fees clue-decisions 子命令必须是 list、verify 或 dismiss，收到 %q", sub)}
+	}
+}
+
+// feeClueDecisionItem is the CLI ledger item shape (mirrors the HTTP one).
+type feeClueDecisionItem struct {
+	ID         string `json:"id"`
+	Scenario   string `json:"scenario"`
+	ScenarioCn string `json:"scenarioCn"`
+	FeeType    string `json:"feeType"`
+	SiteCode   string `json:"siteCode"`
+	Year       int    `json:"year"`
+	Month      int    `json:"month"`
+	Status     string `json:"status"`
+	Note       string `json:"note,omitempty"`
+	DecidedAt  string `json:"decidedAt"`
+}
+
+// cmdFeesClueDecisionsList implements `fees clue-decisions list
+// [--scenario] [--fee-type] [--status] [--site] [--year] [--limit]`.
+func cmdFeesClueDecisionsList(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees clue-decisions list")
+	scenario := fs.String("scenario", "", "按风险场景过滤："+strings.Join(fees.RiskScenarios(), " / "))
+	feeType := fs.String("fee-type", "", "按费用类型过滤："+strings.Join(fees.FeeTypes(), " / "))
+	status := fs.String("status", "", "按裁定状态过滤：verified / dismissed（缺省全部）")
+	site := fs.String("site", "", "按站址编码过滤")
+	year := fs.Int("year", 0, "按年份过滤（2000-2100）")
+	limit := fs.Int("limit", 20, "页大小（默认 20，最大 100）")
+	offset := fs.Int("offset", 0, "偏移（缺省 0）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees clue-decisions list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *scenario != "" {
+		if _, err := fees.ParseRiskScenario(*scenario); err != nil {
+			return &usageError{msg: err.Error(), usage: usage.String()}
+		}
+	}
+	if *feeType != "" {
+		if _, err := fees.ParseFeeType(*feeType); err != nil {
+			return &usageError{msg: err.Error(), usage: usage.String()}
+		}
+	}
+	if *status != "" {
+		if _, err := domain.ParseClueDecisionStatus(*status); err != nil {
+			return &usageError{msg: err.Error(), usage: usage.String()}
+		}
+	}
+	f := repo.ClueDecisionFilter{
+		Scenario: *scenario, FeeType: *feeType, Status: *status,
+		SiteCode: *site, Year: *year, Limit: *limit, Offset: *offset,
+	}
+	items, total, err := svc.ListClueDecisions(ctx, f)
+	if err != nil {
+		return err
+	}
+	out := make([]feeClueDecisionItem, 0, len(items))
+	for _, d := range items {
+		out = append(out, feeClueDecisionItem{
+			ID: d.ID, Scenario: d.Scenario,
+			ScenarioCn: fees.RiskScenarioLabels[fees.RiskScenario(d.Scenario)],
+			FeeType:    string(d.FeeType), SiteCode: d.SiteCode,
+			Year: d.Year, Month: d.Month, Status: string(d.Status),
+			Note: d.Note, DecidedAt: d.DecidedAt.Format(time.RFC3339),
+		})
+	}
+	return writeJSON(stdout, struct {
+		Items  []feeClueDecisionItem `json:"items"`
+		Total  int                   `json:"total"`
+		Limit  int                   `json:"limit"`
+		Offset int                   `json:"offset"`
+	}{Items: out, Total: total, Limit: f.Limit, Offset: f.Offset})
+}
+
+// cmdFeesClueDecisionsDecide implements `fees clue-decisions verify|dismiss
+// --scenario --type --site --year [--month] [--note]`.
+func cmdFeesClueDecisionsDecide(ctx context.Context, svc *fees.Service, op string, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees clue-decisions " + op)
+	scenario := fs.String("scenario", "", "风险场景，必填："+strings.Join(fees.RiskScenarios(), " / "))
+	feeType := fs.String("type", "", "费用类型，必填："+strings.Join(fees.FeeTypes(), " / "))
+	site := fs.String("site", "", "站址编码，必填")
+	year := fs.Int("year", 0, "年份，必填（2000-2100）")
+	month := fs.Int("month", 0, "月份（0 = 整年口径线索，缺省 0）")
+	note := fs.String("note", "", "裁定理由（可选，审计留档）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *scenario == "" || *feeType == "" || *site == "" || *year == 0 {
+		return &usageError{msg: "fees clue-decisions " + op + " 需要 --scenario、--type、--site、--year", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees clue-decisions " + op + " 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	// closed-set validation answers usage errors (exit 2) — the same
+	// shape as cmdFeesRisks; the service re-validates as defense in depth.
+	if _, err := fees.ParseRiskScenario(*scenario); err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+	if _, err := fees.ParseFeeType(*feeType); err != nil {
+		return &usageError{msg: err.Error(), usage: usage.String()}
+	}
+	status := domain.ClueDecisionVerified
+	if op == "dismiss" {
+		status = domain.ClueDecisionDismissed
+	}
+	d, err := svc.DecideClue(ctx, domain.RiskClueDecision{
+		Scenario: *scenario, FeeType: domain.FeeType(*feeType), SiteCode: *site,
+		Year: *year, Month: *month, Status: status, Note: *note,
+	})
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, feeClueDecisionItem{
+		ID: d.ID, Scenario: d.Scenario,
+		ScenarioCn: fees.RiskScenarioLabels[fees.RiskScenario(d.Scenario)],
+		FeeType:    string(d.FeeType), SiteCode: d.SiteCode,
+		Year: d.Year, Month: d.Month, Status: string(d.Status),
+		Note: d.Note, DecidedAt: d.DecidedAt.Format(time.RFC3339),
 	})
 }

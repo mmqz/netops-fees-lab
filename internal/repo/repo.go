@@ -85,6 +85,11 @@ type DB struct {
 	// (migration v30, #63/#58 stage 3): exact/rule auto-confirmed, fuzzy
 	// proposals with human confirmation.
 	FeeSiteLinks *FeeSiteLinkRepo
+	// RiskClueDecisions stores the human decisions on computed risk
+	// clues (migration v33, #119): verified (the known-issues ledger) /
+	// dismissed (suppressed from the default risk output, counted in
+	// the envelope). Human-only writes — the MCP face gains no tool.
+	RiskClueDecisions *RiskClueDecisionRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -202,6 +207,7 @@ func wire(db *DB, q DBTX) {
 	db.Templates = &TemplateRepo{q: q}
 	db.FeeBatches = &FeeBatchRepo{q: q}
 	db.FeeSiteLinks = &FeeSiteLinkRepo{q: q}
+	db.RiskClueDecisions = &RiskClueDecisionRepo{q: q}
 }
 
 // Close closes the underlying database handle.
@@ -238,6 +244,11 @@ type Tx struct {
 	// (migration v30, #63/#58 stage 3): exact/rule auto-confirmed, fuzzy
 	// proposals with human confirmation.
 	FeeSiteLinks *FeeSiteLinkRepo
+	// RiskClueDecisions stores the human decisions on computed risk
+	// clues (migration v33, #119): verified (the known-issues ledger) /
+	// dismissed (suppressed from the default risk output, counted in
+	// the envelope). Human-only writes — the MCP face gains no tool.
+	RiskClueDecisions *RiskClueDecisionRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -376,6 +387,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		Templates:            &TemplateRepo{q: sqlTx},
 		FeeBatches:           &FeeBatchRepo{q: sqlTx},
 		FeeSiteLinks:         &FeeSiteLinkRepo{q: sqlTx},
+		RiskClueDecisions:    &RiskClueDecisionRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

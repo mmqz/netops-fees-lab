@@ -20,6 +20,7 @@ import {
   dismissFeeLink,
   fetchFeeBatches,
   fetchFeeLinks,
+  decideFeeRiskClue,
   fetchFeeRisks,
   formatApiErrorText,
   rollbackFeeBatch,
@@ -129,6 +130,13 @@ import {
   RISK_SCENARIO_UNLINKED,
   RISK_SCENARIO_IDLE_BILLING,
   RISK_SCENARIO_MISSING_BILLING,
+  FEES_RISKS_DISMISSED_COUNT,
+  FEES_RISKS_SHOW_DISMISSED,
+  FEES_RISKS_DECISION_VERIFIED,
+  FEES_RISKS_DECISION_DISMISSED,
+  FEES_RISKS_DECIDE_VERIFY,
+  FEES_RISKS_DECIDE_DISMISS,
+  FEES_RISKS_DECIDE_HINT,
 } from '../i18n';
 
 /** 线索行键与金额展示逻辑见 fees-format.ts（#68 抽出纯函数，表测钉死） */
@@ -340,6 +348,10 @@ export function FeesPage() {
   const [riskError, setRiskError] = useState('');
   const [engineMissing, setEngineMissing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // #119: the human verification loop — the audit toggle and the busy
+  // guard of the per-clue decide buttons.
+  const [includeDecided, setIncludeDecided] = useState(false);
+  const [decidingKey, setDecidingKey] = useState<string | null>(null);
 
   const runRisks = useCallback(async () => {
     const year = Number(riskYear);
@@ -367,6 +379,7 @@ export function FeesPage() {
         z: scenario === 'outlier' && riskZ.trim() !== '' ? Number(riskZ) : undefined,
         minSites:
           scenario === 'outlier' && riskMinSites.trim() !== '' ? Number(riskMinSites) : undefined,
+        includeDecided,
       });
       setRiskResult(res);
     } catch (err) {
@@ -391,7 +404,36 @@ export function FeesPage() {
     riskRatio,
     riskZ,
     riskMinSites,
+    includeDecided,
   ]);
+
+  // #119: the human decide channel — verify (real, stays visible and
+  // marked) or dismiss (ruled out; hidden by default, counted). The
+  // decision lands via UPSERT, then the scenario re-runs so the operator
+  // sees the suppression take effect immediately.
+  const decideClue = useCallback(
+    async (clue: { siteCode: string; year: number; month: number }, status: 'verified' | 'dismissed') => {
+      const key = clueKey(clue);
+      setDecidingKey(key);
+      setRiskError('');
+      try {
+        await decideFeeRiskClue({
+          scenario,
+          feeType: riskType,
+          siteCode: clue.siteCode,
+          year: clue.year,
+          month: clue.month,
+          status,
+        });
+        await runRisks();
+      } catch (err) {
+        setRiskError(formatApiErrorText(err));
+      } finally {
+        setDecidingKey(null);
+      }
+    },
+    [scenario, riskType, runRisks],
+  );
 
   return (
     <div className="page">
@@ -487,6 +529,14 @@ export function FeesPage() {
               </label>
             </>
           )}
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={includeDecided}
+              onChange={(e) => setIncludeDecided(e.target.checked)}
+            />
+            {FEES_RISKS_SHOW_DISMISSED}
+          </label>
           <button className="btn btn--primary" disabled={running} onClick={() => void runRisks()}>
             {running ? <Spinner /> : FEES_RISKS_RUN}
           </button>
@@ -499,6 +549,7 @@ export function FeesPage() {
             <p className="muted">
               {riskResult.scenarioCn} · {FEES_RISKS_CLUE_COUNT(riskResult.total)}
               {riskResult.excluded > 0 && <> · {FEES_RISKS_EXCLUDED(riskResult.excluded)}</>}
+              {riskResult.dismissed > 0 && <> · {FEES_RISKS_DISMISSED_COUNT(riskResult.dismissed)}</>}
             </p>
             <p className="muted muted--small">{riskResult.note}</p>
             {riskResult.clues.length === 0 ? (
@@ -526,7 +577,15 @@ export function FeesPage() {
                             setExpanded(open ? null : key);
                           }}
                         >
-                          <td>{c.siteCode}</td>
+                          <td>
+                            {c.siteCode}
+                            {c.decision === 'verified' && (
+                              <span className="chip chip--ok">{FEES_RISKS_DECISION_VERIFIED}</span>
+                            )}
+                            {c.decision === 'dismissed' && (
+                              <span className="chip chip--muted">{FEES_RISKS_DECISION_DISMISSED}</span>
+                            )}
+                          </td>
                           <td>{c.month > 0 ? `${c.year}-${String(c.month).padStart(2, '0')}` : FEES_RISKS_PERIOD_ALL_YEAR(c.year)}</td>
                           <td>
                             {formatRiskMetric(c.metricValue, c.metricLabel)}（{c.metricLabel}）
@@ -538,6 +597,29 @@ export function FeesPage() {
                           <tr className="row--detail">
                             <td colSpan={5}>
                               {c.note !== undefined && c.note !== '' && <p className="muted">{c.note}</p>}
+                              <p className="muted muted--small">{FEES_RISKS_DECIDE_HINT}</p>
+                              <p>
+                                <button
+                                  className="btn btn--small"
+                                  disabled={decidingKey === key || c.decision === 'verified'}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void decideClue(c, 'verified');
+                                  }}
+                                >
+                                  {FEES_RISKS_DECIDE_VERIFY}
+                                </button>{' '}
+                                <button
+                                  className="btn btn--small"
+                                  disabled={decidingKey === key || c.decision === 'dismissed'}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void decideClue(c, 'dismissed');
+                                  }}
+                                >
+                                  {FEES_RISKS_DECIDE_DISMISS}
+                                </button>
+                              </p>
                               <p className="kv__title">{FEES_RISKS_EVIDENCE}</p>
                               <ul className="kv">
                                 {(c.evidence ?? []).map((a, i) => (

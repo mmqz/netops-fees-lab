@@ -161,7 +161,7 @@ func TestCLIFeesRisksContract(t *testing.T) {
 	// every valid scenario: the engine-unavailable failure carries the
 	// duckdb build hint (exit 1, single JSON error object). #114 added
 	// idle-billing to the closed set.
-	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked", "idle-billing"} {
+	for _, sc := range []string{"retired-billing", "duplicate-settlement", "ledger-mismatch", "spike", "outlier", "unlinked", "idle-billing", "missing-billing"} {
 		stdout, code := runCLI(t, "fees", "--db", db, "--data", tmp,
 			"risks", sc, "--type", "electricity", "--year", "2024")
 		if code != 1 {
@@ -176,5 +176,94 @@ func TestCLIFeesRisksContract(t *testing.T) {
 		if !strings.Contains(fmt.Sprint(errBody["message"]), "duckdb") {
 			t.Errorf("risks %s error message must carry the duckdb hint: %v", sc, errBody["message"])
 		}
+	}
+}
+
+// TestCLIFeesClueDecisions pins #119's human channel on the CLI face:
+// the decision UPSERTS (verify → dismiss flip keeps one ledger row),
+// the ledger list filters work, usage errors exit 2, and — the honest
+// composition note — the DECISION persists on the default build (no
+// engine needed): the suppression applies the next time an engine-built
+// binary runs the scenario.
+func TestCLIFeesClueDecisions(t *testing.T) {
+	if e2eBin == "" {
+		t.Skip("netopslab binary was not built (go tool unavailable)")
+	}
+	tmp := t.TempDir()
+	db := filepath.Join(tmp, "netops.db")
+	base := []string{"fees", "--db", db, "--data", tmp, "clue-decisions"}
+
+	// usage errors exit 2: missing subcommand, bogus subcommand, missing
+	// identity flags, bogus scenario.
+	for _, args := range [][]string{
+		append(append([]string{}, base...), "bogus"),
+		append(append([]string{}, base...), "verify"),
+		append(append([]string{}, base...), "verify", "--scenario", "spike", "--type", "electricity", "--site", "S-1"),
+		append(append([]string{}, base...), "verify", "--scenario", "bogus", "--type", "electricity", "--site", "S-1", "--year", "2024"),
+		append(append([]string{}, base...), "list", "--status", "bogus"),
+	} {
+		_, code := runCLI(t, args...)
+		if code != 2 {
+			t.Errorf("%v: exit = %d, want 2 (usage)", args, code)
+		}
+	}
+
+	// verify: the full item shape comes back (exit 0).
+	stdout, code := runCLI(t, "fees", "--db", db, "--data", tmp,
+		"clue-decisions", "verify", "--scenario", "spike", "--type", "electricity",
+		"--site", "S-1", "--year", "2024", "--month", "5", "--note", "属实，已转核查")
+	if code != 0 {
+		t.Fatalf("verify: exit = %d\nstdout: %s", code, stdout)
+	}
+	var item map[string]any
+	if err := json.Unmarshal([]byte(stdout), &item); err != nil {
+		t.Fatalf("verify stdout not JSON: %v\n%s", err, stdout)
+	}
+	if !strings.HasPrefix(fmt.Sprint(item["id"]), "rcd_") || item["status"] != "verified" ||
+		item["scenarioCn"] != "电费环比异常上涨" || item["note"] != "属实，已转核查" {
+		t.Fatalf("verify item = %v", item)
+	}
+
+	// the flip: dismiss the SAME identity — one ledger row, status flips.
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp,
+		"clue-decisions", "dismiss", "--scenario", "spike", "--type", "electricity",
+		"--site", "S-1", "--year", "2024", "--month", "5")
+	if code != 0 {
+		t.Fatalf("dismiss flip: exit = %d\nstdout: %s", code, stdout)
+	}
+	var flipped map[string]any
+	if err := json.Unmarshal([]byte(stdout), &flipped); err != nil {
+		t.Fatalf("dismiss stdout not JSON: %v", err)
+	}
+	if flipped["status"] != "dismissed" {
+		t.Fatalf("flipped = %v, want dismissed", flipped)
+	}
+
+	// the ledger: one row (the flip kept one), the status filter narrows.
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp,
+		"clue-decisions", "list", "--status", "dismissed")
+	if code != 0 {
+		t.Fatalf("list: exit = %d\nstdout: %s", code, stdout)
+	}
+	var ledger struct {
+		Items []map[string]any `json:"items"`
+		Total int              `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &ledger); err != nil {
+		t.Fatalf("list stdout not JSON: %v", err)
+	}
+	if ledger.Total != 1 || len(ledger.Items) != 1 || ledger.Items[0]["status"] != "dismissed" {
+		t.Fatalf("ledger = %v, want one dismissed row", ledger)
+	}
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp,
+		"clue-decisions", "list", "--status", "verified")
+	if code != 0 {
+		t.Fatalf("list verified: exit = %d", code)
+	}
+	if err := json.Unmarshal([]byte(stdout), &ledger); err != nil {
+		t.Fatalf("list verified stdout not JSON: %v", err)
+	}
+	if ledger.Total != 0 {
+		t.Fatalf("verified filter = %d, want 0 (the flip left no verified rows)", ledger.Total)
 	}
 }

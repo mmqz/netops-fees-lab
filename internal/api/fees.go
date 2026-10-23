@@ -665,6 +665,16 @@ func (s *Server) handleFeesRisks(w http.ResponseWriter, r *http.Request) {
 			*p.ptr = v
 		}
 	}
+	// #119: the audit view — dismissed clues too (marked). Default
+	// false: dismissed are suppressed and counted in the envelope.
+	switch q.Get("includeDecided") {
+	case "", "0", "false":
+	case "1", "true":
+		rq.IncludeDecided = true
+	default:
+		respondError(w, http.StatusBadRequest, "bad_request", "includeDecided 必须是 0/1/true/false")
+		return
+	}
 	engine := fees.Query(r.Context())
 	if !engine.Available() {
 		respondError(w, http.StatusNotImplemented, "engine_not_built", fees.ErrEngineNotBuilt.Error())
@@ -681,4 +691,151 @@ func (s *Server) handleFeesRisks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
+}
+
+// clueDecisionItem is the JSON shape of one ledger row.
+type clueDecisionItem struct {
+	ID         string `json:"id"`
+	Scenario   string `json:"scenario"`
+	ScenarioCn string `json:"scenarioCn"`
+	FeeType    string `json:"feeType"`
+	SiteCode   string `json:"siteCode"`
+	Year       int    `json:"year"`
+	Month      int    `json:"month"`
+	Status     string `json:"status"`
+	Note       string `json:"note"`
+	DecidedAt  string `json:"decidedAt"`
+}
+
+// handleFeesClueDecisionPost implements POST /api/fees/risk-clue-decisions
+// (#119): the HUMAN channel of the risk-clue verification loop — verify
+// (confirmed real, stays visible as the known-issues ledger) or dismiss
+// (ruled out, suppressed from the default output, counted in the
+// envelope). The MCP face gains no write tool: an AI never verifies or
+// dismisses a clue on a human's behalf. Re-deciding flips the status
+// (UPSERT). NOT gated on the DuckDB engine: decisions persist on default
+// builds too — the suppression applies the next time the engine runs.
+func (s *Server) handleFeesClueDecisionPost(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	var body struct {
+		Scenario string `json:"scenario"`
+		FeeType  string `json:"feeType"`
+		SiteCode string `json:"siteCode"`
+		Year     int    `json:"year"`
+		Month    int    `json:"month"`
+		Status   string `json:"status"`
+		Note     string `json:"note"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "请求体必须是合法 JSON："+err.Error())
+		return
+	}
+	// validation precedes the write (the #64 acceptance shape): the
+	// closed sets and the period bounds answer 400 with their own texts;
+	// the service re-validates as defense in depth.
+	if _, err := fees.ParseRiskScenario(body.Scenario); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if _, err := fees.ParseFeeType(body.FeeType); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if _, err := domain.ParseClueDecisionStatus(body.Status); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if body.SiteCode == "" {
+		respondError(w, http.StatusBadRequest, "bad_request", "siteCode 必填（线索的站址编码）")
+		return
+	}
+	if body.Year < 2000 || body.Year > 2100 || body.Month < 0 || body.Month > 12 {
+		respondError(w, http.StatusBadRequest, "bad_request",
+			fmt.Sprintf("账期 %04d-%02d 不在合法范围（year 2000-2100，month 0-12）", body.Year, body.Month))
+		return
+	}
+	d := domain.RiskClueDecision{
+		Scenario: body.Scenario, FeeType: domain.FeeType(body.FeeType),
+		SiteCode: body.SiteCode, Year: body.Year, Month: body.Month,
+		Status: domain.ClueDecisionStatus(body.Status), Note: body.Note,
+	}
+	saved, err := s.fees.DecideClue(r.Context(), d)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, clueDecisionItem{
+		ID: saved.ID, Scenario: saved.Scenario, ScenarioCn: fees.RiskScenarioLabels[fees.RiskScenario(saved.Scenario)],
+		FeeType: string(saved.FeeType), SiteCode: saved.SiteCode,
+		Year: saved.Year, Month: saved.Month, Status: string(saved.Status),
+		Note: saved.Note, DecidedAt: saved.DecidedAt.Format(time.RFC3339),
+	})
+}
+
+// handleFeesClueDecisionsList implements GET /api/fees/risk-clue-decisions
+// — the decision ledger (newest first): the audit view of the human
+// verification loop, with the same filter set as the links list.
+func (s *Server) handleFeesClueDecisionsList(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	f := repo.ClueDecisionFilter{
+		Scenario: q.Get("scenario"), FeeType: q.Get("feeType"),
+		Status: q.Get("status"), SiteCode: q.Get("siteCode"),
+	}
+	// the closed-set filters refuse with 400 (the same shape as the POST
+	// and every other fees route).
+	if f.Scenario != "" {
+		if _, err := fees.ParseRiskScenario(f.Scenario); err != nil {
+			respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	if f.FeeType != "" {
+		if _, err := fees.ParseFeeType(f.FeeType); err != nil {
+			respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	if f.Status != "" {
+		if _, err := domain.ParseClueDecisionStatus(f.Status); err != nil {
+			respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	if raw := q.Get("year"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 2000 || v > 2100 {
+			respondError(w, http.StatusBadRequest, "bad_request", "year 必须是 2000-2100")
+			return
+		}
+		f.Year = v
+	}
+	page, pageSize, ok := parsePagination(w, r)
+	if !ok {
+		return
+	}
+	f.Limit, f.Offset = pageSize, (page-1)*pageSize
+	items, total, err := s.fees.ListClueDecisions(r.Context(), f)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	out := make([]clueDecisionItem, 0, len(items))
+	for _, d := range items {
+		out = append(out, clueDecisionItem{
+			ID: d.ID, Scenario: d.Scenario, ScenarioCn: fees.RiskScenarioLabels[fees.RiskScenario(d.Scenario)],
+			FeeType: string(d.FeeType), SiteCode: d.SiteCode,
+			Year: d.Year, Month: d.Month, Status: string(d.Status),
+			Note: d.Note, DecidedAt: d.DecidedAt.Format(time.RFC3339),
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"items": out, "total": total, "limit": f.Limit, "offset": f.Offset,
+	})
 }

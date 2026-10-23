@@ -737,3 +737,87 @@ func (s *Service) DismissLink(ctx context.Context, id string) (domain.FeeSiteLin
 	}
 	return s.db.FeeSiteLinks.GetByID(ctx, id)
 }
+
+// The clue-decision ledger's pagination bounds — PROJECT_BRIEF §9 (limit
+// defaults to 20, clamps at 100), the same contract as the attribute
+// change list.
+const (
+	clueDecisionDefaultPageSize = 20
+	clueDecisionMaxPageSize     = 100
+)
+
+// DecideClue records one human decision on a computed risk clue (#119,
+// migration v33) — verify (confirmed real, stays visible as the
+// known-issues ledger) or dismiss (ruled out, suppressed from the
+// default output and counted in the envelope). Re-deciding flips the
+// status and refreshes decided_at (the human may change their mind as
+// evidence evolves); the clue identity must be a scenario the registry
+// knows + a valid fee type + a legal period — the same validation the
+// Risks entry point applies. Human channel only: the MCP face gains no
+// write tool (the attribute-changes/links governance).
+func (s *Service) DecideClue(ctx context.Context, d domain.RiskClueDecision) (domain.RiskClueDecision, error) {
+	if _, err := ParseRiskScenario(d.Scenario); err != nil {
+		return domain.RiskClueDecision{}, err
+	}
+	if _, err := ParseFeeType(string(d.FeeType)); err != nil {
+		return domain.RiskClueDecision{}, err
+	}
+	if _, err := domain.ParseClueDecisionStatus(string(d.Status)); err != nil {
+		return domain.RiskClueDecision{}, err
+	}
+	if d.SiteCode == "" {
+		return domain.RiskClueDecision{}, fmt.Errorf("fees: 线索裁定缺站址编码")
+	}
+	if !validQueryPeriod(d.Year, d.Month) {
+		return domain.RiskClueDecision{}, fmt.Errorf("fees: 账期 %04d-%02d 不在合法范围", d.Year, d.Month)
+	}
+	d.DecidedAt = s.clock()
+	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
+		saved, err := tx.RiskClueDecisions.Decide(ctx, d)
+		if err == nil {
+			d = saved
+		}
+		return err
+	}); err != nil {
+		return domain.RiskClueDecision{}, fmt.Errorf("fees: 线索裁定 %s/%s/%s: %w", d.Scenario, d.FeeType, d.SiteCode, err)
+	}
+	return d, nil
+}
+
+// ListClueDecisions reads the decision ledger (newest first) — the audit
+// view of the human verification loop. Pagination follows the §9 bounds.
+func (s *Service) ListClueDecisions(ctx context.Context, f repo.ClueDecisionFilter) ([]domain.RiskClueDecision, int, error) {
+	if f.Limit <= 0 {
+		f.Limit = clueDecisionDefaultPageSize
+	}
+	if f.Limit > clueDecisionMaxPageSize {
+		f.Limit = clueDecisionMaxPageSize
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	if f.Scenario != "" {
+		if _, err := ParseRiskScenario(f.Scenario); err != nil {
+			return nil, 0, err
+		}
+	}
+	if f.Status != "" {
+		if _, err := domain.ParseClueDecisionStatus(f.Status); err != nil {
+			return nil, 0, err
+		}
+	}
+	if f.FeeType != "" {
+		if _, err := ParseFeeType(f.FeeType); err != nil {
+			return nil, 0, err
+		}
+	}
+	items, err := s.db.RiskClueDecisions.List(ctx, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.db.RiskClueDecisions.Count(ctx, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}

@@ -108,13 +108,15 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
 | `GET /api/fees/links?status=&grade=&code=&resource_id=` | 关联列表（资源侧 join） |
 | `POST /api/fees/links/{id}/confirm \| dismiss` | 人工确认/驳回模糊提案（人类优先于扫描） |
-| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=` | 风险八场景（#64/阶段 4 + #114 场景 7 + #118 场景 8；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501） |
+| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided=` | 风险八场景（#64/阶段 4 + #114 场景 7 + #118 场景 8；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501；#119 线索携带人工裁定标记、dismissed 默认隐藏计数、`includeDecided` 审计视图） |
+| `POST /api/fees/risk-clue-decisions` | 风险线索人工裁定（#119：verify 属实留档 / dismiss 排除永不再现；UPSERT 可复议；人类通道，MCP 无此写面；不依赖引擎——默认构建可裁定） |
+| `GET /api/fees/risk-clue-decisions?scenario=&feeType=&status=&siteCode=&year=` | 裁定台账（最新优先，过滤器封闭集校验；审计视图） |
 
-写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 11 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
+写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 13 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
 ## 8. 风险八场景（#64，#58 阶段 4；#114 加场景 7；#118 加场景 8）
 
-**输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，经 `GET /api/fees/batches/{id}/evidence?row=N` 可回读快照原文——#86 起该承诺有通道兑现，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, note}`。
+**输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，经 `GET /api/fees/batches/{id}/evidence?row=N` 可回读快照原文——#86 起该承诺有通道兑现，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, dismissed, note}`（`dismissed` = 本次被人工驳回而隐藏的线索数，#119）。
 
 | 场景 id | 名称 | 判定口径 | 参数（默认值） |
 | --- | --- | --- | --- |
@@ -132,6 +134,8 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 **场景 7 的诚实注意义务（#114）**：`idle-billing` 交叉的是**两条独立台账**——费用面（Parquet：该账期有计费记录）与指标面（SQLite：关联资源在该账期窗口内零采集点）。零点数为确定性信号、无阈值可调；但线索 note 恒携带告诫：**无采集也可能是采集覆盖缺失或采集断链，与真正空置在该证据形态下不可区分**——线索仅供人工核实，不作空置/闲置认定。无 confirmed 关联的编码不在本场景测量（那是 `unlinked` 的业务）。
 
 **场景 8 的诚实注意义务（#118）**：`missing-billing` 交叉的是同两条台账的**反向矛盾**——指标面说资源活着（账期窗口内有采集点），费用面却无该类型计费记录。点数>0 为确定性信号、无阈值可调；metric = 窗口内指标点数（`metricPoints`），`evidenceTotal` 恒 0 且锚点列表为空——**费用侧零行即异常本体**，回读通道指向快照层而非不存在的行。线索 note 恒携带告诫：**账期无记录 ≠ 漏收认定**——季度/年度结算、该费用类型尚未导入、结算主体挂账在其他编码，在该证据形态下全部同相；线索仅供人工核实。退休状态（默认 `停用,退网`）资源不在本场景测量（不给他们计费是正确形态；`retired-billing` 管反向），pending 关联的编码同样不在（人类尚未裁决）。
+
+**人工核实闭环（#119，migration v33）**：八场景输出的是待核实线索，核实成果落库为**裁定行**（`risk_clue_decisions`，身份 = (scenario, fee_type, 站址, 年, 月)，无 FK——站址编码是代码空间事实，批次回滚不触碰，W005/W006 教义）。消费语义：**verified 线索保持可见并标记**（运营的已知问题台账）；**dismissed 线索默认隐藏、信封 `dismissed` 计数**——绝不静默丢弃（#83），重跑不再重复出现（#69 PairDecided 教义：已裁定保持已裁定）；`includeDecided` 参数返回全量标记集。裁定按 (scenario, feeType) 隔离，UPSERT 可复议翻转。写通道仅人类（HTTP POST + CLI `fees clue-decisions verify|dismiss`），**MCP 无写面**——AI 不得替人核实（attribute-changes apply / links confirm 同一治理红线）；`fee_risks` 只读面自动携带标记。
 
 **默认构建诚实契约**：八场景与查询预设同走引擎面——未编译（默认构建）一律 501 `engine_not_built`（CLI exit 1 + 文案携带 Docker/WSL2 指引）；参数校验先于引擎检查（坏场景/坏类型/坏阈值 → 400/exit 2）。
 

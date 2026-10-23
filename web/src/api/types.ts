@@ -1468,6 +1468,10 @@ export interface RiskClue {
   evidence: RiskEvidenceAnchor[];
   evidenceTotal: number;
   note?: string;
+  /** #119 人工裁定：verified（属实，保持可见）/ dismissed（已排除，仅审计视图出现）；缺省 = 待核实 */
+  decision?: string;
+  /** 裁定时间（RFC3339） */
+  decidedAt?: string;
 }
 
 /** GET /api/fees/risks/{scenario} 信封 */
@@ -1480,7 +1484,24 @@ export interface RiskResult {
   clues: RiskClue[];
   total: number;
   excluded: number;
+  /** #119 本次被人工裁定排除而隐藏的线索数（绝不静默丢弃） */
+  dismissed: number;
   note: string;
+}
+
+/** #119 风险线索人工裁定（risk_clue_decisions 的 REST 形状） */
+export interface ClueDecisionItem {
+  id: string;
+  scenario: string;
+  scenarioCn: string;
+  feeType: string;
+  siteCode: string;
+  year: number;
+  month: number;
+  /** verified | dismissed */
+  status: string;
+  note?: string;
+  decidedAt: string;
 }
 
 /** 费用-资源关联（fee_site_links 的 REST 形状；join 展示字段可缺省——资源消失时记录仍自洽） */

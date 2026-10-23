@@ -68,6 +68,7 @@ import type {
   ResourceMetricsResponse,
   ResourceType,
   RestoreResult,
+  ClueDecisionItem,
   RiskResult,
   RollbackResponse,
   RowStatus,
@@ -973,10 +974,16 @@ export function fetchFeeRisks(
     z?: number;
     minSites?: number;
     status?: string;
+    /** #119 审计视图：含已排除（dismissed）线索 */
+    includeDecided?: boolean;
   },
 ): Promise<RiskResult> {
+  const { includeDecided, ...rest } = params;
   return requestJson<RiskResult>(
-    `/fees/risks/${encodeURIComponent(scenario)}${buildQuery(params as Record<string, string | number | undefined>)}`,
+    `/fees/risks/${encodeURIComponent(scenario)}${buildQuery({
+      ...(rest as Record<string, string | number | undefined>),
+      includeDecided: includeDecided === true ? '1' : undefined,
+    })}`,
   );
 }
 
@@ -1020,4 +1027,21 @@ export function dismissFeeLink(id: string): Promise<FeeLinkItem> {
     `/fees/links/${encodeURIComponent(id)}/dismiss`,
     { method: 'POST' },
   );
+}
+
+/** POST /api/fees/risk-clue-decisions — #119 风险线索人工裁定（UPSERT：可复议翻转） */
+export function decideFeeRiskClue(body: {
+  scenario: string;
+  feeType: string;
+  siteCode: string;
+  year: number;
+  month: number;
+  status: 'verified' | 'dismissed';
+  note?: string;
+}): Promise<ClueDecisionItem> {
+  return requestJson<ClueDecisionItem>('/fees/risk-clue-decisions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }

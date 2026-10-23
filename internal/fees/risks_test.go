@@ -553,3 +553,159 @@ func TestAnalysisEmptySurfacesGlobErrors(t *testing.T) {
 		t.Error("malformed glob (dir contains '['): analysisEmpty must answer false so the real query surfaces the error (#105)")
 	}
 }
+
+// TestRiskClueDecisionSemantics pins #119's suppression contract on a
+// real repo + fake engine: a dismissed clue never re-appears in the
+// default output (counted in Dismissed, never silently dropped — #83),
+// a verified clue STAYS visible and marked (the known-issues ledger),
+// IncludeDecided returns the full marked set, re-deciding flips the
+// status, and the decision is scoped per (scenario, feeType) — a
+// dismissed missing-billing clue says nothing about the same site's
+// retired-billing clue or its tower-lease scope.
+func TestRiskClueDecisionSemantics(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	seedLinkResource(t, db, "res_unb_a", "UNBILLED-A", "在网")
+	seedLinkResource(t, db, "res_unb_b", "UNBILLED-B", "在网")
+	seedMetricPoints(t, db, "mbat_unb_a", "res_unb_a", "2024-05-02T00:00:00Z")
+	seedMetricPoints(t, db, "mbat_unb_b", "res_unb_b", "2024-05-04T00:00:00Z", "2024-05-09T00:00:00Z")
+
+	engine := &fakeRiskEngine{} // no bills at all — both sites fire
+	q := RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5}
+
+	res, err := svc.Risks(ctx, engine, RiskMissingBilling, q)
+	if err != nil {
+		t.Fatalf("risks (no decisions): %v", err)
+	}
+	if res.Total != 2 || res.Dismissed != 0 {
+		t.Fatalf("initial run = total %d / dismissed %d, want 2 / 0: %+v", res.Total, res.Dismissed, res.Clues)
+	}
+
+	// dismiss UNBILLED-A's clue (the human channel).
+	if _, err := svc.DecideClue(ctx, domain.RiskClueDecision{
+		Scenario: "missing-billing", FeeType: domain.FeeTypeElectricity,
+		SiteCode: "UNBILLED-A", Year: 2024, Month: 5,
+		Status: domain.ClueDecisionDismissed, Note: "季度结算，不是漏收",
+	}); err != nil {
+		t.Fatalf("decide dismiss: %v", err)
+	}
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, q)
+	if err != nil {
+		t.Fatalf("risks (one dismissed): %v", err)
+	}
+	if res.Total != 1 || res.Dismissed != 1 || res.Clues[0].SiteCode != "UNBILLED-B" {
+		t.Fatalf("after dismiss = total %d / dismissed %d, want 1 / 1 with UNBILLED-B: %+v", res.Total, res.Dismissed, res.Clues)
+	}
+
+	// verify UNBILLED-B's clue: stays VISIBLE and marked.
+	if _, err := svc.DecideClue(ctx, domain.RiskClueDecision{
+		Scenario: "missing-billing", FeeType: domain.FeeTypeElectricity,
+		SiteCode: "UNBILLED-B", Year: 2024, Month: 5,
+		Status: domain.ClueDecisionVerified, Note: "属实，已转资损核查",
+	}); err != nil {
+		t.Fatalf("decide verify: %v", err)
+	}
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, q)
+	if err != nil {
+		t.Fatalf("risks (one verified): %v", err)
+	}
+	if res.Total != 1 || res.Clues[0].SiteCode != "UNBILLED-B" ||
+		res.Clues[0].Decision != "verified" || res.Clues[0].DecidedAt == "" {
+		t.Fatalf("verified clue = %+v, want UNBILLED-B marked verified with decidedAt", res.Clues[0])
+	}
+
+	// IncludeDecided: the full marked set — A dismissed, B verified.
+	q.IncludeDecided = true
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, q)
+	if err != nil {
+		t.Fatalf("risks (include decided): %v", err)
+	}
+	if res.Total != 2 || res.Dismissed != 1 {
+		t.Fatalf("include-decided run = total %d / dismissed %d, want 2 / 1", res.Total, res.Dismissed)
+	}
+	bySite := map[string]RiskClue{}
+	for _, c := range res.Clues {
+		bySite[c.SiteCode] = c
+	}
+	if bySite["UNBILLED-A"].Decision != "dismissed" || bySite["UNBILLED-B"].Decision != "verified" {
+		t.Fatalf("marks = A:%q B:%q, want dismissed/verified", bySite["UNBILLED-A"].Decision, bySite["UNBILLED-B"].Decision)
+	}
+	q.IncludeDecided = false
+
+	// the decision is SCOPED: the same site's clue under another scenario
+	// is untouched (the missing-billing dismissal says nothing about
+	// retired-billing), and another fee type's missing-billing scope is a
+	// different clue too.
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, RiskQuery{FeeType: FeeTypeTowerLease, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("risks (tower_lease scope): %v", err)
+	}
+	if res.Total != 2 || res.Dismissed != 0 {
+		t.Fatalf("tower_lease scope = total %d / dismissed %d, want 2 / 0 — decisions do not leak across fee types", res.Total, res.Dismissed)
+	}
+
+	// re-decide flips: UNBILLED-A verified → visible again.
+	if _, err := svc.DecideClue(ctx, domain.RiskClueDecision{
+		Scenario: "missing-billing", FeeType: domain.FeeTypeElectricity,
+		SiteCode: "UNBILLED-A", Year: 2024, Month: 5,
+		Status: domain.ClueDecisionVerified,
+	}); err != nil {
+		t.Fatalf("re-decide verify: %v", err)
+	}
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, q)
+	if err != nil {
+		t.Fatalf("risks (after flip): %v", err)
+	}
+	if res.Total != 2 || res.Dismissed != 0 {
+		t.Fatalf("after flip = total %d / dismissed %d, want 2 / 0 (both verified)", res.Total, res.Dismissed)
+	}
+
+	// the ledger view: two decisions (the flip kept ONE row for A) —
+	// newest first, filters narrow.
+	items, total, err := svc.ListClueDecisions(ctx, repo.ClueDecisionFilter{Status: string(domain.ClueDecisionVerified)})
+	if err != nil || total != 2 || len(items) != 2 {
+		t.Fatalf("ledger = %d items / total %d (err %v), want 2 verified", len(items), total, err)
+	}
+}
+
+// TestDecideClueValidation pins the human channel's input contract: the
+// closed enums (scenario / feeType / status) and the period bounds
+// refuse before any write, exactly like the Risks entry point.
+func TestDecideClueValidation(t *testing.T) {
+	svc, _, _ := newService(t)
+	ctx := context.Background()
+	base := domain.RiskClueDecision{
+		Scenario: "spike", FeeType: domain.FeeTypeElectricity,
+		SiteCode: "S-1", Year: 2024, Month: 5, Status: domain.ClueDecisionVerified,
+	}
+	for _, bad := range []struct {
+		mutate func(*domain.RiskClueDecision)
+		want   string
+	}{
+		{func(d *domain.RiskClueDecision) { d.Scenario = "bogus" }, "未知风险场景"},
+		{func(d *domain.RiskClueDecision) { d.FeeType = domain.FeeType("bogus") }, "未知费用类型"},
+		{func(d *domain.RiskClueDecision) { d.Status = domain.ClueDecisionStatus("bogus") }, "未知线索裁定"},
+		{func(d *domain.RiskClueDecision) { d.SiteCode = "" }, "缺站址编码"},
+		{func(d *domain.RiskClueDecision) { d.Year = 1999 }, "不在合法范围"},
+		{func(d *domain.RiskClueDecision) { d.Month = 13 }, "不在合法范围"},
+	} {
+		d := base
+		bad.mutate(&d)
+		_, err := svc.DecideClue(ctx, d)
+		if err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("decide(%v) error = %v, want containing %q", d, err, bad.want)
+		}
+	}
+	// the ledger filters validate the same way.
+	if _, _, err := svc.ListClueDecisions(ctx, repo.ClueDecisionFilter{Scenario: "bogus"}); err == nil || !strings.Contains(err.Error(), "未知风险场景") {
+		t.Errorf("list(bogus scenario) error = %v, want the closed-set refusal", err)
+	}
+	if _, _, err := svc.ListClueDecisions(ctx, repo.ClueDecisionFilter{Status: "bogus"}); err == nil || !strings.Contains(err.Error(), "未知线索裁定") {
+		t.Errorf("list(bogus status) error = %v, want the closed-set refusal", err)
+	}
+	// the pagination clamps: limit 0 → default 20, limit 1000 → 100.
+	items, _, err := svc.ListClueDecisions(ctx, repo.ClueDecisionFilter{Limit: 1000})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("clamped list err = %v items = %d (want empty, fresh ledger)", err, len(items))
+	}
+}

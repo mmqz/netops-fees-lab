@@ -38,7 +38,7 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 			"missing-billing 有量无费（资源有采集点但费用面无该类型计费记录，疑似漏收）），返回风险线索" +
 			"（触发指标、显式阈值、行级证据锚点 sourceFile+sourceRow+importBatch 可回读快照原文）。" +
 			"阈值用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网），AI 不可调——调参是人类通道（HTTP/CLI）。" +
-			"输出是待核实线索而非认定结论（账单存在 ≠ 重复付款认定）。默认构建未编译分析引擎时本工具明确报错。" +
+			"输出是待核实线索而非认定结论（账单存在 ≠ 重复付款认定）；线索可携带人工裁定标记 decision=verified（已核实属实）——已驳回（dismissed）的线索默认隐藏并在信封 dismissed 计数（裁定是人类通道 HTTP/CLI，AI 只读）。默认构建未编译分析引擎时本工具明确报错。" +
 			"典型配合：先本工具拿线索，再 graph_traverse / resource_search 下钻资源侧。",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in feeRisksInput) (*mcp.CallToolResult, feeRisksOutput, error) {
 		return feeRisks(ctx, svc, in)

@@ -303,6 +303,33 @@ func TestRiskPresetsDuck(t *testing.T) {
 		t.Fatalf("missing-billing month-5 = %+v (err %v), want the honest empty (no May points)", res.Clues, err)
 	}
 
+	// ---- #119: the human verification loop closes on the real engine ----
+	// dismiss the missing-billing clue → the re-run suppresses it and
+	// counts it in the envelope (verified stays visible; the default
+	// build owns the semantics, this pins the composition end to end).
+	if _, err := svc.DecideClue(ctx, domain.RiskClueDecision{
+		Scenario: "missing-billing", FeeType: FeeTypeElectricity,
+		SiteCode: "UNBILLED-SITE", Year: 2024, Month: 6,
+		Status: domain.ClueDecisionDismissed, Note: "季度结算",
+	}); err != nil {
+		t.Fatalf("decide dismiss: %v", err)
+	}
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, base)
+	if err != nil {
+		t.Fatalf("missing-billing after dismiss: %v", err)
+	}
+	if res.Total != 0 || res.Dismissed != 1 {
+		t.Fatalf("after dismiss = total %d / dismissed %d, want 0 / 1 — the clue must not re-appear", res.Total, res.Dismissed)
+	}
+	// IncludeDecided brings it back, marked.
+	res, err = svc.Risks(ctx, engine, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, IncludeDecided: true})
+	if err != nil {
+		t.Fatalf("missing-billing include-decided: %v", err)
+	}
+	if res.Total != 1 || res.Clues[0].Decision != "dismissed" || res.Clues[0].DecidedAt == "" {
+		t.Fatalf("include-decided = %+v, want the marked dismissed clue", res.Clues)
+	}
+
 	// ---- determinism: re-run everything, byte-identical clue sets ----
 	for _, sc := range []RiskScenario{RiskDuplicateSettlement, RiskLedgerMismatch, RiskSpike, RiskOutlier, RiskMissingBilling} {
 		q := base

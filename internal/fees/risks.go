@@ -184,6 +184,13 @@ type RiskClue struct {
 	Evidence       []EvidenceAnchor `json:"evidence"`
 	EvidenceTotal  int              `json:"evidenceTotal"`
 	Note           string           `json:"note,omitempty"`
+	// Decision carries the human verdict when one exists (#119, migration
+	// v33): "verified" (confirmed real — the clue stays visible as the
+	// known-issues ledger) or "dismissed" (ruled out — only visible with
+	// IncludeDecided, counted in the envelope's Dismissed). Empty = a
+	// pending clue nobody has looked at yet. DecidedAt is RFC3339 UTC.
+	Decision  string `json:"decision,omitempty"`
+	DecidedAt string `json:"decidedAt,omitempty"`
 }
 
 // RiskResult is the scenario answer envelope: the clue list (capped by
@@ -199,7 +206,12 @@ type RiskResult struct {
 	Clues      []RiskClue `json:"clues"`
 	Total      int        `json:"total"`
 	Excluded   int        `json:"excluded"`
-	Note       string     `json:"note"`
+	// Dismissed counts the clues a human already ruled out that this run
+	// would have re-emitted (#119): they are suppressed from Clues by
+	// default (the #69 doctrine — a decided clue stays decided) and
+	// counted here, never silently dropped (#83).
+	Dismissed int    `json:"dismissed"`
+	Note      string `json:"note"`
 }
 
 // RiskQuery is the parameter set of one scenario query. Every threshold
@@ -216,6 +228,11 @@ type RiskQuery struct {
 	MinSites    int      // scenario 5: minimum same-period peers (default 8)
 	Limit       int      // clue cap (default 100, max 1000)
 	MaxEvidence int      // anchors per clue (default 10, max 50)
+	// IncludeDecided returns dismissed clues too (marked) — the full-set
+	// audit view. Default false: dismissed clues are suppressed and
+	// counted (verified clues stay visible either way — they are the
+	// known-issues ledger, not noise).
+	IncludeDecided bool
 }
 
 // normalize fills the documented defaults and clamps the bounds.
@@ -638,6 +655,51 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 		}
 		return clues[i].Year*12+clues[i].Month < clues[j].Year*12+clues[j].Month
 	})
+
+	// #119: attach the human decisions, then apply the suppression
+	// semantics. verified clues STAY visible (marked — they are the
+	// known-issues ledger); dismissed ones drop out of the default view
+	// and are counted (never silently dropped, #83). IncludeDecided
+	// returns the full set — every decided clue visible and marked.
+	// Decisions are scoped per scenario: a dismissed duplicate-settlement
+	// clue says nothing about the same site's spike clue.
+	dismissedCount := 0
+	if len(clues) > 0 {
+		keys := make([]repo.ClueKey, 0, len(clues))
+		for _, c := range clues {
+			keys = append(keys, repo.ClueKey{
+				Scenario: string(scenario), FeeType: q.FeeType,
+				SiteCode: c.SiteCode, Year: c.Year, Month: c.Month,
+			})
+		}
+		if decisions, derr := s.db.RiskClueDecisions.ListForKeys(ctx, keys); derr == nil {
+			marked := make([]RiskClue, 0, len(clues))
+			for i := range clues {
+				k := repo.ClueKey{
+					Scenario: string(scenario), FeeType: q.FeeType,
+					SiteCode: clues[i].SiteCode, Year: clues[i].Year, Month: clues[i].Month,
+				}
+				d, ok := decisions[k]
+				if ok {
+					clues[i].Decision = string(d.Status)
+					clues[i].DecidedAt = d.DecidedAt.Format(time.RFC3339)
+				}
+				if ok && d.Status == domain.ClueDecisionDismissed {
+					dismissedCount++
+					if !q.IncludeDecided {
+						continue
+					}
+				}
+				marked = append(marked, clues[i])
+			}
+			clues = marked
+		}
+		// the decision read is best-effort at the envelope level (the
+		// same ruling as the evidence anchors): a decision-store failure
+		// shows the UNDECIDED clue set rather than an empty answer — a
+		// clue nobody marked pending is always safer than hiding it.
+	}
+
 	total := len(clues)
 	if len(clues) > q.Limit {
 		clues = clues[:q.Limit]
@@ -678,6 +740,7 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 		Clues:      clues,
 		Total:      total,
 		Excluded:   excluded,
+		Dismissed:  dismissedCount,
 		Note:       note,
 	}
 }

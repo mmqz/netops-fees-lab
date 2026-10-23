@@ -1169,7 +1169,7 @@ multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进�
 
 仅 pending 可驳回：`dismissed`（审计保留，编码与资源对不再自动复提）；非 pending → 409；未知 id 404。CLI 等价：`netopslab fees links confirm|dismiss --id <id>`。
 
-## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence= — 费用风险八场景（#58 阶段 4；#114 加场景 7；#118 加场景 8）
+## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided= — 费用风险八场景（#58 阶段 4；#114 加场景 7；#118 加场景 8）
 
 **固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）/ `missing-billing`（有量无费——已确认关联的在网/在建资源该账期窗口内有指标采集点而费用侧无该类型计费记录，跨层组合 #118，账期无记录 ≠ 漏收认定，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
 
@@ -1205,6 +1205,27 @@ multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进�
 ```
 
 阈值默认值（显式参数化，见 fees-layer.md §8）：`status=停用,退网`、`diffCents=0`、`ratio=0.30`、`z=3.0`、`minSites=8`、`limit=100`（上限 1000）、`maxEvidence=10`（上限 50）。`spike`/`outlier` 的 `excluded` 为被排除的跨批次 (站址, 账期) 数——重复行令窗口/分布非确定（#59），跨批次对属 duplicate-settlement/ledger-mismatch 的线索域，排除即声明。
+
+**人工裁定的消费语义（#119，migration v33）**：线索可携带 `decision`（`verified` 已核实属实 / `dismissed` 已排除）与 `decidedAt`。默认输出 = pending + verified（verified 是运营的已知问题台账，标记可见）；**dismissed 默认隐藏、计数入信封 `dismissed`**——绝不静默丢弃（#83 教义），重跑不再重复出现（#69 的 PairDecided 教义：已裁定的线索保持已裁定）。`includeDecided=1|true` 返回全量标记集（审计视图）；`includeDecided` 非法值 → 400。裁定按 (scenario, feeType) 隔离——驳回一条 missing-billing 线索不影响同站的 spike 线索或其铁塔租费口径。
+
+## POST /api/fees/risk-clue-decisions — 风险线索人工裁定（#119）
+
+**人类通道**（MCP 无此写面——AI 不得替人核实线索，与 attribute-changes apply / links confirm 同一治理红线）。body：
+
+```json
+{"scenario": "duplicate-settlement", "feeType": "electricity", "siteCode": "S-DUP",
+ "year": 2024, "month": 5, "status": "dismissed", "note": "合同台账+账单台账，双份合法"}
+```
+
+- `status` 封闭集：`verified`（属实——线索保持可见并标记，构成已知问题台账）/ `dismissed`（排除——默认输出隐藏、信封计数）；`note` 可选（审计留档）。
+- **UPSERT**：同一 (scenario, feeType, siteCode, year, month) 再裁定翻转状态并刷新 `decidedAt`（人可随证据变化改判，台账保留最新裁定）。
+- 校验先于写入：非法 `scenario`/`feeType`/`status`、缺 `siteCode`、越界 `year`（2000-2100）/`month`（0-12）→ 400。
+- **不依赖分析引擎**：默认构建即可裁定（决策是纯审计行，无 FK——站址编码是代码空间事实，同 fee_site_links 的 fee 侧裁决；批次回滚不触碰，W005/W006 教义），抑制在下一次引擎运行的场景查询时生效。
+- 200 返回完整裁定项 `{id, scenario, scenarioCn, feeType, siteCode, year, month, status, note, decidedAt}`（`id` 形如 `rcd_<uuid>`）。
+
+## GET /api/fees/risk-clue-decisions?scenario=&feeType=&status=&siteCode=&year=&page=&pageSize= — 风险线索裁定台账（#119）
+
+**审计视图**：全部人工裁定，`decidedAt` 最新优先（同秒并列回退 id 序——秒粒度内无次序契约）。过滤器全部可选且为封闭集校验（非法 `scenario`/`feeType`/`status` → 400）；分页走 page/pageSize（limit/offset 亦收，缺省 20、上限 100，PROJECT_BRIEF §9）。返回 `{items[], total, limit, offset}`，items 元素同 POST 的裁定项形状。
 
 ## 静态资源与 SPA
 

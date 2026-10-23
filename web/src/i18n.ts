@@ -952,6 +952,13 @@ export const RISK_SCENARIO_OUTLIER = '同类站月度金额离群';
 export const RISK_SCENARIO_UNLINKED = '零资源计费';
 export const RISK_SCENARIO_IDLE_BILLING = '有费无量';
 export const RISK_SCENARIO_MISSING_BILLING = '有量无费';
+export const FEES_RISKS_DISMISSED_COUNT = (n: number) => `已人工排除 ${n} 条（默认隐藏，重跑不再出现）`;
+export const FEES_RISKS_SHOW_DISMISSED = '显示已排除线索（审计视图）';
+export const FEES_RISKS_DECISION_VERIFIED = '已核实属实';
+export const FEES_RISKS_DECISION_DISMISSED = '已排除';
+export const FEES_RISKS_DECIDE_VERIFY = '标记属实';
+export const FEES_RISKS_DECIDE_DISMISS = '排除线索';
+export const FEES_RISKS_DECIDE_HINT = '人工核实通道：裁定落库后重跑生效；已排除的线索默认隐藏并在结果行计数。';
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

@@ -971,3 +971,134 @@ func TestAPIFeesConcurrentSameUpload(t *testing.T) {
 		}
 	}
 }
+
+// TestAPIFeesClueDecisionEndpoints pins #119's human channel on the HTTP
+// face: the POST validates the closed sets (scenario/feeType/status) and
+// the period bounds BEFORE any write, the UPSERT flip keeps one ledger
+// row, and the GET ledger answers newest-first with the filters — all on
+// the DEFAULT build (decisions persist without the analysis engine; the
+// suppression applies the next time an engine-built binary runs).
+func TestAPIFeesClueDecisionEndpoints(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	post := func(body string) (*http.Response, []byte) {
+		return doRequest(t, srv, http.MethodPost, "/api/fees/risk-clue-decisions", []byte(body), "application/json")
+	}
+
+	// the closed sets refuse first (400, no write).
+	for _, bad := range []string{
+		`{"scenario":"bogus","feeType":"electricity","siteCode":"S-1","year":2024,"month":5,"status":"verified"}`,
+		`{"scenario":"spike","feeType":"bogus","siteCode":"S-1","year":2024,"month":5,"status":"verified"}`,
+		`{"scenario":"spike","feeType":"electricity","siteCode":"S-1","year":2024,"month":5,"status":"bogus"}`,
+		`{"scenario":"spike","feeType":"electricity","siteCode":"","year":2024,"month":5,"status":"verified"}`,
+		`{"scenario":"spike","feeType":"electricity","siteCode":"S-1","year":1999,"month":5,"status":"verified"}`,
+		`{"scenario":"spike","feeType":"electricity","siteCode":"S-1","year":2024,"month":13,"status":"verified"}`,
+		`not json at all`,
+	} {
+		resp, body := post(bad)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("POST %q: status = %d, want 400\nbody: %s", bad, resp.StatusCode, body)
+		}
+	}
+	// nothing was written by the refused requests.
+	resp, body := doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ledger: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var empty struct {
+		Items []any `json:"items"`
+		Total int   `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(body), &empty); err != nil {
+		t.Fatal(err)
+	}
+	if empty.Total != 0 || len(empty.Items) != 0 {
+		t.Fatalf("ledger after refusals = %d / %d items, want 0/0", empty.Total, len(empty.Items))
+	}
+
+	// the first decision lands (200, full item shape).
+	resp, body = post(`{"scenario":"spike","feeType":"electricity","siteCode":"S-1","year":2024,"month":5,"status":"dismissed","note":"合同+账单双台账，双份合法"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST dismiss: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var item struct {
+		ID         string `json:"id"`
+		Scenario   string `json:"scenario"`
+		ScenarioCn string `json:"scenarioCn"`
+		FeeType    string `json:"feeType"`
+		SiteCode   string `json:"siteCode"`
+		Status     string `json:"status"`
+		Note       string `json:"note"`
+		DecidedAt  string `json:"decidedAt"`
+	}
+	if err := json.Unmarshal(body, &item); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(item.ID, "rcd_") || item.Scenario != "spike" || item.ScenarioCn != "电费环比异常上涨" ||
+		item.FeeType != "electricity" || item.SiteCode != "S-1" || item.Status != "dismissed" ||
+		item.Note != "合同+账单双台账，双份合法" || item.DecidedAt == "" {
+		t.Fatalf("item = %+v", item)
+	}
+
+	// the flip: the SAME identity re-decided as verified keeps ONE row.
+	resp, body = post(`{"scenario":"spike","feeType":"electricity","siteCode":"S-1","year":2024,"month":5,"status":"verified"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST flip: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var flipped struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(body), &flipped); err != nil || flipped.Status != "verified" {
+		t.Fatalf("flip = %s (%v)", body, err)
+	}
+	// a second, distinct decision.
+	post(`{"scenario":"missing-billing","feeType":"tower_lease","siteCode":"S-2","year":2024,"month":0,"status":"dismissed"}`)
+
+	// the ledger: two rows, newest first; the filters narrow.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions", nil, "")
+	var ledger struct {
+		Items []struct {
+			SiteCode string `json:"siteCode"`
+			Status   string `json:"status"`
+		} `json:"items"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(body), &ledger); err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Total != 2 || len(ledger.Items) != 2 {
+		t.Fatalf("ledger = %+v, want 2 rows", ledger)
+	}
+	// decided_at is RFC3339 SECOND-granular: two same-second decisions tie
+	// and fall to the random-uuid id DESC tiebreak — the order BETWEEN
+	// same-second rows is not a contract (the repo test pins the ordered
+	// part across distinct seconds). Here: the SET is the contract.
+	gotSet := map[string]string{}
+	for _, it := range ledger.Items {
+		gotSet[it.SiteCode] = it.Status
+	}
+	if gotSet["S-1"] != "verified" || gotSet["S-2"] != "dismissed" {
+		t.Fatalf("ledger set = %v, want S-1 verified + S-2 dismissed", gotSet)
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions?status=verified", nil, "")
+	if err := json.Unmarshal([]byte(body), &ledger); err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Total != 1 || ledger.Items[0].SiteCode != "S-1" {
+		t.Fatalf("status filter = %+v, want only S-1 verified", ledger)
+	}
+	// bogus filters refuse (the closed-set validation runs on GET too).
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions?scenario=bogus", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("GET bogus scenario: status = %d, want 400\nbody: %s", resp.StatusCode, body)
+	}
+	// the risks route's includeDecided parses honestly.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risks/spike?feeType=electricity&year=2024&includeDecided=bogus", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("risks includeDecided=bogus: status = %d, want 400\nbody: %s", resp.StatusCode, body)
+	}
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risks/spike?feeType=electricity&year=2024&includeDecided=1", nil, "")
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Errorf("risks includeDecided=1 (default build): status = %d, want 501 engine_not_built", resp.StatusCode)
+	}
+}

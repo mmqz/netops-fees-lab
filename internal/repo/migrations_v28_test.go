@@ -233,8 +233,8 @@ VALUES ('ad_bad','al_v28_b',?,'http://h/p',?,1,'2026-10-18T08:00:00Z')`, bad.eve
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 32 {
-		t.Errorf("max schema version after upgrade = %d, want 32", maxV)
+	if maxV != 33 {
+		t.Errorf("max schema version after upgrade = %d, want 33", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

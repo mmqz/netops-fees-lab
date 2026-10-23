@@ -161,3 +161,61 @@ type FeeSiteLink struct {
 	CreatedAt    time.Time
 	DecidedAt    *time.Time
 }
+
+// ClueDecisionStatus is the closed enum of the risk-clue decision states
+// (#119, migration v33). verified: the human CONFIRMED the clue is a real
+// anomaly — it stays visible (marked) as the known-issues ledger.
+// dismissed: the human ruled the clue out — it never re-appears in the
+// default risk output (the #69 PairDecided doctrine: a decided pair stays
+// decided; the count is still reported, never silently dropped).
+type ClueDecisionStatus string
+
+const (
+	// ClueDecisionVerified: human-confirmed real anomaly (visible, marked).
+	ClueDecisionVerified ClueDecisionStatus = "verified"
+	// ClueDecisionDismissed: human-ruled-out clue (suppressed, counted).
+	ClueDecisionDismissed ClueDecisionStatus = "dismissed"
+)
+
+// ParseClueDecisionStatus validates a raw token against the closed enum.
+func ParseClueDecisionStatus(raw string) (ClueDecisionStatus, error) {
+	switch ClueDecisionStatus(raw) {
+	case ClueDecisionVerified, ClueDecisionDismissed:
+		return ClueDecisionStatus(raw), nil
+	default:
+		return "", fmt.Errorf("domain: 未知线索裁定 %q（可用：verified、dismissed）", raw)
+	}
+}
+
+// IsValid reports whether s is a known clue decision status (the values
+// must stay in sync with risk_clue_decisions' CHECK constraint, v33).
+func (s ClueDecisionStatus) IsValid() bool {
+	switch s {
+	case ClueDecisionVerified, ClueDecisionDismissed:
+		return true
+	default:
+		return false
+	}
+}
+
+// RiskClueDecision is one human decision on a computed risk clue
+// (migration v33). The clue has no row of its own — it is recomputed from
+// the analysis layer on every run — so the decision IS the record, keyed
+// by the clue's identity (scenario + fee type + site + period). No
+// foreign keys by design: site codes come from fee files (not the
+// resources table), and the row is pure audit — batch rollback never
+// touches it (the W005/W006 doctrine: human decisions survive as the
+// audit trail). Re-deciding flips the status and refreshes DecidedAt
+// (the human may change their mind as evidence evolves; the ledger keeps
+// the LATEST decision, the optional Note carries the reason).
+type RiskClueDecision struct {
+	ID        string
+	Scenario  string
+	FeeType   FeeType
+	SiteCode  string
+	Year      int
+	Month     int // 0 = the whole-year-scope shape (unlinked clues may carry it)
+	Status    ClueDecisionStatus
+	Note      string
+	DecidedAt time.Time
+}

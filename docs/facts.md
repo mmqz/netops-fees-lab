@@ -11,16 +11,16 @@
 | key | 当前值 | 断言方式（代码实数 → 本表声明数） |
 | --- | --- | --- |
 | `mcp-tools` | 11 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
-| `api-routes` | 82 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
-| `api-fees-routes` | 11 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
-| `repo-migrations` | 32 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
+| `api-routes` | 84 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `api-fees-routes` | 13 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
+| `repo-migrations` | 33 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |
 
 **MCP 工具清单（11 个，2026-10-20 实测）**：`resource_search` + 仿真域 4 个 `lab_apply_ops` / `lab_run_checks` / `lab_diff_undo` / `lab_checkpoint`（PROJECT_BRIEF_P2 §8）+ 只读分析域 5 个 `graph_traverse` / `graph_impact` / `graph_context` / `alerts_query` / `metrics_query`（v0.9 R4）+ 费用风险域 1 个 `fee_risks`（v0.15.0，#58 阶段 5）。全部只读或仿真写封闭面：无 SQL/Shell/SSH/文件工具、无建删工作区工具、告警 ack/clear 与检测运行留在人类/HTTP/CLI 侧。
 
-**费用域路由清单（`fees` tag 11 条）**：`POST /api/fees/imports`、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`、`GET /api/fees/batches/{id}/evidence`（#86）、`GET /api/fees/query/totals`、`GET /api/fees/query/duplicates`、`GET /api/fees/risks/{scenario}`、`POST /api/fees/links/scan`、`GET /api/fees/links`、`POST /api/fees/links/{id}/confirm`、`POST /api/fees/links/{id}/dismiss`。
+**费用域路由清单（`fees` tag 13 条）**：`POST /api/fees/imports`、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`、`GET /api/fees/batches/{id}/evidence`（#86）、`GET /api/fees/query/totals`、`GET /api/fees/query/duplicates`、`GET /api/fees/risks/{scenario}`、`POST /api/fees/risk-clue-decisions`（#119）、`GET /api/fees/risk-clue-decisions`（#119）、`POST /api/fees/links/scan`、`GET /api/fees/links`、`POST /api/fees/links/{id}/confirm`、`POST /api/fees/links/{id}/dismiss`。
 
-**迁移版本（v1–v32）**：v1–v3 核心表（migrations.go 字面量）起，逐版本单事务追加；当前头 v32（`schema_migrations` 头由 repo 层迁移测试钉死）。
+**迁移版本（v1–v33）**：v1–v3 核心表（migrations.go 字面量）起，逐版本单事务追加；当前头 v33（`schema_migrations` 头由 repo 层迁移测试钉死）。
 
 ## 2. 派生闭集（不在此断言——已有各自的闭集派生机制）
 
