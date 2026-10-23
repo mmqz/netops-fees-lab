@@ -10,6 +10,9 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,3 +69,36 @@ func TestUploadTargetMatches(t *testing.T) {
 		t.Fatal("a directory at the target name must not match")
 	}
 }
+
+// TestStatusRecorderFlushAndUnwrap pins the two zero-covered plumbing
+// methods of statusRecorder: Flush must forward to the wrapped writer's
+// http.Flusher (or no-op safely when absent), and Unwrap must expose the
+// wrapped writer so http.ResponseController can probe its capabilities —
+// the embedded-interface shortcut alone does not provide Unwrap, and a
+// streaming endpoint (SSE-style progress) silently degrades without it.
+func TestStatusRecorderFlushAndUnwrap(t *testing.T) {
+	// httptest.ResponseRecorder implements http.Flusher.
+	rec := httptest.NewRecorder()
+	sr := &statusRecorder{ResponseWriter: rec}
+	sr.WriteHeader(200)
+
+	f, ok := interface{}(sr).(http.Flusher)
+	if !ok {
+		t.Fatalf("statusRecorder does not implement http.Flusher")
+	}
+	f.Flush() // must not panic; forwards to the recorder
+
+	if got := sr.Unwrap(); got != rec {
+		t.Fatalf("Unwrap() = %v, want the wrapped ResponseWriter", got)
+	}
+
+	// A bare writer without Flusher: Flush must no-op, not panic.
+	sr2 := &statusRecorder{ResponseWriter: bareWriter{w: rec}}
+	sr2.Flush()
+}
+
+type bareWriter struct{ w io.Writer }
+
+func (b bareWriter) Header() http.Header         { return http.Header{} }
+func (b bareWriter) Write(p []byte) (int, error) { return b.w.Write(p) }
+func (b bareWriter) WriteHeader(int)             {}

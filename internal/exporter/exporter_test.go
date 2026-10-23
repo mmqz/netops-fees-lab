@@ -452,3 +452,38 @@ func sampleResourcesFixtures() []domain.Resource {
 			Attributes: map[string]string{"site_name": "局站甲", "city": "哈尔滨"}},
 	}
 }
+
+// TestAssignSplit pins the split-key allocation ladder: equal counts
+// zip one-to-one; surplus parts join into the LAST field (the '|'-inside-
+// a-component ambiguity is the documented precision limit); missing
+// parts leave the trailing fields empty.
+func TestAssignSplit(t *testing.T) {
+	t.Run("equal counts zip", func(t *testing.T) {
+		v := map[string]string{}
+		assignSplit(v, []string{"a", "b"}, []string{"x", "y"})
+		if v["a"] != "x" || v["b"] != "y" {
+			t.Fatalf("v = %v, want a=x b=y", v)
+		}
+	})
+	t.Run("surplus joins into the last field", func(t *testing.T) {
+		v := map[string]string{}
+		assignSplit(v, []string{"a", "b"}, []string{"x", "y", "z"})
+		if v["a"] != "x" || v["b"] != "y|z" {
+			t.Fatalf("v = %v, want a=x b=y|z (the surplus stays recoverable)", v)
+		}
+	})
+	t.Run("missing parts leave trailing fields empty", func(t *testing.T) {
+		v := map[string]string{}
+		assignSplit(v, []string{"a", "b", "c"}, []string{"x"})
+		if v["a"] != "x" || v["b"] != "" || v["c"] != "" {
+			t.Fatalf("v = %v, want a=x b= c= (empty, not omitted, not shifted)", v)
+		}
+	})
+	t.Run("no parts at all", func(t *testing.T) {
+		v := map[string]string{}
+		assignSplit(v, []string{"a"}, nil)
+		if v["a"] != "" {
+			t.Fatalf("v = %v, want a= for an empty split", v)
+		}
+	})
+}
