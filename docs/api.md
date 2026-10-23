@@ -1131,6 +1131,20 @@ body `{label（必填，事由）, startsAt, endsAt（RFC3339，ends > starts）
 
 multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进制旧格式，不受支持**——识别层与快照层均以 #92 专门消息拒收并引导「另存为 .xlsx（或导出 .csv）」，CLI `fees import` 帮助文案同口径）+ `feeType`（electricity/tower_lease/repair/maintenance）+ `year` + `month`（声明账期）+ 可选 `map`（列映射 JSON：`{"columns":{"siteCode":"站址编码","amount":"电费(元)","period":"账期"}}`，缺省表头自动识别；识别不到必需列 → 422）。管线：快照（内容寻址不可变）→ 规范化（金额/账期/站址编码；行失败计数不致命）→ Parquet 分区大表（`fee_type/year/month` hive 分区，行级账期优先于声明账期）→ 批次行（幂等键 = 哈希×类型×账期×映射）。**幂等**：同文件重导 → **200**（非 201）+ `skippedDuplicate=true` + `existingBatch`（informational，与 CLI 同严重级语义）。新导入 → **201** + 摘要（计数/分区文件清单/行错误）。全部行失败 → 422 `fee_rows_failed`（错误明细在摘要，重试通道开放）。参数非法 → 400；扩展名不支持（.csv/.xlsx 之外）→ 422 `unsupported_fee_file`。设计全貌见 [fees-layer.md](fees-layer.md)。
 
+## POST /api/fees/imports/sheets — 多 sheet 台账整本导入（#125）
+
+真实月度台账的自然形态：**一个工作簿 = 一个月，每张 sheet 一种费用类型**（电费/铁塔租费/修理费）。此端点一次吃掉整本工作簿——每张 sheet 由**自身的证据**（表名 + 表头标记）判定费用类型，产出**独立批次**（独立幂等键 `(sha256, sheet, feeType, 账期, 映射)`、独立证据链、独立回滚面）。
+
+multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类型证据，请用单 sheet 通道显式声明）+ `year` + `month`。**没有 `feeType` 字段**——传了直接 400 指引去单 sheet 通道。
+
+- 幂等重复导入（同一文件、同模式）→ **200**，每个条目 `skippedDuplicate=true` + `existingBatch`（informational，与单 sheet 通道同一教义）；
+- 全新导入 → **201** + `batches[]`（sheet/feeType/batchId/行数/文件清单）+ `skippedSheets[]`（装饰性 sheet 按名列出，绝不静默丢弃）；
+- CSV、不可判定 sheet、必备列映射失败、与单 sheet 模式跨模式重导 → **422 `fee_import_refused`**（**全部 sheet 先分类后落地**，拒绝发生在任何数据落地之前，列出全部肇事 sheet）；
+- 中途服务器故障（部分 sheet 已落地）→ **500 `fee_import_partial`**，消息点名已落地批次（可查询/可回滚）与失败原因。
+
+**验收锚点**（#125）：三 sheet 台账（电费 12345.67 / 铁塔租费 5000.00 / 修理费）整本导入后，`tower_lease` 的 totals 汇总必须等于**铁塔租费 sheet 的金额**（5000.00），而不是第一张 sheet 的 12345.67；单 sheet / CSV 行为零回归。语义细节见 [fees-layer.md](fees-layer.md)。
+
+
 ## GET /api/fees/batches?status= — 费用导入批次列表
 
 `status=completed/failed/rolled_back`（缺省全部）；最新在前。`feeTypeLabel`（中文）与 `period`（2024-05）为展示字段；`snapshotPath` 是内容寻址快照相对路径（证据锚点；**逻辑路径，恒 `/` 分隔**——跨平台契约，migration v31 起存量统一归一）。

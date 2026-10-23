@@ -27,6 +27,7 @@ import (
 	"github.com/mmqz/netops-lab/internal/app"
 	"github.com/mmqz/netops-lab/internal/fees"
 	"github.com/mmqz/netops-lab/internal/testsupport"
+	"github.com/xuri/excelize/v2"
 )
 
 // uploadFeeFile posts the fee import multipart (file + feeType + year +
@@ -1100,5 +1101,191 @@ func TestAPIFeesClueDecisionEndpoints(t *testing.T) {
 	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risks/spike?feeType=electricity&year=2024&includeDecided=1", nil, "")
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Errorf("risks includeDecided=1 (default build): status = %d, want 501 engine_not_built", resp.StatusCode)
+	}
+}
+
+// uploadFeeSheetsFile posts the multi-sheet import multipart (file + year
+// + month — NO feeType) to /api/fees/imports/sheets (#125).
+func uploadFeeSheetsFile(t *testing.T, srv *httptest.Server, filename string, content []byte, year, month string, extra map[string]string) (*http.Response, []byte) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := fw.Write(content); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	for k, v := range map[string]string{"year": year, "month": month} {
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("write field %s: %v", k, err)
+		}
+	}
+	for k, v := range extra {
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("write field %s: %v", k, err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/fees/imports/sheets", &buf)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post sheets import: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	_ = resp.Body.Close()
+	return resp, body
+}
+
+// buildLedgerWorkbook builds the #125 acceptance workbook in memory:
+// sheets 电费(2 rows) / 铁塔租费(1 row: 5000.00) / 修理费(1 row) / 说明(cover).
+func buildLedgerWorkbook(t *testing.T) []byte {
+	t.Helper()
+	f := excelize.NewFile()
+	if err := f.SetSheetName(f.GetSheetList()[0], "电费"); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []struct {
+		sheet string
+		rows  [][]string
+	}{
+		{"电费", [][]string{{"站址编码", "站址名称", "电费(元)", "账期"}, {"S1", "一站", "12345.67", "2024-05"}, {"S2", "二站", "678.90", "2024-05"}}},
+		{"铁塔租费", [][]string{{"站址编码", "站址名称", "塔租费(元)", "账期"}, {"S1", "一站", "5000.00", "2024-05"}}},
+		{"修理费", [][]string{{"站址编码", "站址名称", "修理费(元)", "账期", "工单号"}, {"S2", "二站", "999.99", "2024-05", "GD-001"}}},
+		{"说明", [][]string{{"本表由财务部编制"}}},
+	} {
+		if spec.sheet != "电费" {
+			if _, err := f.NewSheet(spec.sheet); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, row := range spec.rows {
+			for j, cell := range row {
+				ref, err := excelize.CoordinatesToCellName(j+1, i+1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := f.SetCellValue(spec.sheet, ref, cell); err != nil {
+					t.Fatalf("set %s!%s: %v", spec.sheet, ref, err)
+				}
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write workbook: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// sheetsImportSummary mirrors the POST /api/fees/imports/sheets body.
+type sheetsImportSummary struct {
+	WorkbookName string `json:"workbookName"`
+	Status       string `json:"status"`
+	Batches      []struct {
+		Sheet            string `json:"sheet"`
+		FeeType          string `json:"feeType"`
+		BatchID          string `json:"batchId"`
+		Status           string `json:"status"`
+		RowsImported     int    `json:"rowsImported"`
+		SkippedDuplicate bool   `json:"skippedDuplicate"`
+		ExistingBatch    string `json:"existingBatch"`
+	} `json:"batches"`
+	SkippedSheets []string `json:"skippedSheets"`
+}
+
+// TestAPIFeesImportSheets pins the #125 multi-sheet HTTP contract: 201
+// with one batch per fee-type sheet (each type from its own evidence),
+// the cosmetic sheet named, 200 with per-sheet skippedDuplicate on the
+// idempotent re-import, 400 when a feeType misunderstands the channel,
+// and 422 for the CSV that has no sheet names to classify from.
+func TestAPIFeesImportSheets(t *testing.T) {
+	srv := newAPITestServer(t)
+	ledger := buildLedgerWorkbook(t)
+
+	// fresh import → 201 + three batches in workbook order.
+	resp, body := uploadFeeSheetsFile(t, srv, "2024年05月费用.xlsx", ledger, "2024", "5", nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("sheets import: status = %d, want 201\nbody: %s", resp.StatusCode, body)
+	}
+	var sum sheetsImportSummary
+	if err := json.Unmarshal(body, &sum); err != nil {
+		t.Fatalf("decode summary: %v\n%s", err, body)
+	}
+	if sum.Status != "completed" || len(sum.Batches) != 3 {
+		t.Fatalf("summary = %+v, want completed with 3 batches", sum)
+	}
+	for i, want := range []struct {
+		sheet, typ string
+		rows       int
+	}{{"电费", "electricity", 2}, {"铁塔租费", "tower_lease", 1}, {"修理费", "repair", 1}} {
+		b := sum.Batches[i]
+		if b.Sheet != want.sheet || b.FeeType != want.typ || b.RowsImported != want.rows || b.Status != "completed" {
+			t.Fatalf("batches[%d] = %+v, want %s/%s rows %d", i, b, want.sheet, want.typ, want.rows)
+		}
+	}
+	if len(sum.SkippedSheets) != 1 || sum.SkippedSheets[0] != "说明" {
+		t.Fatalf("skippedSheets = %v, want [说明]", sum.SkippedSheets)
+	}
+
+	// the batches surface in the shared batches list (query/rollback face).
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/batches?status=completed", nil, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("batches list: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), sum.Batches[1].BatchID) {
+		t.Fatalf("batches list must carry the tower batch %s", sum.Batches[1].BatchID)
+	}
+
+	// idempotent re-import → 200, every sheet a duplicate skip.
+	resp, body = uploadFeeSheetsFile(t, srv, "2024年05月费用.xlsx", ledger, "2024", "5", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("duplicate sheets import: status = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+	var dup sheetsImportSummary
+	if err := json.Unmarshal(body, &dup); err != nil {
+		t.Fatalf("decode duplicate: %v", err)
+	}
+	for i := range dup.Batches {
+		if !dup.Batches[i].SkippedDuplicate || dup.Batches[i].ExistingBatch != sum.Batches[i].BatchID {
+			t.Fatalf("duplicate batches[%d] = %+v, want skip → %s", i, dup.Batches[i], sum.Batches[i].BatchID)
+		}
+	}
+
+	// a feeType field misunderstands the channel → 400 with the pointer.
+	resp, body = uploadFeeSheetsFile(t, srv, "2024年05月费用.xlsx", ledger, "2024", "5", map[string]string{"feeType": "electricity"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("sheets import with feeType: status = %d, want 400\nbody: %s", resp.StatusCode, body)
+	}
+
+	// CSV has no sheet names to classify from → 422 fee_import_refused.
+	csv := "站址编码,账期,电费(元)\nS1,2024-05,10.00\n"
+	resp, body = uploadFeeSheetsFile(t, srv, "may.csv", []byte(csv), "2024", "5", nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("CSV sheets import: status = %d, want 422\nbody: %s", resp.StatusCode, body)
+	}
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != "fee_import_refused" {
+		t.Fatalf("CSV refusal code = %q, want fee_import_refused", env.Error.Code)
 	}
 }

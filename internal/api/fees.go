@@ -158,6 +158,131 @@ var errUnsupportedFeeExt = errors.New("仅支持 .csv / .xlsx 费用文件")
 
 var errXlsBinaryFormat = errors.New(".xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试")
 
+// handleFeesImportSheets implements POST /api/fees/imports/sheets (#125):
+// the multi-sheet channel — the REAL monthly ledger shape where one
+// workbook holds one sheet per fee type (电费/铁塔租费/修理费). No feeType
+// field exists here on purpose: each sheet's own evidence (name + header
+// markers) declares its type, which is exactly what the single-sheet
+// channel cannot see. 201 with the per-sheet batch array on a fresh
+// import; 200 with the same shape (every entry skippedDuplicate) on the
+// idempotent re-import — informational, never a failure. Classifiable-
+// impossible files (CSV, an unclassifiable sheet, a sheet whose mandatory
+// columns won't map, a file already imported through the single-sheet
+// channel) answer 422 fee_import_refused BEFORE any sheet lands; a
+// server fault mid-file answers 500 fee_import_partial naming both the
+// batches that DID land (queryable, rollback-able) and the failing
+// sheet — "completed with missing data" stays impossible.
+func (s *Server) handleFeesImportSheets(w http.ResponseWriter, r *http.Request) {
+	if s.dataDir == "" {
+		s.log.Error("fees sheets import rejected: dataDir is not configured",
+			"method", r.Method, "path", r.URL.Path)
+		respondError(w, http.StatusInternalServerError, "internal",
+			"服务器未配置数据目录（dataDir），无法处理费用导入")
+		return
+	}
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			respondError(w, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("上传文件超过 10MB 上限（实际 %d 字节）", maxErr.Limit))
+			return
+		}
+		respondError(w, http.StatusBadRequest, "bad_request", "无法解析 multipart 请求："+err.Error())
+		return
+	}
+	if v := r.FormValue("feeType"); v != "" {
+		// The channel's whole premise is sheet-declared types; an explicit
+		// feeType here means the caller is on the wrong endpoint — send
+		// them to the single-sheet channel instead of silently accepting.
+		respondError(w, http.StatusBadRequest, "bad_request",
+			"多 sheet 导入不接受 feeType——每张 sheet 的类型由表名/表头自动判定；需固定单一类型请用 POST /api/fees/imports")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "缺少 multipart 字段 \"file\"")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	name := filepath.Base(header.Filename)
+	if name == "" || name == "." || name == "/" {
+		respondError(w, http.StatusBadRequest, "bad_request", "上传文件名无效")
+		return
+	}
+	year, err := strconv.Atoi(strings.TrimSpace(r.FormValue("year")))
+	if err != nil || year < 2000 || year > 2100 {
+		respondError(w, http.StatusBadRequest, "bad_request", "year 必须是 2000–2100 的整数")
+		return
+	}
+	month, err := strconv.Atoi(strings.TrimSpace(r.FormValue("month")))
+	if err != nil || month < 1 || month > 12 {
+		respondError(w, http.StatusBadRequest, "bad_request", "month 必须是 1–12 的整数")
+		return
+	}
+	staged, err := stageFeeUpload(s.dataDir, file, name)
+	if err != nil {
+		if errors.Is(err, errUnsupportedFeeExt) || errors.Is(err, errXlsBinaryFormat) {
+			respondError(w, http.StatusUnprocessableEntity, "unsupported_fee_file", err.Error())
+			return
+		}
+		s.log.Error("store fee upload failed", "error", err.Error())
+		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
+		return
+	}
+	summary, err := s.fees.ImportSheets(r.Context(), fees.SheetsImportOptions{
+		Path: staged, OriginalName: name, Year: year, Month: month,
+	})
+	if err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			// The all-or-nothing refusal: NOTHING landed — 422 with every
+			// offending sheet named (the service text already lists them).
+			respondError(w, http.StatusUnprocessableEntity, "fee_import_refused", err.Error())
+			return
+		}
+		// A server fault AFTER some sheets landed: the summary is the
+		// honest accounting — name the landed batches (each queryable,
+		// rollback-able) inside the message so the operator can verify
+		// or undo without guessing.
+		landed := make([]string, 0, len(summary.Batches))
+		for _, b := range summary.Batches {
+			if b.Status == "completed" || b.SkippedDuplicate {
+				landed = append(landed, b.BatchID)
+			}
+		}
+		if len(landed) > 0 {
+			s.log.Error("fees sheets import partially failed", "error", err.Error(),
+				"landed", strings.Join(landed, ","))
+			respondError(w, http.StatusInternalServerError, "fee_import_partial",
+				fmt.Sprintf("多 sheet 导入部分失败——已落地批次：%s；失败原因：%s（已落地批次可查询/可回滚）",
+					strings.Join(landed, ", "), err.Error()))
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	// Pure-duplicate re-import is informational (200); anything that
+	// landed new data answers 201 — the single-channel doctrine. The
+	// service contract has only two nil-error shapes: every data sheet
+	// completed, or every entry already a known duplicate.
+	allSkipped := len(summary.Batches) > 0
+	for _, b := range summary.Batches {
+		if !b.SkippedDuplicate {
+			allSkipped = false
+			break
+		}
+	}
+	if allSkipped {
+		respondJSON(w, http.StatusOK, summary)
+		return
+	}
+	respondJSON(w, http.StatusCreated, summary)
+}
+
 // stageFeeUpload writes the uploaded fee file under
 // <dataDir>/uploads/fees/<sha256>_<name> and returns its path —
 // content-addressed, the same pattern as the resource and metrics
