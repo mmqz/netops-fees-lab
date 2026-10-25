@@ -121,7 +121,22 @@ samples/               电信运营导出样例（授权范围见 samples/README
 - **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets · list · rollback · evidence · query · link-scan · links · risks · clue-decisions）/ `templates` / `mcp` / `gc` / `backup` / `testdata`。
 - **MCP**（`netopsfees mcp`，stdio JSON-RPC）：`resource_search` / `fee_risks` / `fee_totals` / `fee_duplicates` —— 全部只读，闭集由 TestMCPToolRegistry + facts.md 门禁双向钉死。
 
-## 8. 免责声明
+## 8. 常见问题
+
+**Q：新克隆后直接 `make test`，为什么有 3 个包报 404 失败？**
+
+`internal/webui/dist` 里只有 `.gitkeep`（构建产物不入库），Go 二进制嵌入的是空目录，
+SPA 路由 `GET /` 返回 404，三个 SPA 冒烟测试（`TestAuthTokenWriteGate` / `TestAPIHealthAndSPA` /
+`TestHandlerRealDistSmoke`）因此失败。**这不是代码缺陷，是构建顺序问题。**
+自 issue #13 起，`make test` 已带前置检查：dist 未构建时直接给出明确提示并退出，
+不再跑出费解的 404 红灯。执行 `make web`（需要 Node 18+）后重跑即可 16 包全绿。
+
+**Q：`make build` 出的二进制打开页面 404？**
+
+同因：`make build` 只编译 Go 二进制，嵌入的是当时的 `internal/webui/dist`。
+要带真实前端请用 `make all`（= 先 `web` 后 `build`）。
+
+## 9. 免责声明
 
 本系统输出的是**风险线索**而非定论：账单数据只能证明费用存在（「账单只能证明存在，不能定罪」），一切裁定权在人工通道。分析结果仅供对账核查使用。
 

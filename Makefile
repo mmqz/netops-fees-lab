@@ -8,7 +8,15 @@ fmt:
 vet:
 	go vet ./...
 
+# The Go test suite embeds internal/webui/dist via go:embed; three SPA
+# smoke tests fail with a bare 404 when dist has not been built (issue #13).
+# Pre-check instead of running the suite into a confusing red: the error
+# below names the one command that fixes it. A fresh clone therefore gets
+# a clear instruction instead of 3 x 404 test failures.
 test:
+	@test -f internal/webui/dist/index.html || \
+	  (echo "ERROR: 前端未构建——internal/webui/dist 为空，SPA 相关测试将 404 失败（issue #13）。"; \
+	   echo "       请先运行: make web （需要 Node 18+；构建后重跑本目标即可全绿）"; exit 1)
 	go test -count=1 -timeout 15m ./...
 
 testdata:
