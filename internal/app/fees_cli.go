@@ -177,6 +177,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	// snapshot layer both reject it with a dedicated message) — the help
 	// must not claim it. Accepted: .csv / .xlsx only.
 	file := fs.String("file", "", "费用文件路径（.csv / .xlsx；.xls 为 Excel 2003 二进制旧格式不受支持，可用 netopsfees convert 批量保真转换，issue #7），必填")
+	strictRows := fs.Bool("strict-rows", false, "严格行校验（#8，默认关闭）：台账可选列（读数/用量/单价/分摊）中无法解析为数字的非空单元格使该行导入失败并列明原因；关闭时按宽松口径导入（坏值降级为空，行不拦），确定性规则仍可经 risks ledger-consistency 随时核查")
 	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
@@ -210,6 +211,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	}
 	summary, err := svc.Import(ctx, fees.ImportOptions{
 		Path: *file, FeeType: t, Year: *year, Month: *month, Mapping: mapping,
+		StrictRows: *strictRows,
 	})
 	if err != nil {
 		var dup *fees.ErrDuplicateImport
@@ -233,6 +235,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("fees import-sheets")
 	file := fs.String("file", "", "多 sheet 台账工作簿路径（.xlsx；每 sheet 一种费用类型，类型按表名/表头自动判定），必填")
+	strictRows := fs.Bool("strict-rows", false, "严格行校验（#8，默认关闭）：同 fees import")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
 	if err := fs.Parse(args); err != nil {
@@ -246,6 +249,7 @@ func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, 
 	}
 	summary, err := svc.ImportSheets(ctx, fees.SheetsImportOptions{
 		Path: *file, OriginalName: filepath.Base(*file), Year: *year, Month: *month,
+		StrictRows: *strictRows,
 	})
 	if err != nil {
 		return err

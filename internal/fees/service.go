@@ -67,6 +67,12 @@ func (s *Service) analysisDir() string {
 // the human mapping channel is the fallback, never a guess.
 type ImportOptions struct {
 	Path string
+	// StrictRows (#8): when true, an optional ledger column cell that is
+	// PRESENT but unparseable (a hand-mangled number) fails the row with its
+	// reason instead of silently degrading to nil. Default false keeps the
+	// pre-#8 behavior byte-for-byte — the lenient import and the on-demand
+	// scenario-9 rules remain the warning surface.
+	StrictRows bool
 	// SourcePath is the ABSOLUTE path the import actually reads (issue #6):
 	// recorded on the batch so 'fees verify-sources' can re-hash the file
 	// later and notice tampering. Set by Service.Import from Path ('' =
@@ -377,6 +383,8 @@ type SheetsImportOptions struct {
 	Month        int
 	// SourcePath mirrors ImportOptions.SourcePath (issue #6).
 	SourcePath string
+	// StrictRows mirrors ImportOptions.StrictRows (#8).
+	StrictRows bool
 }
 
 // SheetBatchResult is one sheet's import outcome inside the multi-sheet
@@ -516,6 +524,7 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 			Path: opts.Path, OriginalName: opts.OriginalName,
 			FeeType: p.feeType, Year: opts.Year, Month: opts.Month,
 			SourcePath: opts.SourcePath,
+			StrictRows: opts.StrictRows,
 			// Mapping intentionally nil: each sheet's columns differ — the
 			// recognizer runs per sheet inside importSheet.
 		}, p.sheet, sha, name, p.sheet.Name)
@@ -788,11 +797,25 @@ func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dat
 		"shareUnicom": &out.ShareUnicom, "shareTelecom": &out.ShareTelecom,
 		"shareTower": &out.ShareTower,
 	} {
-		if idx := ledgerIdx[field]; idx >= 0 {
-			if v, ok := parseOptionalFloat(cellAt(row, idx)); ok {
-				*dst = &v
-			}
+		idx := ledgerIdx[field]
+		if idx < 0 {
+			continue
 		}
+		raw := cellAt(row, idx)
+		v, ok := parseOptionalFloat(raw)
+		if !ok {
+			// #8 --strict-rows: a cell the file DID write but no number can be
+			// read from is a hand-mangled value — fail the row with the reason
+			// instead of importing a money record whose evidence columns lie.
+			if opts.StrictRows && strings.TrimSpace(raw) != "" {
+				return NormalizedRow{}, &ImportError{
+					Row: row.Number, Field: field, Raw: raw,
+					Reason: fmt.Sprintf("台账列 %s 的值 %q 无法解析为数字（--strict-rows：该行拒绝导入）", field, raw),
+				}
+			}
+			continue
+		}
+		*dst = &v
 	}
 	if idx := ledgerIdx["meterSwapped"]; idx >= 0 {
 		if v, ok := parseOptionalBool(cellAt(row, idx)); ok {

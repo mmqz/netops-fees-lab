@@ -121,7 +121,7 @@ samples/               电信运营导出样例（授权范围见 samples/README
 
 ## 7. CLI 与 MCP
 
-- **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets · list · rollback · evidence · query〔totals/rows/duplicates〕 · link-scan · links · risks · clue-decisions · verify-sources〔issue #6：批次源文件 SHA256 核对——match/changed/missing，快照完整性一并核对〕）/ `templates` / `mcp` / `gc` / `backup` / `convert`（.xls→.xlsx/.csv 批量保真转换，issue #7） / `testdata`。
+- **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets——均支持 --strict-rows 严格行校验〔#8〕 · list · rollback · evidence · query〔totals/rows/duplicates〕 · link-scan · links · risks〔九场景，含 ledger-consistency 台账确定性规则〕 · clue-decisions · verify-sources〔issue #6：批次源文件 SHA256 核对——match/changed/missing，快照完整性一并核对〕）/ `templates` / `mcp` / `gc` / `backup` / `convert`（.xls→.xlsx/.csv 批量保真转换，issue #7） / `testdata`。
 - **MCP**（`netopsfees mcp`，stdio JSON-RPC，`--read-only` 可选）：`resource_search` / `fee_risks` / `fee_totals` / `fee_duplicates` —— 全部只读，全部携带 MCP 2025-06 标准注解（`readOnlyHint=true` 等四提示显式无默认值，issue #10）；`mcp --read-only` 只注册注解只读的工具（当前即全部 4 个）。闭集由 TestMCPToolRegistry + facts.md 门禁双向钉死。
 
 ## 8. 常见问题
