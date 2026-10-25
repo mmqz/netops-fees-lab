@@ -48,7 +48,8 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 			"（触发指标、显式阈值、行级证据锚点 sourceFile+sourceRow+importBatch 可回读快照原文）。" +
 			"阈值用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网），AI 不可调——调参是人类通道（HTTP/CLI）。" +
 			"输出是待核实线索而非认定结论（账单存在 ≠ 重复付款认定）；线索可携带人工裁定标记 decision=verified（已核实属实）——已驳回（dismissed）的线索默认隐藏并在信封 dismissed 计数（裁定是人类通道 HTTP/CLI，AI 只读）。默认构建未编译分析引擎时本工具明确报错。" +
-			"典型配合：先本工具拿线索，再 graph_traverse / resource_search 下钻资源侧。",
+			"典型配合：先本工具拿线索，再 resource_search 下钻资源侧。",
+		Annotations: readOnlyHints(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in feeRisksInput) (*mcp.CallToolResult, feeRisksOutput, error) {
 		return feeRisks(ctx, svc, in)
 	})
@@ -58,6 +59,7 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 		Description: "只读·费用汇总查询：某费用类型下各站址的账期合计（金额为整数分），AI 的基础事实问句（「这个站今年电费多少」）。" +
 			"参数：feeType + year 必填、month 可选（缺省整年各月）、limit 缺省 20 上限 50（比 HTTP 面更紧）。" +
 			"与 HTTP GET /api/fees/query/totals 同形（一契约两传输）。默认构建未编译分析引擎时明确报错。",
+		Annotations: readOnlyHints(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in feeQueryInput) (*mcp.CallToolResult, feeTotalsOutput, error) {
 		return feeTotals(ctx, svc, in)
 	})
@@ -66,6 +68,7 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 		Name: feeDuplicatesName,
 		Description: "只读·跨批次重复结算候选查询：同 (站址, 账期) 被多个导入批次计费的形态（批次共存是设计——候选供人工核对，账单存在 ≠ 重复付款认定）。" +
 			"参数：feeType + year 必填、month 可选、limit 缺省 20 上限 50。与 HTTP GET /api/fees/query/duplicates 同形。默认构建未编译分析引擎时明确报错。",
+		Annotations: readOnlyHints(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in feeQueryInput) (*mcp.CallToolResult, feeDuplicatesOutput, error) {
 		return feeDuplicates(ctx, svc, in)
 	})

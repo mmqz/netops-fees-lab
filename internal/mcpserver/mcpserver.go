@@ -6,16 +6,15 @@
 // number frozen in prose is a sentence that lies on every addition): no SQL,
 // shell, SSH or file tools, no production write capability of any kind (the
 // SEC non-negotiable; risk-clue decisions and link confirmations stay
-// human/HTTP/CLI).
+// human/HTTP/CLI — the fork of v0.17.0 removed the simulation workspace
+// tools entirely, so there is nothing mutating left on this surface).
 //
-// The AI mutates simulation state ONLY through these tools, and only by
-// typed application operations on an existing workspace — no tool can create
-// or delete a workspace (materialization stays a human/HTTP action), and
-// restore_* op codes are rejected inside lab_apply_ops because the engine's
-// own decoder guards every external boundary. The R4 analysis tools are
-// strictly read-only: the resource domain stays human-write-only, alert
-// lifecycle edges (ack/clear) stay human-only, and detection runs stay
-// explicit operator actions.
+// Every tool carries its MCP-standard annotation set (issue #10, v0.18 —
+// the behavior contract lives in annotations.go; today all four tools are
+// pure queries). The --read-only variant (NewReadOnlyServer/RunReadOnly)
+// registers exactly the tools annotated readOnlyHint=true — an invariant
+// pinned by TestMCPReadOnlyRegistryIsReadOnlyHintSet, so a future write
+// tool lands OUTSIDE the read-only set by construction.
 //
 // The server speaks MCP over newline-delimited JSON-RPC 2.0 via the
 // modelcontextprotocol go-sdk v1.8.0 (IOTransport over the caller-provided
@@ -97,17 +96,15 @@ type searchOutput struct {
 	ApplicationGenerated bool         `json:"applicationGenerated"`
 }
 
-// NewServer builds the MCP server with the eleven registered tools: the
-// Phase 1 resource_search, the four lab tools of PROJECT_BRIEF_P2 §8, the
-// five read-only analysis tools of v0.9 R4 and the fee-risk tool of v0.15
-// (#58 stage 5 — the fee tool registers only when the fee service is
-// wired, which every composition root here does via services.WithFees).
-// W9-D: the server consumes the shared *services.Services composition root —
-// resource_search reads through the SAME query service the HTTP API uses
-// (query.Service.SearchResourcesWithSource, batched provenance resolution),
-// and the lab tools bind to the SAME sim.Service engine (svc.Lab) — no more
-// locally-built second engine, exactly like the HTTP API (no SQL here).
-// Exported for tests and future embedding.
+// NewServer builds the MCP server with the four registered tools of the
+// fee repo: resource_search plus the three fee analysis tools (#58 stage
+// 5 — the fee tools register only when the fee service is wired, which
+// every composition root here does via services.WithFees). The server
+// consumes the shared *services.Services composition root — resource_search
+// reads through the SAME query service the HTTP API uses
+// (query.Service.SearchResourcesWithSource, batched provenance
+// resolution), no SQL here. Every tool carries its annotation set (issue
+// #10 — see annotations.go). Exported for tests and future embedding.
 func NewServer(svc *services.Services) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: ServerName, Version: ServerVersion},
@@ -119,6 +116,7 @@ func NewServer(svc *services.Services) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        toolName,
 		Description: "只读检索 NetOps Lab 中已导入的网络资源（设备 / 地址池 / 电路 / 端口 / 基站 / 局站 / 机房 / PTP端口）。返回 total 与 items，每个条目含 id、type、naturalKey、name、status、attributes 及其来源（workbook/sheet/rowNumber）或 applicationGenerated 标记。",
+		Annotations: readOnlyHints(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
 		out, err := resourceSearch(ctx, svc.Query, in)
 		if err != nil {
@@ -133,13 +131,56 @@ func NewServer(svc *services.Services) *mcp.Server {
 	return server
 }
 
+// NewReadOnlyServer builds the --read-only variant of issue #10: the
+// tools annotated readOnlyHint=true ONLY — today that is the same four
+// pure-query tools as NewServer (this repo has no write-side MCP tool),
+// but the variant exists as the deployment boundary: a future write tool
+// registered on NewServer does NOT appear here, and the invariant (the
+// read-only registry == the readOnlyHint=true set) is pinned by
+// TestMCPReadOnlyRegistryIsReadOnlyHintSet plus the facts file
+// mcp-tools-readonly gate.
+func NewReadOnlyServer(svc *services.Services) *mcp.Server {
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: ServerName, Version: ServerVersion},
+		&mcp.ServerOptions{
+			// Logs go to stderr — stdout carries the MCP protocol.
+			Logger: slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		},
+	)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        toolName,
+		Description: "只读检索 NetOps Lab 中已导入的网络资源（设备 / 地址池 / 电路 / 端口 / 基站 / 局站 / 机房 / PTP端口）。返回 total 与 items，每个条目含 id、type、naturalKey、name、status、attributes 及其来源（workbook/sheet/rowNumber）或 applicationGenerated 标记。",
+		Annotations: readOnlyHints(),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
+		out, err := resourceSearch(ctx, svc.Query, in)
+		if err != nil {
+			return nil, searchOutput{}, err
+		}
+		return nil, out, nil
+	})
+	addFeeTools(server, svc)
+	return server
+}
+
 // Run starts the MCP server over the given stdin/stdout pair and blocks
 // until the client closes the connection or ctx is cancelled. Use it with
 // the process's real os.Stdin/os.Stdout for the CLI, and with os.Pipe ends
 // in tests. W9-D: takes the shared *services.Services (app.New's single
 // composition root) instead of a bare db.
 func Run(ctx context.Context, svc *services.Services, stdin io.Reader, stdout io.Writer) error {
-	server := NewServer(svc)
+	return runServer(ctx, NewServer(svc), stdin, stdout)
+}
+
+// RunReadOnly is Run's --read-only variant (issue #10): only the
+// readOnlyHint-annotated tools are registered — for pure-analysis
+// deployments where the write capability should not even exist at the
+// protocol level.
+func RunReadOnly(ctx context.Context, svc *services.Services, stdin io.Reader, stdout io.Writer) error {
+	return runServer(ctx, NewReadOnlyServer(svc), stdin, stdout)
+}
+
+// runServer drives one built server over the IO transport.
+func runServer(ctx context.Context, server *mcp.Server, stdin io.Reader, stdout io.Writer) error {
 	transport := &mcp.IOTransport{
 		Reader: io.NopCloser(stdin),
 		Writer: nopWriteCloser{stdout},

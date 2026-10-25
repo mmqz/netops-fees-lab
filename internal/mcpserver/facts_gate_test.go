@@ -42,3 +42,27 @@ func TestMCPToolCountMatchesFactsFile(t *testing.T) {
 		t.Fatalf("tools/list exposes %d tools, docs/facts.md declares %d — a tool added or removed must update the facts file in the same change (see docs/facts.md §4)", len(list.Tools), want)
 	}
 }
+
+// TestMCPReadOnlyToolCountMatchesFactsFile is the --read-only twin of the
+// count gate (issue #10): the read-only variant's real registry count must
+// equal the mcp-tools-readonly declaration of docs/facts.md.
+func TestMCPReadOnlyToolCountMatchesFactsFile(t *testing.T) {
+	want, ok := testsupport.FactsFileInt(t, "mcp-tools-readonly")
+	if !ok {
+		t.Skipf("docs/facts.md not readable (package tested outside the repo tree)")
+	}
+	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
+	if err != nil {
+		t.Fatalf("repo.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	session := startReadOnlySession(t, db)
+	list, err := session.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools (read-only): %v", err)
+	}
+	if len(list.Tools) != want {
+		t.Fatalf("read-only tools/list exposes %d tools, docs/facts.md mcp-tools-readonly declares %d — the variant and the facts file must move together", len(list.Tools), want)
+	}
+}

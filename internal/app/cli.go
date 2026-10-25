@@ -929,6 +929,7 @@ func cmdMCP(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("mcp")
 	db := fs.String("db", "", fmt.Sprintf("SQLite 数据库路径（缺省读取环境变量 %s 或 ./data/netops.db）", envDBPath))
 	data := fs.String("data", "./data", "费用分析数据目录（快照与分析树根；须与 fees --data / serve --data-dir 指向同一目录，缺省 ./data）")
+	readOnly := fs.Bool("read-only", false, "只读模式（issue #10）：只注册标注 readOnlyHint=true 的纯查询工具（当前即全部 4 个）——纯分析接入的显式声明，未来出现写工具时本模式天然不含它")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -955,7 +956,11 @@ func cmdMCP(args []string, stdout, stderr io.Writer) error {
 	defer stop()
 	// The MCP server speaks JSON-RPC over the process's real stdio; it
 	// consumes the app's single service composition (W9-D) — the same
-	// instances the HTTP API and the CLI use.
+	// instances the HTTP API and the CLI use. --read-only (issue #10) swaps
+	// in the variant that registers only the readOnlyHint-annotated tools.
+	if *readOnly {
+		return mcpserver.RunReadOnly(ctx, a.Services, os.Stdin, os.Stdout)
+	}
 	return mcpserver.Run(ctx, a.Services, os.Stdin, os.Stdout)
 }
 

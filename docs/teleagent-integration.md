@@ -1,5 +1,9 @@
 # NetOps Lab — TeleAgent 集成指南（MCP 注册 + CLI 回退）
 
+> ⚠️ **费用仓迁移提示（v0.17.0 fork 起生效）**：本文写作于费用域拆分前的主仓，其工具清单（lab_* / graph_* / alerts_query / metrics_query 共 11 工具）属于主仓 IPRAN 面，
+> **本仓库不存在这些工具**。本仓 MCP 实况：`resource_search` + `fee_risks` / `fee_totals` / `fee_duplicates` 共 4 个纯查询工具，
+> 全部携带 MCP 标准只读注解（`readOnlyHint=true`，issue #10），命令为 `netopsfees mcp [--read-only]`。机读事实源以 [facts.md](facts.md) 为准；本文其余流程性内容（stdio 拉起/回退路径/故障排查思路）仍可参考，但工具名一律以上述 4 个为准。
+
 > ⚠️ **诚实声明**：部署态 TeleAgent 的 MCP 调用**未在本开发环境验证**（环境内没有 TeleAgent 实例；v0.2.0 时点状态与 Phase 1 相同）。已验证的是：进程内 MCP stdio 回环（go-sdk 客户端 × `mcpserver.Run`，`TestMCPServerResourceSearch` / `TestMCPToolRegistry` / `TestMCPLab*` ×4 / `TestMCPGraphToolsRoundTrip` / `TestMCPAlertsMetricsRoundTrip`）**以及**真子进程 stdio 冒烟（`netopslab mcp --db <fresh>` 裸 JSON-RPC initialize + tools/list → 服务器身份与工具清单〔v0.2.0 时点为 5 工具，v0.9 起 10 工具，v0.15.0 起 **11 工具**——当前数以 [facts.md](facts.md) 为机读事实源〕）。**接入部署态时请按本文操作，并把结果（成功/报错/协议差异）反馈给工程组。** 在验证完成前，建议优先使用 CLI 回退路径（§4）——它与 MCP 共用同一引擎，输出同为结构化 JSON。
 
 ## 1. 前置
