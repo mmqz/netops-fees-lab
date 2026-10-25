@@ -103,6 +103,7 @@ type FeeBatch struct {
 	FeeYear      int
 	FeeMonth     int
 	SnapshotPath string // relative to the data dir (content-addressed)
+	SourcePath   string // absolute path the import actually read (issue #6; '' = unknown/pre-v35)
 	Mapping      string // canonical JSON of the column mapping
 	Status       FeeStatus
 	RowsTotal    int

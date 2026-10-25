@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -65,6 +66,11 @@ func (s *Service) analysisDir() string {
 // the human mapping channel is the fallback, never a guess.
 type ImportOptions struct {
 	Path string
+	// SourcePath is the ABSOLUTE path the import actually reads (issue #6):
+	// recorded on the batch so 'fees verify-sources' can re-hash the file
+	// later and notice tampering. Set by Service.Import from Path ('' =
+	// not recorded; the HTTP channel passes the staged uploads path).
+	SourcePath string
 	// OriginalName is the USER's file name for the batch's display identity
 	// and the evidence anchors (WorkbookName / sourceFile). The HTTP channel
 	// stages uploads content-addressed (#88: <sha256>_<name>), so deriving
@@ -96,6 +102,10 @@ type ImportSummary struct {
 	Errors           []string `json:"errors,omitempty"`
 	SkippedDuplicate bool     `json:"skippedDuplicate"`
 	ExistingBatch    string   `json:"existingBatch,omitempty"`
+	// Warnings are non-blocking integrity notices of issue #6 (a writable
+	// source file at import time — the read-only-directory advice rides
+	// here; the import itself never refuses on them).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Import runs the full pipeline for one file the way it always worked
@@ -137,6 +147,13 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if err != nil {
 		return ImportSummary{}, err
 	}
+	// issue #6: record the absolute source path the import reads (survives
+	// later CWD changes; '' rows are skipped by verify-sources, not guessed).
+	if opts.SourcePath == "" {
+		if abs, aerr := filepath.Abs(opts.Path); aerr == nil {
+			opts.SourcePath = abs
+		}
+	}
 	name := opts.OriginalName
 	if name == "" {
 		name = filepath.Base(opts.Path)
@@ -144,6 +161,7 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if _, err := SnapshotExt(name); err != nil {
 		return ImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
 	}
+	warnings := sourceWritableWarnings(opts.Path)
 	sheet, err := ReadFeeFileFirst(opts.Path)
 	if err != nil {
 		// #104: a bad file shape is the operator's to fix — 422 class, not a
@@ -170,7 +188,9 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	// The single-sheet channel keeps the pre-v34 batch coordinate (sheet
 	// '') so its idempotency keys survive the migration byte-for-byte;
 	// the runtime cross-check above still USES the sheet's name.
-	return s.importSheet(ctx, opts, sheet, sha, name, "")
+	sum, err := s.importSheet(ctx, opts, sheet, sha, name, "")
+	sum.Warnings = warnings
+	return sum, err
 }
 
 // importSheet runs steps 2-7 for ONE sheet's data. sheetKey is the
@@ -225,7 +245,8 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 		return tx.FeeBatches.Create(ctx, FeeBatch{
 			ID: batchID, WorkbookName: name, SHA256: sha, Sheet: sheetKey, FeeType: opts.FeeType,
 			FeeYear: opts.Year, FeeMonth: opts.Month, SnapshotPath: snapRel, Mapping: canonical,
-			Status: FeeStatusFailed, CreatedAt: s.clock(),
+			SourcePath: opts.SourcePath,
+			Status:     FeeStatusFailed, CreatedAt: s.clock(),
 		})
 	}); err != nil {
 		return ImportSummary{}, fmt.Errorf("fees: 记录导入批次: %w", err)
@@ -340,6 +361,8 @@ type SheetsImportOptions struct {
 	OriginalName string
 	Year         int
 	Month        int
+	// SourcePath mirrors ImportOptions.SourcePath (issue #6).
+	SourcePath string
 }
 
 // SheetBatchResult is one sheet's import outcome inside the multi-sheet
@@ -358,6 +381,7 @@ type SheetBatchResult struct {
 	Errors           []string `json:"errors,omitempty"`
 	SkippedDuplicate bool     `json:"skippedDuplicate"`
 	ExistingBatch    string   `json:"existingBatch,omitempty"`
+	Warnings         []string `json:"warnings,omitempty"`
 }
 
 // SheetsImportSummary is the multi-sheet envelope: the workbook identity,
@@ -407,6 +431,12 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 	if err != nil {
 		return SheetsImportSummary{}, err
 	}
+	// issue #6: same recording discipline as the single-sheet channel.
+	if opts.SourcePath == "" {
+		if abs, aerr := filepath.Abs(opts.Path); aerr == nil {
+			opts.SourcePath = abs
+		}
+	}
 	name := opts.OriginalName
 	if name == "" {
 		name = filepath.Base(opts.Path)
@@ -414,6 +444,7 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 	if _, err := SnapshotExt(name); err != nil {
 		return SheetsImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
 	}
+	warnings := sourceWritableWarnings(opts.Path)
 	sheets, skipped, err := ReadFeeFileSheets(opts.Path)
 	if err != nil {
 		return SheetsImportSummary{}, fmt.Errorf("%w: %v", ErrImportRefused, err)
@@ -470,6 +501,7 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 		summary, err := s.importSheet(ctx, ImportOptions{
 			Path: opts.Path, OriginalName: opts.OriginalName,
 			FeeType: p.feeType, Year: opts.Year, Month: opts.Month,
+			SourcePath: opts.SourcePath,
 			// Mapping intentionally nil: each sheet's columns differ — the
 			// recognizer runs per sheet inside importSheet.
 		}, p.sheet, sha, name, p.sheet.Name)
@@ -478,6 +510,7 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 			RowsTotal: summary.RowsTotal, RowsImported: summary.RowsImported,
 			RowsFailed: summary.RowsFailed, Files: summary.Files, Errors: summary.Errors,
 			SkippedDuplicate: summary.SkippedDuplicate, ExistingBatch: summary.ExistingBatch,
+			Warnings: warnings,
 		}
 		if result.SkippedDuplicate && result.BatchID == "" {
 			result.BatchID = summary.ExistingBatch
@@ -508,6 +541,124 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 		return out, refusef("多 sheet 导入部分失败（成功批次的批次号见 batches；失败原因见对应条目）")
 	}
 	return out, nil
+}
+
+// sourceWritableWarnings is the issue #6 import-time notice: the system
+// itself never writes source files (os.Open -> snapshot copy), but a
+// WRITABLE source is one careless "fix the number in Excel" away from a
+// broken evidence chain, and until now nothing even noticed. The notice
+// is non-blocking (the operator keeps full agency); on Windows the POSIX
+// write bit is meaningless, so the check is skipped there rather than
+// firing a permanent false alarm on every file.
+func sourceWritableWarnings(path string) []string {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil // unreadable = the import will surface the real error
+	}
+	if info.Mode().Perm()&0o200 == 0 {
+		return nil // read-only source: the advised state, nothing to say
+	}
+	return []string{
+		"源文件当前可写——建议将原始台账目录设为只读（chmod a-w / chattr +i；Windows attrib +R），防止事后改动破坏证据链；本系统对源文件只读，但无法阻止外部程序改动（issue #6）",
+	}
+}
+
+// SourceVerifyStatus is the per-batch verdict of fees verify-sources.
+type SourceVerifyStatus string
+
+const (
+	SourceMatched SourceVerifyStatus = "match"   // file hash == import-time hash
+	SourceChanged SourceVerifyStatus = "changed" // file exists, hash differs — the source was modified after import
+	SourceMissing SourceVerifyStatus = "missing" // file no longer exists
+	SourceUnknown SourceVerifyStatus = "unknown" // no recorded source path (pre-v35 / staged-then-GC'd rows) — skipped, never guessed
+)
+
+// SourceVerifyItem is one batch's verdict with the evidence to act on.
+type SourceVerifyItem struct {
+	BatchID        string             `json:"batchId"`
+	WorkbookName   string             `json:"workbookName"`
+	Sheet          string             `json:"sheet,omitempty"`
+	Status         SourceVerifyStatus `json:"status"`
+	SourcePath     string             `json:"sourcePath,omitempty"`
+	RecordedSHA    string             `json:"recordedSha256"`
+	CurrentSHA     string             `json:"currentSha256,omitempty"`
+	SnapshotIntact bool               `json:"snapshotIntact"`
+	Note           string             `json:"note,omitempty"`
+}
+
+// SourceVerifyReport is the single-JSON envelope of fees verify-sources.
+type SourceVerifyReport struct {
+	Checked int                `json:"checked"`
+	Match   int                `json:"match"`
+	Changed int                `json:"changed"`
+	Missing int                `json:"missing"`
+	Unknown int                `json:"unknown"`
+	Results []SourceVerifyItem `json:"results"`
+}
+
+// VerifySources re-hashes every fee batch's recorded source file against
+// the hash captured at import time (issue #6 方案 A2): the three honest
+// verdicts are match / changed / missing; batches without a recorded path
+// are counted as unknown and skipped (never guessed). The snapshot side
+// is checked too — the content-addressed copy must still exist and still
+// hash to the recorded value, so a "changed" verdict always has the
+// untampered evidence to fall back on.
+func (s *Service) VerifySources(ctx context.Context) (SourceVerifyReport, error) {
+	batches, err := s.db.FeeBatches.List(ctx, "")
+	if err != nil {
+		return SourceVerifyReport{}, fmt.Errorf("fees: 读取费用批次: %w", err)
+	}
+	report := SourceVerifyReport{Results: []SourceVerifyItem{}}
+	for _, b := range batches {
+		item := SourceVerifyItem{
+			BatchID: b.ID, WorkbookName: b.WorkbookName, Sheet: b.Sheet,
+			RecordedSHA: b.SHA256,
+		}
+		// Snapshot integrity: the evidence copy must still exist and still
+		// carry the recorded content (the one thing verify-sources CAN
+		// guarantee even for unknown-source rows).
+		snapPath := filepath.Join(s.dir, b.SnapshotPath)
+		if snapSHA, err := HashFile(snapPath); err == nil && snapSHA == b.SHA256 {
+			item.SnapshotIntact = true
+		}
+		if b.SourcePath == "" {
+			item.Status = SourceUnknown
+			item.Note = "批次未记录源文件路径（v35 前批次或 HTTP 暂存通道）——跳过源核对"
+		} else if _, err := os.Stat(b.SourcePath); err != nil {
+			item.Status = SourceMissing
+			item.SourcePath = b.SourcePath
+			item.Note = "源文件已不存在——快照仍在（可恢复），但无法再核对源侧"
+		} else if cur, err := HashFile(b.SourcePath); err != nil {
+			item.Status = SourceMissing
+			item.SourcePath = b.SourcePath
+			item.Note = "源文件无法读取：" + err.Error()
+		} else if cur == b.SHA256 {
+			item.Status = SourceMatched
+			item.SourcePath = b.SourcePath
+			item.CurrentSHA = cur
+		} else {
+			item.Status = SourceChanged
+			item.SourcePath = b.SourcePath
+			item.CurrentSHA = cur
+			item.Note = "源文件内容与导入时不一致——源侧已被改动；本批结论以快照为准并需人工核实改动来源"
+		}
+		report.Checked++
+		switch item.Status {
+		case SourceMatched:
+			report.Match++
+		case SourceChanged:
+			report.Changed++
+		case SourceMissing:
+			report.Missing++
+		case SourceUnknown:
+			report.Unknown++
+		}
+		report.Results = append(report.Results, item)
+	}
+	return report, nil
 }
 
 // crossCheckDeclaredType refuses a declared fee type that CONTRADICTS the

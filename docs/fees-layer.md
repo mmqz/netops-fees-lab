@@ -172,3 +172,32 @@ netopslab fees --db <path> --data <dir> risks <scenario> --type <t> --year <Y> [
 - [api.md](api.md) —— 费用域 HTTP 契约全量（导入/批次/回滚/查询预设/关联/风险六场景端点）与 CLI 等价物；
 - [teleagent-integration.md](teleagent-integration.md) —— MCP 工具清单（含 fee_risks）；
 - #59 关闭评论 —— 引擎基准数字与设计纠偏（重复行共存裁决的来源）；#58 关闭评论 —— 阶段 0-5 全量收口记录。
+
+
+## §12 原始台账目录的只读保护（issue #6，v0.18）
+
+系统的证据链起点是**源文件未被改动**这一假设。本系统自身对源文件只读
+（`os.Open` 读取 → 内容寻址快照副本），但无法阻止外部程序改动源文件。
+
+**v35 迁移**给 `fee_batches` 增加 `source_path`（导入时实读文件的绝对路径；
+空 = v35 前批次或无路径通道）。**`fees verify-sources`** 对每个批次把当前
+源文件 SHA256 与导入时哈希对比，输出四类判定：
+
+| 判定 | 含义 |
+| --- | --- |
+| `match` | 源文件内容与导入时一致 |
+| `changed` | 源文件已被改动——结论以快照为准，需人工核实改动来源（退出码非零） |
+| `missing` | 源文件已不存在（快照仍在，可恢复） |
+| `unknown` | 批次无源路径记录（v35 前）——跳过而非猜测 |
+
+每条结果同时核对**快照完整性**（`snapshotIntact`：快照文件仍存在且哈希与
+导入时一致）。导入时源文件可写则结果 JSON 的 `warnings` 给出只读建议
+（Windows 因无 POSIX 写位语义跳过该检查）。
+
+**部署建议（原始台账目录设只读）：**
+
+| 平台 | 操作 |
+| --- | --- |
+| Linux | `chmod -R a-w /path/to/ledgers`（目录需继续收新文件则只对历史月份子目录执行）；更强：`chattr +i`（root，防误删） |
+| macOS | `chmod -R a-w /path/to/ledgers`；防删：`chflags uchg` |
+| Windows | 资源管理器属性勾「只读」或 `attrib +R <文件>`；整目录用 `icacls <目录> /deny Everyone:(WD,AD)`（拒写拒删） |

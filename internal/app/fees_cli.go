@@ -30,7 +30,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "import-sheets", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions",
+	"import", "import-sheets", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions", "verify-sources",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -105,6 +105,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesRisks(ctx, svc, dataDir, subArgs, stdout, stderr)
 	case "clue-decisions":
 		return cmdFeesClueDecisions(ctx, svc, subArgs, stdout, stderr)
+	case "verify-sources":
+		return cmdFeesVerifySources(ctx, svc, subArgs, stdout, stderr)
 	default:
 		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 %s，收到 %q", commandEnum(feesSubcommands), sub)}
 	}
@@ -682,4 +684,35 @@ func cmdFeesClueDecisionsDecide(ctx context.Context, svc *fees.Service, op strin
 		Year: d.Year, Month: d.Month, Status: string(d.Status),
 		Note: d.Note, DecidedAt: d.DecidedAt.Format(time.RFC3339),
 	})
+}
+
+// cmdFeesVerifySources implements `fees verify-sources` (issue #6 方案 A2):
+// re-hash every fee batch's recorded source file against its import-time
+// hash — match / changed / missing, plus unknown for pre-v35 rows (skipped,
+// never guessed). The single-JSON report carries per-batch evidence; a
+// non-empty "changed" count exits non-zero (the operator's terminal can
+// see it) while stdout stays the one envelope (errAlreadyPrinted).
+func cmdFeesVerifySources(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees verify-sources")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "verify-sources 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	report, err := svc.VerifySources(ctx)
+	if err != nil {
+		return err
+	}
+	enc, jerr := json.MarshalIndent(report, "", "  ")
+	if jerr != nil {
+		return jerr
+	}
+	if _, err := stdout.Write(append(enc, '\n')); err != nil {
+		return err
+	}
+	if report.Changed > 0 {
+		return fmt.Errorf("%d 个批次的源文件在导入后被改动（明细见 stdout JSON）: %w", report.Changed, errAlreadyPrinted)
+	}
+	return nil
 }
