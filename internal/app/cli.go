@@ -43,6 +43,7 @@ const envDBPath = "NETOPS_DB"
 var cliSubcommands = []string{
 	"serve", "analyze", "import", "ingest", "metrics",
 	"validate", "report", "fees", "templates", "mcp", "gc", "backup", "testdata",
+	"convert",
 }
 
 // commandEnum renders the enumeration of the "必须是 …" usage errors:
@@ -105,6 +106,8 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdTemplates(args[1:], stdout, stderr)
 	case "mcp":
 		err = cmdMCP(args[1:], stdout, stderr)
+	case "convert":
+		err = cmdConvert(args[1:], stdout, stderr)
 	case "gc":
 		err = cmdGC(args[1:], stdout, stderr)
 	case "backup":
@@ -119,6 +122,9 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	if err == nil {
 		return exitOK
 	}
+	if errors.Is(err, errAlreadyPrinted) {
+		return exitFailure
+	}
 	var uerr *usageError
 	if errors.As(err, &uerr) {
 		if uerr.usage != "" {
@@ -130,6 +136,13 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 	writeCLIError(stdout, cliErrorCode(err), err.Error())
 	return exitFailure
 }
+
+// errAlreadyPrinted is the sentinel a command returns when it has ALREADY
+// written its own single §10 JSON object to stdout and only wants the
+// non-zero exit code reflected (batch partial failures — e.g. convert with
+// some files unparseable: the Result JSON on stdout carries the per-file
+// reasons, dispatch must not write a second envelope).
+var errAlreadyPrinted = errors.New("cli: 单 JSON 已输出，仅反射退出码")
 
 // usageError marks flag/usage problems (exit code 2).
 type usageError struct {

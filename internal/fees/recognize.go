@@ -77,7 +77,7 @@ func ReadFeeFileFirst(path string) (SheetData, error) {
 		// only reads xlsx (zip+XML), so routing .xls there surfaced a
 		// misleading "zip: not a valid zip file" from deep inside the
 		// library instead of telling the operator what to do.
-		return SheetData{}, fmt.Errorf("fees: .xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试：%s", path)
+		return SheetData{}, fmt.Errorf("fees: .xls 是 Excel 2003 二进制旧格式，不受支持——请先转换后重试：netopsfees convert --in <file.xls> --out <dir>（批量保真转换，issue #7）：%s", path)
 	default:
 		return SheetData{}, fmt.Errorf("fees: 文件 %s 的扩展名不受支持（可用：csv / xlsx）", path)
 	}

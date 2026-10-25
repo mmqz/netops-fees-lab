@@ -156,7 +156,7 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 // csv/xlsx (.xls gets its own dedicated message — #92).
 var errUnsupportedFeeExt = errors.New("仅支持 .csv / .xlsx 费用文件")
 
-var errXlsBinaryFormat = errors.New(".xls 是 Excel 2003 二进制旧格式，不受支持——请用 Excel 另存为 .xlsx（或导出 .csv）后重试")
+var errXlsBinaryFormat = errors.New(".xls 是 Excel 2003 二进制旧格式，不受支持——请先转换后重试：netopsfees convert --in <file.xls> --out <dir> [--format xlsx|csv]（批量保真转换，issue #7）")
 
 // handleFeesImportSheets implements POST /api/fees/imports/sheets (#125):
 // the multi-sheet channel — the REAL monthly ledger shape where one

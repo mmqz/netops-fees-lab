@@ -3,6 +3,7 @@ module github.com/mmqz/netops-fees-lab
 go 1.27
 
 require (
+	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7
 	github.com/google/uuid v1.6.0
 	github.com/marcboeker/go-duckdb/v2 v2.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0

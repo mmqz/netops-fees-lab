@@ -174,7 +174,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	// #92/#108: .xls is REFUSED (Excel 2003 binary; the reader and the
 	// snapshot layer both reject it with a dedicated message) — the help
 	// must not claim it. Accepted: .csv / .xlsx only.
-	file := fs.String("file", "", "费用文件路径（.csv / .xlsx；.xls 为 Excel 2003 二进制旧格式不受支持），必填")
+	file := fs.String("file", "", "费用文件路径（.csv / .xlsx；.xls 为 Excel 2003 二进制旧格式不受支持，可用 netopsfees convert 批量保真转换，issue #7），必填")
 	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
