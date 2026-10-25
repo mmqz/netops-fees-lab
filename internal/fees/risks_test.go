@@ -46,6 +46,14 @@ func (f *fakeRiskEngine) Duplicates(ctx context.Context, analysisDir string, fee
 	}
 	return f.duplicates, nil
 }
+func (f *fakeRiskEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+	return nil, nil // the composition tests never exercise the rows query
+}
+
+func (f *fakeRiskEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error) {
+	return nil, 0, nil // scenario 9 has its own test engine surface
+}
+
 func (f *fakeRiskEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("not used")
 }
@@ -70,8 +78,8 @@ func (f *fakeRiskEngine) EvidenceFor(ctx context.Context, analysisDir string, fe
 
 // TestParseRiskScenario pins the closed enum and its rejection contract.
 func TestParseRiskScenario(t *testing.T) {
-	if len(RiskScenarios()) != 8 {
-		t.Fatalf("scenario count = %d, want 8", len(RiskScenarios()))
+	if len(RiskScenarios()) != 9 {
+		t.Fatalf("scenario count = %d, want 9", len(RiskScenarios()))
 	}
 	for _, s := range riskScenarios {
 		got, err := ParseRiskScenario(string(s))
@@ -796,6 +804,12 @@ func (unavailableEngine) Totals(ctx context.Context, analysisDir string, feeType
 }
 func (unavailableEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
 	return nil, errors.New("unreachable")
+}
+func (unavailableEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+	return nil, errors.New("unreachable")
+}
+func (unavailableEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error) {
+	return nil, 0, errors.New("unreachable")
 }
 func (unavailableEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("unreachable")

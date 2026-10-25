@@ -77,6 +77,17 @@ const (
 	// idle equipment OR broken/absent collection coverage — the clue is a
 	// to-be-verified signal, never an idleness verdict.
 	RiskIdleBilling RiskScenario = "idle-billing"
+	// RiskLedgerConsistency (scenario 9, #5 refined by #8): the
+	// deterministic IN-LEDGER consistency rules over the optional richness
+	// columns — reading-gap (multi-party meters excluded per #8 §0: 读数差
+	// is the whole meter's consumption, 实际电量 this party's share;
+	// comparing them is a false-positive machine), ratio-sum (the four-way
+	// share columns must sum to 1), chain-break (last period's reading_end
+	// vs this period's reading_start per meter — swap-FLAGGED rows are
+	// legal breaks, never clues), zero-quantity-billing (用量 0 却计费 —
+	// the missed-reading carry-over shape). Every clue is row-level
+	// evidence with its口径 in the note; never a verdict.
+	RiskLedgerConsistency RiskScenario = "ledger-consistency"
 	// RiskMissingBilling (scenario 8, #118): the mirror of scenario 7 —
 	// the measurement face says the resource is ALIVE (metric points
 	// exist in the period window) while the fee face has NO billing
@@ -98,7 +109,7 @@ const (
 var riskScenarios = []RiskScenario{
 	RiskRetiredBilling, RiskDuplicateSettlement, RiskLedgerMismatch,
 	RiskSpike, RiskOutlier, RiskUnlinked, RiskIdleBilling,
-	RiskMissingBilling,
+	RiskMissingBilling, RiskLedgerConsistency,
 }
 
 // RiskScenarioLabels is the Chinese display name of each scenario.
@@ -111,6 +122,7 @@ var RiskScenarioLabels = map[RiskScenario]string{
 	RiskUnlinked:            "零资源计费",
 	RiskIdleBilling:         "有费无量",
 	RiskMissingBilling:      "有量无费",
+	RiskLedgerConsistency:   "台账内部一致性",
 }
 
 // RiskScenarios lists every scenario id (CLI usage text).
@@ -329,6 +341,10 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		var c cluesPack
 		c, err = s.risksMissingBilling(ctx, engine, q)
 		clues, excluded, note = c.clues, c.excluded, c.note
+	case RiskLedgerConsistency:
+		var c cluesPack
+		c, err = s.risksLedgerConsistency(ctx, engine, q)
+		clues, excluded, note = c.clues, c.excluded, c.note
 	default:
 		return RiskResult{}, fmt.Errorf("fees: 未实现的风险场景 %q", scenario)
 	}
@@ -344,6 +360,95 @@ type cluesPack struct {
 	clues    []RiskClue
 	excluded int
 	note     string
+}
+
+// risksLedgerConsistency composes scenario 9 (#5/#8): the engine preset
+// answers the raw rule findings (site, period, rule, metric, row anchor);
+// the service attaches the shared evidence anchors and the 口径 note that
+// carries EVERY rule's semantics — the clue set is evidence, never
+// verdicts (acceptance #6).
+func (s *Service) risksLedgerConsistency(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	raw, excluded, err := engine.RiskLedgerConsistencyPreset(ctx, s.analysisDir(), q)
+	if err != nil {
+		return cluesPack{}, err
+	}
+	if len(raw) == 0 {
+		return cluesPack{
+			clues: []RiskClue{}, excluded: excluded,
+			note: "线索口径：台账内部一致性四条确定性规则（reading-gap 读数差≠填报用量，一表多户已排除；ratio-sum 四方分摊之和≠1；chain-break 跨账期读数断链，已标记换表的合法断开不计；zero-quantity-billing 用量0却有金额）——全部为行级确定性校验，非统计推断；线索不构成认定结论；缺相应列的文件对应规则自动跳过",
+		}, nil
+	}
+	keys := make([]EvidenceKey, 0, len(raw))
+	seen := map[EvidenceKey]bool{}
+	for _, c := range raw {
+		k := EvidenceKey{SiteCode: c.SiteCode, Year: c.Year, Month: c.Month}
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	anchors, err := engine.EvidenceFor(ctx, s.analysisDir(), q.FeeType, keys, q.MaxEvidence)
+	if err != nil {
+		return cluesPack{}, err
+	}
+	clues := make([]RiskClue, 0, len(raw))
+	for _, c := range raw {
+		k := EvidenceKey{SiteCode: c.SiteCode, Year: c.Year, Month: c.Month}
+		clue := RiskClue{
+			SiteCode: c.SiteCode, Year: c.Year, Month: c.Month,
+			MetricValue: c.MetricValue, MetricLabel: c.MetricLabel,
+			Evidence: anchors[k], EvidenceTotal: len(anchors[k]),
+		}
+		// The rule rides the threshold label slot — the deterministic rules
+		// have fixed tolerances, shown instead of an invented number.
+		switch c.Rule {
+		case "reading-gap":
+			clue.ThresholdLabel = "rule: reading-gap（容差 0.5 度；一表多户已排除）"
+			clue.Note = "读数差与填报用量之差超过容差——手工填写或抄表进位嫌疑，请核对原始行"
+		case "ratio-sum":
+			clue.ThresholdLabel = "rule: ratio-sum（容差 0.005）"
+			clue.Note = "四方分摊比例之和偏离 1——分摊口径嫌疑，请核对分摊列"
+		case "chain-break":
+			clue.ThresholdLabel = "rule: chain-break（未标记换表的跨账期断链）"
+			clue.Note = "上月止数与本月起数不连续且未标记换表——错抄/漏抄或漏标换表，请核对台账换表衔接列"
+		case "zero-quantity-billing":
+			clue.ThresholdLabel = "rule: zero-quantity-billing（用量=0 且金额>0）"
+			clue.Note = "零用量却有计费金额——疑似上期漏抄表后用量顺延至本期，财务未多收但台账自相矛盾，请人工核实"
+		default:
+			clue.ThresholdLabel = "rule: " + c.Rule
+		}
+		if c.SourceFile != "" {
+			clue.Note += "；锚点：" + c.SourceFile + " 第 " + itoa(c.SourceRow) + " 行"
+		}
+		clues = append(clues, clue)
+	}
+	return cluesPack{
+		clues: clues, excluded: excluded,
+		note: "线索口径：台账内部一致性四条确定性规则（reading-gap 读数差≠填报用量，一表多户已排除；ratio-sum 四方分摊之和≠1；chain-break 跨账期读数断链，已标记换表的合法断开不计；zero-quantity-billing 用量0却有金额）——全部为行级确定性校验，非统计推断；线索不构成认定结论；缺相应列的文件对应规则自动跳过；excluded=一表多户未判读数差行数+已标记换表的断链行数",
+	}, nil
+}
+
+// itoa keeps the anchor note free of a strconv import in this file.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	neg := i < 0
+	if neg {
+		i = -i
+	}
+	var b [20]byte
+	pos := len(b)
+	for i > 0 {
+		pos--
+		b[pos] = byte('0' + i%10)
+		i /= 10
+	}
+	if neg {
+		pos--
+		b[pos] = '-'
+	}
+	return string(b[pos:])
 }
 
 // risksRetiredBilling composes scenario 1: fee-side per-(site, period)

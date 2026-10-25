@@ -841,6 +841,14 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 同键多批次共存的行（`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/period/批次数/行数/`totalCents` 整数分总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。整数分保证比对与求和顺序无关（#65 P1-a）。参数与 501 契约同 totals。
 
+## GET /api/fees/query/rows?feeType=&year=&month=&site=&limit= — 台账行查询（#5）
+
+分析层的原始行回读：`site/账期` 过滤 + `limit`（1–500），返回每行的核心身份（site/year/month/`amountCents` 整数分）与**可选台账列**（`meterNo`/`readingStart`/`readingEnd`/`meterPrevEnd`/`meterSwapped`/`quantity`/`unitPrice`/`shareMobile`/`shareUnicom`/`shareTelecom`/`shareTower`——缺列/空值为 null）与证据坐标（`sourceFile`/`sourceRow`/`importBatch`）。**v35 前的旧批次没有这些列，union_by_name 读取下按 null 返回**——新旧批次混读同表。#5 台账列消费扩展的查询面；501 契约同 totals。
+
+### 场景 9：ledger-consistency 台账内部一致性（#5/#8）
+
+`GET /api/fees/risks/{scenario}` 的第 9 个成员（参数同其它场景：feeType/year[/month]/limit）。四条**确定性**规则（非统计推断，阈值固定无参数）：`reading-gap`（读数差与填报用量之差 > 0.5 度——**一表多户已排除**：仅当无分摊列或某一方分摊为全量时才判读数差，#8 §0 撤回教训）/ `ratio-sum`（四方分摊比例之和与 1 偏差 > 0.005）/ `chain-break`（同电表跨账期 上月止数≠本月起数 且未标记换表——**已标记换表的合法断开不算线索**）/ `zero-quantity-billing`（用量=0 且金额>0——疑似漏抄后顺延计费）。每条线索带行级证据锚点与口径 note（不构成认定结论）；`excluded` = 一表多户未判读数差行数 + 已标记换表的断链行数；缺相应列的文件对应规则自动跳过。
+
 ## POST /api/fees/links/scan — 费用-资源分级关联扫描（#63，#58 阶段 3）
 
 对活跃 Parquet 编码全集跑三级匹配：**exact**（逐字节 → 自动确认）/ **rule**（fold / zero_pad 命名规则 → 自动确认 + 规则留痕）/ **fuzzy**（相似度 ≥ 0.8 → pending 提案，每编码至多 3 候选）。人类确认的链接**永不**被扫描覆写；数据面消失的编码其自动链接被清扫（人工决策除外）。返回计数信封 `{codes, exactLinks, ruleLinks, fuzzyProposed, unlinked, humanKept}`。幂等：重复扫描同判定、不重复提案。

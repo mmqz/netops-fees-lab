@@ -360,14 +360,15 @@ func cmdFeesEvidence(ctx context.Context, svc *fees.Service, args []string, stdo
 // cmdFeesQuery implements `fees query totals|duplicates --type --year [--month] [--limit]`.
 func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return &usageError{msg: "fees query 需要 totals 或 duplicates 子命令"}
+		return &usageError{msg: "fees query 需要 totals、duplicates 或 rows 子命令"}
 	}
 	preset, rest := args[0], args[1:]
 	fs, usage := newFlagSet("fees query " + preset)
 	feeType := fs.String("type", "", "费用类型，必填")
 	year := fs.Int("year", 0, "年份（必填）")
 	month := fs.Int("month", 0, "月份（可选：缺省整年）")
-	limit := fs.Int("limit", 20, "返回条数上限（默认 20；totals/duplicates 均生效）")
+	limit := fs.Int("limit", 20, "返回条数上限（默认 20；totals/duplicates/rows 均生效）")
+	site := fs.String("site", "", "rows 预设的站址过滤（可选；缺省全部）")
 	if err := fs.Parse(rest); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -394,6 +395,17 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 		}
 		return writeJSON(stdout, map[string]any{
 			"preset": "totals", "feeType": string(t), "year": *year, "month": *month,
+			"items": rows, "total": len(rows),
+		})
+	case "rows":
+		// #5: the optional ledger columns' query surface — the raw analysis
+		// rows with meter/reading/quantity/price/share values.
+		rows, err := engine.LedgerRows(ctx, analysis, t, *year, *month, *site, *limit)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"preset": "rows", "feeType": string(t), "year": *year, "month": *month,
 			"items": rows, "total": len(rows),
 		})
 	case "duplicates":

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -211,6 +212,13 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 		_, suggested := Recognize(sheet.Headers)
 		mapping = suggested
 	}
+	// #5: the optional ledger columns join the same mapping (explicit wins;
+	// the recognizer fills; nil rides). They resolve by header index next.
+	for field, header := range RecognizeLedgerFields(sheet.Headers) {
+		if mapping[field] == "" {
+			mapping[field] = header
+		}
+	}
 	if mapping["siteCode"] == "" || mapping["amount"] == "" {
 		return ImportSummary{}, refusef("缺少必需列映射（siteCode / amount）——请提供映射 JSON 或修正表头；识别到的表头：%v", sheet.Headers)
 	}
@@ -257,6 +265,12 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	amountIdx := headerIndex(sheet.Headers, mapping["amount"])
 	periodIdx := headerIndex(sheet.Headers, mapping["period"])
 	dateIdx := headerIndex(sheet.Headers, mapping["date"])
+	// #5: resolve the optional ledger indices once per file (absent = -1,
+	// the column never read).
+	ledgerIdx := make(map[string]int, len(LedgerFieldKeys()))
+	for _, field := range LedgerFieldKeys() {
+		ledgerIdx[field] = headerIndex(sheet.Headers, mapping[field])
+	}
 	if siteIdx < 0 || amountIdx < 0 {
 		errMsg := fmt.Sprintf("映射列不在表头中：siteCode=%q amount=%q（表头：%v）", mapping["siteCode"], mapping["amount"], sheet.Headers)
 		_ = s.db.FeeBatches.MarkFailed(ctx, batchID, len(rows), 0, errMsg)
@@ -273,7 +287,7 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	normalized := make([]NormalizedRow, 0, len(rows))
 	var importErrs []*ImportError
 	for _, row := range rows {
-		nr, ierr := s.normalizeRow(row, siteIdx, amountIdx, periodIdx, dateIdx, opts, sourceFile, batchID)
+		nr, ierr := s.normalizeRow(row, siteIdx, amountIdx, periodIdx, dateIdx, ledgerIdx, opts, sourceFile, batchID)
 		if ierr != nil {
 			importErrs = append(importErrs, ierr)
 			continue
@@ -716,7 +730,7 @@ func (s *Service) refuseModeConflict(ctx context.Context, sha, name string, mode
 // period column, when mapped and non-empty, MUST parse (a garbage period
 // is a row failure, not a silent fallback — the partition grain is the
 // whole point).
-func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dateIdx int, opts ImportOptions, sourceFile, batchID string) (NormalizedRow, *ImportError) {
+func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dateIdx int, ledgerIdx map[string]int, opts ImportOptions, sourceFile, batchID string) (NormalizedRow, *ImportError) {
 	code := NormalizeSiteCode(cellAt(row, siteIdx))
 	if code == "" {
 		return NormalizedRow{}, &ImportError{Row: row.Number, Field: "siteCode", Raw: cellAt(row, siteIdx), Reason: "站址编码为空"}
@@ -748,10 +762,90 @@ func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dat
 	if !validPeriod(year, month) {
 		return NormalizedRow{}, &ImportError{Row: row.Number, Field: "period", Raw: fmt.Sprintf("%04d-%02d", year, month), Reason: "账期越界"}
 	}
-	return NormalizedRow{
+	out := NormalizedRow{
 		SiteCode: code, AmountCents: amountCents, Year: year, Month: month,
 		SourceFile: sourceFile, SourceRow: row.Number, ImportBatch: batchID,
-	}, nil
+	}
+	// #5: the optional ledger columns parse LENIENTLY by default — absent
+	// or empty cell = nil, unparseable numeric = nil (the row's CORE
+	// identity and amount already passed the strict gate; a bad optional
+	// cell must not sink the row's money record). The strict mode of #8
+	// (--strict-rows) turns unparseable optionals into row errors.
+	if idx := ledgerIdx["meterNo"]; idx >= 0 {
+		if v := cellAt(row, idx); v != "" {
+			out.MeterNo = &v
+		}
+	}
+	for field, dst := range map[string]**float64{
+		"readingStart": &out.ReadingStart, "readingEnd": &out.ReadingEnd,
+		"meterPrevEnd": &out.MeterPrevEnd, "quantity": &out.Quantity,
+		"unitPrice": &out.UnitPrice, "shareMobile": &out.ShareMobile,
+		"shareUnicom": &out.ShareUnicom, "shareTelecom": &out.ShareTelecom,
+		"shareTower": &out.ShareTower,
+	} {
+		if idx := ledgerIdx[field]; idx >= 0 {
+			if v, ok := parseOptionalFloat(cellAt(row, idx)); ok {
+				*dst = &v
+			}
+		}
+	}
+	if idx := ledgerIdx["meterSwapped"]; idx >= 0 {
+		if v, ok := parseOptionalBool(cellAt(row, idx)); ok {
+			out.MeterSwapped = &v
+		}
+	}
+	return out, nil
+}
+
+// parseOptionalFloat is the lenient numeric parse of the optional ledger
+// columns: empty or unparseable = absent (nil). 括号负数与千分位逗号 follow
+// NormalizeAmount's tolerant forms via the same parse helper.
+func parseOptionalFloat(raw string) (float64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	s := strings.NewReplacer(",", "", "，", "", " ", "", "　", "").Replace(raw)
+	s = strings.NewReplacer("．", ".", "－", "-").Replace(s)
+	// accounting negative: a full paren wrap means minus
+	neg := false
+	if len(s) >= 3 {
+		if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+			neg, s = true, s[1:len(s)-1]
+		} else if strings.HasPrefix(s, "（") && strings.HasSuffix(s, "）") {
+			neg, s = true, s[len("（"):len(s)-len("）")]
+		}
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= '０' && r <= '９':
+			b.WriteRune(r - '０' + '0')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	v, err := strconv.ParseFloat(b.String(), 64)
+	if err != nil {
+		return 0, false
+	}
+	if neg {
+		v = -v
+	}
+	return v, true
+}
+
+// parseOptionalBool reads the 是否换表-style flag: 是/true/1/y = true,
+// 否/false/0/n = false, anything else = absent.
+func parseOptionalBool(raw string) (bool, bool) {
+	raw = strings.TrimSpace(raw)
+	switch raw {
+	case "是", "true", "TRUE", "True", "1", "Y", "y":
+		return true, true
+	case "否", "false", "FALSE", "False", "0", "N", "n", "":
+		return false, raw != ""
+	}
+	return false, false
 }
 
 // List returns the fee batches (newest first), optionally filtered by

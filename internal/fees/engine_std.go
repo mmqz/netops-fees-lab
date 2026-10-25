@@ -24,6 +24,14 @@ func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeTyp
 	return nil, ErrEngineNotBuilt
 }
 
+func (stdQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+	return nil, ErrEngineNotBuilt
+}
+
+func (stdQueryEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error) {
+	return nil, 0, ErrEngineNotBuilt
+}
+
 // ---- the risk-scenario presets + cross-layer primitives on the std stub:
 // every method answers the honest 501 contract (#64 acceptance: default
 // builds refuse, duckdb builds answer). ----

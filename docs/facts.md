@@ -12,14 +12,14 @@
 | --- | --- | --- |
 | `mcp-tools` | 4 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
 | `mcp-tools-readonly` | 4 | `internal/mcpserver.TestMCPReadOnlyToolCountMatchesFactsFile`：`--read-only` 变体握手 `tools/list` 实数（issue #10；不变式=full 面中 `readOnlyHint=true` 的子集，另由 `TestMCPReadOnlyRegistryIsReadOnlyHintSet` 钉死） |
-| `api-routes` | 40 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
-| `api-fees-routes` | 14 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
+| `api-routes` | 41 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `api-fees-routes` | 15 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
 | `repo-migrations` | 35 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |
 
 **MCP 工具清单（4 个，费用仓拆分后实况）**：`resource_search`（资源宇宙检索，AI 发现面）+ 费用域 3 个 `fee_risks` / `fee_totals` / `fee_duplicates`。全部只读：无 SQL/Shell/SSH/文件工具；风险线索裁定与关联确认留在人类/HTTP/CLI 侧。全部 4 工具带 MCP 2025-06 标准注解（`readOnlyHint=true` / `destructiveHint=false` / `idempotentHint=true` / `openWorldHint=false`，显式无默认值，issue #10）；`mcp --read-only` 变体只注册注解 `readOnlyHint=true` 的工具（当前即全部 4 个）。
 
-**费用域路由清单（`fees` tag 14 条）**：`POST /api/fees/imports`、`POST /api/fees/imports/sheets`（#125 多 sheet 台账整本导入）、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`、`GET /api/fees/batches/{id}/evidence`（#86）、`GET /api/fees/query/totals`、`GET /api/fees/query/duplicates`、`GET /api/fees/risks/{scenario}`、`POST /api/fees/risk-clue-decisions`（#119）、`GET /api/fees/risk-clue-decisions`（#119）、`POST /api/fees/links/scan`、`GET /api/fees/links`、`POST /api/fees/links/{id}/confirm`、`POST /api/fees/links/{id}/dismiss`。
+**费用域路由清单（`fees` tag 14 条）**：`POST /api/fees/imports`、`POST /api/fees/imports/sheets`（#125 多 sheet 台账整本导入）、`GET /api/fees/batches`、`POST /api/fees/batches/{id}/rollback`、`GET /api/fees/batches/{id}/evidence`（#86）、`GET /api/fees/query/totals`、`GET /api/fees/query/duplicates`、`GET /api/fees/query/rows`（#5 台账行查询）、`GET /api/fees/risks/{scenario}`、`POST /api/fees/risk-clue-decisions`（#119）、`GET /api/fees/risk-clue-decisions`（#119）、`POST /api/fees/links/scan`、`GET /api/fees/links`、`POST /api/fees/links/{id}/confirm`、`POST /api/fees/links/{id}/dismiss`。
 
 **迁移版本（v1–v34）**：v1–v3 核心表（migrations.go 字面量）起，逐版本单事务追加；当前头 v34（#125 fee_batches 加 sheet 坐标并重建幂等索引——`schema_migrations` 头由 repo 层迁移测试钉死）。
 
@@ -29,7 +29,7 @@
 
 - 资源类型**清单**（`domain.AllResourceTypes()` ↔ SQL CHECK ↔ `/api/schema` ↔ web 镜像四点一致性）——§1 只钉**数量**，清单本身派生；
 - CLI 顶层子命令清单（usage 从 dispatch 切片 join，go/ast 闭集测试）；
-- 校验规则目录（E/W/I 13 条）、风险八场景目录（#114 加 idle-billing、#118 加 missing-billing）、检测规则目录——各自有闭集断言；
+- 校验规则目录（E/W/I 13 条）、风险九场景目录（#114 加 idle-billing、#118 加 missing-billing、#5 加 ledger-consistency）、检测规则目录——各自有闭集断言；
 - OpenAPI 文档与路由表同源生成（`TestOpenAPISpecMatchesLiveServer` 反向行走）。
 
 ## 3. 测试计数（无静态断言——口径 + 当前值 + 更新纪律）

@@ -18,7 +18,7 @@
    指标台账 ────────►  指标时序（SQLite · 双账本交叉的另一半）          │
                     │      │                                       │
                     │      ▼                                       │
-                    │  8 个风险场景（线索 + 行级证据锚点 + 人工裁定）    │
+                    │  9 个风险场景（线索 + 行级证据锚点 + 人工裁定）    │
                     │      │                                       │
                     │  ┌── API（86 → 40 条费用面路由 · OpenAPI 同源）─┐│
                     │  ├── 嵌入式 React UI（/fees 费用工作台）        ││
@@ -34,12 +34,12 @@
 
 ## 1. 项目定位
 
-NetOps Fees Lab 是一个本地优先（local-first）的**站点费用风险分析系统**：把费用台账（电费 / 铁塔租费 / 修理费 / 综维费用，单 sheet 或多 sheet 整本）经**快照 + 幂等键**导入 DuckDB Parquet 分区表，把资源台账与指标台账导入 SQLite 构成关联宇宙；再以 **8 个风险场景**（退用仍在账 / 跨批次重复结算 / 台账金额差异 / 环比突增 / 离群站址 / 未关联 / 有费无量 / 有量无费）对账出**带行级证据锚点的风险线索**，经**分级关联**（精确/规则自动 + 模糊人工）挂到资源宇宙，最终由人（HTTP/CLI）或 AI（MCP 只读面）消费与裁定。
+NetOps Fees Lab 是一个本地优先（local-first）的**站点费用风险分析系统**：把费用台账（电费 / 铁塔租费 / 修理费 / 综维费用，单 sheet 或多 sheet 整本）经**快照 + 幂等键**导入 DuckDB Parquet 分区表，把资源台账与指标台账导入 SQLite 构成关联宇宙；再以 **9 个风险场景**（退用仍在账 / 跨批次重复结算 / 台账金额差异 / 环比突增 / 离群站址 / 未关联 / 有费无量 / 有量无费 / 台账内部一致性〔#5 四条确定性规则：读数差/分摊和/读数断链/零用量计费〕）对账出**带行级证据锚点的风险线索**，经**分级关联**（精确/规则自动 + 模糊人工）挂到资源宇宙，最终由人（HTTP/CLI）或 AI（MCP 只读面）消费与裁定。
 
 ## 2. 能力清单（fork 自 v0.16.1 的费用线全量）
 
 - **费用导入**：单 sheet（`fees import`）与多 sheet 台账整本（`fees import-sheets`，#125——每 sheet 按表名/表头自判类型、独立批次独立证据链）；快照内容寻址（#88），回滚删分析行、保快照证据（#107 单提交点）；uploads GC；.xls 旧格式诚实拒绝。
-- **8 个风险场景 + 三级证据**：线索 → 站址汇总/明细 → 快照行原文回读（`GET /api/fees/batches/{id}/evidence`，#86）；`z-score`/环比阈值全部显式参数化；空结果诚实空（#83）。
+- **9 个风险场景 + 三级证据**：线索 → 站址汇总/明细 → 快照行原文回读（`GET /api/fees/batches/{id}/evidence`，#86）；`z-score`/环比阈值全部显式参数化；空结果诚实空（#83）。
 - **人工裁定闭环**（#119）：verify 属实留档为「已知问题台账」/ dismiss 排除且**永不再现**（dismissed 计数入信封）；可复议翻转；MCP 无写面。
 - **分级关联**（#63/#58-S3）：`link-scan` 精确/规则自动确认 + 模糊出提案，人工 confirm/dismiss；关联列表含资源侧 join。
 - **双账本交叉**：指标摄入独立通道（`metrics ingest`）+ 资源宇宙导入；`idle-billing`（有费无量，#114）与 `missing-billing`（有量无费，#118）跨账本互证。
@@ -105,7 +105,7 @@ docs/                  契约与决策文档（api.md · fees-layer.md · facts.
 samples/               电信运营导出样例（授权范围见 samples/README.md）
 ```
 
-## 6. 风险场景目录（8 个，#64/#114/#118）
+## 6. 风险场景目录（9 个，#64/#114/#118/#5）
 
 | 场景 | code | 判定口径 |
 | --- | --- | --- |
@@ -117,10 +117,11 @@ samples/               电信运营导出样例（授权范围见 samples/README
 | 未关联费用 | `unlinked` | 站址编码未挂上资源宇宙 |
 | 有费无量 | `idle-billing` | 费用在账而指标点数为 0（指标摄入通道） |
 | 有量无费 | `missing-billing` | 指标有量而账期为空（指标摄入通道） |
+| 台账内部一致性 | `ledger-consistency` | 四条确定性规则（#5）：reading-gap 读数差≠填报用量（一表多户排除）/ ratio-sum 四方分摊和≠1 / chain-break 跨账期读数断链（换表已标记不计）/ zero-quantity-billing 零用量计费 |
 
 ## 7. CLI 与 MCP
 
-- **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets · list · rollback · evidence · query · link-scan · links · risks · clue-decisions · verify-sources〔issue #6：批次源文件 SHA256 核对——match/changed/missing，快照完整性一并核对〕）/ `templates` / `mcp` / `gc` / `backup` / `convert`（.xls→.xlsx/.csv 批量保真转换，issue #7） / `testdata`。
+- **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets · list · rollback · evidence · query〔totals/rows/duplicates〕 · link-scan · links · risks · clue-decisions · verify-sources〔issue #6：批次源文件 SHA256 核对——match/changed/missing，快照完整性一并核对〕）/ `templates` / `mcp` / `gc` / `backup` / `convert`（.xls→.xlsx/.csv 批量保真转换，issue #7） / `testdata`。
 - **MCP**（`netopsfees mcp`，stdio JSON-RPC，`--read-only` 可选）：`resource_search` / `fee_risks` / `fee_totals` / `fee_duplicates` —— 全部只读，全部携带 MCP 2025-06 标准注解（`readOnlyHint=true` 等四提示显式无默认值，issue #10）；`mcp --read-only` 只注册注解只读的工具（当前即全部 4 个）。闭集由 TestMCPToolRegistry + facts.md 门禁双向钉死。
 
 ## 8. 常见问题

@@ -104,12 +104,29 @@ type FeeMapping struct {
 	Columns map[string]string `json:"columns"`
 }
 
+// coreMappingKeys are the idempotency-relevant mapping keys: siteCode /
+// amount / period / date determine WHICH data a batch holds. The ledger
+// richness keys of issue #5 (meterNo / readingStart / … / shareTower)
+// ride the mapping for RESOLUTION but are deliberately OUT of the
+// canonical key: same file + same core mapping = same data = the same
+// idempotent import, regardless of which richness columns a build's
+// recognizer happened to know. Dropping a richness key from the canonical
+// string also means upgrading the recognizer NEVER retroactively unlocks
+// a re-import of an already-imported file (the double-count hazard of a
+// key that moves with the build).
+var coreMappingKeys = map[string]bool{
+	"siteCode": true, "amount": true, "period": true, "date": true,
+}
+
 // CanonicalMapping renders the mapping with stable key order (the
 // idempotency key's mapping component — a reordered JSON must not produce
 // a second identity).
 func (m FeeMapping) CanonicalMapping() string {
 	keys := make([]string, 0, len(m.Columns))
 	for k := range m.Columns {
+		if !coreMappingKeys[k] {
+			continue // richness keys ride the import, not the identity (#5)
+		}
 		keys = append(keys, k)
 	}
 	// insertion sort: tiny N, no extra import surface
@@ -148,6 +165,22 @@ type NormalizedRow struct {
 	SourceFile  string
 	SourceRow   int
 	ImportBatch string
+	// The optional ledger richness columns of issue #5 (台账列消费扩展):
+	// every field nil = the source file had no such column (or the cell was
+	// empty/unparseable — the lenient default; the strict mode of #8 turns
+	// unparseable optionals into row errors). A file without ANY of these
+	// produces byte-identical imports to the pre-#5 world (acceptance #2).
+	MeterNo      *string  // 电表编号（recordKey 级核查的锚，#4 的前置）
+	ReadingStart *float64 // 起始读数
+	ReadingEnd   *float64 // 截止读数
+	MeterPrevEnd *float64 // 旧表止数（换表衔接，#8 chain-break）
+	MeterSwapped *bool    // 是否换表（#8 chain-break 的显式区分）
+	Quantity     *float64 // 实际电量/用量
+	UnitPrice    *float64 // 单价
+	ShareMobile  *float64 // 移动分摊比例
+	ShareUnicom  *float64 // 联通分摊比例
+	ShareTelecom *float64 // 电信分摊比例
+	ShareTower   *float64 // 铁塔分摊比例
 }
 
 // ImportError is a row-level normalization failure (bad amount, unparseable

@@ -99,6 +99,8 @@ func (s *Server) apiRoutes() []route {
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/query/duplicates", Tag: "fees", Summary: "费用分析：跨批次重复结算候选（风险线索 + 证据锚点）", Handler: s.handleFeesQueryDuplicates,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
+		{Method: "GET", Pattern: "/api/fees/query/rows", Tag: "fees", Summary: "费用分析：台账行查询（#5——站址/账期过滤，含可选台账列 读数/用量/单价/四方分摊；旧批次缺列为 null）", Handler: s.handleFeesQueryRows,
+			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险八场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked/idle-billing/missing-billing；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "POST", Pattern: "/api/fees/risk-clue-decisions", Tag: "fees", Summary: "风险线索人工裁定（#119：verify 属实留档 / dismiss 排除永不再现；可复议翻转；人类通道，MCP 无此写面；审核=管理级）", Handler: s.handleFeesClueDecisionPost, Admin: true},

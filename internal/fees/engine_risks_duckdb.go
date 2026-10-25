@@ -48,7 +48,7 @@ WITH per AS (
          count(DISTINCT import_batch) AS batches,
          count(*) AS rows,
          sum(amount_cents) AS total_cents
-  FROM read_parquet('%s', hive_partitioning = true)
+  FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
   WHERE fee_type = '%s' %s
   GROUP BY site_code, year, month
 )`
@@ -96,6 +96,155 @@ ORDER BY total_cents DESC, site_code, year, month`,
 	return clues, 0, rows.Err()
 }
 
+// The deterministic tolerances of the ledger-consistency family (#5/#8)
+// — every value documented, none buried in SQL:
+const (
+	// ReadingGapTolerance: 读数差 vs 填报用量的容差（度）。台账读数为整数或
+	// 一位小数，0.5 容差吸收抄表进位；超出即线索。
+	ReadingGapTolerance = 0.5
+	// ShareSumEpsilon: 四方分摊比例之和与 1 的容差。千分位的四舍五入
+	// (0.333×3) 是真实业务形态，5‰ 吸收它。
+	ShareSumEpsilon = 0.005
+	// ExclusiveShareFloor: 分摊合计 >= 0.999 视为独表（本方 100%，
+	// #8 §0 的 reading-gap 前置）。
+	ExclusiveShareFloor = 0.999
+)
+
+// RiskLedgerConsistencyPreset implements scenario 9 (#5, refined by #8):
+// four deterministic in-ledger rules over the optional columns. Every
+// clue is row-level evidence; the Excluded return counts the rows a rule
+// intentionally did NOT judge: multi-party meters for reading-gap (the
+// 一表多户 shape of #8 §0 — 读数差 is the WHOLE meter's consumption while
+// 实际电量 is this party's share; comparing them is a false-positive
+// machine) and swap-flagged rows for chain-break (a marked meter change
+// is a legal break).
+func (duckQueryEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, 0, nil
+	}
+	db, err := openAnalysis()
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = db.Close() }()
+	if q.Limit <= 0 {
+		q.Limit = 100
+	}
+	base := `
+SELECT site_code, year, month, amount_cents, meter_no, reading_start, reading_end,
+       meter_prev_end, meter_swapped, quantity, unit_price,
+       share_mobile, share_unicom, share_telecom, share_tower,
+       (share_mobile IS NOT NULL OR share_unicom IS NOT NULL OR share_telecom IS NOT NULL OR share_tower IS NOT NULL) AS has_share,
+       COALESCE(share_mobile,0) + COALESCE(share_unicom,0) + COALESCE(share_telecom,0) + COALESCE(share_tower,0) AS share_sum,
+       -- exclusive_meter: the reading-gap precondition of #8 §0 —
+       -- judgeable ONLY when the party bears the FULL meter: no share
+       -- columns at all, or one single party's share is the whole. A
+       -- share_sum of 1 is NOT exclusivity (a 40/60 split also sums to
+       -- 1 — the trap the first SQL fell into).
+       (NOT (share_mobile IS NOT NULL OR share_unicom IS NOT NULL OR share_telecom IS NOT NULL OR share_tower IS NOT NULL)
+        OR greatest(COALESCE(share_mobile,0), COALESCE(share_unicom,0), COALESCE(share_telecom,0), COALESCE(share_tower,0)) >= %f) AS exclusive_meter,
+       source_file, source_row, import_batch
+FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
+WHERE fee_type = '%s' %s
+`
+	// NOTE: the UNION ALL shape keeps every rule's WHERE explicit below —
+	// one query, one round trip, the limit applied to the merged set.
+	query := fmt.Sprintf(`
+WITH ledger AS (%s),
+rule_rows AS (SELECT * FROM ledger),
+gap AS (
+  SELECT site_code, year, month, amount_cents, source_file, source_row, import_batch,
+         abs((reading_end - reading_start) - quantity) AS metric,
+         '读数差与用量之差（度）' AS label,
+         '读数差=' || (reading_end - reading_start) || '，填报用量=' || quantity AS detail
+  FROM rule_rows
+  WHERE reading_start IS NOT NULL AND reading_end IS NOT NULL AND quantity IS NOT NULL
+    AND exclusive_meter
+    AND abs((reading_end - reading_start) - quantity) > %f
+),
+sums AS (
+  SELECT site_code, year, month, amount_cents, source_file, source_row, import_batch,
+         abs(share_sum - 1) AS metric,
+         '四方分摊比例之和与 1 的偏差' AS label,
+         '分摊合计=' || share_sum AS detail
+  FROM rule_rows
+  WHERE has_share AND abs(share_sum - 1) > %f
+),
+chain AS (
+  SELECT site_code, year, month, amount_cents, source_file, source_row, import_batch,
+         abs(reading_start - prev_end) AS metric,
+         '跨账期读数断差（上月止数≠本月起数，度）' AS label,
+         '上月止数=' || prev_end || '，本月起数=' || reading_start AS detail
+  FROM (
+    SELECT *, LAG(reading_end) OVER (PARTITION BY meter_no ORDER BY year, month) AS prev_end
+    FROM rule_rows
+    WHERE meter_no IS NOT NULL AND reading_start IS NOT NULL
+  ) t
+  WHERE prev_end IS NOT NULL
+    AND reading_start IS NOT NULL AND reading_start <> prev_end
+    AND NOT COALESCE(meter_swapped, false)
+),
+zero AS (
+  SELECT site_code, year, month, amount_cents, source_file, source_row, import_batch,
+         amount_cents / 100.0 AS metric,
+         '零用量计费金额（元）' AS label,
+         '用量=0 但应付金额>0——疑似上期漏抄表后用量顺延到本期计费' AS detail
+  FROM rule_rows
+  WHERE quantity IS NOT NULL AND quantity = 0 AND amount_cents > 0
+)
+SELECT 'reading-gap' AS rule, site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM gap
+UNION ALL
+SELECT 'ratio-sum', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM sums
+UNION ALL
+SELECT 'chain-break', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM chain
+UNION ALL
+SELECT 'zero-quantity-billing', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM zero
+ORDER BY year, month, site_code, rule
+LIMIT %d`,
+		fmt.Sprintf(base, ExclusiveShareFloor, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, q.Month)),
+		ReadingGapTolerance, ShareSumEpsilon, q.Limit)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fees: 风险场景 ledger-consistency 查询: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var clues []LedgerConsistencyClue
+	for rows.Next() {
+		var c LedgerConsistencyClue
+		if err := rows.Scan(&c.Rule, &c.SiteCode, &c.Year, &c.Month, &c.MetricValue,
+			&c.MetricLabel, &c.Detail, &c.SourceFile, &c.SourceRow, &c.ImportBatch); err != nil {
+			return nil, 0, fmt.Errorf("fees: 读取台账一致性线索: %w", err)
+		}
+		clues = append(clues, c)
+	}
+	// The intentionally-unjudged counts: multi-party rows (reading-gap's
+	// honest exclusion — the 一表多户 shape of #8 §0) and swap-flagged
+	// chain rows (a MARKED meter change is a legal break, never a clue).
+	var excluded int
+	if len(clues) > 0 || true {
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`
+WITH ledger AS (%s),
+chains AS (
+  SELECT reading_start, prev_end, meter_swapped FROM (
+    SELECT *, LAG(reading_end) OVER (PARTITION BY meter_no ORDER BY year, month) AS prev_end
+    FROM ledger
+    WHERE meter_no IS NOT NULL AND reading_start IS NOT NULL
+  ) t
+)
+SELECT
+  (SELECT count(*) FROM ledger
+     WHERE reading_start IS NOT NULL AND reading_end IS NOT NULL AND quantity IS NOT NULL
+       AND NOT exclusive_meter)
++ (SELECT count(*) FROM chains
+     WHERE prev_end IS NOT NULL AND reading_start IS NOT NULL AND reading_start <> prev_end
+       AND COALESCE(meter_swapped, false))`,
+			fmt.Sprintf(base, ExclusiveShareFloor, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, q.Month)))).Scan(&excluded); err != nil {
+			return nil, 0, fmt.Errorf("fees: 台账一致性排除数: %w", err)
+		}
+	}
+	return clues, excluded, rows.Err()
+}
+
 // RiskLedgerMismatchPreset implements scenario 3: (site, period) pairs
 // whose PER-BATCH totals disagree by more than DiffCents (default 0 =
 // any delta). The batch-level aggregation first, then min/max across
@@ -112,7 +261,7 @@ func (duckQueryEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir
 	query := fmt.Sprintf(`
 WITH batched AS (
   SELECT site_code, year, month, import_batch, sum(amount_cents) AS batch_total, count(*) AS rows
-  FROM read_parquet('%s', hive_partitioning = true)
+  FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
   WHERE fee_type = '%s' %s
   GROUP BY site_code, year, month, import_batch
 ),
@@ -354,7 +503,7 @@ func (duckQueryEngine) SitePeriodTotals(ctx context.Context, analysisDir string,
 	defer func() { _ = db.Close() }()
 	query := fmt.Sprintf(`
 SELECT site_code, year, month, count(*) AS rows, sum(amount_cents) AS total_cents
-FROM read_parquet('%s', hive_partitioning = true)
+FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
 WHERE fee_type = '%s' %s
 GROUP BY site_code, year, month
 ORDER BY total_cents DESC, site_code, year, month`,
@@ -392,7 +541,7 @@ func (duckQueryEngine) SiteTotalsAll(ctx context.Context, analysisDir string, fe
 	defer func() { _ = db.Close() }()
 	query := fmt.Sprintf(`
 SELECT site_code, count(*) AS rows, sum(amount_cents) AS total_cents
-FROM read_parquet('%s', hive_partitioning = true)
+FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
 WHERE fee_type = '%s' %s
 GROUP BY site_code
 ORDER BY total_cents DESC, site_code`,
@@ -466,7 +615,7 @@ func (duckQueryEngine) EvidenceFor(ctx context.Context, analysisDir string, feeT
 		b.WriteString(`), matched AS (
   SELECT k.k AS kid, p.source_file, p.source_row, p.import_batch, p.amount_cents,
          k.site, k.yr, k.mo
-  FROM read_parquet('` + feeTableGlob(analysisDir) + `', hive_partitioning = true) p
+  FROM read_parquet('` + feeTableGlob(analysisDir) + `', hive_partitioning = true, union_by_name = true) p
   JOIN keys k ON p.site_code = k.site AND p.year = k.yr AND (k.mo = 0 OR p.month = k.mo)
   WHERE fee_type = '` + string(feeType) + `'
 ), ranked AS (

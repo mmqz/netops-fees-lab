@@ -438,6 +438,12 @@ func (s *Server) handleFeesQueryTotals(w http.ResponseWriter, r *http.Request) {
 	s.feesQuery(w, r, "totals")
 }
 
+// handleFeesQueryRows answers GET /api/fees/query/rows (#5): the raw
+// analysis rows with the optional ledger columns.
+func (s *Server) handleFeesQueryRows(w http.ResponseWriter, r *http.Request) {
+	s.feesQuery(w, r, "rows")
+}
+
 // handleFeesQueryDuplicates implements GET /api/fees/query/duplicates?
 // feeType=&year=&month= — the cross-batch duplicate-settlement preset
 // (risk leads with evidence anchors, never payment-duplicate verdicts).
@@ -500,6 +506,19 @@ func (s *Server) feesQuery(w http.ResponseWriter, r *http.Request, preset string
 		respondJSON(w, http.StatusOK, feesDuplicatesResult{
 			Preset: "duplicates", FeeType: string(feeType), Year: year, Month: month, Items: rows, Total: len(rows),
 		})
+	case "rows":
+		// #5: the optional ledger columns' query surface — site filter
+		// optional, the same period/limit discipline as the siblings.
+		site := strings.TrimSpace(q.Get("site"))
+		rows, err := engine.LedgerRows(r.Context(), analysis, feeType, year, month, site, limit)
+		if err != nil {
+			s.respondErrorFor(w, r, err, "")
+			return
+		}
+		respondJSON(w, http.StatusOK, feesRowsResult{
+			Preset: "rows", FeeType: string(feeType), Year: year, Month: month, Site: site,
+			Items: rows, Total: len(rows),
+		})
 	}
 }
 
@@ -534,6 +553,16 @@ type feesTotalsResult struct {
 	Year    int              `json:"year"`
 	Month   int              `json:"month"`
 	Items   []fees.TotalsRow `json:"items"`
+	Total   int              `json:"total"`
+}
+
+type feesRowsResult struct {
+	Preset  string           `json:"preset"`
+	FeeType string           `json:"feeType"`
+	Year    int              `json:"year"`
+	Month   int              `json:"month"`
+	Site    string           `json:"site"`
+	Items   []fees.LedgerRow `json:"items"`
 	Total   int              `json:"total"`
 }
 

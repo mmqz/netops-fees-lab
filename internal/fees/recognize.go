@@ -498,6 +498,77 @@ func headerMatchKey(s string) string {
 	return b.String()
 }
 
+// ledgerFieldSynonyms maps the OPTIONAL ledger richness columns of issue
+// #5 to their header synonyms (trimmed/normalized keys — the same
+// headerMatchKey discipline as coreFieldSynonyms; contains-match fallback
+// catches the unit-suffixed variants like 上期读数(度)). Every field is
+// optional: no hit = the column stays nil and the import is byte-identical
+// to the pre-#5 behavior (acceptance #2).
+var ledgerFieldSynonyms = map[string][]string{
+	"meterNo":      {"电表编号", "表号", "电表号"},
+	"readingStart": {"起始读数", "上期读数", "起始示数", "上期示数"},
+	"readingEnd":   {"截止读数", "本期读数", "截止示数", "本期示数", "终止读数", "止数"},
+	"meterPrevEnd": {"旧表止数", "旧表读数"},
+	"meterSwapped": {"是否换表", "换表标记"},
+	"quantity":     {"实际电量", "用电量", "电量"},
+	"unitPrice":    {"单价", "电价"},
+	"shareMobile":  {"移动分摊比例", "移动分摊"},
+	"shareUnicom":  {"联通分摊比例", "联通分摊"},
+	"shareTelecom": {"电信分摊比例", "电信分摊"},
+	"shareTower":   {"铁塔分摊比例", "铁塔分摊"},
+}
+
+// LedgerFieldKeys lists the optional ledger field keys (canonical order).
+func LedgerFieldKeys() []string {
+	return []string{
+		"meterNo", "readingStart", "readingEnd", "meterPrevEnd", "meterSwapped",
+		"quantity", "unitPrice",
+		"shareMobile", "shareUnicom", "shareTelecom", "shareTower",
+	}
+}
+
+// RecognizeLedgerFields resolves the optional ledger columns from the
+// headers (same match discipline as the core walk: exact key match first,
+// contains fallback for unit-suffixed variants). Returns target->header
+// with only the hits — a key absent from the map means the file carries
+// no such column.
+func RecognizeLedgerFields(headers []string) map[string]string {
+	keys := make([]string, len(headers))
+	for i, h := range headers {
+		keys[i] = headerMatchKey(h)
+	}
+	cols := make(map[string]string)
+	for field, syns := range ledgerFieldSynonyms {
+		for _, syn := range syns {
+			k := headerMatchKey(syn)
+			for i, h := range headers {
+				if keys[i] == k {
+					cols[field] = h
+					break
+				}
+			}
+			if cols[field] != "" {
+				break
+			}
+		}
+		if cols[field] == "" {
+			for _, syn := range syns {
+				k := headerMatchKey(syn)
+				for i, h := range headers {
+					if strings.Contains(keys[i], k) {
+						cols[field] = h
+						break
+					}
+				}
+				if cols[field] != "" {
+					break
+				}
+			}
+		}
+	}
+	return cols
+}
+
 // Recognize inspects the headers and returns (suggested fee type, "" when
 // no marker hits; suggested core column mapping target→source header, ""
 // for fields without a hit). Pure scoring on trimmed headers — no

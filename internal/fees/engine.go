@@ -38,6 +38,46 @@ type TotalsRow struct {
 // evidence anchors (batch ids + row numbers). TotalCents: integer-cents
 // contract (#65 P1-a) — a duplicate comparison must never depend on the
 // summation order.
+// LedgerRow is one analysis row as the rows-query answers it (#5): the
+// core identity + amount, plus the optional ledger columns (nil-absent
+// JSON via the pointers) and the evidence coordinates.
+type LedgerRow struct {
+	SiteCode     string   `json:"siteCode"`
+	Year         int      `json:"year"`
+	Month        int      `json:"month"`
+	AmountCents  int64    `json:"amountCents"`
+	MeterNo      *string  `json:"meterNo,omitempty"`
+	ReadingStart *float64 `json:"readingStart,omitempty"`
+	ReadingEnd   *float64 `json:"readingEnd,omitempty"`
+	MeterPrevEnd *float64 `json:"meterPrevEnd,omitempty"`
+	MeterSwapped *bool    `json:"meterSwapped,omitempty"`
+	Quantity     *float64 `json:"quantity,omitempty"`
+	UnitPrice    *float64 `json:"unitPrice,omitempty"`
+	ShareMobile  *float64 `json:"shareMobile,omitempty"`
+	ShareUnicom  *float64 `json:"shareUnicom,omitempty"`
+	ShareTelecom *float64 `json:"shareTelecom,omitempty"`
+	ShareTower   *float64 `json:"shareTower,omitempty"`
+	SourceFile   string   `json:"sourceFile"`
+	SourceRow    int      `json:"sourceRow"`
+	ImportBatch  string   `json:"importBatch"`
+}
+
+// LedgerConsistencyClue is one ledger-internal-consistency finding (#5's
+// family, scenario 9): the Rule names which of the deterministic rules
+// fired; every field is row-level evidence, no verdicts.
+type LedgerConsistencyClue struct {
+	SiteCode    string  `json:"siteCode"`
+	Year        int     `json:"year"`
+	Month       int     `json:"month"`
+	Rule        string  `json:"rule"`
+	MetricValue float64 `json:"metricValue"`
+	MetricLabel string  `json:"metricLabel"`
+	Detail      string  `json:"detail,omitempty"`
+	SourceFile  string  `json:"sourceFile"`
+	SourceRow   int     `json:"sourceRow"`
+	ImportBatch string  `json:"importBatch"`
+}
+
 type DuplicateRow struct {
 	SiteCode   string `json:"siteCode"`
 	Year       int    `json:"year"`
@@ -79,6 +119,17 @@ type QueryEngine interface {
 	// of one fee type (month 0 = the whole year): every (site, period)
 	// whose rows span more than one import batch.
 	Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error)
+	// LedgerRows returns the raw analysis rows of one fee type in the
+	// scope (month 0 = the whole year), site filter optional ("" = all),
+	// capped at limit (<= 0 -> 100) — the #5 query surface for the optional
+	// ledger columns.
+	LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error)
+	// RiskLedgerConsistencyPreset (scenario 9, #5): the deterministic
+	// in-ledger consistency rules over the optional columns — reading-gap
+	// (multi-party meters excluded per #8 S0), ratio-sum, chain-break
+	// (swap-flagged rows excluded, #8), zero-quantity-billing. BARE clues;
+	// the service attaches evidence anchors and the shared note.
+	RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error)
 
 	// ---- the risk scenarios' engine presets (#64, #58 stage 4; the
 	// cross-layer scenarios 1/6/7 compose these primitives in Go) ----

@@ -57,6 +57,21 @@ type feeParquetRow struct {
 	SourceFile  string `parquet:"source_file"`
 	SourceRow   int32  `parquet:"source_row"`
 	ImportBatch string `parquet:"import_batch"`
+	// The optional ledger columns of issue #5: pointer fields = OPTIONAL
+	// parquet columns, absent in pre-#5 files. Reads must use
+	// union_by_name=true so mixed-generation batches coexist in one
+	// partition (missing columns read as NULL — see the engine).
+	MeterNo      *string  `parquet:"meter_no,optional"`
+	ReadingStart *float64 `parquet:"reading_start,optional"`
+	ReadingEnd   *float64 `parquet:"reading_end,optional"`
+	MeterPrevEnd *float64 `parquet:"meter_prev_end,optional"`
+	MeterSwapped *bool    `parquet:"meter_swapped,optional"`
+	Quantity     *float64 `parquet:"quantity,optional"`
+	UnitPrice    *float64 `parquet:"unit_price,optional"`
+	ShareMobile  *float64 `parquet:"share_mobile,optional"`
+	ShareUnicom  *float64 `parquet:"share_unicom,optional"`
+	ShareTelecom *float64 `parquet:"share_telecom,optional"`
+	ShareTower   *float64 `parquet:"share_tower,optional"`
 }
 
 // partitionFile is the per-partition manifest entry: the live (relative)
@@ -83,11 +98,22 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 	for _, r := range rows {
 		key := [2]int{r.Year, r.Month}
 		byPeriod[key] = append(byPeriod[key], feeParquetRow{
-			SiteCode:    r.SiteCode,
-			AmountCents: r.AmountCents,
-			SourceFile:  r.SourceFile,
-			SourceRow:   int32(r.SourceRow),
-			ImportBatch: r.ImportBatch,
+			SiteCode:     r.SiteCode,
+			AmountCents:  r.AmountCents,
+			SourceFile:   r.SourceFile,
+			SourceRow:    int32(r.SourceRow),
+			ImportBatch:  r.ImportBatch,
+			MeterNo:      r.MeterNo,
+			ReadingStart: r.ReadingStart,
+			ReadingEnd:   r.ReadingEnd,
+			MeterPrevEnd: r.MeterPrevEnd,
+			MeterSwapped: r.MeterSwapped,
+			Quantity:     r.Quantity,
+			UnitPrice:    r.UnitPrice,
+			ShareMobile:  r.ShareMobile,
+			ShareUnicom:  r.ShareUnicom,
+			ShareTelecom: r.ShareTelecom,
+			ShareTower:   r.ShareTower,
 		})
 	}
 	keys := make([][2]int, 0, len(byPeriod))
