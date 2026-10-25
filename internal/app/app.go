@@ -49,6 +49,9 @@ type Config struct {
 	// analysis surface); the gate is where audit identity belongs.
 	// Empty = off.
 	AuthToken string
+	// AdminToken is the admin tier of issue #9: wired into the API server
+	// alongside AuthToken (see internal/api/auth.go for the matrix).
+	AdminToken string
 }
 
 // defaults fills empty fields with the documented defaults.
@@ -142,6 +145,7 @@ func New(cfg Config) (*App, error) {
 	// is ever called (the middleware reads it per request, so tests can
 	// also flip it on an existing server).
 	a.API.AuthToken = cfg.AuthToken
+	a.API.AdminToken = cfg.AdminToken
 	return a, nil
 }
 

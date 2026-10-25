@@ -75,7 +75,9 @@ make build-duckdb    # bin/netopsfees-duckdb
      risks spike --type electricity --year 2024
 
 # 6) 启动服务并打开界面
-./bin/netopsfees serve --addr :8080 --db ./data/netops.db --data ./data
+./bin/netopsfees serve --db ./data/netops.db   # 默认 127.0.0.1:8080（仅回环）；
+#                                   多人/对外部署：--auth-token 申报级 + --admin-token 管理级
+#                                   （issue #9 两级写门禁：申报级可导入不可删除/回滚/审核）
 #    浏览器打开 http://localhost:8080（费用工作台入口：/fees）
 #    可选写保护：--auth-token <T>（所有 POST/PATCH/DELETE 需 Bearer）
 ```

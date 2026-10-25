@@ -36,6 +36,14 @@ type route struct {
 	// deviations like 501 engine_not_built (default builds without the
 	// DuckDB tag), 422 semantic file errors, 409 conflicts.
 	ExtraStatuses map[int]string
+
+	// Admin marks the two-tier privilege class of issue #9 (v0.18):
+	// destructive rollbacks/deletes and the human-channel audit
+	// confirmations. With both --auth-token and --admin-token
+	// configured these routes accept ONLY the admin token (the
+	// declarer tier gets 403); the OpenAPI 403 note derives from
+	// this same flag — zero hand-copying.
+	Admin bool
 }
 
 // apiRoutes returns the full route table in registration order. Order
@@ -53,11 +61,11 @@ func (s *Server) apiRoutes() []route {
 		{Method: "POST", Pattern: "/api/imports/{id}/mapping", Tag: "imports", Summary: "确认批次映射并执行导入（含自动校验）", Handler: s.handleImportMapping, SuccessStatus: http.StatusAccepted},
 		{Method: "POST", Pattern: "/api/imports/{id}/template", Tag: "imports", Summary: "捕获已完成批次的确认映射为模板", Handler: s.handleImportTemplateCapture, SuccessStatus: http.StatusCreated},
 		{Method: "GET", Pattern: "/api/mapping-templates", Tag: "imports", Summary: "映射模板列表（无人值守导入的模板目录）", Handler: s.handleMappingTemplatesList},
-		{Method: "DELETE", Pattern: "/api/mapping-templates/{id}", Tag: "imports", Summary: "删除映射模板", Handler: s.handleMappingTemplateDelete},
+		{Method: "DELETE", Pattern: "/api/mapping-templates/{id}", Tag: "imports", Summary: "删除映射模板（管理级）", Handler: s.handleMappingTemplateDelete, Admin: true},
 		{Method: "GET", Pattern: "/api/batches", Tag: "imports", Summary: "导入批次分页列表", Handler: s.handleBatchesList},
 		{Method: "GET", Pattern: "/api/batches/{id}", Tag: "imports", Summary: "批次详情（统计与状态）", Handler: s.handleBatchDetail},
 		{Method: "GET", Pattern: "/api/batches/{id}/rows", Tag: "imports", Summary: "批次行级数据分页（含问题行定位）", Handler: s.handleBatchRows},
-		{Method: "DELETE", Pattern: "/api/batches/{id}", Tag: "imports", Summary: "删除批次及其导入数据（回滚）", Handler: s.handleBatchDelete,
+		{Method: "DELETE", Pattern: "/api/batches/{id}", Tag: "imports", Summary: "删除批次及其导入数据（回滚，管理级）", Handler: s.handleBatchDelete, Admin: true,
 			ExtraStatuses: map[int]string{http.StatusConflict: "批次被工作台引用（batch_in_use）"}},
 
 		{Method: "GET", Pattern: "/api/resources", Tag: "resources", Summary: "资源分页列表（类型/状态/关键字过滤）", Handler: s.handleResourcesList},
@@ -72,7 +80,7 @@ func (s *Server) apiRoutes() []route {
 			SuccessStatus: http.StatusAccepted,
 			ExtraStatuses: map[int]string{http.StatusUnprocessableEntity: "文件语义错误（not_xlsx）"}},
 		{Method: "GET", Pattern: "/api/metrics/batches", Tag: "metrics", Summary: "指标摄入批次列表", Handler: s.handleMetricBatchesList},
-		{Method: "POST", Pattern: "/api/metrics/batches/{id}/rollback", Tag: "metrics", Summary: "回滚指标摄入批次", Handler: s.handleMetricBatchRollback},
+		{Method: "POST", Pattern: "/api/metrics/batches/{id}/rollback", Tag: "metrics", Summary: "回滚指标摄入批次（管理级）", Handler: s.handleMetricBatchRollback, Admin: true},
 
 		{Method: "GET", Pattern: "/api/stats", Tag: "governance", Summary: "资源/问题统计计数", Handler: s.handleStats},
 		{Method: "GET", Pattern: "/api/issues", Tag: "governance", Summary: "数据质量问题分页列表（类型过滤）", Handler: s.handleIssues},
@@ -85,7 +93,7 @@ func (s *Server) apiRoutes() []route {
 			SuccessStatus: http.StatusCreated,
 			ExtraStatuses: map[int]string{http.StatusUnprocessableEntity: "拒收（CSV 无表名/sheet 不可判定/列映射失败/与单 sheet 模式冲突）"}},
 		{Method: "GET", Pattern: "/api/fees/batches", Tag: "fees", Summary: "费用导入批次列表（status 过滤，最新在前）", Handler: s.handleFeesBatchesList},
-		{Method: "POST", Pattern: "/api/fees/batches/{id}/rollback", Tag: "fees", Summary: "回滚费用批次（删分析行、保快照证据）", Handler: s.handleFeesRollback},
+		{Method: "POST", Pattern: "/api/fees/batches/{id}/rollback", Tag: "fees", Summary: "回滚费用批次（删分析行、保快照证据；管理级）", Handler: s.handleFeesRollback, Admin: true},
 		{Method: "GET", Pattern: "/api/fees/batches/{id}/evidence", Tag: "fees", Summary: "费用证据回读：快照第 N 行原文（row=源文件自身编号，表头=1；source_row 锚点的第三级证据，回滚批次仍可读）", Handler: s.handleFeesEvidence},
 		{Method: "GET", Pattern: "/api/fees/query/totals", Tag: "fees", Summary: "费用分析：站址汇总（feeType/year[/month]，DuckDB 引擎需 duckdb 构建）", Handler: s.handleFeesQueryTotals,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
@@ -93,11 +101,11 @@ func (s *Server) apiRoutes() []route {
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险八场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked/idle-billing/missing-billing；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
-		{Method: "POST", Pattern: "/api/fees/risk-clue-decisions", Tag: "fees", Summary: "风险线索人工裁定（#119：verify 属实留档 / dismiss 排除永不再现；可复议翻转；人类通道，MCP 无此写面）", Handler: s.handleFeesClueDecisionPost},
+		{Method: "POST", Pattern: "/api/fees/risk-clue-decisions", Tag: "fees", Summary: "风险线索人工裁定（#119：verify 属实留档 / dismiss 排除永不再现；可复议翻转；人类通道，MCP 无此写面；审核=管理级）", Handler: s.handleFeesClueDecisionPost, Admin: true},
 		{Method: "GET", Pattern: "/api/fees/risk-clue-decisions", Tag: "fees", Summary: "风险线索裁定台账（scenario/feeType/status/siteCode/year 过滤，最新优先）", Handler: s.handleFeesClueDecisionsList},
 		{Method: "POST", Pattern: "/api/fees/links/scan", Tag: "fees", Summary: "费用-资源分级关联扫描（精确→规则自动确认，模糊出提案；人类通道确认）", Handler: s.handleFeesLinksScan},
 		{Method: "GET", Pattern: "/api/fees/links", Tag: "fees", Summary: "费用-资源关联列表（status/grade/code/resource_id 过滤，含资源侧 join）", Handler: s.handleFeesLinksList},
-		{Method: "POST", Pattern: "/api/fees/links/{id}/confirm", Tag: "fees", Summary: "人工确认模糊关联提案（pending→confirmed；人类决策优先于自动扫描）", Handler: s.handleFeesLinkConfirm},
-		{Method: "POST", Pattern: "/api/fees/links/{id}/dismiss", Tag: "fees", Summary: "驳回模糊关联提案（审计保留，编码留给新候选）", Handler: s.handleFeesLinkDismiss},
+		{Method: "POST", Pattern: "/api/fees/links/{id}/confirm", Tag: "fees", Summary: "人工确认模糊关联提案（pending→confirmed；人类决策优先于自动扫描；审核=管理级）", Handler: s.handleFeesLinkConfirm, Admin: true},
+		{Method: "POST", Pattern: "/api/fees/links/{id}/dismiss", Tag: "fees", Summary: "驳回模糊关联提案（审计保留，编码留给新候选；审核=管理级）", Handler: s.handleFeesLinkDismiss, Admin: true},
 	}
 }

@@ -107,6 +107,11 @@ func routeResponses(r route) map[string]openAPIResponse {
 	if r.Method != http.MethodGet {
 		out["401"] = openAPIResponse{Description: "写门禁启用时（serve --auth-token）：缺少/错误 Bearer 令牌（unauthorized）"}
 	}
+	// v0.18/issue #9: the two-tier model documents its 403 on exactly the
+	// Admin-flagged routes — same table flag the enforcement wrapper uses.
+	if r.Admin {
+		out["403"] = openAPIResponse{Description: "两级门禁启用时（同时配置 --auth-token 与 --admin-token）：申报级令牌访问管理级路由（删除/回滚/审核）被拒（forbidden）"}
+	}
 	for status, desc := range r.ExtraStatuses {
 		out[strconv.Itoa(status)] = openAPIResponse{Description: desc}
 	}

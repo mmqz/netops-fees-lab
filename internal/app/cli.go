@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -223,13 +224,16 @@ func openAppData(dbPath, dataDir string) (*App, error) {
 	return a, nil
 }
 
-// cmdServe implements `netopsfees serve --addr --db --data-dir [--auth-token T]`.
+// cmdServe implements `netopsfees serve --addr --db --data-dir
+// [--auth-token T] [--admin-token A]` (issue #9: two tiers + default-safe
+// bind — the naked external bind that used to be the default is refused).
 func cmdServe(args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("serve")
-	addr := fs.String("addr", ":8080", "HTTP 监听地址")
+	addr := fs.String("addr", "127.0.0.1:8080", "HTTP 监听地址（默认仅回环；非回环绑定必须配置写令牌，见 --auth-token/--admin-token）")
 	db := fs.String("db", "./data/netops.db", "SQLite 数据库路径")
 	dataDir := fs.String("data-dir", "./data", "上传文件存储目录")
-	authToken := fs.String("auth-token", "", "写操作访问令牌（非空则所有 POST/PATCH/DELETE /api 请求需携带 Authorization: Bearer <token>；只读请求与健康检查不受影响；空 = 不启用）")
+	authToken := fs.String("auth-token", "", "申报级写令牌：非空则所有 POST/PATCH/DELETE /api 请求需携带 Authorization: Bearer <token>；只读请求与健康检查不受影响；空 = 不启用")
+	adminToken := fs.String("admin-token", "", "管理级写令牌（issue #9）：配置后删除/回滚/审核类管理级路由仅接受本令牌（申报级令牌得 403）；单独配置时本令牌是唯一写令牌；与 --auth-token 相同会被拒绝启动")
 	if err := fs.Parse(args); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -237,7 +241,10 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		return &usageError{msg: "serve 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
 	}
 
-	cfg := Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, AuthToken: *authToken}
+	if err := validateServeGuards(*addr, *authToken, *adminToken); err != nil {
+		return err
+	}
+	cfg := Config{Addr: *addr, DBPath: *db, DataDir: *dataDir, AuthToken: *authToken, AdminToken: *adminToken}
 	a, err := New(cfg)
 	if err != nil {
 		return err
@@ -278,6 +285,45 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	// reaches this call site (it owns no serve loop).
 	a.gcSweep(ctx)
 	return a.Run(ctx)
+}
+
+// validateServeGuards enforces the two v0.18/issue #9 startup refusals:
+// (1) the two tokens must differ (a declarer tier that secretly holds
+// admin rights is a broken model, refuse it loudly);
+// (2) a non-loopback bind without ANY write token is the naked-network
+// default the issue kills — the operator must either configure a token or
+// bind loopback explicitly. Both answer *usageError (exit 2).
+func validateServeGuards(addr, authToken, adminToken string) error {
+	if authToken != "" && adminToken != "" && authToken == adminToken {
+		return &usageError{msg: "--admin-token 与 --auth-token 不能相同：两级模型中申报级令牌将持有管理级权限，模型失效；请设置两个不同的令牌"}
+	}
+	if !loopbackOnly(addr) && authToken == "" && adminToken == "" {
+		return &usageError{msg: fmt.Sprintf("拒绝启动：--addr %s 绑定到非回环地址（对外可达）但未配置任何写令牌（--auth-token / --admin-token），删除/回滚等写操作将裸奔；要么配置令牌，要么显式绑定回环地址（如 127.0.0.1:8080）", addr)}
+	}
+	return nil
+}
+
+// loopbackOnly reports whether the listen address binds a loopback
+// interface ONLY (issue #9's default-safety predicate). The host part of
+// addr is examined statically: an empty host (":8080" / "0.0.0.0:8080" /
+// "[::]:8080") binds every interface — NOT loopback-only; a literal
+// loopback IP or "localhost" is; any other resolvable name is treated as
+// external (fail-safe: the guard fires, the operator states their intent
+// explicitly with a token or a loopback bind).
+func loopbackOnly(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// No port at all ("localhost", "0.0.0.0"): treat as a bare host.
+		host = addr
+	}
+	if host == "" {
+		return false // ":8080" — every interface.
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // cmdAnalyze implements `netopsfees analyze --file`: OFFLINE workbook

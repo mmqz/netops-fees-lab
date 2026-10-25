@@ -72,6 +72,11 @@ type Server struct {
 	// Bearer-token check; reads, /api/health, /api/openapi.json and the
 	// SPA stay open. Empty = off (the v0.10 behavior).
 	AuthToken string
+	// AdminToken is the second tier of issue #9 (v0.18): when BOTH tiers
+	// are configured the Admin-flagged routes (rollbacks/deletes/audit
+	// confirmations) accept ONLY this token. Empty = the single-operator
+	// compat of v0.11 (the AuthToken keeps full access).
+	AdminToken string
 }
 
 // New returns a Server wired from svc — the single composition root the
@@ -117,7 +122,11 @@ func (s *Server) Routes() http.Handler {
 	// table (routes.go) — the same table the OpenAPI document is
 	// generated from, so the spec cannot drift from the surface.
 	for _, r := range s.apiRoutes() {
-		mux.HandleFunc(r.Method+" "+r.Pattern, r.Handler)
+		h := r.Handler
+		if r.Admin {
+			h = s.requireAdmin(h)
+		}
+		mux.HandleFunc(r.Method+" "+r.Pattern, h)
 	}
 
 	// Unknown /api/ paths: JSON 404 envelope (never the SPA fallback).

@@ -1,15 +1,34 @@
-# NetOps Lab — HTTP API 参考
+# NetOps Fees Lab — HTTP API 参考
 
-Base URL：`http://localhost:8080`（`netopslab serve`）。全部响应 UTF-8 JSON（缩进 2 空格）。
+Base URL：`http://localhost:8080`（`netopsfees serve`）。全部响应 UTF-8 JSON（缩进 2 空格）。
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`（v0.3.2 起新增 `workbook_too_large`：解压后超限，422，见 §POST /api/imports）；脚本通道（W8-D）另用 `unsupported_script`（422，.txt/.cfg 无 PTP 脚本特征）与 `script_parse_error`（422，解析失败，消息含行号，见 §POST /api/imports）；仿真工作台路由（§7）另用：`invalid_request` / `not_latest` / `checkpoint_missing_file` / `no_source_resources` / `op_failed`；属性变更确认路由（W4-D）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）与 `ref_target_missing`（409，v0.6.0 W13-D，apply 的 ref 字段新值解析不到被引用类型资源——目标被删除或提案外漂入，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W6-D）另用 `target_missing`（409，apply 时新资源已不存在而提案仍在——标准批次回滚会先删本批提案、apply 将得 404，此 409 多为新资源被其它路径直接删除，见 §POST /api/renames/{id}/apply）。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`；写门禁（见下节）另用 `unauthorized`（401，缺/错令牌）与 `forbidden`（403，申报级令牌访问管理级路由）；费用域另用 `fee_import_failed`（422，费用文件语义错误）与 `engine_not_built`（501，默认构建未编译 DuckDB 分析引擎）。
 - 分页参数（v0.6.2 起双接口，issue #7）：`page`（1 起）+ `pageSize`（默认 20，>100 截断为 100），或 REST 风格 `limit`（1–100，>100 截断为 100）+ `offset`（0 起，页号按 offset/limit 推导）。非数值/负数/零的 page/pageSize/limit 与负数 offset → 400 `bad_request`（消息说明取值范围；此前 limit/offset 是未知名被静默忽略，负值与「已生效」不可区分）。两接口混用（page+offset 或 pageSize+limit）→ 400。列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
 
-以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.15.2（2026-10-20）。**
+以下示例除特别标注外均为真实运行输出（导入 `testdata/` 三本工作簿后的库），仅截断。`id` 类字段每次导入都会变化；P1/§7 示例取自 2026-10-09 的服务器旅程（v0.2.0）；拓扑节点 `geoLat/geoLng`、`type=port` 与复合自然键条目为 v0.3.x 新增字段/能力的补充说明（已按实码与真实样例标注）。**本文档契约基线：v0.18.0（2026-10-25，issue #9 两级写门禁）。**
+
+## 写门禁与两级权限（issue #9，v0.18.0）
+
+serve 提供两级可选写令牌（GET/HEAD 只读请求与 `/api/health`、`/api/openapi.json`、SPA 永不门禁）：
+
+| 令牌 | 旗标 | 权限 |
+| --- | --- | --- |
+| 申报级 | `--auth-token T` | 导入/分析/扫描等全部写操作 |
+| 管理级 | `--admin-token A` | 全部操作，含 7 条管理级路由（删除批次/删除模板/指标回滚/费用回滚/线索裁定/关联确认/关联驳回） |
+
+判定矩阵：
+
+- 只配 `--auth-token`：**单操作员兼容**——该令牌保留 v0.11 全量权限（含管理级路由），不因忘配第二级而被锁；
+- 只配 `--admin-token`：该令牌是唯一写令牌；
+- 双令牌同时配置：管理级路由**仅接受**管理令牌，申报令牌得 `403 forbidden`（信封 `error.code="forbidden"`）；两令牌相同则拒绝启动；
+- 无任何令牌 + 非回环绑定（`:8080`/`0.0.0.0`/`[::]`/外部地址）：**拒绝启动**（exit 2）；默认地址已改为 `127.0.0.1:8080`，本地单机零配置行为不变；
+- 管理级路由成功（2xx）输出一行 `audit: admin op` 审计日志（method/path/remote/status）；403 不产审计行（未发生操作）。
+
+401/403 契约由路由表单源派生进 openapi.json（401 在全部写路由、403 恰在 7 条管理级路由），零手抄。
 
 ## GET /api/health
 
