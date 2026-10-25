@@ -507,17 +507,18 @@ func (s *Server) feesQuery(w http.ResponseWriter, r *http.Request, preset string
 			Preset: "duplicates", FeeType: string(feeType), Year: year, Month: month, Items: rows, Total: len(rows),
 		})
 	case "rows":
-		// #5: the optional ledger columns' query surface — site filter
-		// optional, the same period/limit discipline as the siblings.
+		// #5: the optional ledger columns' query surface — site and record
+		// key (#4) filters optional, the same period/limit discipline.
 		site := strings.TrimSpace(q.Get("site"))
-		rows, err := engine.LedgerRows(r.Context(), analysis, feeType, year, month, site, limit)
+		recordKey := strings.TrimSpace(q.Get("recordKey"))
+		rows, err := engine.LedgerRows(r.Context(), analysis, feeType, year, month, site, recordKey, limit)
 		if err != nil {
 			s.respondErrorFor(w, r, err, "")
 			return
 		}
 		respondJSON(w, http.StatusOK, feesRowsResult{
 			Preset: "rows", FeeType: string(feeType), Year: year, Month: month, Site: site,
-			Items: rows, Total: len(rows),
+			RecordKey: recordKey, Items: rows, Total: len(rows),
 		})
 	}
 }
@@ -557,13 +558,14 @@ type feesTotalsResult struct {
 }
 
 type feesRowsResult struct {
-	Preset  string           `json:"preset"`
-	FeeType string           `json:"feeType"`
-	Year    int              `json:"year"`
-	Month   int              `json:"month"`
-	Site    string           `json:"site"`
-	Items   []fees.LedgerRow `json:"items"`
-	Total   int              `json:"total"`
+	Preset    string           `json:"preset"`
+	FeeType   string           `json:"feeType"`
+	Year      int              `json:"year"`
+	Month     int              `json:"month"`
+	Site      string           `json:"site"`
+	RecordKey string           `json:"recordKey"`
+	Items     []fees.LedgerRow `json:"items"`
+	Total     int              `json:"total"`
 }
 
 type feesDuplicatesResult struct {

@@ -771,6 +771,11 @@ func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dat
 	// identity and amount already passed the strict gate; a bad optional
 	// cell must not sink the row's money record). The strict mode of #8
 	// (--strict-rows) turns unparseable optionals into row errors.
+	if idx := ledgerIdx["recordKey"]; idx >= 0 {
+		if v := strings.TrimSpace(cellAt(row, idx)); v != "" {
+			out.RecordKey = &v
+		}
+	}
 	if idx := ledgerIdx["meterNo"]; idx >= 0 {
 		if v := cellAt(row, idx); v != "" {
 			out.MeterNo = &v

@@ -66,7 +66,7 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: feeDuplicatesName,
-		Description: "只读·跨批次重复结算候选查询：同 (站址, 账期) 被多个导入批次计费的形态（批次共存是设计——候选供人工核对，账单存在 ≠ 重复付款认定）。" +
+		Description: "只读·跨批次重复结算候选查询：同 (站址, 记录键, 账期) 被多个导入批次计费的形态（#4 起记录键=订单号/电表编号/工单号；同站多记录键为正常业务形态；无记录键批次按 (站址, 账期) 对口径。批次共存是设计——候选供人工核对，账单存在 ≠ 重复付款认定）。" +
 			"参数：feeType + year 必填、month 可选、limit 缺省 20 上限 50。与 HTTP GET /api/fees/query/duplicates 同形。默认构建未编译分析引擎时明确报错。",
 		Annotations: readOnlyHints(),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in feeQueryInput) (*mcp.CallToolResult, feeDuplicatesOutput, error) {

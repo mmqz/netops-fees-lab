@@ -165,6 +165,15 @@ type NormalizedRow struct {
 	SourceFile  string
 	SourceRow   int
 	ImportBatch string
+	// RecordKey is the optional business-document identity of the row
+	// (#4): the order number of a tower-lease confirmation, the meter number
+	// of an electricity row, the work order of a repair/maintenance bill. A
+	// site NATURALLY carries several record keys (orders signed in different
+	// years, several meters) — the single-key site aggregation that judged
+	// fee movement mistook 'new order' for 'price spike' and 'several
+	// meters' for 'duplicate settlement'. nil = the file has no such column
+	// (the pre-#4 aggregation semantics, byte-compatible).
+	RecordKey *string
 	// The optional ledger richness columns of issue #5 (台账列消费扩展):
 	// every field nil = the source file had no such column (or the cell was
 	// empty/unparseable — the lenient default; the strict mode of #8 turns

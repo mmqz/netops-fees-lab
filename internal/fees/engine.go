@@ -46,6 +46,7 @@ type LedgerRow struct {
 	Year         int      `json:"year"`
 	Month        int      `json:"month"`
 	AmountCents  int64    `json:"amountCents"`
+	RecordKey    *string  `json:"recordKey,omitempty"`
 	MeterNo      *string  `json:"meterNo,omitempty"`
 	ReadingStart *float64 `json:"readingStart,omitempty"`
 	ReadingEnd   *float64 `json:"readingEnd,omitempty"`
@@ -120,10 +121,11 @@ type QueryEngine interface {
 	// whose rows span more than one import batch.
 	Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error)
 	// LedgerRows returns the raw analysis rows of one fee type in the
-	// scope (month 0 = the whole year), site filter optional ("" = all),
-	// capped at limit (<= 0 -> 100) — the #5 query surface for the optional
-	// ledger columns.
-	LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error)
+	// scope (month 0 = the whole year), site and record-key filters
+	// optional ("" = all), capped at limit (<= 0 -> 100) — the #5 query
+	// surface for the optional ledger columns, with the #4 record-key
+	// drill-down.
+	LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, recordKey string, limit int) ([]LedgerRow, error)
 	// RiskLedgerConsistencyPreset (scenario 9, #5): the deterministic
 	// in-ledger consistency rules over the optional columns — reading-gap
 	// (multi-party meters excluded per #8 S0), ratio-sum, chain-break

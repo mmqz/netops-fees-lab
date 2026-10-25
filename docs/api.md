@@ -839,11 +839,11 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 ## GET /api/fees/query/duplicates?feeType=&year=&month= — 跨批次重复结算候选
 
-同键多批次共存的行（`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/period/批次数/行数/`totalCents` 整数分总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。整数分保证比对与求和顺序无关（#65 P1-a）。参数与 501 契约同 totals。
+同键多批次共存的行（#4 起**口径为 (站址, 记录键, 账期) 三元组**：记录键=订单号/电表编号/工单号；同站多条记录键是正常多订单/多电表形态，不算重复；无记录键的批次仍按 (站址, 账期) 对口径，`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/recordKey/period/批次数/行数/`totalCents` 整数分总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。整数分保证比对与求和顺序无关（#65 P1-a）。参数与 501 契约同 totals。
 
-## GET /api/fees/query/rows?feeType=&year=&month=&site=&limit= — 台账行查询（#5）
+## GET /api/fees/query/rows?feeType=&year=&month=&site=&recordKey=&limit= — 台账行查询（#5/#4）
 
-分析层的原始行回读：`site/账期` 过滤 + `limit`（1–500），返回每行的核心身份（site/year/month/`amountCents` 整数分）与**可选台账列**（`meterNo`/`readingStart`/`readingEnd`/`meterPrevEnd`/`meterSwapped`/`quantity`/`unitPrice`/`shareMobile`/`shareUnicom`/`shareTelecom`/`shareTower`——缺列/空值为 null）与证据坐标（`sourceFile`/`sourceRow`/`importBatch`）。**v35 前的旧批次没有这些列，union_by_name 读取下按 null 返回**——新旧批次混读同表。#5 台账列消费扩展的查询面；501 契约同 totals。
+分析层的原始行回读：`site/账期/recordKey`（#4 记录键钻取）过滤 + `limit`（1–500），返回每行的核心身份（site/year/month/`amountCents` 整数分/`recordKey` 记录键）与**可选台账列**（`meterNo`/`readingStart`/`readingEnd`/`meterPrevEnd`/`meterSwapped`/`quantity`/`unitPrice`/`shareMobile`/`shareUnicom`/`shareTelecom`/`shareTower`——缺列/空值为 null）与证据坐标（`sourceFile`/`sourceRow`/`importBatch`）。**v35 前的旧批次没有这些列，union_by_name 读取下按 null 返回**——新旧批次混读同表。#5 台账列消费扩展的查询面；501 契约同 totals。
 
 ### 场景 9：ledger-consistency 台账内部一致性（#5/#8）
 

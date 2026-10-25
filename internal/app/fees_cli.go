@@ -369,6 +369,7 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 	month := fs.Int("month", 0, "月份（可选：缺省整年）")
 	limit := fs.Int("limit", 20, "返回条数上限（默认 20；totals/duplicates/rows 均生效）")
 	site := fs.String("site", "", "rows 预设的站址过滤（可选；缺省全部）")
+	rk := fs.String("record-key", "", "rows 预设的记录键过滤（#4：订单号/电表编号/工单号；可选）")
 	if err := fs.Parse(rest); err != nil {
 		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
 	}
@@ -400,7 +401,7 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 	case "rows":
 		// #5: the optional ledger columns' query surface — the raw analysis
 		// rows with meter/reading/quantity/price/share values.
-		rows, err := engine.LedgerRows(ctx, analysis, t, *year, *month, *site, *limit)
+		rows, err := engine.LedgerRows(ctx, analysis, t, *year, *month, *site, *rk, *limit)
 		if err != nil {
 			return err
 		}

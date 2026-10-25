@@ -24,7 +24,7 @@ func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeTyp
 	return nil, ErrEngineNotBuilt
 }
 
-func (stdQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+func (stdQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, recordKey string, limit int) ([]LedgerRow, error) {
 	return nil, ErrEngineNotBuilt
 }
 

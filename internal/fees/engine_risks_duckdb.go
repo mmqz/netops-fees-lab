@@ -47,14 +47,23 @@ WITH per AS (
   SELECT site_code, year, month,
          count(DISTINCT import_batch) AS batches,
          count(*) AS rows,
-         sum(amount_cents) AS total_cents
+         sum(amount_cents) AS total_cents,
+         -- record-key cardinality (#4): how many business documents
+         -- (orders/meters/work orders) make up this pair; NULL keys
+         -- count as zero (pre-#4 files).
+         count(DISTINCT record_key) AS rks
   FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
   WHERE fee_type = '%s' %s
   GROUP BY site_code, year, month
 )`
 
-// RiskDuplicatesPreset implements scenario 2: multi-batch (site, period)
-// pairs; metric = the batch count, threshold = >1 batches.
+// RiskDuplicatesPreset implements scenario 2 RE-KEYED by #4: the
+// duplicate-settlement 口径 is the (site, recordKey, period) TRIPLE —
+// one business document billed by more than one import batch. Several
+// record keys under one site in one batch are the NATURAL multi-order /
+// multi-meter shape (never duplicates); rows without record keys (pre-#4
+// imports) keep the original (site, period) pair semantics via the
+// COALESCE(”) key — byte-compatible with every existing pin.
 func (duckQueryEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	if analysisEmpty(analysisDir) {
 		return nil, 0, nil
@@ -64,11 +73,24 @@ func (duckQueryEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir str
 		return nil, 0, err
 	}
 	defer func() { _ = db.Close() }()
-	query := fmt.Sprintf(riskPerPairCTE+`
-SELECT site_code, year, month, batches, rows, total_cents
+	query := fmt.Sprintf(`
+WITH keyed AS (
+  SELECT site_code, year, month, import_batch, record_key, amount_cents
+  FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
+  WHERE fee_type = '%s' %s
+), per AS (
+  SELECT site_code, year, month,
+         COALESCE(record_key, '') AS rk,
+         count(DISTINCT import_batch) AS batches,
+         count(*) AS rows,
+         sum(amount_cents) AS total_cents
+  FROM keyed
+  GROUP BY site_code, year, month, COALESCE(record_key, '')
+)
+SELECT site_code, year, month, rk, batches, rows, total_cents
 FROM per
 WHERE batches > 1
-ORDER BY total_cents DESC, site_code, year, month`,
+ORDER BY total_cents DESC, site_code, year, month, rk`,
 		feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, q.Month))
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -78,16 +100,16 @@ ORDER BY total_cents DESC, site_code, year, month`,
 	var clues []RiskClue
 	for rows.Next() {
 		var (
-			site              string
+			site, rk          string
 			year, month, b, r int
 			total             int64
 		)
-		if err := rows.Scan(&site, &year, &month, &b, &r, &total); err != nil {
+		if err := rows.Scan(&site, &year, &month, &rk, &b, &r, &total); err != nil {
 			return nil, 0, fmt.Errorf("fees: 读取重复结算线索: %w", err)
 		}
 		th := float64(1)
 		clues = append(clues, RiskClue{
-			SiteCode: site, Year: year, Month: month,
+			SiteCode: site, RecordKey: rk, Year: year, Month: month,
 			MetricValue: float64(b), MetricLabel: "batches",
 			Threshold: &th, ThresholdLabel: ">1 批次",
 			EvidenceTotal: r,
@@ -345,12 +367,15 @@ func (duckQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, 
 , clean AS (
   SELECT * FROM per WHERE batches = 1
 ), seq AS (
-  SELECT site_code, year, month, total_cents, rows,
-         lag(total_cents) OVER (PARTITION BY site_code ORDER BY (year::BIGINT)*12 + (month::BIGINT)) AS prev_total
+  SELECT site_code, year, month, total_cents, rows, rks,
+         lag(total_cents) OVER (PARTITION BY site_code ORDER BY (year::BIGINT)*12 + (month::BIGINT)) AS prev_total,
+         lag(rows) OVER (PARTITION BY site_code ORDER BY (year::BIGINT)*12 + (month::BIGINT)) AS prev_rows,
+         lag(rks) OVER (PARTITION BY site_code ORDER BY (year::BIGINT)*12 + (month::BIGINT)) AS prev_rks
   FROM clean
 )
 SELECT seq.site_code, seq.year, seq.month, seq.total_cents, seq.rows, seq.prev_total,
-       (seq.total_cents - seq.prev_total)::DOUBLE / seq.prev_total AS ratio
+       (seq.total_cents - seq.prev_total)::DOUBLE / seq.prev_total AS ratio,
+       seq.rks, seq.prev_rks, seq.prev_rows
 FROM seq
 WHERE seq.prev_total IS NOT NULL AND seq.prev_total > 0
   AND (seq.total_cents - seq.prev_total)::DOUBLE / seq.prev_total >= %.6f
@@ -365,25 +390,33 @@ ORDER BY ratio DESC, site_code, year, month`,
 	var clues []RiskClue
 	for rows.Next() {
 		var (
-			site           string
-			year, month, r int
-			total, prev    int64
-			ratio          float64
+			site                 string
+			year, month, r       int
+			total, prev          int64
+			ratio                float64
+			rks, prevRks, prevRs sql.NullInt64
 		)
-		if err := rows.Scan(&site, &year, &month, &total, &r, &prev, &ratio); err != nil {
+		if err := rows.Scan(&site, &year, &month, &total, &r, &prev, &ratio, &rks, &prevRks, &prevRs); err != nil {
 			return nil, 0, fmt.Errorf("fees: 读取环比线索: %w", err)
 		}
 		th := q.Ratio
-		clues = append(clues, RiskClue{
+		clue := RiskClue{
 			SiteCode: site, Year: year, Month: month,
 			MetricValue: ratio, MetricLabel: "riseRatio",
 			Threshold: &th, ThresholdLabel: fmt.Sprintf("环比涨幅 ≥ %.2f（上期 %d 分 → 本期 %d 分）", q.Ratio, prev, total),
 			EvidenceTotal: r,
-		})
+		}
+		// #4 acceptance 1: a record-COUNT change is the honest annotation —
+		// a new order or an extra meter may be the whole rise; the clue
+		// must say so instead of masquerading as a price movement.
+		if rks.Valid && prevRks.Valid && rks.Int64 != prevRks.Int64 {
+			clue.Note = fmt.Sprintf("本期记录键数 %d→%d——新增/退出订单或电表可能正是金额变化主因，请核对记录级明细", prevRks.Int64, rks.Int64)
+		} else if prevRs.Valid && int64(r) != prevRs.Int64 {
+			clue.Note = fmt.Sprintf("本期行数 %d→%d——记录构成发生变化，请核对行级明细", prevRs.Int64, int64(r))
+		}
+		clues = append(clues, clue)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
+
 	// #83: the excluded count is its own query — truthful on empty clue
 	// sets and independent of the display filters. Year-wide scope: the
 	// lag chain spans the whole year, so a pair excluded anywhere in it

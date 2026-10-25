@@ -197,7 +197,7 @@ func TestLedgerRowsQueryReturnOptionalColumns(t *testing.T) {
 		t.Fatalf("import plain: %v", err)
 	}
 	rows, err := newQueryEngine().LedgerRows(context.Background(),
-		filepath.Join(dir, "analysis"), "electricity", 2026, 1, "", 100)
+		filepath.Join(dir, "analysis"), "electricity", 2026, 1, "", "", 100)
 	if err != nil {
 		t.Fatalf("LedgerRows: %v", err)
 	}

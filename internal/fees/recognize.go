@@ -505,6 +505,11 @@ func headerMatchKey(s string) string {
 // optional: no hit = the column stays nil and the import is byte-identical
 // to the pre-#5 behavior (acceptance #2).
 var ledgerFieldSynonyms = map[string][]string{
+	// recordKey (#4): the business-document identity — tower-lease order
+	// numbers, electricity meter numbers (the meter IS the electricity
+	// record identity, so 电表编号 maps BOTH here and to meterNo), repair /
+	// maintenance work orders and settlement sheet numbers.
+	"recordKey":    {"订单号", "需求确认单编号", "确认单编号", "工单号", "结算单号", "电表编号", "表号"},
 	"meterNo":      {"电表编号", "表号", "电表号"},
 	"readingStart": {"起始读数", "上期读数", "起始示数", "上期示数"},
 	"readingEnd":   {"截止读数", "本期读数", "截止示数", "本期示数", "终止读数", "止数"},
@@ -521,7 +526,7 @@ var ledgerFieldSynonyms = map[string][]string{
 // LedgerFieldKeys lists the optional ledger field keys (canonical order).
 func LedgerFieldKeys() []string {
 	return []string{
-		"meterNo", "readingStart", "readingEnd", "meterPrevEnd", "meterSwapped",
+		"recordKey", "meterNo", "readingStart", "readingEnd", "meterPrevEnd", "meterSwapped",
 		"quantity", "unitPrice",
 		"shareMobile", "shareUnicom", "shareTelecom", "shareTower",
 	}

@@ -85,7 +85,7 @@ LIMIT %d`,
 // ledger columns (union_by_name keeps pre-#5 files readable — their
 // optional columns come back NULL). Site filter optional, limit capped
 // like the sibling presets.
-func (duckQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+func (duckQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, recordKey string, limit int) ([]LedgerRow, error) {
 	if analysisEmpty(analysisDir) {
 		return nil, nil
 	}
@@ -98,8 +98,11 @@ func (duckQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeTy
 	if site != "" {
 		siteFilter = fmt.Sprintf("AND site_code = '%s'", escapeSQLString(site))
 	}
+	if recordKey != "" {
+		siteFilter += fmt.Sprintf(" AND COALESCE(record_key, '') = '%s'", escapeSQLString(recordKey))
+	}
 	query := fmt.Sprintf(`
-SELECT site_code, year, month, amount_cents,
+SELECT site_code, year, month, amount_cents, record_key,
        meter_no, reading_start, reading_end, meter_prev_end, meter_swapped,
        quantity, unit_price, share_mobile, share_unicom, share_telecom, share_tower,
        source_file, source_row, import_batch
@@ -116,17 +119,23 @@ LIMIT %d`,
 	var out []LedgerRow
 	for rows.Next() {
 		var (
-			r       LedgerRow
-			meterNo sql.NullString
-			f       [9]sql.NullFloat64
-			swapped sql.NullBool
-			_       = f
+			r        LedgerRow
+			recordNo sql.NullString
+			meterNo  sql.NullString
+			f        [9]sql.NullFloat64
+			swapped  sql.NullBool
+			_        = f
 		)
 		if err := rows.Scan(&r.SiteCode, &r.Year, &r.Month, &r.AmountCents,
+			&recordNo,
 			&meterNo, &f[0], &f[1], &f[2], &swapped, &f[3], &f[4],
 			&f[5], &f[6], &f[7], &f[8],
 			&r.SourceFile, &r.SourceRow, &r.ImportBatch); err != nil {
 			return nil, fmt.Errorf("fees: 读取台账行: %w", err)
+		}
+		if recordNo.Valid {
+			v := recordNo.String
+			r.RecordKey = &v
 		}
 		if meterNo.Valid {
 			v := meterNo.String

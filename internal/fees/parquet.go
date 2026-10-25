@@ -57,6 +57,9 @@ type feeParquetRow struct {
 	SourceFile  string `parquet:"source_file"`
 	SourceRow   int32  `parquet:"source_row"`
 	ImportBatch string `parquet:"import_batch"`
+	// record_key: the #4 business-document identity (order/meter/work
+	// order). Optional like the ledger columns; absent in pre-#4 files.
+	RecordKey *string `parquet:"record_key,optional"`
 	// The optional ledger columns of issue #5: pointer fields = OPTIONAL
 	// parquet columns, absent in pre-#5 files. Reads must use
 	// union_by_name=true so mixed-generation batches coexist in one
@@ -103,6 +106,7 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 			SourceFile:   r.SourceFile,
 			SourceRow:    int32(r.SourceRow),
 			ImportBatch:  r.ImportBatch,
+			RecordKey:    r.RecordKey,
 			MeterNo:      r.MeterNo,
 			ReadingStart: r.ReadingStart,
 			ReadingEnd:   r.ReadingEnd,

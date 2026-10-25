@@ -46,7 +46,7 @@ func (f *fakeRiskEngine) Duplicates(ctx context.Context, analysisDir string, fee
 	}
 	return f.duplicates, nil
 }
-func (f *fakeRiskEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+func (f *fakeRiskEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, recordKey string, limit int) ([]LedgerRow, error) {
 	return nil, nil // the composition tests never exercise the rows query
 }
 
@@ -805,7 +805,7 @@ func (unavailableEngine) Totals(ctx context.Context, analysisDir string, feeType
 func (unavailableEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
 	return nil, errors.New("unreachable")
 }
-func (unavailableEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, limit int) ([]LedgerRow, error) {
+func (unavailableEngine) LedgerRows(ctx context.Context, analysisDir string, feeType FeeType, year, month int, site string, recordKey string, limit int) ([]LedgerRow, error) {
 	return nil, errors.New("unreachable")
 }
 func (unavailableEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error) {

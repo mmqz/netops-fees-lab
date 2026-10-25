@@ -186,7 +186,12 @@ type EvidenceKey struct {
 // count behind the clue; Note carries scenario-specific caveats (never a
 // verdict — 账单存在 ≠ 认定结论).
 type RiskClue struct {
-	SiteCode       string           `json:"siteCode"`
+	SiteCode string `json:"siteCode"`
+	// RecordKey carries the #4 business-document identity when the clue is
+	// record-granular (the duplicate-settlement 口径 is (site, recordKey,
+	// period) since #4): the order/meter/work-order the evidence rows share.
+	// Empty when the underlying rows carry no record keys.
+	RecordKey      string           `json:"recordKey,omitempty"`
 	Year           int              `json:"year"`
 	Month          int              `json:"month"`
 	MetricValue    float64          `json:"metricValue"`
@@ -315,7 +320,7 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 	switch scenario {
 	case RiskDuplicateSettlement:
 		clues, excluded, err = engine.RiskDuplicatesPreset(ctx, s.analysisDir(), q)
-		note = "线索口径：同一 (站址, 账期) 存在多个导入批次的计费记录——批次按设计共存不合并，账单存在不构成重复付款认定，请人工核实"
+		note = "线索口径（#4 起）：同一 (站址, 记录键, 账期) 被多个导入批次计费——记录键=订单号/电表编号/工单号，同站多条记录键是正常业务形态（多订单/多电表）不算重复；无记录键的批次仍按 (站址, 账期) 对口径。批次按设计共存不合并，账单存在不构成重复付款认定，请人工核实"
 	case RiskLedgerMismatch:
 		clues, excluded, err = engine.RiskLedgerMismatchPreset(ctx, s.analysisDir(), q)
 		note = "线索口径：同一 (站址, 账期) 的各批次合计金额不一致（合同台账与账单台账作为不同批次导入时的差异形态）——差异金额供核对，非认定结论"
