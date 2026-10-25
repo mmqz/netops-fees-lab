@@ -390,3 +390,70 @@ func TestAPIMetricsConcurrentSameUpload(t *testing.T) {
 		}
 	}
 }
+
+// TestAPIImportConcurrentSameUploadSustained pins #126's acceptance bar:
+// "连跑 20 次并发上传，必须 20/20 全绿——单次通过不代表修好". The v0.16.1
+// Windows evidence is the point: the first #124 fix turned 5/5 failures into
+// 4/5 — the fifth run passed by luck, which is exactly why one lucky green
+// round proves nothing. Twenty consecutive FRESH races (distinct content per
+// round, so every round stages a target that does not exist yet — the
+// rename-collision window at its widest), each with the full 202 +
+// evidence-hash + content-addressed-path + no-temp-leak assertion set of
+// the 6-round pin above. The in-process stripe serialization (#126) makes
+// every loser take the idempotent fast path, so a green round here is
+// deterministic rather than probabilistic — but the test keeps its guard:
+// any regression back to probabilistic tolerance (a retry loop quietly
+// removed, a stripe narrowed) resurfaces here first.
+func TestAPIImportConcurrentSameUploadSustained(t *testing.T) {
+	dir := testsupport.TempDir(t)
+	a, err := app.New(app.Config{
+		DBPath:  filepath.Join(dir, "netops.db"),
+		DataDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("app.New: %v", err)
+	}
+	srv := httptest.NewServer(a.Routes())
+	t.Cleanup(func() {
+		srv.Close()
+		_ = a.Close()
+	})
+
+	name := "race-sustained.xlsx"
+	for round := 0; round < 20; round++ {
+		content := buildRaceWorkbook(t, 100+round) // fresh target every round
+		sum := sha256.Sum256(content)
+		contentSHA := hex.EncodeToString(sum[:])
+		contentType, body := buildUploadMultipart(t, name, content, nil)
+
+		results := raceUpload(t, srv, "/api/imports", contentType, body, 4)
+		for i, r := range results {
+			if r.status != http.StatusAccepted {
+				t.Fatalf("round %d: concurrent upload %d status = %d (want 202 — %d/%d rounds green)\nbody: %s",
+					round, i, r.status, round, 20, r.body)
+			}
+			var an importAnalysis
+			decodeJSON(t, fmt.Sprintf("round %d upload %d", round, i), r.body, &an)
+			if an.SHA256 != contentSHA {
+				t.Errorf("round %d: upload %d recorded sha256 = %s, want the content hash %s — the evidence hash must never lie (#112)",
+					round, i, an.SHA256, contentSHA)
+			}
+			wp, err := a.DB.Batches.WorkbookPath(context.Background(), an.BatchID)
+			if err != nil {
+				t.Fatalf("round %d: workbook path of batch %s: %v", round, an.BatchID, err)
+			}
+			if base := filepath.Base(wp); base != contentSHA+"_"+name {
+				t.Errorf("round %d: upload %d workbook_path base = %q, want the content-addressed %q", round, i, base, contentSHA+"_"+name)
+			}
+			if got := hashFile(t, wp); got != contentSHA {
+				t.Errorf("round %d: upload %d workbook at %s hashes to %s, want %s", round, i, wp, got, contentSHA)
+			}
+		}
+		stored := filepath.Join(dir, "uploads", contentSHA+"_"+name)
+		if got := hashFile(t, stored); got != contentSHA {
+			t.Errorf("round %d: stored upload hashes to %s, want %s", round, got, contentSHA)
+		}
+	}
+
+	assertNoStagingTempLeak(t, dir)
+}

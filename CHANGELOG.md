@@ -2,6 +2,15 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.17.1] — 2026-10-25
+
+**主仓 v0.16.2 共享底座修复同步**（fork 时点 v0.16.1 / 2223101 之后主仓合入的 #126 根治修复，cherry-pick 到费用线；patch 发布）。
+
+### 修复 — storeUpload 并发同名上传的残余竞态（主仓 #126，#124 收口的根治层）
+- **同步范围**：`internal/api/uploads.go`（stripe 进程内串行 + 快路径全哈希探测 + 跨进程有界 rename-or-probe 重试）与 `uploads_race_test.go` 新增 `TestAPIImportConcurrentSameUploadSustained`（20 轮全新内容 × 4 并发，#126 明示验收标准）——资源/指标/费用三通道共用的同一 staging 原语，fork 评审已预判「storeUpload 修复 fork 后两边 cherry-pick 即可」。
+- **同批**：`fees_test.go` 的服务端故障注入由 POSIX `os.Chmod(0o500)` 改为普通文件占位（ENOTDIR 全平台成立——Windows ACL 无视 POSIX 位，chmod 从未造出故障）。
+- **验证**（2026-10-25，linux/amd64 · 2 核沙箱）：`go test -count=1 ./...` 16 包全绿；并发家族 `-race` 零竞争；sustained 20/20 全绿（16.6s）。Windows 复验仍留 issue #1。
+
 ## [0.17.0] — 2026-10-23
 
 **费用仓拆分**：本仓库自此从 [mmqz/netops-lab](https://github.com/mmqz/netops-lab) fork 而来（fork 时点 v0.16.1 / 2223101），定位为**纯费用域**仓库——IPRAN 网络域（仿真工作台/拓扑图查询/告警检测/维护窗口/webhook 通知/身份治理/治理总览/资源导出/PTP 配置脚本）整面移出，留在主仓演进。决策与裁剪清单：[docs/fees-repo-split-plan.md](docs/fees-repo-split-plan.md) + [docs/fees-split-review.md](docs/fees-split-review.md)（评审 A–E 五项修订全部落实）；主仓侧移除红线见 [docs/fees-code-removal-plan.md](docs/fees-code-removal-plan.md)。

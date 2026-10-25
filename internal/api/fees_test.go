@@ -753,16 +753,19 @@ func TestAPIFeesImportErrorClassification(t *testing.T) {
 	// fine. The OLD channel answered 422 fee_import_failed (fix your file
 	// — misleading); the classified channel answers 500 internal with the
 	// generic message and the path-carrying detail in the log.
-	// The DEEPEST existing parent of the new snapshot path: the base import
-	// created fee-imports/electricity/2024/08; the new file (month 07) must
-	// CREATE .../2024/07, which needs write permission on .../2024 — lock
-	// exactly that (chmod of the tree root alone would leave the deeper
-	// parents writable and the write would succeed).
-	snapDir := filepath.Join(dir, "fee-imports", "electricity", "2024")
-	if err := os.Chmod(snapDir, 0o500); err != nil {
-		t.Fatalf("chmod snapshot dir: %v", err)
+	// #126: the fault is injected by placing a regular FILE at the new
+	// snapshot DIRECTORY's path — os.MkdirAll fails with ENOTDIR on every
+	// platform (the pre-#126 os.Chmod 0o500 variant only produced a write
+	// refusal on POSIX: Windows ACLs ignore the mode bits, the injection
+	// never happened, and the product's 201 was CORRECT — the third
+	// POSIX-assumption leak this repo has hit, see issue-126). The file
+	// occupies the exact slot the month-07 snapshot must create, so the
+	// failure stays at the SNAPSHOT layer (the staging area keeps
+	// working — that separation is the classification this test pins).
+	snapBlock := filepath.Join(dir, "fee-imports", "electricity", "2024", "07")
+	if err := os.WriteFile(snapBlock, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("place snapshot-dir blocker: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(snapDir, 0o755) })
 	resp, body = uploadFeeFile(t, srv, "good-but-stranded.csv", strings.ReplaceAll(csv, "2024-08", "2024-07"), "electricity", "2024", "7", "")
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("server fault: status = %d, want 500\n%s", resp.StatusCode, body)
