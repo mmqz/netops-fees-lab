@@ -93,6 +93,11 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: npm ci
         run: npm ci
+      # #22: case-collision gate — case-insensitive platforms (Windows) cannot
+      # build a tree where two files differ only by letter case; run before
+      # build so the collision dies here, not in a Windows checkout.
+      - name: case-collision gate (#22)
+        run: npm run lint:case
       - name: build (tsc strict + vite)
         run: npm run build
       - name: test (vitest)

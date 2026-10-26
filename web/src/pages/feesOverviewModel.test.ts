@@ -19,7 +19,7 @@ import {
   slotOf,
   sortMergedClues,
   trendGeometry,
-} from './feesOverview';
+} from './feesOverviewModel';
 
 describe('padMonthly', () => {
   it('pads sparse months with null — absent is a statement, never a zero', () => {

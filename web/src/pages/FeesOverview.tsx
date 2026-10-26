@@ -4,7 +4,7 @@
  * - 总览卡片：各费用类型本月费用 / 环比 / 站址数——全部由月度序列推导
  *   （GET /api/fees/query/monthly，整数分契约，前端 /100 万元展示）；
  * - 月度趋势图：纯 SVG 折线（零图表库红线——延续 MetricChart 的确定性
- *   渲染教义，坐标纯函数计算于 feesOverview.ts，可对照测试）；空月断线
+ *   渲染教义，坐标纯函数计算于 feesOverviewModel.ts，可对照测试）；空月断线
  *   不造零；环比异常点空心环高亮；
  * - 一键分析（分析路径五步）：十场景顺序执行（治理默认阈值——单场景
  *   调参仍在下方风险面板），跨场景合并线索列表：按触发指标排序、
@@ -41,7 +41,7 @@ import {
   type ClueSortKey,
   type MonthSlot,
   type TrendSeries,
-} from './feesOverview';
+} from './feesOverviewModel';
 import {
   FEES_501_HINT,
   FEES_OV_CARD_MOM,

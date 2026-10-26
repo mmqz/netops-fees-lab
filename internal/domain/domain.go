@@ -22,14 +22,12 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.19.1 is
-// the fork's first consolidated feature release: the v0.18 shared-base ports
-// (#9 two-tier write gate, #10 MCP annotations/--read-only) plus the fee-line
-// depth work — record keys (#4), the 11 optional ledger columns + scenario 9
-// (#5), source-file integrity (#6), .xls convert (#7), --strict-rows (#8),
-// and the transfer-supply catch-up columns + two deterministic rules + spike
-// annotation (#11).
-const AppVersion = "v0.19.1"
+// the health endpoint, the MCP server implementation and the CLI. v0.20.0 is
+// the cross-platform correctness release: it opens with the Windows build
+// fix (#22 — the FeesOverview/feesOverview case collision and its CI gate)
+// and continues with fee-pipeline hardening for cross-period duplicates and
+// clue explainability.
+const AppVersion = "v0.20.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

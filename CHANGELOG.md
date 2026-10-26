@@ -2,6 +2,16 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.20.0] — 进行中
+
+**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
+
+### 修复 — Windows 构建阻断（#22）：`FeesOverview.tsx` 与 `feesOverview.ts` 仅大小写不同，Windows 上 tsc/vite 双双失败
+- **根因**：`web/src/pages/` 下同时存在 `FeesOverview.tsx`（React 组件，大写 F）与 `feesOverview.ts`（纯函数库，小写 f）——Linux/macOS 大小写敏感文件系统两者共存一切正常，Windows 大小写不敏感把它们当同一文件：`import { FeesOverview } from './FeesOverview'` 解析到不含该导出的 `feesOverview.ts`，tsc 报 TS1261/TS1149、vite 报「"FeesOverview" is not exported by "src/pages/feesOverview.ts"」，**前端完全无法构建**（Go 二进制随之缺内嵌前端）。issue 报告人 Windows/Node 24/npm 11 实测复现率 100%。
+- **修复（方案 A）**：纯函数库改名消除碰撞——`git mv feesOverview.ts feesOverviewModel.ts` + `git mv feesOverview.test.ts feesOverviewModel.test.ts`（Model 后缀申明「展示层确定性核心=纯数据模型」职责，与组件名拉开）；引用同步两处（`FeesOverview.tsx` 的 import 与头注释 / 测试文件自引用）；`Fees.tsx` 的 `import { FeesOverview } from './FeesOverview'` 保持指向组件未动（issue 特别警示的误改点）。
+- **门禁（方案 C）**：新增 `web/scripts/check-case-collisions.mjs`（Node 跨平台，递归扫描 src/public，同目录仅大小写不同即 exit 1——错误信息带先例编号）；`package.json` 新增 `lint:case` script；CI 前端 job 在 build 前加「case-collision gate (#22)」步骤——**同类碰撞从此在 CI 就地拦死，不再漏到 Windows 检出时**。脚本负例已实测（注入 Foo.ts/foo.ts 组 exit 1 + 双名打印）。
+- **验证**：Linux 侧 tsc 0 错 / vitest 146/146 全过（与 issue 报告人改名后实测一致）/ vite build 成功 / 门禁 clean（49 files）；Windows 侧由 issue 报告人本地验证结论背书（改名后 tsc+build+146 测试全过、Go 构建通过）——CI 含 Windows job，推送后由其复验。
+
 ## [0.19.1] — 2026-10-26
 
 **版本钉与隔离目录修复版**（patch：#17——两项确定性测试红：发版原子性 + Windows AV 句柄）。
