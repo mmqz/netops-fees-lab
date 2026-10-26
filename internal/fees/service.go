@@ -822,6 +822,56 @@ func (s *Service) normalizeRow(row SourceRow, siteIdx, amountIdx, periodIdx, dat
 			out.MeterSwapped = &v
 		}
 	}
+	// #11's transfer-supply catch-up columns: same lenient/strict
+	// discipline as the #5 floats — absent/empty = nil (the sheet
+	// carried no such column), a written-but-unparseable cell stays
+	// nil in lenient mode and fails the row under --strict-rows (#8).
+	for field, dst := range map[string]**string{
+		"purchaseStart": &out.PurchaseStart, "purchaseEnd": &out.PurchaseEnd,
+	} {
+		idx := ledgerIdx[field]
+		if idx < 0 {
+			continue
+		}
+		raw := cellAt(row, idx)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		v, derr := ParseDateISO(raw)
+		if derr != nil {
+			if opts.StrictRows {
+				return NormalizedRow{}, &ImportError{
+					Row: row.Number, Field: field, Raw: raw,
+					Reason: fmt.Sprintf("台账列 %s 的值 %q 无法解析为日期（--strict-rows：该行拒绝导入）", field, raw),
+				}
+			}
+			continue
+		}
+		*dst = &v
+	}
+	for field, dst := range map[string]**int64{
+		"receivableCents": &out.ReceivableCents, "receivedCents": &out.ReceivedCents,
+	} {
+		idx := ledgerIdx[field]
+		if idx < 0 {
+			continue
+		}
+		raw := cellAt(row, idx)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		v, aerr := NormalizeAmount(raw)
+		if aerr != nil {
+			if opts.StrictRows {
+				return NormalizedRow{}, &ImportError{
+					Row: row.Number, Field: field, Raw: raw,
+					Reason: fmt.Sprintf("台账列 %s 的值 %q 无法解析为金额（--strict-rows：该行拒绝导入）", field, raw),
+				}
+			}
+			continue
+		}
+		*dst = &v
+	}
 	return out, nil
 }
 

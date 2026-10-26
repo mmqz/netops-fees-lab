@@ -160,6 +160,16 @@ const (
 	// DefaultMaxEvidence: at most 10 evidence anchors per clue (the full
 	// row set stays reconstructible from the snapshot + batch lineage).
 	DefaultMaxEvidence = 10
+	// PurchaseSpanToleranceDays (#11 rule 1): 购电周期容差（天）。正常购电
+	// 周期约 30 天（#11 实测）；+5 天吸收跨月抄表的自然摆动。超出的行是
+	// 「长期不报后集中补报」的候选——线索，不是错误认定（补报可能是合理
+	// 业务：等总账单/季节性用电/审批在途）。
+	PurchaseSpanToleranceDays = 35
+	// CatchUpSpanDays (#11 §4.3): 补报标注线（天）= 正常周期 × 2。spike
+	// 场景里购电周期超过此值的 (站址, 账期) 在线索 note 里标注「疑似集中
+	// 补报」——环比涨幅可能是攒报的计量后果而非趋势异常。标注而非排除：
+	// 攒报是否合理由人判断。
+	CatchUpSpanDays = 70
 )
 
 // EvidenceAnchor is one row-level evidence coordinate pointing back into
@@ -380,7 +390,7 @@ func (s *Service) risksLedgerConsistency(ctx context.Context, engine QueryEngine
 	if len(raw) == 0 {
 		return cluesPack{
 			clues: []RiskClue{}, excluded: excluded,
-			note: "线索口径：台账内部一致性四条确定性规则（reading-gap 读数差≠填报用量，一表多户已排除；ratio-sum 四方分摊之和≠1；chain-break 跨账期读数断链，已标记换表的合法断开不计；zero-quantity-billing 用量0却有金额）——全部为行级确定性校验，非统计推断；线索不构成认定结论；缺相应列的文件对应规则自动跳过",
+			note: "线索口径：台账内部一致性六条确定性规则（reading-gap 读数差≠填报用量，一表多户已排除；ratio-sum 四方分摊之和≠1；chain-break 跨账期读数断链，已标记换表的合法断开不计；zero-quantity-billing 用量0却有金额；purchase-period 购电周期>35天——长期不报后集中补报候选；receivable-unreceived 应收>实收——资金回收风险）——全部为行级确定性校验，非统计推断；线索不构成认定结论；缺相应列的文件对应规则自动跳过",
 		}, nil
 	}
 	keys := make([]EvidenceKey, 0, len(raw))
@@ -419,6 +429,12 @@ func (s *Service) risksLedgerConsistency(ctx context.Context, engine QueryEngine
 		case "zero-quantity-billing":
 			clue.ThresholdLabel = "rule: zero-quantity-billing（用量=0 且金额>0）"
 			clue.Note = "零用量却有计费金额——疑似上期漏抄表后用量顺延至本期，财务未多收但台账自相矛盾，请人工核实"
+		case "purchase-period":
+			clue.ThresholdLabel = fmt.Sprintf("rule: purchase-period（购电周期 > %d 天）", PurchaseSpanToleranceDays)
+			clue.Note = "购电周期显著超过常规月度周期——长期不报后集中补报的候选：期间用电量不可知，账实存在不符风险；补报本身可能是合理业务（等总账单/季节性用电/审批在途），请核对抄表与结算安排"
+		case "receivable-unreceived":
+			clue.ThresholdLabel = "rule: receivable-unreceived（应收-实收 > 0）"
+			clue.Note = "应收与实收存在差额——资金回收风险：需核实是否已收款或仍在流程中（实收=0 为完全未收形态）；差额为待核对事实，非认定结论"
 		default:
 			clue.ThresholdLabel = "rule: " + c.Rule
 		}
@@ -429,7 +445,7 @@ func (s *Service) risksLedgerConsistency(ctx context.Context, engine QueryEngine
 	}
 	return cluesPack{
 		clues: clues, excluded: excluded,
-		note: "线索口径：台账内部一致性四条确定性规则（reading-gap 读数差≠填报用量，一表多户已排除；ratio-sum 四方分摊之和≠1；chain-break 跨账期读数断链，已标记换表的合法断开不计；zero-quantity-billing 用量0却有金额）——全部为行级确定性校验，非统计推断；线索不构成认定结论；缺相应列的文件对应规则自动跳过；excluded=一表多户未判读数差行数+已标记换表的断链行数",
+		note: "线索口径：台账内部一致性六条确定性规则（reading-gap 读数差≠填报用量，一表多户已排除；ratio-sum 四方分摊之和≠1；chain-break 跨账期读数断链，已标记换表的合法断开不计；zero-quantity-billing 用量0却有金额；purchase-period 购电周期>35天——长期不报后集中补报候选；receivable-unreceived 应收>实收——资金回收风险）——全部为行级确定性校验，非统计推断；线索不构成认定结论；缺相应列的文件对应规则自动跳过；excluded=一表多户未判读数差行数+已标记换表的断链行数",
 	}, nil
 }
 

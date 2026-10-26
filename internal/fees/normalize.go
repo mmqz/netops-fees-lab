@@ -217,3 +217,59 @@ func validPeriod(y, m int) bool {
 func PeriodLabel(year, month int) string {
 	return fmt.Sprintf("%04d-%02d", year, month)
 }
+
+// ParseDateISO parses a full calendar date into the canonical ISO form
+// 'YYYY-MM-DD' (issue #11's 购电起始日/购电截止日 columns). Accepted
+// shapes: 2026-01-15, 2026.1.5, 2026/01/15, 2026年1月15日, 2026年1月15,
+// 2026-1-5 — the SAME shape family ParseDatePeriod accepts, but the DAY
+// is kept (the purchase window's whole analytic value is the day-level
+// span: date_diff('day', start, end)). The date must be a real calendar
+// date (Feb 30 refuses); the year bounds follow validPeriod (2000..2100).
+// Output is zero-padded so every consumer (DuckDB CAST AS DATE, JSON,
+// display) sees one form.
+func ParseDateISO(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", fmt.Errorf("日期为空")
+	}
+	s = strings.NewReplacer("年", "-", "月", "-", "日", "", "号", "", "　", "").Replace(s)
+	s = strings.ReplaceAll(s, "/", "-")
+	s = strings.ReplaceAll(s, ".", "-")
+	s = strings.ReplaceAll(s, " ", "")
+	parts := strings.Split(s, "-")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("日期 %q 无法解析（可用形如 2026-01-15 / 2026.1.5 / 2026年1月15日）", raw)
+	}
+	y, err1 := strconv.Atoi(parts[0])
+	m, err2 := strconv.Atoi(parts[1])
+	d, err3 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return "", fmt.Errorf("日期 %q 无法解析", raw)
+	}
+	if y < 2000 || y > 2100 {
+		return "", fmt.Errorf("日期 %q 年份不在合法范围", raw)
+	}
+	if m < 1 || m > 12 {
+		return "", fmt.Errorf("日期 %q 月份不在合法范围", raw)
+	}
+	if d < 1 || d > daysInMonth(y, m) {
+		return "", fmt.Errorf("日期 %q 不是真实日历日期", raw)
+	}
+	return fmt.Sprintf("%04d-%02d-%02d", y, m, d), nil
+}
+
+// daysInMonth is the calendar month length (leap-aware for February).
+func daysInMonth(year, month int) int {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if year%4 == 0 && (year%100 != 0 || year%400 == 0) {
+			return 29
+		}
+		return 28
+	}
+	return 0
+}

@@ -22,16 +22,14 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.12.1 is
-// the issue-fix release on top of v0.12.0 (alarm-quality line): the
-// maintenance-window suppression gained a DUAL time basis — a window now
-// holds a new fire when EITHER the evidence ts (data timeline) OR the
-// sweep's operational moment falls inside it, plus a run-receipt note that
-// names the silent-failure case (issue #55); the overview render loop is
-// gone (issue #56); the alerts list shows the natural key under the port
-// name (issue #57); the topology fit no longer lets L0 geo anchors define
-// the canvas scale (issue #54).
-const AppVersion = "v0.17.1"
+// the health endpoint, the MCP server implementation and the CLI. v0.18.0 is
+// the fork's first consolidated feature release: the v0.18 shared-base ports
+// (#9 two-tier write gate, #10 MCP annotations/--read-only) plus the fee-line
+// depth work — record keys (#4), the 11 optional ledger columns + scenario 9
+// (#5), source-file integrity (#6), .xls convert (#7), --strict-rows (#8),
+// and the transfer-supply catch-up columns + two deterministic rules + spike
+// annotation (#11).
+const AppVersion = "v0.18.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

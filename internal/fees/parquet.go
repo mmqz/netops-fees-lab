@@ -75,6 +75,15 @@ type feeParquetRow struct {
 	ShareUnicom  *float64 `parquet:"share_unicom,optional"`
 	ShareTelecom *float64 `parquet:"share_telecom,optional"`
 	ShareTower   *float64 `parquet:"share_tower,optional"`
+	// The transfer-supply catch-up columns of issue #11: same
+	// OPTIONAL discipline (absent in pre-#11 files; union_by_name
+	// reads mixed generations as NULL). purchase_start/end are ISO
+	// 'YYYY-MM-DD' strings (CAST-able to DuckDB DATE for date_diff);
+	// the two money faces are INTEGER CENTS.
+	PurchaseStart   *string `parquet:"purchase_start,optional"`
+	PurchaseEnd     *string `parquet:"purchase_end,optional"`
+	ReceivableCents *int64  `parquet:"receivable_cents,optional"`
+	ReceivedCents   *int64  `parquet:"received_cents,optional"`
 }
 
 // partitionFile is the per-partition manifest entry: the live (relative)
@@ -101,23 +110,27 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 	for _, r := range rows {
 		key := [2]int{r.Year, r.Month}
 		byPeriod[key] = append(byPeriod[key], feeParquetRow{
-			SiteCode:     r.SiteCode,
-			AmountCents:  r.AmountCents,
-			SourceFile:   r.SourceFile,
-			SourceRow:    int32(r.SourceRow),
-			ImportBatch:  r.ImportBatch,
-			RecordKey:    r.RecordKey,
-			MeterNo:      r.MeterNo,
-			ReadingStart: r.ReadingStart,
-			ReadingEnd:   r.ReadingEnd,
-			MeterPrevEnd: r.MeterPrevEnd,
-			MeterSwapped: r.MeterSwapped,
-			Quantity:     r.Quantity,
-			UnitPrice:    r.UnitPrice,
-			ShareMobile:  r.ShareMobile,
-			ShareUnicom:  r.ShareUnicom,
-			ShareTelecom: r.ShareTelecom,
-			ShareTower:   r.ShareTower,
+			SiteCode:        r.SiteCode,
+			AmountCents:     r.AmountCents,
+			SourceFile:      r.SourceFile,
+			SourceRow:       int32(r.SourceRow),
+			ImportBatch:     r.ImportBatch,
+			RecordKey:       r.RecordKey,
+			MeterNo:         r.MeterNo,
+			ReadingStart:    r.ReadingStart,
+			ReadingEnd:      r.ReadingEnd,
+			MeterPrevEnd:    r.MeterPrevEnd,
+			MeterSwapped:    r.MeterSwapped,
+			Quantity:        r.Quantity,
+			UnitPrice:       r.UnitPrice,
+			ShareMobile:     r.ShareMobile,
+			ShareUnicom:     r.ShareUnicom,
+			ShareTelecom:    r.ShareTelecom,
+			ShareTower:      r.ShareTower,
+			PurchaseStart:   r.PurchaseStart,
+			PurchaseEnd:     r.PurchaseEnd,
+			ReceivableCents: r.ReceivableCents,
+			ReceivedCents:   r.ReceivedCents,
 		})
 	}
 	keys := make([][2]int, 0, len(byPeriod))

@@ -521,6 +521,17 @@ var ledgerFieldSynonyms = map[string][]string{
 	"shareUnicom":  {"联通分摊比例", "联通分摊"},
 	"shareTelecom": {"电信分摊比例", "电信分摊"},
 	"shareTower":   {"铁塔分摊比例", "铁塔分摊"},
+	// The transfer-supply catch-up columns of issue #11: 购电起止日
+	// (the purchase window — the day-level span is the catch-up signal)
+	// and 应收/实收 (the two money faces; the 转供电 sheet carries them
+	// as 应收电信/实收电信). Deliberately PURCHASE-scoped keys only —
+	// a bare 起始日期/截止日期 would false-match a 填表日期 column, and
+	// the whole #15 lesson is that generic date headers are form dates,
+	// not period evidence.
+	"purchaseStart":   {"购电起始日", "购电起始日期", "购电开始日期", "购电起日", "购电起始时间"},
+	"purchaseEnd":     {"购电截止日", "购电截止日期", "购电结束日期", "购电终止日", "购电止日", "购电截止时间", "购电终止日期"},
+	"receivableCents": {"应收电信", "应收金额", "应收电费"},
+	"receivedCents":   {"实收电信", "实收金额", "实收电费"},
 }
 
 // LedgerFieldKeys lists the optional ledger field keys (canonical order).
@@ -529,6 +540,7 @@ func LedgerFieldKeys() []string {
 		"recordKey", "meterNo", "readingStart", "readingEnd", "meterPrevEnd", "meterSwapped",
 		"quantity", "unitPrice",
 		"shareMobile", "shareUnicom", "shareTelecom", "shareTower",
+		"purchaseStart", "purchaseEnd", "receivableCents", "receivedCents",
 	}
 }
 

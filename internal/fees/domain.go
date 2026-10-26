@@ -190,6 +190,19 @@ type NormalizedRow struct {
 	ShareUnicom  *float64 // 联通分摊比例
 	ShareTelecom *float64 // 电信分摊比例
 	ShareTower   *float64 // 铁塔分摊比例
+	// The transfer-supply catch-up columns of issue #11 (转供电「长期
+	// 不报+集中补报」): 购电起止日 spans the PURCHASE window (not the
+	// billing period — a 764-day span billed in one month is the whole
+	// point), 应收/实收 are the two money faces of the same row (the
+	// ledger bills the site 应收 while 实收 records what actually came
+	// back). Dates normalize to ISO 'YYYY-MM-DD' strings (CAST-able to
+	// DuckDB DATE); the money faces are INTEGER CENTS like AmountCents.
+	// nil = the source sheet carried no such column — a file without
+	// them imports byte-identically to the pre-#11 world.
+	PurchaseStart   *string // 购电起始日（ISO 日期）
+	PurchaseEnd     *string // 购电截止日（ISO 日期）
+	ReceivableCents *int64  // 应收金额（分）——应收电信
+	ReceivedCents   *int64  // 实收金额（分）——实收电信
 }
 
 // ImportError is a row-level normalization failure (bad amount, unparseable

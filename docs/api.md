@@ -843,11 +843,11 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 ## GET /api/fees/query/rows?feeType=&year=&month=&site=&recordKey=&limit= — 台账行查询（#5/#4）
 
-分析层的原始行回读：`site/账期/recordKey`（#4 记录键钻取）过滤 + `limit`（1–500），返回每行的核心身份（site/year/month/`amountCents` 整数分/`recordKey` 记录键）与**可选台账列**（`meterNo`/`readingStart`/`readingEnd`/`meterPrevEnd`/`meterSwapped`/`quantity`/`unitPrice`/`shareMobile`/`shareUnicom`/`shareTelecom`/`shareTower`——缺列/空值为 null）与证据坐标（`sourceFile`/`sourceRow`/`importBatch`）。**v35 前的旧批次没有这些列，union_by_name 读取下按 null 返回**——新旧批次混读同表。#5 台账列消费扩展的查询面；501 契约同 totals。
+分析层的原始行回读：`site/账期/recordKey`（#4 记录键钻取）过滤 + `limit`（1–500），返回每行的核心身份（site/year/month/`amountCents` 整数分/`recordKey` 记录键）与**可选台账列**（`meterNo`/`readingStart`/`readingEnd`/`meterPrevEnd`/`meterSwapped`/`quantity`/`unitPrice`/`shareMobile`/`shareUnicom`/`shareTelecom`/`shareTower`——缺列/空值为 null；#11 转供电补报四列：`purchaseStart`/`purchaseEnd`〔ISO `YYYY-MM-DD`〕/`receivableCents`/`receivedCents`〔整数分〕）与证据坐标（`sourceFile`/`sourceRow`/`importBatch`）。**v35 前的旧批次没有这些列，union_by_name 读取下按 null 返回**——新旧批次混读同表。#5 台账列消费扩展的查询面；501 契约同 totals。
 
-### 场景 9：ledger-consistency 台账内部一致性（#5/#8）
+### 场景 9：ledger-consistency 台账内部一致性（#5/#8，#11 扩展）
 
-`GET /api/fees/risks/{scenario}` 的第 9 个成员（参数同其它场景：feeType/year[/month]/limit）。四条**确定性**规则（非统计推断，阈值固定无参数）：`reading-gap`（读数差与填报用量之差 > 0.5 度——**一表多户已排除**：仅当无分摊列或某一方分摊为全量时才判读数差，#8 §0 撤回教训）/ `ratio-sum`（四方分摊比例之和与 1 偏差 > 0.005）/ `chain-break`（同电表跨账期 上月止数≠本月起数 且未标记换表——**已标记换表的合法断开不算线索**）/ `zero-quantity-billing`（用量=0 且金额>0——疑似漏抄后顺延计费）。每条线索带行级证据锚点与口径 note（不构成认定结论）；`excluded` = 一表多户未判读数差行数 + 已标记换表的断链行数；缺相应列的文件对应规则自动跳过。
+`GET /api/fees/risks/{scenario}` 的第 9 个成员（参数同其它场景：feeType/year[/month]/limit）。六条**确定性**规则（非统计推断，阈值固定无参数）：`reading-gap`（读数差与填报用量之差 > 0.5 度——**一表多户已排除**：仅当无分摊列或某一方分摊为全量时才判读数差，#8 §0 撤回教训）/ `ratio-sum`（四方分摊比例之和与 1 偏差 > 0.005）/ `chain-break`（同电表跨账期 上月止数≠本月起数 且未标记换表——**已标记换表的合法断开不算线索**）/ `zero-quantity-billing`（用量=0 且金额>0——疑似漏抄后顺延计费）/ `purchase-period`（购电截止日−购电起始日 > 35 天——转供电「长期不报+集中补报」候选，#11：补报可能是合理业务，线索非错误认定）/ `receivable-unreceived`（应收电信−实收电信 > 0——资金回收风险，实收=0 为完全未收形态，#11）。每条线索带行级证据锚点与口径 note（不构成认定结论）；`excluded` = 一表多户未判读数差行数 + 已标记换表的断链行数；缺相应列的文件对应规则自动跳过；#11 两规则依赖购电起止日/应收实收列，旧批次（无该列的一代文件）同样自动跳过（列探测守卫）。
 
 ## POST /api/fees/links/scan — 费用-资源分级关联扫描（#63，#58 阶段 3）
 
@@ -867,7 +867,7 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 ## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided= — 费用风险八场景（#58 阶段 4；#114 加场景 7；#118 加场景 8）
 
-**固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）/ `missing-billing`（有量无费——已确认关联的在网/在建资源该账期窗口内有指标采集点而费用侧无该类型计费记录，跨层组合 #118，账期无记录 ≠ 漏收认定，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
+**固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨——**#11 补报标注**：线索账期内含购电周期 > 70 天〔正常周期×2〕的行时，note 标注「疑似长期不报后集中补报」并携带最长周期天数，环比涨幅可能是攒报的计量后果而非趋势异常；标注而非排除，攒报是否合理由人判断；依赖购电起止日列，旧批次无列则退化为原行为）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）/ `missing-billing`（有量无费——已确认关联的在网/在建资源该账期窗口内有指标采集点而费用侧无该类型计费记录，跨层组合 #118，账期无记录 ≠ 漏收认定，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
 
 返回 `RiskResult`（金额均为整数分；线索按 metric 降序、(站址, 账期) 升序确定序；`evidence` 为行级证据锚点，可回读快照原文）：
 

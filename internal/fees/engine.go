@@ -58,9 +58,16 @@ type LedgerRow struct {
 	ShareUnicom  *float64 `json:"shareUnicom,omitempty"`
 	ShareTelecom *float64 `json:"shareTelecom,omitempty"`
 	ShareTower   *float64 `json:"shareTower,omitempty"`
-	SourceFile   string   `json:"sourceFile"`
-	SourceRow    int      `json:"sourceRow"`
-	ImportBatch  string   `json:"importBatch"`
+	// #11's transfer-supply catch-up columns (nil when the source sheet
+	// carried none): the purchase window (ISO dates) and the two money
+	// faces (integer cents).
+	PurchaseStart   *string `json:"purchaseStart,omitempty"`
+	PurchaseEnd     *string `json:"purchaseEnd,omitempty"`
+	ReceivableCents *int64  `json:"receivableCents,omitempty"`
+	ReceivedCents   *int64  `json:"receivedCents,omitempty"`
+	SourceFile      string  `json:"sourceFile"`
+	SourceRow       int     `json:"sourceRow"`
+	ImportBatch     string  `json:"importBatch"`
 }
 
 // LedgerConsistencyClue is one ledger-internal-consistency finding (#5's

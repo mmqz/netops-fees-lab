@@ -105,6 +105,7 @@ func (duckQueryEngine) LedgerRows(ctx context.Context, analysisDir string, feeTy
 SELECT site_code, year, month, amount_cents, record_key,
        meter_no, reading_start, reading_end, meter_prev_end, meter_swapped,
        quantity, unit_price, share_mobile, share_unicom, share_telecom, share_tower,
+       purchase_start, purchase_end, receivable_cents, received_cents,
        source_file, source_row, import_batch
 FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
 WHERE fee_type = '%s' %s %s
@@ -119,17 +120,21 @@ LIMIT %d`,
 	var out []LedgerRow
 	for rows.Next() {
 		var (
-			r        LedgerRow
-			recordNo sql.NullString
-			meterNo  sql.NullString
-			f        [9]sql.NullFloat64
-			swapped  sql.NullBool
-			_        = f
+			r               LedgerRow
+			recordNo        sql.NullString
+			meterNo         sql.NullString
+			f               [9]sql.NullFloat64
+			swapped         sql.NullBool
+			purchaseStart   sql.NullString
+			purchaseEnd     sql.NullString
+			receivableCents sql.NullInt64
+			receivedCents   sql.NullInt64
 		)
 		if err := rows.Scan(&r.SiteCode, &r.Year, &r.Month, &r.AmountCents,
 			&recordNo,
 			&meterNo, &f[0], &f[1], &f[2], &swapped, &f[3], &f[4],
 			&f[5], &f[6], &f[7], &f[8],
+			&purchaseStart, &purchaseEnd, &receivableCents, &receivedCents,
 			&r.SourceFile, &r.SourceRow, &r.ImportBatch); err != nil {
 			return nil, fmt.Errorf("fees: 读取台账行: %w", err)
 		}
@@ -140,6 +145,24 @@ LIMIT %d`,
 		if meterNo.Valid {
 			v := meterNo.String
 			r.MeterNo = &v
+		}
+		// #11: the transfer-supply catch-up columns (NULL in
+		// pre-#11 files — union_by_name keeps them absent).
+		if purchaseStart.Valid {
+			v := purchaseStart.String
+			r.PurchaseStart = &v
+		}
+		if purchaseEnd.Valid {
+			v := purchaseEnd.String
+			r.PurchaseEnd = &v
+		}
+		if receivableCents.Valid {
+			v := receivableCents.Int64
+			r.ReceivableCents = &v
+		}
+		if receivedCents.Valid {
+			v := receivedCents.Int64
+			r.ReceivedCents = &v
 		}
 		if f[0].Valid {
 			r.ReadingStart = &f[0].Float64

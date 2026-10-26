@@ -118,8 +118,8 @@ ORDER BY total_cents DESC, site_code, year, month, rk`,
 	return clues, 0, rows.Err()
 }
 
-// The deterministic tolerances of the ledger-consistency family (#5/#8)
-// — every value documented, none buried in SQL:
+// The deterministic tolerances of the ledger-consistency family (#5/#8,
+// extended by #11) — every value documented, none buried in SQL:
 const (
 	// ReadingGapTolerance: 读数差 vs 填报用量的容差（度）。台账读数为整数或
 	// 一位小数，0.5 容差吸收抄表进位；超出即线索。
@@ -132,14 +132,54 @@ const (
 	ExclusiveShareFloor = 0.999
 )
 
-// RiskLedgerConsistencyPreset implements scenario 9 (#5, refined by #8):
-// four deterministic in-ledger rules over the optional columns. Every
-// clue is row-level evidence; the Excluded return counts the rows a rule
-// intentionally did NOT judge: multi-party meters for reading-gap (the
-// 一表多户 shape of #8 §0 — 读数差 is the WHOLE meter's consumption while
-// 实际电量 is this party's share; comparing them is a false-positive
-// machine) and swap-flagged rows for chain-break (a marked meter change
-// is a legal break).
+// duckTableColumns returns the union_by_name column set of the analysis
+// glob — the schema-availability guard of scenario 9. A rule whose columns
+// exist in NO file of the partition must not even be REFERENCED in the SQL
+// (DuckDB answers a binder error for a column no file carries), and
+// union_by_name only unifies columns that exist somewhere: a partition of
+// exclusively pre-#4/pre-#5/pre-#11 generation files has no meter_no /
+// reading_start / purchase_start to read. The guard resolves every
+// optional column to itself (present) or a NULL literal (absent) — the
+// rules then skip the NULL rows exactly like a file that carries no such
+// column, and a mixed-generation partition keeps working either way.
+func duckTableColumns(ctx context.Context, db *sql.DB, glob string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(
+		"SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet('%s', hive_partitioning = true, union_by_name = true))",
+		glob))
+	if err != nil {
+		return nil, fmt.Errorf("fees: 分析表列探测: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("fees: 读取分析表列: %w", err)
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
+}
+
+// sqlRef renders a column reference that survives absent generations:
+// the column name when the partition carries it, a typed NULL literal
+// otherwise. nilRef also EXISTS-guarded date_diff: the CASE yields NULL
+// when either side is absent — pre-#11 files never fire the span rule.
+func sqlRef(cols map[string]bool, name string) string {
+	if cols[name] {
+		return name
+	}
+	return "NULL"
+}
+
+// RiskLedgerConsistencyPreset implements scenario 9 (#5, refined by #8,
+// extended by #11): six deterministic in-ledger rules over the optional
+// columns. Every clue is row-level evidence; the Excluded return counts
+// the rows a rule intentionally did NOT judge: multi-party meters for
+// reading-gap (the 一表多户 shape of #8 §0 — 读数差 is the WHOLE meter's
+// consumption while 实际电量 is this party's share; comparing them is a
+// false-positive machine) and swap-flagged rows for chain-break (a marked
+// meter change is a legal break).
 func (duckQueryEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]LedgerConsistencyClue, int, error) {
 	if analysisEmpty(analysisDir) {
 		return nil, 0, nil
@@ -152,23 +192,44 @@ func (duckQueryEngine) RiskLedgerConsistencyPreset(ctx context.Context, analysis
 	if q.Limit <= 0 {
 		q.Limit = 100
 	}
-	base := `
-SELECT site_code, year, month, amount_cents, meter_no, reading_start, reading_end,
-       meter_prev_end, meter_swapped, quantity, unit_price,
-       share_mobile, share_unicom, share_telecom, share_tower,
-       (share_mobile IS NOT NULL OR share_unicom IS NOT NULL OR share_telecom IS NOT NULL OR share_tower IS NOT NULL) AS has_share,
-       COALESCE(share_mobile,0) + COALESCE(share_unicom,0) + COALESCE(share_telecom,0) + COALESCE(share_tower,0) AS share_sum,
+	glob := feeTableGlob(analysisDir)
+	cols, err := duckTableColumns(ctx, db, glob)
+	if err != nil {
+		return nil, 0, err
+	}
+	r := func(name string) string { return sqlRef(cols, name) }
+	base := fmt.Sprintf(`
+SELECT site_code, year, month, amount_cents,
+       %[1]s AS meter_no, %[2]s AS reading_start, %[3]s AS reading_end,
+       %[4]s AS meter_prev_end, %[5]s AS meter_swapped, %[6]s AS quantity, %[7]s AS unit_price,
+       %[8]s AS share_mobile, %[9]s AS share_unicom, %[10]s AS share_telecom, %[11]s AS share_tower,
+       (%[8]s IS NOT NULL OR %[9]s IS NOT NULL OR %[10]s IS NOT NULL OR %[11]s IS NOT NULL) AS has_share,
+       COALESCE(%[8]s,0) + COALESCE(%[9]s,0) + COALESCE(%[10]s,0) + COALESCE(%[11]s,0) AS share_sum,
        -- exclusive_meter: the reading-gap precondition of #8 §0 —
        -- judgeable ONLY when the party bears the FULL meter: no share
        -- columns at all, or one single party's share is the whole. A
        -- share_sum of 1 is NOT exclusivity (a 40/60 split also sums to
        -- 1 — the trap the first SQL fell into).
-       (NOT (share_mobile IS NOT NULL OR share_unicom IS NOT NULL OR share_telecom IS NOT NULL OR share_tower IS NOT NULL)
-        OR greatest(COALESCE(share_mobile,0), COALESCE(share_unicom,0), COALESCE(share_telecom,0), COALESCE(share_tower,0)) >= %f) AS exclusive_meter,
+       (NOT (%[8]s IS NOT NULL OR %[9]s IS NOT NULL OR %[10]s IS NOT NULL OR %[11]s IS NOT NULL)
+        OR greatest(COALESCE(%[8]s,0), COALESCE(%[9]s,0), COALESCE(%[10]s,0), COALESCE(%[11]s,0)) >= %[12]f) AS exclusive_meter,
+       -- purchase_span (#11): the day-level length of the purchase window;
+       -- NULL when either date (or the whole generation) is absent — the
+       -- rule only judges rows that CARRY the window.
+       %[13]s AS purchase_start, %[14]s AS purchase_end,
+       CASE WHEN %[13]s IS NOT NULL AND %[14]s IS NOT NULL
+            THEN date_diff('day', CAST(%[13]s AS DATE), CAST(%[14]s AS DATE)) END AS purchase_span,
+       %[15]s AS receivable_cents, %[16]s AS received_cents,
        source_file, source_row, import_batch
-FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
-WHERE fee_type = '%s' %s
-`
+FROM read_parquet('%[17]s', hive_partitioning = true, union_by_name = true)
+WHERE fee_type = '%[18]s' %[19]s
+`,
+		r("meter_no"), r("reading_start"), r("reading_end"),
+		r("meter_prev_end"), r("meter_swapped"), r("quantity"), r("unit_price"),
+		r("share_mobile"), r("share_unicom"), r("share_telecom"), r("share_tower"),
+		ExclusiveShareFloor,
+		r("purchase_start"), r("purchase_end"),
+		r("receivable_cents"), r("received_cents"),
+		glob, string(q.FeeType), riskPeriodFilter(q.Year, q.Month))
 	// NOTE: the UNION ALL shape keeps every rule's WHERE explicit below —
 	// one query, one round trip, the limit applied to the merged set.
 	query := fmt.Sprintf(`
@@ -213,6 +274,31 @@ zero AS (
          '用量=0 但应付金额>0——疑似上期漏抄表后用量顺延到本期计费' AS detail
   FROM rule_rows
   WHERE quantity IS NOT NULL AND quantity = 0 AND amount_cents > 0
+),
+-- purchase-period (#11 rule 1): the day-level purchase window exceeds the
+-- normal ~30-day cycle beyond tolerance — the「长期不报后集中补报」shape.
+-- Deterministic pure date arithmetic; the SPAN rides the clue (764-day
+-- extremes must be visible, not just ">35").
+span AS (
+  SELECT site_code, year, month, amount_cents, source_file, source_row, import_batch,
+         purchase_span AS metric,
+         '购电周期（天）' AS label,
+         '购电起始日=' || purchase_start || '，购电截止日=' || purchase_end || '，周期 ' || purchase_span || ' 天——疑似长期不报后集中补报，期间用电量不可知，请核对应收账款与抄表安排' AS detail
+  FROM rule_rows
+  WHERE purchase_span IS NOT NULL AND purchase_span > %d
+),
+-- receivable-unreceived (#11 rule 2): 应收电信 vs 实收电信 — the two money
+-- faces of the transfer-supply sheet disagree (received < receivable, any
+-- positive gap). The receivable-unreceived money is the direct recovery-
+-- risk number (#11 measured ~5.3万 over 8 months in one prefecture).
+unrecv AS (
+  SELECT site_code, year, month, amount_cents, source_file, source_row, import_batch,
+         (receivable_cents - received_cents) / 100.0 AS metric,
+         '应收未收差额（元）' AS label,
+         '应收电信=' || (receivable_cents / 100.0) || ' 元，实收电信=' || (received_cents / 100.0) || ' 元——差额需核实是否已收款或仍在流程中（实收=0 为完全未收形态）' AS detail
+  FROM rule_rows
+  WHERE receivable_cents IS NOT NULL AND received_cents IS NOT NULL
+    AND (receivable_cents - received_cents) > 0
 )
 SELECT 'reading-gap' AS rule, site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM gap
 UNION ALL
@@ -221,10 +307,14 @@ UNION ALL
 SELECT 'chain-break', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM chain
 UNION ALL
 SELECT 'zero-quantity-billing', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM zero
+UNION ALL
+SELECT 'purchase-period', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM span
+UNION ALL
+SELECT 'receivable-unreceived', site_code, year, month, metric, label, detail, source_file, source_row, import_batch FROM unrecv
 ORDER BY year, month, site_code, rule
 LIMIT %d`,
-		fmt.Sprintf(base, ExclusiveShareFloor, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, q.Month)),
-		ReadingGapTolerance, ShareSumEpsilon, q.Limit)
+		base,
+		ReadingGapTolerance, ShareSumEpsilon, PurchaseSpanToleranceDays, q.Limit)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, 0, fmt.Errorf("fees: 风险场景 ledger-consistency 查询: %w", err)
@@ -260,7 +350,7 @@ SELECT
 + (SELECT count(*) FROM chains
      WHERE prev_end IS NOT NULL AND reading_start IS NOT NULL AND reading_start <> prev_end
        AND COALESCE(meter_swapped, false))`,
-			fmt.Sprintf(base, ExclusiveShareFloor, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, q.Month)))).Scan(&excluded); err != nil {
+			base)).Scan(&excluded); err != nil {
 			return nil, 0, fmt.Errorf("fees: 台账一致性排除数: %w", err)
 		}
 	}
@@ -346,6 +436,11 @@ SELECT count(*) FROM per WHERE batches > 1`, glob, feeType, period)
 // totals whose rise against the previous billed month crosses Ratio.
 // The excluded count reports the multi-batch pairs left out (#59's
 // determinism ruling — they are scenarios 2/3's clues).
+//
+// #11: clues whose period carries a purchase window beyond
+// CatchUpSpanDays get the catch-up ANNOTATION (not exclusion) — the
+// rise may be the metering consequence of a concentrated catch-up
+// report, and the operator must see that reading before acting.
 func (duckQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	if analysisEmpty(analysisDir) {
 		return nil, 0, nil
@@ -355,6 +450,10 @@ func (duckQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, 
 		return nil, 0, err
 	}
 	defer func() { _ = db.Close() }()
+	catchUp, err := catchUpSpans(ctx, db, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, 0))
+	if err != nil {
+		return nil, 0, err
+	}
 	// A single-month scope narrows the CLUE window, not the lag base:
 	// the per CTE always sees the WHOLE YEAR (month 0 in the period
 	// filter) so the previous billed month stays in the sequence — the
@@ -414,6 +513,21 @@ ORDER BY ratio DESC, site_code, year, month`,
 		} else if prevRs.Valid && int64(r) != prevRs.Int64 {
 			clue.Note = fmt.Sprintf("本期行数 %d→%d——记录构成发生变化，请核对行级明细", prevRs.Int64, int64(r))
 		}
+		// #11 §4.3: the catch-up annotation — when the period's rows
+		// carry a purchase window beyond 2× the normal cycle, the
+		// rise is likely the METERING consequence of a concentrated
+		// catch-up report (攒报), not a trend anomaly. ANNOTATED,
+		// never excluded — the operator decides whether the catch-up
+		// is business-as-usual (rural site, quarterly settlement) or
+		// a genuine recovery risk.
+		if span, ok := catchUp[catchKey{site, year, month}]; ok {
+			note := fmt.Sprintf("本期含长购电周期行（最长 %d 天，超过 %d 天标注线）——疑似长期不报后集中补报，环比涨幅可能是攒报的计量后果而非趋势异常，请结合购电起止日人工核查", span, CatchUpSpanDays)
+			if clue.Note != "" {
+				clue.Note = note + "；" + clue.Note
+			} else {
+				clue.Note = note
+			}
+		}
 		clues = append(clues, clue)
 	}
 
@@ -435,6 +549,54 @@ ORDER BY ratio DESC, site_code, year, month`,
 		return nil, 0, err
 	}
 	return clues, excluded + zeroBase, nil
+}
+
+// catchKey addresses one (site, period) pair in the catch-up map.
+type catchKey struct {
+	SiteCode string
+	Year     int
+	Month    int
+}
+
+// catchUpSpans computes the per-(site, period) MAXIMUM purchase-window
+// span (days) that crosses CatchUpSpanDays — the #11 §4.3 annotation
+// source of the spike scenario. Schema-guarded: pre-#11 partitions (no
+// purchase columns anywhere in the glob) answer an empty map and the
+// scenario degrades to its pre-#11 behavior byte-compatibly; the period
+// filter is year-wide like the spike query's own lag base (a catch-up
+// annotated in any month of the chain stays visible).
+func catchUpSpans(ctx context.Context, db *sql.DB, glob, feeType, period string) (map[catchKey]int, error) {
+	cols, err := duckTableColumns(ctx, db, glob)
+	if err != nil {
+		return nil, err
+	}
+	if !cols["purchase_start"] || !cols["purchase_end"] {
+		return map[catchKey]int{}, nil // pre-#11 generation: no windows to read
+	}
+	query := fmt.Sprintf(`
+SELECT site_code, year, month,
+       max(date_diff('day', CAST(purchase_start AS DATE), CAST(purchase_end AS DATE))) AS span
+FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
+WHERE fee_type = '%s' %s
+  AND purchase_start IS NOT NULL AND purchase_end IS NOT NULL
+GROUP BY site_code, year, month
+HAVING max(date_diff('day', CAST(purchase_start AS DATE), CAST(purchase_end AS DATE))) > %d`,
+		glob, feeType, period, CatchUpSpanDays)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("fees: 补报周期扫描查询: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[catchKey]int{}
+	for rows.Next() {
+		var k catchKey
+		var span int
+		if err := rows.Scan(&k.SiteCode, &k.Year, &k.Month, &span); err != nil {
+			return nil, fmt.Errorf("fees: 读取补报周期: %w", err)
+		}
+		out[k] = span
+	}
+	return out, rows.Err()
 }
 
 // zeroBasePairCount counts the single-batch (site, period) pairs whose
