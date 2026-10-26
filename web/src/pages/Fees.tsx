@@ -911,7 +911,10 @@ export function FeesPage() {
                           </td>
                           <td>{c.month > 0 ? `${c.year}-${String(c.month).padStart(2, '0')}` : FEES_RISKS_PERIOD_ALL_YEAR(c.year)}</td>
                           <td>
-                            {formatRiskMetric(c.metricValue, c.metricLabel)}（{c.metricLabel}）
+                            {/* #23: 括号里是触发口径（thresholdLabel），不是指标名——
+                                后端漏给时渲染 null，绝不出现空括号（） */}
+                            {formatRiskMetric(c.metricValue, c.metricLabel)}
+                            {c.thresholdLabel ? `（${c.thresholdLabel}）` : null}
                           </td>
                           <td className="muted">{c.thresholdLabel}</td>
                           <td>{FEES_RISKS_EVIDENCE_ROWS(c.evidenceTotal)}</td>

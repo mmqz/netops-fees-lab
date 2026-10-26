@@ -621,7 +621,10 @@ export function FeesOverview() {
                             <td>{m.scenarioCn}</td>
                             <td>
                               {formatRiskMetric(m.clue.metricValue, m.clue.metricLabel)}
-                              <span className="muted muted--small">（{m.clue.thresholdLabel}）</span>
+                              {/* #23: 空值兜底——后端漏给口径时渲染 null，不出空括号 */}
+                              {m.clue.thresholdLabel ? (
+                                <span className="muted muted--small">（{m.clue.thresholdLabel}）</span>
+                              ) : null}
                             </td>
                             <td>
                               {clueStateLabel(m.clue.decision) === 'verified' && (

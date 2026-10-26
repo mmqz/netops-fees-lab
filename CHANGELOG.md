@@ -4,7 +4,7 @@
 
 ## [0.20.0] — 进行中
 
-**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
+**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
 
 ### 修复 — Windows 构建阻断（#22）：`FeesOverview.tsx` 与 `feesOverview.ts` 仅大小写不同，Windows 上 tsc/vite 双双失败
 - **根因**：`web/src/pages/` 下同时存在 `FeesOverview.tsx`（React 组件，大写 F）与 `feesOverview.ts`（纯函数库，小写 f）——Linux/macOS 大小写敏感文件系统两者共存一切正常，Windows 大小写不敏感把它们当同一文件：`import { FeesOverview } from './FeesOverview'` 解析到不含该导出的 `feesOverview.ts`，tsc 报 TS1261/TS1149、vite 报「"FeesOverview" is not exported by "src/pages/feesOverview.ts"」，**前端完全无法构建**（Go 二进制随之缺内嵌前端）。issue 报告人 Windows/Node 24/npm 11 实测复现率 100%。
@@ -23,6 +23,12 @@
 - **根因**：`ImportSummary` 三条路径手工拼装——预检重复分支缺 `PeriodSource/PeriodBasis/Files/Warnings`；竞态分支更缺 `WorkbookName`；`periodSource` 空串与字段缺省不可区分，审计链（files/warnings）在重复时静默消失。
 - **修复**：单一构造函数 `summaryFromBatch(existing)`——批次行为唯一事实源（身份字段全部回填库值；`files[]` 从分析层恢复（`BatchParquetFiles`——批次行不存 manifest，分析层才是数据所在）；warnings 回填 `#6` 源文件可写提醒）；两条重复分支共用，结构性杜绝再次漂移。
 - **裁决**：legacy 批次（pre-v36）`periodSource` 库值为空时如实回空（诚实优先——验收标准「非空」针对 #15 之后批次，测试以新批次钉非空+等于库值）。
+
+### 修复 — 线索可解释性缺口（#23）：4 个无数值阈值场景 thresholdLabel 为空渲染出空括号；前端一处误用 metricLabel
+- **后端**：unlinked / retired-billing / idle-billing / missing-billing 四场景构造 `RiskClue` 时补 `ThresholdLabel`——**判定口径本身**作为标签（「关联面为空（confirmed 与 pending 均无）」「关联资源状态 ∈ {…} 且该账期仍有费用」「关联资源指标点数 = 0 且仍有费用」「指标点数 > 0 且费用侧无记录」），与 `rule: xxx` 风格一致；**不为填满而编造数字**（issue 的关键原则）。
+- **前端**：`Fees.tsx` 触发指标列的括号内容从误用的 `metricLabel` 改为 `thresholdLabel`（同一字段被用两次的缺陷）+ 空值兜底（`thresholdLabel ? （…） : null`——后端漏给也绝不渲染空括号）；`FeesOverview.tsx` 的正确写法处同样补空值兜底。
+- **契约测试**：`TestEveryClueCarriesThresholdLabel`——遍历九内置场景（复用 risks 夹具）断言**每条 clue 的 thresholdLabel 非空**（实测 28 条线索 × 9 场景全过）；未来新增场景忘记赋值将直接红在此处而非 UI 空括号。
+- **不改判定逻辑**：只补展示文案（issue 验收 5）——全部 146 前端测试 + build + duckdb 引擎测试绿。
 
 ## [0.19.1] — 2026-10-26
 

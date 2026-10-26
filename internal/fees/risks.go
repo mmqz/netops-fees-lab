@@ -539,8 +539,11 @@ func (s *Service) risksRetiredBilling(ctx context.Context, engine QueryEngine, q
 		clues = append(clues, RiskClue{
 			SiteCode: r.SiteCode, Year: r.Year, Month: r.Month,
 			MetricValue: float64(r.TotalCents), MetricLabel: "totalCents",
-			EvidenceTotal: r.Rows,
-			Note:          fmt.Sprintf("关联资源 %s 状态为 %q，该账期费用仍流入——请人工核实", lr.naturalKey, lr.status),
+			// #23: the "threshold" of a no-numeric-threshold scenario IS the
+			// verdict's own condition — never an invented number.
+			ThresholdLabel: "关联资源状态 ∈ {" + joinComma(q.Statuses) + "} 且该账期仍有费用",
+			EvidenceTotal:  r.Rows,
+			Note:           fmt.Sprintf("关联资源 %s 状态为 %q，该账期费用仍流入——请人工核实", lr.naturalKey, lr.status),
 		})
 	}
 	return cluesPack{
@@ -577,8 +580,11 @@ func (s *Service) risksUnlinked(ctx context.Context, engine QueryEngine, q RiskQ
 		clues = append(clues, RiskClue{
 			SiteCode: r.SiteCode, Year: q.Year, Month: q.Month,
 			MetricValue: float64(r.TotalCents), MetricLabel: "totalCents",
-			EvidenceTotal: r.Rows,
-			Note:          "该费用编码既无已确认关联也无待确认提案（已驳回的候选视为无匹配）——零资源计费线索，请人工核实",
+			// #23: the verdict condition as the label (no numeric threshold
+			// exists — the empty-link face IS the signal).
+			ThresholdLabel: "关联面为空（confirmed 与 pending 均无）",
+			EvidenceTotal:  r.Rows,
+			Note:           "该费用编码既无已确认关联也无待确认提案（已驳回的候选视为无匹配）——零资源计费线索，请人工核实",
 		})
 	}
 	return cluesPack{
@@ -650,8 +656,10 @@ func (s *Service) risksIdleBilling(ctx context.Context, engine QueryEngine, q Ri
 		clues = append(clues, RiskClue{
 			SiteCode: r.SiteCode, Year: r.Year, Month: r.Month,
 			MetricValue: float64(r.TotalCents), MetricLabel: "totalCents",
-			EvidenceTotal: r.Rows,
-			Note:          fmt.Sprintf("关联资源 %s 在 %04d-%02d 账期窗口内无任何指标采集点，但该账期仍有费用记录——两条台账矛盾，请人工核实（无采集也可能是采集覆盖缺失或断链，非空置认定）", lr.naturalKey, r.Year, r.Month),
+			// #23: the deterministic zero-point verdict, stated as the label.
+			ThresholdLabel: "关联资源指标点数 = 0 且仍有费用",
+			EvidenceTotal:  r.Rows,
+			Note:           fmt.Sprintf("关联资源 %s 在 %04d-%02d 账期窗口内无任何指标采集点，但该账期仍有费用记录——两条台账矛盾，请人工核实（无采集也可能是采集覆盖缺失或断链，非空置认定）", lr.naturalKey, r.Year, r.Month),
 		})
 	}
 	return cluesPack{
@@ -752,8 +760,10 @@ func (s *Service) risksMissingBilling(ctx context.Context, engine QueryEngine, q
 			clues = append(clues, RiskClue{
 				SiteCode: link.FeeSiteCode, Year: q.Year, Month: m,
 				MetricValue: float64(n), MetricLabel: "metricPoints",
-				EvidenceTotal: 0,
-				Note:          fmt.Sprintf("关联资源 %s 在 %04d-%02d 账期窗口内有 %d 个指标采集点，但费用侧该账期无任何本类型计费记录——两条台账反向矛盾，疑似漏收线索仅供人工核实（无月度账单不等于漏收认定：可能季度/年度结算、该费用类型未导入或结算主体挂账在其他编码）", ri.key, q.Year, m, n),
+				// #23: the reverse-verdict condition as the label.
+				ThresholdLabel: "指标点数 > 0 且费用侧无记录",
+				EvidenceTotal:  0,
+				Note:           fmt.Sprintf("关联资源 %s 在 %04d-%02d 账期窗口内有 %d 个指标采集点，但费用侧该账期无任何本类型计费记录——两条台账反向矛盾，疑似漏收线索仅供人工核实（无月度账单不等于漏收认定：可能季度/年度结算、该费用类型未导入或结算主体挂账在其他编码）", ri.key, q.Year, m, n),
 			})
 		}
 	}

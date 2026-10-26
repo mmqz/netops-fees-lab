@@ -12,6 +12,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mmqz/netops-fees-lab/internal/domain"
@@ -364,4 +365,56 @@ func TestRiskPresetsDuck(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestEveryClueCarriesThresholdLabel (#23's contract): whatever the
+// scenario, a clue's thresholdLabel is never empty — a clue whose verdict
+// condition is invisible is unexplainable, and "可解释" is the product
+// doctrine. The four no-numeric-threshold scenarios (unlinked /
+// retired-billing / idle-billing / missing-billing) state their verdict
+// conditions as the label; the numeric ones keep their existing labels.
+// A future scenario that forgets the label fails HERE, not as an empty
+// 括号 in the UI.
+func TestEveryClueCarriesThresholdLabel(t *testing.T) {
+	svc, db, _ := newService(t)
+	ctx := context.Background()
+	importRiskFixture(t, svc)
+	seedLinkResource(t, db, "res_retired_site", "RETIRED-SITE", "停用")
+	seedLinkResource(t, db, "res_active_site", "ACTIVE-SITE", "在网")
+	seedLinkResource(t, db, "res_unbilled_site", "UNBILLED-SITE", "在网")
+	if err := db.Do(ctx, func(tx *repo.Tx) error {
+		return tx.FeeSiteLinks.InsertProposal(ctx, domain.FeeSiteLink{
+			ID: "fsl_pending_lbl", FeeSiteCode: "PENDING-SITE", ResourceID: "res_active_site",
+			ResourceType: domain.ResourceTypeSite, ResourceKey: "ACTIVE-SITE",
+			Grade: domain.LinkGradeFuzzy, Status: domain.LinkStatusPending,
+			Source: domain.LinkSourceAuto, CreatedAt: simTSLink,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := Query(ctx)
+	if !engine.Available() {
+		t.Fatal("the duckdb build must report Available")
+	}
+	scenarios := []RiskScenario{
+		RiskRetiredBilling, RiskDuplicateSettlement, RiskLedgerMismatch, RiskSpike,
+		RiskOutlier, RiskUnlinked, RiskIdleBilling, RiskMissingBilling, RiskLedgerConsistency,
+	}
+	checked := 0
+	for _, sc := range scenarios {
+		res, err := svc.Risks(ctx, engine, sc, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024})
+		if err != nil {
+			t.Fatalf("%s: %v", sc, err)
+		}
+		for _, c := range res.Clues {
+			checked++
+			if strings.TrimSpace(c.ThresholdLabel) == "" {
+				t.Errorf("%s clue %s %04d-%02d: thresholdLabel is EMPTY — every clue must carry its verdict condition (#23)", sc, c.SiteCode, c.Year, c.Month)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("fixture must produce at least one clue for the contract to mean anything")
+	}
+	t.Logf("thresholdLabel contract verified on %d clues across %d scenarios", checked, len(scenarios))
 }
