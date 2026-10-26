@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -192,12 +193,18 @@ func TestSimSentinelErrors(t *testing.T) {
 }
 
 func TestAppVersionP2(t *testing.T) {
-	// P2: the version constant is a single pinned fact (the changelog-head
-	// cross-check below guards the other copy).
-	if AppVersion != "v0.19.0" {
-		t.Errorf("AppVersion = %q, want v0.19.0 (fees display layer + windows red fix — CHANGELOG 0.19.0)", AppVersion)
+	// P2 (#17 方案 A): the version constant is a single pinned FACT, but
+	// never a pinned LITERAL — every bump used to break this test for a
+	// commit (fd2818a's v0.18.1 red). The format is the invariant here;
+	// the head-section agreement is the changelog cross-check below.
+	if !appVersionRe.MatchString(strings.TrimPrefix(AppVersion, "v")) {
+		t.Errorf("AppVersion = %q, not a valid semver (MAJOR.MINOR.PATCH)", AppVersion)
 	}
 }
+
+// appVersionRe accepts exactly MAJOR.MINOR.PATCH (no pre-release/build
+// tags — the release discipline has never used them).
+var appVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // TestAppVersionMatchesChangelogHead enforces the single-fact-source rule
 // (review R1-D1 / R3-C1): the domain constant and the CHANGELOG head section

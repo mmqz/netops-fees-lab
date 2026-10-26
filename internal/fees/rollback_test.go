@@ -151,7 +151,13 @@ func TestRollbackAtomicUnderIOFault(t *testing.T) {
 	}
 	liveBatchFiles(t, analysisDir, sum.BatchID, 0)
 	if _, err := os.Stat(rollbackQuarantineRoot(analysisDir, sum.BatchID)); !os.IsNotExist(err) {
-		t.Errorf("quarantine tree must be dropped after the commit (stat err = %v)", err)
+		// #17: name WHAT is left behind — an empty-dir residue points at
+		// the platform's RemoveAll semantics, a file residue at the
+		// cleanup order. The failure stays a failure; the message makes
+		// the next diagnosis one read instead of one session.
+		entries, _ := os.ReadDir(rollbackQuarantineRoot(analysisDir, sum.BatchID))
+		t.Errorf("quarantine tree must be dropped after the commit (stat err = %v, residue = %d entries: %v)",
+			err, len(entries), dirEntryNames(entries))
 	}
 }
 
@@ -498,4 +504,14 @@ func TestGCRollbackQuarantineSweep(t *testing.T) {
 	if len(matches) != 1 {
 		t.Errorf("glob matches = %v, want exactly the one live partition file", matches)
 	}
+}
+
+// dirEntryNames renders a residue listing for the #17 diagnostics (nil
+// when the read itself failed — the count alone still helps).
+func dirEntryNames(entries []os.DirEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
 }

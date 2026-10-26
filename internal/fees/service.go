@@ -1074,7 +1074,7 @@ func (s *Service) Rollback(ctx context.Context, id string) (FeeBatch, error) {
 		}
 	}
 	if len(torn) > 0 {
-		_ = os.RemoveAll(rollbackQuarantineRoot(s.analysisDir(), id))
+		_ = dropQuarantineTree(rollbackQuarantineRoot(s.analysisDir(), id))
 	}
 
 	// materialize the WHOLE delete plan before touching any file.
@@ -1108,10 +1108,14 @@ func (s *Service) Rollback(ctx context.Context, id string) (FeeBatch, error) {
 	}
 
 	// after the commit the quarantined rows are dead: drop the quarantine
-	// tree (best-effort — a crash here leaves it to GCAnalysis's .rollback
-	// sweep) and prune the emptied partition dirs (the hygiene
-	// RemoveParquetFiles' rollback callers always had).
-	_ = os.RemoveAll(rollbackQuarantineRoot(s.analysisDir(), id))
+	// tree and prune the emptied partition dirs (the hygiene
+	// RemoveParquetFiles' rollback callers always had). The drop is
+	// STILL best-effort at heart — a crash mid-drop leaves it to
+	// GCAnalysis's .rollback sweep — but #17's Windows red (AV scanners
+	// hold transient handles on freshly written files, the main repo's
+	// env-fsync-antivirus precedent) gets a bounded retry first: three
+	// attempts, 50ms apart, then the GC guarantee stands as designed.
+	_ = dropQuarantineTree(rollbackQuarantineRoot(s.analysisDir(), id))
 	for _, p := range plan {
 		pruneEmptyDirs(filepath.Dir(p.live), 3)
 	}

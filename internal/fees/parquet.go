@@ -311,6 +311,25 @@ func rollbackQuarantineRoot(analysisDir, batchID string) string {
 	return filepath.Join(analysisDir, "fees", quarantineDirName, batchID)
 }
 
+// dropQuarantineTree removes a batch's quarantine tree with a bounded
+// retry (#17): Windows AV/indexer handles on freshly written files can
+// hold a transient lock that a single RemoveAll loses; three attempts
+// spaced 50ms release in practice (the main repo's env-fsync-antivirus
+// precedent documents the family). The caller treats any residue as the
+// documented best-effort state — GCAnalysis's .rollback sweep owns it.
+func dropQuarantineTree(root string) error {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err = os.RemoveAll(root); err == nil {
+			return nil
+		}
+		if attempt < 2 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	return err
+}
+
 // buildRollbackPlan materializes the delete plan: every live file of
 // the batch mapped to its mirrored quarantine slot. files are the live
 // paths exactly as BatchParquetFiles returned them (fees-rooted).
