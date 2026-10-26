@@ -98,6 +98,8 @@ func (s *Server) apiRoutes() []route {
 		{Method: "GET", Pattern: "/api/fees/batches/{id}/evidence", Tag: "fees", Summary: "费用证据回读：快照第 N 行原文（row=源文件自身编号，表头=1；source_row 锚点的第三级证据，回滚批次仍可读）", Handler: s.handleFeesEvidence},
 		{Method: "GET", Pattern: "/api/fees/query/totals", Tag: "fees", Summary: "费用分析：站址汇总（feeType/year[/month]，DuckDB 引擎需 duckdb 构建）", Handler: s.handleFeesQueryTotals,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
+		{Method: "GET", Pattern: "/api/fees/query/monthly", Tag: "fees", Summary: "费用分析：月度趋势序列（#3——feeType/year 全年逐月 rows/sites/totalCents；无数据月份不返回，展示层补空白不造零）", Handler: s.handleFeesQueryMonthly,
+			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/query/duplicates", Tag: "fees", Summary: "费用分析：跨批次重复结算候选（风险线索 + 证据锚点）", Handler: s.handleFeesQueryDuplicates,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/query/rows", Tag: "fees", Summary: "费用分析：台账行查询（#5——站址/账期过滤，含可选台账列 读数/用量/单价/四方分摊；旧批次缺列为 null）", Handler: s.handleFeesQueryRows,

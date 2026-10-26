@@ -12,8 +12,8 @@
 | --- | --- | --- |
 | `mcp-tools` | 5 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
 | `mcp-tools-readonly` | 4 | `internal/mcpserver.TestMCPReadOnlyToolCountMatchesFactsFile`：`--read-only` 变体握手 `tools/list` 实数（issue #10；不变式=full 面中 `readOnlyHint=true` 的子集，另由 `TestMCPReadOnlyRegistryIsReadOnlyHintSet` 钉死） |
-| `api-routes` | 47 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
-| `api-fees-routes` | 21 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
+| `api-routes` | 48 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `api-fees-routes` | 22 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
 | `repo-migrations` | 37 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |
 

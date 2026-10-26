@@ -35,6 +35,13 @@ type fakeRiskEngine struct {
 }
 
 func (f *fakeRiskEngine) Available() bool { return true }
+
+// MonthlyTotals is never exercised by the risk scenarios — the interface
+// grew it for the #3 trend surface; the fake carries the honest
+// not-built answer so the compile-time contract stays pinned.
+func (f *fakeRiskEngine) MonthlyTotals(ctx context.Context, analysisDir string, feeType FeeType, year int) ([]MonthlyTotalsRow, error) {
+	return nil, ErrEngineNotBuilt
+}
 func (f *fakeRiskEngine) Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
 	if f.totals == nil {
 		return nil, errors.New("not used")
@@ -803,6 +810,9 @@ func TestQueryPresetsViaService(t *testing.T) {
 type unavailableEngine struct{}
 
 func (unavailableEngine) Available() bool { return false }
+func (unavailableEngine) MonthlyTotals(ctx context.Context, analysisDir string, feeType FeeType, year int) ([]MonthlyTotalsRow, error) {
+	return nil, errors.New("unreachable")
+}
 func (unavailableEngine) Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
 	return nil, errors.New("unreachable")
 }

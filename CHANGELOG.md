@@ -2,9 +2,13 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
-## [0.18.1] — 2026-10-26
+## [0.19.0] — 2026-10-26
 
-**Windows 测试恒红根治 + 发布渠道修复版**（patch：#14；渠道：release.sh 拆仓适配与 v0.17.1 回补——v0.18.0 发布后随即落地）。
+**费用分析展示层二期 + Windows 测试恒红根治 + 发布渠道修复版**（#3 二期总览/趋势/线索列表/一键分析；patch 线：#14、release.sh 拆仓适配与 v0.17.1 回补）。
+
+### 新增 — 费用分析展示层二期（#3）：总览 / 趋势 / 线索列表 / 一键分析
+
+**数据面（本期）**：引擎新原语 `MonthlyTotals`（月度趋势序列）——接口/duckdb 实现/std 501 桩三面，`[]MonthlyTotalsRow{month,rows,sites,totalCents}` 按月升序、**有数据的月份才出现**（无数据月份不返回，展示层补空白不造零）；`sites` 去重站址数与总览卡同源；整数分契约（#65 P1-a）贯穿。HTTP `GET /api/fees/query/monthly?feeType=&year=`（**不接受 month 参数**——400 先于 501，与 totals 的参数校验先于引擎检查同一教义）+ CLI `fees query monthly --type --year`（--month 拒绝 exit 2 先于引擎检查）。测试：duckdb 真机验收（多月聚合/缺席月份缺席/类型隔离/空年 nil）+ HTTP 契约（501 形态/400 矩阵/OpenAPI 路由闭集）+ CLI e2e（诚实拒绝/--month exit 2）；`fakeRiskEngine`/`unavailableEngine` 测试替身随接口扩展补桩。事实源：api-routes 47→48、api-fees-routes 21→22。
 
 ### 修复 — Windows 全量测试恒红（#14）：源文件可写提示的平台假设统一
 - **根因**：`sourceWritableWarnings` 按 `runtime.GOOS == "windows"` 平台短路返回 nil（注释假设「Windows 上 POSIX 写位无意义」），但 `TestE2EVerifySources` 与 `TestLedgerColumnsRoundTripAndCompat` 恒断言 0644 源文件必须携带只读建议——实现与测试的平台假设背离，Windows 上 15 包恒 2 红，恒红测试掩盖真实回归。

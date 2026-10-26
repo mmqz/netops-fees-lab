@@ -393,10 +393,10 @@ func cmdFeesEvidence(ctx context.Context, svc *fees.Service, args []string, stdo
 	})
 }
 
-// cmdFeesQuery implements `fees query totals|duplicates --type --year [--month] [--limit]`.
+// cmdFeesQuery implements `fees query totals|monthly|duplicates|rows --type --year [--month] [--limit]`.
 func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return &usageError{msg: "fees query 需要 totals、duplicates 或 rows 子命令"}
+		return &usageError{msg: "fees query 需要 totals、monthly、duplicates 或 rows 子命令"}
 	}
 	preset, rest := args[0], args[1:]
 	fs, usage := newFlagSet("fees query " + preset)
@@ -419,6 +419,11 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 	if err != nil {
 		return &usageError{msg: err.Error(), usage: usage.String()}
 	}
+	if preset == "monthly" && *month > 0 {
+		// parameter validation precedes the engine state — the same
+		// doctrine as the HTTP layer's 400-before-501.
+		return &usageError{msg: "fees query monthly 不接受 --month——序列覆盖全年逐月", usage: usage.String()}
+	}
 	engine := fees.Query(ctx)
 	if !engine.Available() {
 		return fmt.Errorf("fees: 本二进制未编译分析查询引擎（%w）——发布构建使用 -tags duckdb（CGO）", fees.ErrEngineNotBuilt)
@@ -432,6 +437,18 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 		}
 		return writeJSON(stdout, map[string]any{
 			"preset": "totals", "feeType": string(t), "year": *year, "month": *month,
+			"items": rows, "total": len(rows),
+		})
+	case "monthly":
+		// #3: the whole-year monthly trend series (no --month, no --limit —
+		// twelve rows are the honest ceiling; the --month refusal fires
+		// before the engine check below).
+		rows, err := engine.MonthlyTotals(ctx, analysis, t, *year)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"preset": "monthly", "feeType": string(t), "year": *year,
 			"items": rows, "total": len(rows),
 		})
 	case "rows":
@@ -455,7 +472,7 @@ func cmdFeesQuery(ctx context.Context, svc *fees.Service, dataDir string, args [
 			"items": rows, "total": len(rows),
 		})
 	default:
-		return &usageError{msg: fmt.Sprintf("fees query 预设必须是 totals 或 duplicates，收到 %q", preset)}
+		return &usageError{msg: fmt.Sprintf("fees query 预设必须是 totals、monthly、duplicates 或 rows，收到 %q", preset)}
 	}
 }
 

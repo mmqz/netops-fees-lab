@@ -837,6 +837,10 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 **固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,totalCents}],total}`（按 totalCents 降序）。**金额为整数分**（`totalCents`，#65 P1-a：金额在解析/存储/聚合/输出全链路走 int64 分，杜绝浮点对账误差；展示层自行 /100）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；Windows 原生无 duckdb 路径——用 Docker/WSL2，见 fees-layer.md §5；导入/快照/Parquet 写入不受影响）。
 
+## GET /api/fees/query/monthly?feeType=&year= — 月度趋势序列（#3）
+
+**展示层趋势图的数据面**：所选费用类型在所选年份的逐月聚合 `{preset,feeType,year,items:[{month,rows,sites,totalCents}],total}`（按月升序）。**不接受 `month` 参数**（400——序列覆盖全年；有数据的月份才出现，无数据月份不返回，展示层补空白**不造零**）；`sites` 为该月去重站址数（总览卡「站址数」同源）。整数分契约同 totals（#65 P1-a）；501 契约同 totals。CLI：`fees query monthly --type --year`。
+
 ## GET /api/fees/query/duplicates?feeType=&year=&month= — 跨批次重复结算候选
 
 同键多批次共存的行（#4 起**口径为 (站址, 记录键, 账期) 三元组**：记录键=订单号/电表编号/工单号；同站多条记录键是正常多订单/多电表形态，不算重复；无记录键的批次仍按 (站址, 账期) 对口径，`HAVING count(DISTINCT import_batch) > 1`）——**风险线索非结论**：输出候选（site/recordKey/period/批次数/行数/`totalCents` 整数分总额），人工持行级证据（source_file + source_row）核实。账单存在 ≠ 重复付款认定。整数分保证比对与求和顺序无关（#65 P1-a）。参数与 501 契约同 totals。

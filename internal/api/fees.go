@@ -524,6 +524,13 @@ func (s *Server) handleFeesQueryTotals(w http.ResponseWriter, r *http.Request) {
 	s.feesQuery(w, r, "totals")
 }
 
+// handleFeesQueryMonthly implements GET /api/fees/query/monthly?
+// feeType=&year= — the #3 trend series (one row per month WITH data).
+// A month parameter is refused: the series covers the whole year.
+func (s *Server) handleFeesQueryMonthly(w http.ResponseWriter, r *http.Request) {
+	s.feesQuery(w, r, "monthly")
+}
+
 // handleFeesQueryRows answers GET /api/fees/query/rows (#5): the raw
 // analysis rows with the optional ledger columns.
 func (s *Server) handleFeesQueryRows(w http.ResponseWriter, r *http.Request) {
@@ -567,6 +574,10 @@ func (s *Server) feesQuery(w http.ResponseWriter, r *http.Request, preset string
 		}
 	}
 
+	if preset == "monthly" && month > 0 {
+		respondError(w, http.StatusBadRequest, "bad_request", "monthly 不接受 month 参数——序列覆盖所选年份全部有数据的月份")
+		return
+	}
 	engine := fees.Query(r.Context())
 	if !engine.Available() {
 		respondError(w, http.StatusNotImplemented, "engine_not_built", fees.ErrEngineNotBuilt.Error())
@@ -582,6 +593,17 @@ func (s *Server) feesQuery(w http.ResponseWriter, r *http.Request, preset string
 		}
 		respondJSON(w, http.StatusOK, feesTotalsResult{
 			Preset: "totals", FeeType: string(feeType), Year: year, Month: month, Items: rows, Total: len(rows),
+		})
+	case "monthly":
+		// #3: the trend series — the whole-year monthly breakdown. The
+		// rows engine-direct discipline of the sibling presets applies.
+		rows, err := engine.MonthlyTotals(r.Context(), analysis, feeType, year)
+		if err != nil {
+			s.respondErrorFor(w, r, err, "")
+			return
+		}
+		respondJSON(w, http.StatusOK, feesMonthlyResult{
+			Preset: "monthly", FeeType: string(feeType), Year: year, Items: rows, Total: len(rows),
 		})
 	case "duplicates":
 		rows, err := engine.Duplicates(r.Context(), analysis, feeType, year, month, limit)
@@ -641,6 +663,17 @@ type feesTotalsResult struct {
 	Month   int              `json:"month"`
 	Items   []fees.TotalsRow `json:"items"`
 	Total   int              `json:"total"`
+}
+
+// feesMonthlyResult is the #3 display-layer series answer: the twelve-
+// month trend of one fee type's year. No month field — the series IS the
+// whole year; months without data are absent from Items.
+type feesMonthlyResult struct {
+	Preset  string                  `json:"preset"`
+	FeeType string                  `json:"feeType"`
+	Year    int                     `json:"year"`
+	Items   []fees.MonthlyTotalsRow `json:"items"`
+	Total   int                     `json:"total"`
 }
 
 type feesRowsResult struct {

@@ -74,3 +74,69 @@ func TestDuckEngineTotalsAndDuplicates(t *testing.T) {
 		t.Errorf("duplicate row = %+v, want S1 2024-05 / 2 batches / 2 rows / 400.00", d)
 	}
 }
+
+// TestDuckEngineMonthlyTotals is the #3 trend primitive's acceptance
+// proof: the whole-year series aggregates per month (rows, DISTINCT
+// sites, integer-cents total), ascending, with the months that carry no
+// data simply ABSENT — the display layer pads gaps, the engine never
+// invents zeroes.
+func TestDuckEngineMonthlyTotals(t *testing.T) {
+	svc, _, dir := newService(t)
+	ctx := context.Background()
+	for _, f := range []struct{ name, body string }{
+		{"a.csv", "站址编码,账期,电费(元)\nS1,2024-05,100.00\nS2,2024-05,50.00\n"},
+		{"b.csv", "站址编码,账期,电费(元)\nS1,2024-05,300.00\n"},
+		{"c.csv", "站址编码,账期,电费(元)\nS1,2024-06,70.00\n"},
+		{"d.csv", "站址编码,账期,电费(元)\nS2,2024-08,20.00\n"},
+	} {
+		p := filepath.Join(dir, f.name)
+		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		month := 5
+		if f.name == "c.csv" {
+			month = 6
+		}
+		if f.name == "d.csv" {
+			month = 8
+		}
+		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: month}); err != nil {
+			t.Fatalf("import %s: %v", f.name, err)
+		}
+	}
+	e := newQueryEngine()
+	analysis := filepath.Join(dir, "analysis")
+	rows, err := e.MonthlyTotals(ctx, analysis, FeeTypeElectricity, 2024)
+	if err != nil {
+		t.Fatalf("MonthlyTotals: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("monthly = %+v, want exactly months 5/6/8 (absent months absent)", rows)
+	}
+	want := []MonthlyTotalsRow{
+		{Month: 5, Rows: 3, Sites: 2, TotalCents: 45000},
+		{Month: 6, Rows: 1, Sites: 1, TotalCents: 7000},
+		{Month: 8, Rows: 1, Sites: 1, TotalCents: 2000},
+	}
+	for i, w := range want {
+		if rows[i] != w {
+			t.Errorf("monthly[%d] = %+v, want %+v", i, rows[i], w)
+		}
+	}
+	// a year with no data answers an empty series (nil), not an error.
+	rows, err = e.MonthlyTotals(ctx, analysis, FeeTypeElectricity, 2030)
+	if err != nil {
+		t.Fatalf("MonthlyTotals(2030): %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("MonthlyTotals(2030) = %+v, want empty", rows)
+	}
+	// another fee type never touches electricity's series.
+	rows, err = e.MonthlyTotals(ctx, analysis, FeeTypeTowerLease, 2024)
+	if err != nil {
+		t.Fatalf("MonthlyTotals(tower): %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("MonthlyTotals(tower) = %+v, want empty (type isolation)", rows)
+	}
+}

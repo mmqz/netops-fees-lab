@@ -280,6 +280,31 @@ func TestAPIFeesQueryEngineState(t *testing.T) {
 			t.Errorf("%s: status = %d, want 400\nbody: %s", q, resp.StatusCode, body)
 		}
 	}
+
+	// the #3 monthly series rides the same contract: engine state first
+	// (501 on default builds), parameter validation before the engine
+	// check, and a month parameter refused — the series IS the year.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/query/monthly?feeType=electricity&year=2024", nil, "")
+	if resp.StatusCode == http.StatusNotImplemented {
+		if err := json.Unmarshal(body, &errOut); err != nil {
+			t.Fatalf("decode monthly 501: %v\n%s", err, body)
+		}
+		if errOut.Error.Code != "engine_not_built" {
+			t.Errorf("monthly 501 code = %q, want engine_not_built\n%s", errOut.Error.Code, body)
+		}
+	} else if resp.StatusCode != http.StatusOK {
+		t.Fatalf("monthly: status = %d, want 200 (duckdb) or 501 (default)\nbody: %s", resp.StatusCode, body)
+	}
+	for _, q := range []string{
+		"/api/fees/query/monthly?feeType=electricity",
+		"/api/fees/query/monthly?feeType=electricity&year=2024&month=5",
+		"/api/fees/query/monthly?feeType=groceries&year=2024",
+	} {
+		resp, body = doRequest(t, srv, http.MethodGet, q, nil, "")
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400\nbody: %s", q, resp.StatusCode, body)
+		}
+	}
 }
 
 // TestAPIFeesRoutesInOpenAPI pins the anti-drift contract: the fee
@@ -302,7 +327,7 @@ func TestAPIFeesRoutesInOpenAPI(t *testing.T) {
 	for _, path := range []string{
 		"/api/fees/imports", "/api/fees/batches", "/api/fees/batches/{id}/rollback",
 		"/api/fees/batches/{id}/evidence",
-		"/api/fees/query/totals", "/api/fees/query/duplicates",
+		"/api/fees/query/totals", "/api/fees/query/monthly", "/api/fees/query/duplicates",
 	} {
 		ops, ok := doc.Paths[path]
 		if !ok {

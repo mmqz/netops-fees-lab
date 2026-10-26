@@ -23,6 +23,9 @@ func (stdQueryEngine) Available() bool { return false }
 func (stdQueryEngine) Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error) {
 	return nil, ErrEngineNotBuilt
 }
+func (stdQueryEngine) MonthlyTotals(ctx context.Context, analysisDir string, feeType FeeType, year int) ([]MonthlyTotalsRow, error) {
+	return nil, ErrEngineNotBuilt
+}
 
 func (stdQueryEngine) Duplicates(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]DuplicateRow, error) {
 	return nil, ErrEngineNotBuilt

@@ -132,6 +132,22 @@ func TestCLIFeesFlow(t *testing.T) {
 	if code == 0 {
 		t.Log("this e2e binary was built with -tags duckdb: the query succeeded")
 	}
+
+	// the #3 monthly series rides the identical contract: honest engine
+	// state on the default build, usage refusal for --month (exit 2).
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "query", "monthly", "--type", "electricity", "--year", "2024")
+	if json.Unmarshal([]byte(stdout), &errOut) != nil {
+		t.Fatalf("monthly stdout is not JSON: %s", stdout)
+	}
+	if _, ok := errOut["error"]; !ok {
+		t.Fatalf("monthly stdout must be an error envelope on the default build: %s", stdout)
+	}
+	if code == 0 {
+		t.Log("this e2e binary was built with -tags duckdb: the monthly query succeeded")
+	}
+	if _, code = runCLI(t, "fees", "--db", db, "--data", tmp, "query", "monthly", "--type", "electricity", "--year", "2024", "--month", "5"); code != 2 {
+		t.Errorf("monthly --month: exit = %d, want 2 (the series covers the whole year)", code)
+	}
 }
 
 // TestCLIFeesRisksContract pins the risk-scenario CLI surface on the

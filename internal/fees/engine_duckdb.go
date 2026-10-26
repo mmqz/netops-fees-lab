@@ -81,6 +81,43 @@ LIMIT %d`,
 	return out, rows.Err()
 }
 
+// MonthlyTotals is the #3 display-layer trend primitive: one row per
+// month WITH data of the fee type's year, ascending by month. The
+// distinct-site count rides along so the overview's site-count question
+// is answerable from the same series. Months without data are absent —
+// the display layer pads the gaps, never invents zeroes.
+func (duckQueryEngine) MonthlyTotals(ctx context.Context, analysisDir string, feeType FeeType, year int) ([]MonthlyTotalsRow, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, nil
+	}
+	db, err := openAnalysis()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+	query := fmt.Sprintf(`
+SELECT month, count(*) AS rows, count(DISTINCT site_code) AS sites, sum(amount_cents) AS total_cents
+FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
+WHERE fee_type = '%s' AND year = %d
+GROUP BY month
+ORDER BY month`,
+		feeTableGlob(analysisDir), string(feeType), year)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("fees: 查询月度序列: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []MonthlyTotalsRow
+	for rows.Next() {
+		var r MonthlyTotalsRow
+		if err := rows.Scan(&r.Month, &r.Rows, &r.Sites, &r.TotalCents); err != nil {
+			return nil, fmt.Errorf("fees: 读取月度行: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // LedgerRows is the #5 rows query: raw analysis rows with the optional
 // ledger columns (union_by_name keeps pre-#5 files readable — their
 // optional columns come back NULL). Site filter optional, limit capped

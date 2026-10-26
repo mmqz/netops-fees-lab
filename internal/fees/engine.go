@@ -40,6 +40,18 @@ type TotalsRow struct {
 // evidence anchors (batch ids + row numbers). TotalCents: integer-cents
 // contract (#65 P1-a) — a duplicate comparison must never depend on the
 // summation order.
+// MonthlyTotalsRow is one month of a fee type's year series (#3 display
+// layer): the per-month aggregate the trend chart draws — rows, distinct
+// site count and the integer-cents total (#65 P1-a). Months without data
+// are simply absent (the display layer pads the gaps, never invents
+// zeroes: an empty month is a statement, not a zero).
+type MonthlyTotalsRow struct {
+	Month      int   `json:"month"`
+	Rows       int   `json:"rows"`
+	Sites      int   `json:"sites"`
+	TotalCents int64 `json:"totalCents"`
+}
+
 // LedgerRow is one analysis row as the rows-query answers it (#5): the
 // core identity + amount, plus the optional ledger columns (nil-absent
 // JSON via the pointers) and the evidence coordinates.
@@ -140,6 +152,11 @@ type QueryEngine interface {
 	// (month 0 = the whole year), largest total first, capped at limit
 	// (<= 0 → 100).
 	Totals(ctx context.Context, analysisDir string, feeType FeeType, year, month, limit int) ([]TotalsRow, error)
+	// MonthlyTotals returns the twelve-month series of one fee type's
+	// year (#3): one row per month WITH data, ascending by month. No
+	// limit — twelve rows are the honest ceiling; no month filter — the
+	// series IS the point.
+	MonthlyTotals(ctx context.Context, analysisDir string, feeType FeeType, year int) ([]MonthlyTotalsRow, error)
 	// Duplicates returns the cross-batch duplicate-settlement candidates
 	// of one fee type (month 0 = the whole year): every (site, period)
 	// whose rows span more than one import batch.
