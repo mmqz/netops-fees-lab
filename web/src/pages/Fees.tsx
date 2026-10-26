@@ -63,6 +63,7 @@ import {
   linkGradeLabel,
   linkStatusLabel,
   selectLinkFilter,
+  riskEmptyState,
 } from './fees-format';
 import type { LinkFilterSelection } from './fees-format';
 import {
@@ -122,6 +123,7 @@ import {
   FEES_RISKS_EVIDENCE_BATCH,
   FEES_RISKS_EVIDENCE_ROWS,
   FEES_RISKS_EMPTY,
+  FEES_RISKS_EMPTY_EXCLUDED,
   FEES_RISKS_EVIDENCE,
   FEES_RISKS_EVIDENCE_MORE,
   FEES_RISKS_EXCLUDED,
@@ -874,9 +876,24 @@ export function FeesPage() {
               {riskResult.excluded > 0 && <> · {FEES_RISKS_EXCLUDED(riskResult.excluded)}</>}
               {riskResult.dismissed > 0 && <> · {FEES_RISKS_DISMISSED_COUNT(riskResult.dismissed)}</>}
             </p>
+            {riskResult.warnings?.map((w) => (
+              <div key={w} className="banner banner--warning" role="note">
+                {w}
+              </div>
+            ))}
             <p className="muted muted--small">{riskResult.note}</p>
             {riskResult.clues.length === 0 ? (
-              <p className="empty">{FEES_RISKS_EMPTY}</p>
+              /* #21 三态空状态（riskEmptyState 裁决）：'excluded-zero' 是「可能
+                  无法分析」的告警形态（警告色），'clean' 才是中性的「未发现」。
+                  风险面板按查询时态（无月度序列探针）只有后两态。 */
+              riskEmptyState(riskResult.clues.length, riskResult.excluded, true) ===
+              'excluded-zero' ? (
+                <div className="banner banner--warning" role="note">
+                  {FEES_RISKS_EMPTY_EXCLUDED(riskResult.excluded)}
+                </div>
+              ) : (
+                <p className="empty">{FEES_RISKS_EMPTY}</p>
+              )
             ) : (
               <table className="table table--interactive">
                 <thead>

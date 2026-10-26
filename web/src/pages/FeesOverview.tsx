@@ -23,7 +23,7 @@ import { useToast } from '../components/Toast';
 import { Stepper } from '../components/Stepper';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Spinner } from '../components/Spinner';
-import { centsToYuan, clueKey, formatRiskMetric } from './fees-format';
+import { centsToYuan, clueKey, formatRiskMetric, riskEmptyState } from './fees-format';
 import {
   centsToWan,
   clueStateLabel,
@@ -48,6 +48,7 @@ import {
   FEES_OV_CARD_MONTH_TOTAL,
   FEES_OV_CARD_SITES,
   FEES_OV_CLUES_EMPTY,
+  FEES_RISKS_NO_DATA,
   FEES_OV_CLUES_EXPORT,
   FEES_OV_CLUES_EXPORT_OK,
   FEES_OV_CLUES_OF,
@@ -213,6 +214,19 @@ export function FeesOverview() {
     return latest;
   }, [ovMonthSel, slots]);
 
+  /** #21：全部场景排除数合计（空态三态判据之一）。 */
+  const totalExcluded = useMemo(
+    () => (results === null ? 0 : results.reduce((n, r) => n + r.excluded, 0)),
+    [results],
+  );
+
+  /** #21：当前类型+月份是否有导入数据（空态三态判据之一）。 */
+  const monthHasData = useMemo(() => {
+    const s = slots[ovType];
+    if (!s || resolvedMonth <= 0) return false;
+    return (s[resolvedMonth - 1]?.point ?? null) !== null;
+  }, [slots, ovType, resolvedMonth]);
+
   const dataMonths = useMemo(() => {
     const set = new Set<number>();
     for (const t of TYPES) {
@@ -270,6 +284,20 @@ export function FeesOverview() {
     () => (results === null ? [] : sortMergedClues(mergeClues(results), sortKey)),
     [results, sortKey],
   );
+
+  // #21：聚合各场景的结构化告警（排除主导等）——「跑完全部场景无待核实线索」
+  // 与「有场景因排除而无法分析」必须在页面上可区分。
+  const allWarnings = useMemo(() => {
+    if (results === null) return [] as string[];
+    const out: string[] = [];
+    for (const r of results) {
+      for (const w of r.warnings ?? []) {
+        const label = r.scenarioCn || r.scenario;
+        out.push(`【${label}】${w}`);
+      }
+    }
+    return out;
+  }, [results]);
 
   const decideClue = useCallback(
     async (m: { scenario: string; clue: RiskClue }, status: 'verified' | 'dismissed') => {
@@ -589,8 +617,24 @@ export function FeesOverview() {
             </div>
 
             {runRunning && <Spinner />}
+            {/* #21：跑全部场景后，任一场景的结构化告警（排除主导等）以告警条
+                浮出——「无线索」的页面绝不能把「无法分析」洗白成「本月正常」。 */}
+            {!runRunning && results !== null && allWarnings.length > 0 && (
+              <div className="banner banner--warning" role="note">
+                {allWarnings.map((w) => (
+                  <p key={w}>{w}</p>
+                ))}
+              </div>
+            )}
             {!runRunning && results !== null && merged.length === 0 && (
-              <div className="banner banner--hint">{FEES_OV_CLUES_EMPTY}</div>
+              /* #21 三态空状态（riskEmptyState 裁决）：'no-data' 引导导入、
+                  'clean' 中性好信号；'excluded-zero' 的告警条由上方 allWarnings
+                  浮出（该月任一场景有排除主导即触发）——三者文案与颜色可区分。 */
+              <div className="banner banner--hint">
+                {riskEmptyState(merged.length, totalExcluded, monthHasData) === 'no-data'
+                  ? FEES_RISKS_NO_DATA
+                  : FEES_OV_CLUES_EMPTY}
+              </div>
             )}
             {!runRunning && results !== null && merged.length > 0 && (
               <div className="table-wrap">

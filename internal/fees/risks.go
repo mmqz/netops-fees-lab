@@ -249,6 +249,12 @@ type RiskResult struct {
 	// counted here, never silently dropped (#83).
 	Dismissed int    `json:"dismissed"`
 	Note      string `json:"note"`
+	// Warnings (#21): non-blocking, structured visibility notices — the
+	// exclusion-dominance warning rides here ("0 clues" + a large excluded
+	// count is the cannot-analyze shape, NOT the all-clear shape). The note
+	// carries the same text (acceptance 1); the array exists so the UI can
+	// render it as an alert bar instead of parsing prose.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // RiskQuery is the parameter set of one scenario query. Every threshold
@@ -888,6 +894,32 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 	if clues == nil {
 		clues = make([]RiskClue, 0)
 	}
+	// #21: "cannot analyze" must never dress up as "analyzed, all clear".
+	// A zero-clue answer with a non-zero excluded count is ambiguous to a
+	// human — the honest text names the ambiguity and the audit channel;
+	// the wording deliberately does NOT claim "everything was excluded"
+	// (the excluded/(total+excluded) ratio cannot know the full
+	// participation face without another engine roundtrip, and a false
+	// "全部被排除" would be its own misinformation).
+	var warnings []string
+	if excluded > 0 {
+		switch {
+		case total == 0:
+			warnings = append(warnings, fmt.Sprintf(
+				"本场景返回 0 条线索，另有 %d 个对象被排除出统计——0 条线索可能是「数据被排除后无法分析」而非「无异常」；请核对是否存在重复导入/多批次（可用 fees verify-batches 审计跨账期重复）",
+				excluded))
+		case excluded*2 >= total+excluded:
+			pct := excluded * 100 / (total + excluded)
+			warnings = append(warnings, fmt.Sprintf(
+				"本场景排除数 %d 已达线索与排除合计的 %d%%——统计面被显著削弱，结果可能不具备代表性；请核对是否存在重复导入/多批次（可用 fees verify-batches 审计跨账期重复）",
+				excluded, pct))
+		}
+		if len(warnings) > 0 {
+			// acceptance 1: the note carries the count + the advice too —
+			// CLI and MCP consumers read the note, the array is for UIs.
+			note += "；【注意】" + warnings[0]
+		}
+	}
 	return RiskResult{
 		Scenario:   string(scenario),
 		ScenarioCn: RiskScenarioLabels[scenario],
@@ -899,6 +931,7 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 		Excluded:   excluded,
 		Dismissed:  dismissedCount,
 		Note:       note,
+		Warnings:   warnings,
 	}
 }
 

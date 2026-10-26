@@ -418,3 +418,61 @@ func TestEveryClueCarriesThresholdLabel(t *testing.T) {
 	}
 	t.Logf("thresholdLabel contract verified on %d clues across %d scenarios", checked, len(scenarios))
 }
+
+// TestExcludedDominanceWarns (#21): a zero-clue answer with a dominant
+// excluded count is the CANNOT-ANALYZE shape, not the all-clear shape —
+// the envelope must say so in BOTH the structured warnings (for UI alert
+// bars) and the note (for CLI/MCP readers). The fixture: one site, one
+// declared period, TWO batches — the (site, period) pair spans batches,
+// so the outlier preset excludes it and nothing participates.
+func TestExcludedDominanceWarns(t *testing.T) {
+	svc, _, dir := newService(t)
+	ctx := context.Background()
+	for _, f := range []struct{ name, body string }{
+		{"a.csv", "站址编码,账期,电费(元)\nS1,2024-05,100.00\n"},
+		{"b.csv", "站址编码,账期,电费(元)\nS1,2024-05,300.00\n"},
+	} {
+		p := filepath.Join(dir, f.name)
+		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: 5}); err != nil {
+			t.Fatalf("import %s: %v", f.name, err)
+		}
+	}
+	engine := Query(ctx)
+	if !engine.Available() {
+		t.Fatal("the duckdb build must report Available")
+	}
+	res, err := svc.Risks(ctx, engine, RiskOutlier, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("outlier: %v", err)
+	}
+	if res.Total != 0 || res.Excluded == 0 {
+		t.Fatalf("fixture shape: total=%d excluded=%d, want 0 clues with a positive excluded", res.Total, res.Excluded)
+	}
+	if len(res.Warnings) == 0 {
+		t.Fatal("zero clues + excluded > 0 must carry a warning (#21: cannot-analyze must not dress up as all-clear)")
+	}
+	for _, want := range []string{"0 条线索", "排除", "verify-batches"} {
+		if !strings.Contains(res.Warnings[0], want) {
+			t.Errorf("warning must contain %q: %q", want, res.Warnings[0])
+		}
+	}
+	if !strings.Contains(res.Note, "【注意】") {
+		t.Errorf("note must carry the same advice (CLI/MCP readers read the note): %q", res.Note)
+	}
+
+	// The clean shape: no exclusions, zero clues → NO warning (the neutral
+	// "analyzed, all clear" must not be polluted by false alarms).
+	clean, err := svc.Risks(ctx, engine, RiskOutlier, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 7})
+	if err != nil {
+		t.Fatalf("outlier clean: %v", err)
+	}
+	if clean.Total != 0 || clean.Excluded != 0 {
+		t.Fatalf("clean shape assumption: total=%d excluded=%d", clean.Total, clean.Excluded)
+	}
+	if len(clean.Warnings) != 0 {
+		t.Fatalf("clean zero-clue answer must not warn, got %v", clean.Warnings)
+	}
+}

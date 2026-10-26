@@ -1515,6 +1515,8 @@ export interface RiskResult {
   /** #119 本次被人工裁定排除而隐藏的线索数（绝不静默丢弃） */
   dismissed: number;
   note: string;
+  /** #21 结构化非阻断告警（排除主导等「无法分析 ≠ 无异常」形态）——UI 渲染为告警条 */
+  warnings?: string[];
 }
 
 /** 站址账期合计行（GET /api/fees/query/totals；整数分契约） */

@@ -77,3 +77,23 @@ export function selectLinkFilter(
 ): LinkFilterSelection {
   return { ...current, ...patch, page: 1 };
 }
+
+/**
+ * 风险线索空态的三态裁决（#21）：「无法分析」与「分析后无发现」必须可区分。
+ *
+ * - 'no-data'       该账期无导入数据——引导去导入，不是分析结论；
+ * - 'excluded-zero' 0 条线索但有排除数——可能「数据被排除后无法分析」，
+ *                   告警色渲染，绝不与「本月正常」混同；
+ * - 'clean'         有数据、无排除、确实 0 条——中性的「未发现」。
+ */
+export type RiskEmptyKind = 'no-data' | 'excluded-zero' | 'clean';
+
+export function riskEmptyState(
+  clueCount: number,
+  excluded: number,
+  monthHasData: boolean,
+): RiskEmptyKind {
+  if (!monthHasData) return 'no-data';
+  if (clueCount === 0 && excluded > 0) return 'excluded-zero';
+  return 'clean';
+}

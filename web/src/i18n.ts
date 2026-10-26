@@ -605,6 +605,10 @@ export const FEES_RISKS_RATIO = '环比阈值';
 export const FEES_RISKS_Z = 'z 阈值';
 export const FEES_RISKS_MIN_SITES = '最少样本';
 export const FEES_RISKS_EMPTY = '该场景在选定范围内无风险线索。';
+/** #21 三态空状态：确实 0 条（中性）与「有排除的 0 条」（告警色）必须可区分 */
+export const FEES_RISKS_EMPTY_EXCLUDED = (n: number) =>
+  `本场景 0 条线索，但另有 ${n} 个对象被排除出统计——0 条可能意味着「无法分析」而非「无异常」，请核对重复导入/多批次。`;
+export const FEES_RISKS_NO_DATA = '该账期无导入数据——先导入费用文件，分析才有输入。';
 export const FEES_RISKS_EXCLUDED = (a: number) => `已排除 ${a} 个跨批次 (站址, 账期)（属于重复结算/金额差异场景的线索域）`;
 export const FEES_RISKS_EVIDENCE = '证据锚点';
 export const FEES_RISKS_EVIDENCE_MORE = (a: number) => `…另有 ${a} 行（快照层可回读原文）`;

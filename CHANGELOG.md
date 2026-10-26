@@ -4,7 +4,7 @@
 
 ## [0.20.0] — 进行中
 
-**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
+**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23、排除主导告警与三态空状态 #21；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
 
 ### 修复 — Windows 构建阻断（#22）：`FeesOverview.tsx` 与 `feesOverview.ts` 仅大小写不同，Windows 上 tsc/vite 双双失败
 - **根因**：`web/src/pages/` 下同时存在 `FeesOverview.tsx`（React 组件，大写 F）与 `feesOverview.ts`（纯函数库，小写 f）——Linux/macOS 大小写敏感文件系统两者共存一切正常，Windows 大小写不敏感把它们当同一文件：`import { FeesOverview } from './FeesOverview'` 解析到不含该导出的 `feesOverview.ts`，tsc 报 TS1261/TS1149、vite 报「"FeesOverview" is not exported by "src/pages/feesOverview.ts"」，**前端完全无法构建**（Go 二进制随之缺内嵌前端）。issue 报告人 Windows/Node 24/npm 11 实测复现率 100%。
@@ -29,6 +29,12 @@
 - **前端**：`Fees.tsx` 触发指标列的括号内容从误用的 `metricLabel` 改为 `thresholdLabel`（同一字段被用两次的缺陷）+ 空值兜底（`thresholdLabel ? （…） : null`——后端漏给也绝不渲染空括号）；`FeesOverview.tsx` 的正确写法处同样补空值兜底。
 - **契约测试**：`TestEveryClueCarriesThresholdLabel`——遍历九内置场景（复用 risks 夹具）断言**每条 clue 的 thresholdLabel 非空**（实测 28 条线索 × 9 场景全过）；未来新增场景忘记赋值将直接红在此处而非 UI 空括号。
 - **不改判定逻辑**：只补展示文案（issue 验收 5）——全部 146 前端测试 + build + duckdb 引擎测试绿。
+
+### 修复 — 排除主导的静默零线索（#21）：「无法分析」不再伪装成「分析后无异常」
+- **后端**：`RiskResult` 新增结构化 `warnings []string` 字段（issue 方案 4.2）+ `finishClues` 排除分析——0 条线索且有排除数（`total==0 && excluded>0`）时告警「0 条线索可能是『数据被排除后无法分析』而非『无异常』，请核对重复导入/多批次（可用 fees verify-batches 审计）」；排除数 ≥ (线索+排除)/2 时告警「统计面被显著削弱，结果可能不具代表性」。两形态同时追加进 note（CLI/MCP 读者读 note，UI 渲染 warnings——验收 1+2 双通道）。
+- **文案准确性裁决**：措辞**不声称「全部被排除」**——excluded/(total+excluded) 比例无法知道完整参与面（需要额外一次引擎往返），一个错误的「全部被排除」本身就是新的误导；诚实文案只说「可能是无法分析形态」并指出审计通道。
+- **前端三态空状态**（验收 3/4）：`riskEmptyState(clueCount, excluded, monthHasData)` 纯函数裁决 `'no-data' | 'excluded-zero' | 'clean'`——风险面板（Fees.tsx）：`excluded-zero` 渲染警告色 banner（与 `clean` 的中性空态视觉区分）；总览页（FeesOverview.tsx）：无数据月引导导入文案 + 各场景 warnings 聚合告警条（`【场景名】告警文本`）。三态文案与颜色全部可区分。
+- **测试**：后端 `TestExcludedDominanceWarns`（跨批次夹具 0 线索+排除 → warnings+note 双通道断言；干净零线索 → 零告警不误报）+ 前端 `riskEmptyState` 四分支纯函数测试（无数据优先/排除零/干净零/有线索不介入）。**不阻断查询、不改任何线索产出逻辑**（验收 5）。
 
 ## [0.19.1] — 2026-10-26
 

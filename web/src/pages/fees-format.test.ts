@@ -16,6 +16,7 @@ import {
   linkStatusLabel,
   trimMetricTail,
   selectLinkFilter,
+  riskEmptyState,
 } from './fees-format';
 import type { LinkFilterSelection } from './fees-format';
 
@@ -129,5 +130,23 @@ describe('selectLinkFilter — 关联筛选变更必须回到第 1 页（#109-A�
   });
   it('已在第 1 页时保持 1（无跳变），清空筛选（空串）也回第 1 页', () => {
     expect(selectLinkFilter({ status: 'confirmed', grade: '', page: 1 }, { status: '' }).page).toBe(1);
+  });
+});
+
+describe('riskEmptyState（#21 三态空态裁决）', () => {
+  it('无数据月 → no-data（引导导入，不是分析结论）', () => {
+    expect(riskEmptyState(0, 0, false)).toBe('no-data');
+    // 即使有排除数，无数据月仍优先引导导入（排除数来自别的账期口径）
+    expect(riskEmptyState(0, 203, false)).toBe('no-data');
+  });
+  it('0 条线索 + 有排除 → excluded-zero（无法分析 ≠ 无异常，告警色）', () => {
+    expect(riskEmptyState(0, 203, true)).toBe('excluded-zero');
+  });
+  it('有数据、无排除、0 条 → clean（中性的「未发现」）', () => {
+    expect(riskEmptyState(0, 0, true)).toBe('clean');
+  });
+  it('有线索 → clean（空态逻辑不介入）', () => {
+    expect(riskEmptyState(7, 0, true)).toBe('clean');
+    expect(riskEmptyState(7, 300, true)).toBe('clean');
   });
 });
