@@ -811,6 +811,40 @@ export const FEES_DET_REJECT_PH = '如：重复填报 / 金额有误';
 export const FEES_DET_EMPTY = '暂无明细——系统表金额中无佐证的部分就在这里补。';
 export const FEES_DET_LIST_LINK = '按关联键过滤';
 export const FEES_DET_403_HINT = '裁定是管理级通道——请使用管理令牌。';
+
+// ---- 跨数据集对账（#12：站址编码映射 + 电费 vs 塔租对账表）----
+export const FEES_X_TITLE = '跨数据集对账（电费台账 vs 塔类详单）';
+export const FEES_X_DESC =
+  '甲方核对乙方：两套系统按主编码归并对账——只在电费台账=疑似自建站或编码不一致；只在塔表=多为共享站（正常）；差额=电费−塔租。对账表是待核实差异而非认定结论。';
+export const FEES_X_RUN = '生成对账表';
+export const FEES_X_YEAR = '年份';
+export const FEES_X_MONTH = '月份（空=整年）';
+export const FEES_X_CLASS_BOTH = '双方都有';
+export const FEES_X_CLASS_ONLY_ELEC = '只在电费台账';
+export const FEES_X_CLASS_ONLY_TOWER = '只在塔表';
+export const FEES_X_COUNTS = (a: number, b: number, c: number) => `只在电费 ${a} · 只在塔表 ${b} · 双方都有 ${c}`;
+export const FEES_X_COL_SITE = '主编码';
+export const FEES_X_COL_ELEC = '电费台账';
+export const FEES_X_COL_TOWER = '塔类详单';
+export const FEES_X_COL_DELTA = '差额（电−塔）';
+export const FEES_X_COL_TRAIL = '映射痕迹';
+export const FEES_X_EMPTY = '该账期两库均无数据。';
+export const FEES_X_ALIAS_TITLE = '站址编码映射';
+export const FEES_X_ALIAS_DESC = '双系统同一物理站两套编码的桥——扫描提议（只提议不落库），人工确认建立，全程留痕（谁在何时）。';
+export const FEES_X_ALIAS_SCAN = '扫描提议';
+export const FEES_X_ALIAS_CONFIRM = '确认建立';
+export const FEES_X_ALIAS_PROPOSALS = (n: number) => `提议 ${n} 条（同骨架不同字面——疑为同站双码）`;
+export const FEES_X_ALIAS_EMPTY = '无提议：两库无同骨架未映射编码对，或无已导入数据。';
+export const FEES_X_ALIAS_ADD = '手工建立映射';
+export const FEES_X_ALIAS_CANONICAL = '主编码';
+export const FEES_X_ALIAS_ALIAS = '别名（另一系统编码）';
+export const FEES_X_ALIAS_SOURCE = '别名所属系统';
+export const FEES_X_ALIAS_CONFIDENCE = '置信';
+export const FEES_X_ALIAS_SUBMIT = '建立';
+export const FEES_X_ALIAS_ADDED = '映射已建立（留痕：谁在何时）。';
+export const FEES_X_ALIAS_REMOVE = '移除';
+export const FEES_X_ALIAS_403 = '移除是管理级治理动作——请使用管理令牌。';
+export const FEES_X_ALIAS_REQUIRED = '主编码、别名、所属系统都必须填。';
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

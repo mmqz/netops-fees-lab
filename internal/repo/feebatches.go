@@ -235,3 +235,20 @@ func (r *FeeBatchRepo) ListParquetLiveBatchIDs(ctx context.Context) (map[string]
 	}
 	return out, rows.Err()
 }
+
+// RowsImportedOfPeriod answers Σ rows_imported of the COMPLETED batches
+// of one fee type and period (issue #12's import-time data-volume guard:
+// this month vs the previous month — the honest apples-to-apples
+// comparison needs the imported-row universe, not rows_total which
+// counts pre-normalization lines).
+func (r *FeeBatchRepo) RowsImportedOfPeriod(ctx context.Context, feeType domain.FeeType, year, month int) (int, error) {
+	var total sql.NullInt64
+	err := r.q.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(rows_imported), 0) FROM fee_batches
+WHERE fee_type = ? AND fee_year = ? AND fee_month = ? AND status = 'completed'`,
+		string(feeType), year, month).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("repo: rows of period (%s %04d-%02d): %w", feeType, year, month, err)
+	}
+	return int(total.Int64), nil
+}

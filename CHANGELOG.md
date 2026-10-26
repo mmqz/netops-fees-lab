@@ -31,6 +31,12 @@
 - 测试：v38 迁移（往返/CHECK 双闭集/指纹探针/核实 trail/过滤）+ 服务级（三强制 11 拒绝形态/双门金额/指纹拒绝与改名逃生/状态流 reason 纪律/reconcile 三态含引擎缺席）+ duckdb 真机（reconcile 真系统侧：裸差-970000/补齐归零/缺席键不造零）+ HTTP 通道矩阵（401/201/422×6/403/200/404/reconcile 诚实缺席）+ CLI e2e 生命周期；事实源 api-routes 48→52、api-fees-routes 22→26、repo-migrations 37→38、Admin 闭集 9→10。
 - 前端：FeesDetails 面板（差额对账卡三格/录入表单 datalist 建议集/台账过滤+内联驳回两步流〔原因必填守卫〕+核实 chip+留痕展示）；浏览器级回归（duckdb 真机）：对账 52,000 系统侧/录入后差额 -52,000→-47,000 自动联动/驳回原因留痕/核实流转/零报错。
 
+### 新增 — 跨数据集对账（#12）：站址编码映射桥 + 电费 vs 塔租对账表 + 导入量骤降守卫
+- **迁移 v39 `fee_site_code_aliases`**：canonical↔alias 双系统编码桥（UNIQUE 三元组 + source 闭集〔四费用类型+manual〕+ confidence 分级〔exact/rule/manual，fee_site_links 同教义〕+ 建立留痕〔验收 5：谁在何时〕）。**扫描只提议不落库**：两库站址骨架比对（大写+去噪声+**数字段去前导零**——"HLJ-0001"↔"hlj001" 实测同站双码形态；"AB01"≠"AB10" 无误并），确认走建立通道（申报级），无任何自动写入。
+- **跨数据集对账表**（验收 2/3）：两个既有 Totals 预设 + 别名桥 + **纯函数合并**（同数据同输出，表测钉死）——逐主编码 `{电费, 塔租, 差额(电−塔), 三类, 映射痕迹}`；only_electricity=疑似自建站/编码不一致（实测 7 站 10.5 万元形态）、only_tower=多为共享站、both=可进一步核对；异常优先排序（只在电费→只在塔表→双方）。**对账表是待核实差异而非认定结论**。通道：HTTP `GET /api/fees/cross-reconcile`（400 先于 501）+ CLI `fees cross-reconcile`。
+- **导入数据量骤降守卫**（验收 4）：本月导入行 < 上月完成批次行数 × 20% 且上月 ≥ 10 行（噪音地板）→ warnings 骑既有通道「本月 N 行仅为上月 M 行的 P%——请确认源文件是否完整」（#12 实测形态：塔表个别月 1 行 vs 邻月 400+，按邻月估算可能少算百万元级）。**只提示不阻断**；类型隔离（电费基线不触发塔费）；失败路径不触发（失败自陈）。
+- 三面：建立=申报级（留痕）/ 移除=管理级（治理动作，Admin 闭集 11）/ 列表+扫描+对账=读开放。测试：骨架/合并纯函数（三类/重定向痕迹/确定性）+ 服务（映射 CRUD 拒绝形态/骤降三态：触发/基线不足不触发/类型隔离）+ duckdb 真机端到端（扫描提议双码对→确认→对账归并 BOTH-2 形态三类计数与差额 -500.00）+ HTTP 矩阵（双构建自适应 501）+ CLI e2e（add/dup/list/scan 诚实拒绝/cross-reconcile 诚实拒绝/remove 404）。事实源：api-routes 52→57、api-fees-routes 26→31、repo-migrations 38→39、Admin 闭集 10→11。
+
 ### 修复 — Windows 全量测试恒红（#14）：源文件可写提示的平台假设统一
 - **根因**：`sourceWritableWarnings` 按 `runtime.GOOS == "windows"` 平台短路返回 nil（注释假设「Windows 上 POSIX 写位无意义」），但 `TestE2EVerifySources` 与 `TestLedgerColumnsRoundTripAndCompat` 恒断言 0644 源文件必须携带只读建议——实现与测试的平台假设背离，Windows 上 15 包恒 2 红，恒红测试掩盖真实回归。
 - **修复（issue 方案 A）**：删除平台短路。Go 的 `os.Stat` 在 Windows 上把只读属性（`FILE_ATTRIBUTE_READONLY`）映射进 mode 位——普通文件报 0666、`attrib +R` 后报 0444（issue 作者实机钉死）——单一 `&0o200` 探针**跨平台为真**。原短路反而使 Windows 用户收不到 #6 的源文件可写提示；现在三个平台（linux/WSL2/Windows）行为一致：可写源带建议、只读源静默。

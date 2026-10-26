@@ -107,3 +107,82 @@ func TestCLIFeesDetailsLifecycle(t *testing.T) {
 		t.Fatalf("default build must answer the honest absent system side: %v", rec)
 	}
 }
+
+func TestCLIFeesAliasesLifecycle(t *testing.T) {
+	if e2eBin == "" {
+		t.Skip("netopsfees binary was not built (go tool unavailable)")
+	}
+	tmp := t.TempDir()
+	db := filepath.Join(tmp, "netops.db")
+
+	// add: the audited human confirm channel.
+	stdout, code := runCLI(t, "fees", "--db", db, "--data", tmp, "aliases", "add",
+		"--canonical", "HLJ-0001", "--alias", "hlj001", "--source", "tower_lease",
+		"--confidence", "rule", "--actor", "cli-zhang")
+	if code != 0 {
+		t.Fatalf("add exit = %d:\n%s", code, stdout)
+	}
+	var item map[string]any
+	if err := json.Unmarshal([]byte(stdout), &item); err != nil {
+		t.Fatalf("add stdout is not JSON: %s", stdout)
+	}
+	if item["createdBy"] != "cli-zhang" || item["confidence"] != "rule" {
+		t.Fatalf("added = %v", item)
+	}
+	id := item["id"].(string)
+
+	// duplicate: refusal exit + text.
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "aliases", "add",
+		"--canonical", "HLJ-0001", "--alias", "hlj001", "--source", "tower_lease",
+		"--confidence", "manual", "--actor", "cli")
+	if code == 0 || !strings.Contains(stdout, "映射已存在") {
+		t.Fatalf("duplicate = exit %d, %s", code, stdout)
+	}
+
+	// list.
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "aliases", "list")
+	if code != 0 {
+		t.Fatalf("list exit = %d:\n%s", code, stdout)
+	}
+	var list struct {
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &list); err != nil || list.Total != 1 {
+		t.Fatalf("list = %s", stdout)
+	}
+
+	// scan + cross-reconcile on the DEFAULT build: the honest engine
+	// refusals (exit non-zero, JSON error envelope naming the tag).
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "aliases", "scan")
+	var errOut map[string]any
+	if json.Unmarshal([]byte(stdout), &errOut) != nil {
+		t.Fatalf("scan stdout is not JSON: %s", stdout)
+	}
+	if _, ok := errOut["error"]; !ok && code == 0 {
+		t.Fatalf("default-build scan must refuse honestly: %s", stdout)
+	}
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "cross-reconcile",
+		"--year", "2026", "--month", "8")
+	if json.Unmarshal([]byte(stdout), &errOut) != nil {
+		t.Fatalf("cross-reconcile stdout is not JSON: %s", stdout)
+	}
+	if _, ok := errOut["error"]; !ok && code == 0 {
+		t.Fatalf("default-build cross-reconcile must refuse honestly: %s", stdout)
+	}
+
+	// usage discipline: missing --year.
+	if _, code = runCLI(t, "fees", "--db", db, "--data", tmp, "cross-reconcile"); code != 2 {
+		t.Errorf("missing year exit = %d, want 2", code)
+	}
+
+	// remove.
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "aliases", "remove", "--id", id)
+	if code != 0 {
+		t.Fatalf("remove exit = %d:\n%s", code, stdout)
+	}
+	// remove again: 404 semantics.
+	stdout, code = runCLI(t, "fees", "--db", db, "--data", tmp, "aliases", "remove", "--id", id)
+	if code == 0 || !strings.Contains(stdout, "not_found") {
+		t.Fatalf("re-remove = exit %d, %s", code, stdout)
+	}
+}

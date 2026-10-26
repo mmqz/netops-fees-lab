@@ -31,7 +31,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "details", "verify-sources",
+	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "details", "aliases", "cross-reconcile", "verify-sources",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -112,6 +112,10 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesClueDecisions(ctx, svc, subArgs, stdout, stderr)
 	case "details":
 		return cmdFeesDetails(ctx, svc, subArgs, stdout, stderr)
+	case "aliases":
+		return cmdFeesAliases(ctx, svc, dataDir, subArgs, stdout, stderr)
+	case "cross-reconcile":
+		return cmdFeesCrossReconcile(ctx, svc, subArgs, stdout, stderr)
 	case "verify-sources":
 		return cmdFeesVerifySources(ctx, svc, subArgs, stdout, stderr)
 	default:
@@ -1141,4 +1145,146 @@ func cmdFeesDetailsReconcile(ctx context.Context, svc *fees.Service, args []stri
 		return err
 	}
 	return writeJSON(stdout, rec)
+}
+
+// ---- 跨数据集对账 CLI（#12：fees aliases + fees cross-reconcile） ----
+
+// cmdFeesAliases dispatches `fees aliases <add|list|remove|scan>`.
+func cmdFeesAliases(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees aliases 需要 add、list、remove 或 scan 子命令"}
+	}
+	sub, subArgs := args[0], args[1:]
+	switch sub {
+	case "add":
+		return cmdFeesAliasesAdd(ctx, svc, subArgs, stdout, stderr)
+	case "list":
+		return cmdFeesAliasesList(ctx, svc, subArgs, stdout, stderr)
+	case "remove":
+		return cmdFeesAliasesRemove(ctx, svc, subArgs, stdout, stderr)
+	case "scan":
+		return cmdFeesAliasesScan(ctx, svc, dataDir, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("fees aliases 子命令必须是 add、list、remove 或 scan，收到 %q", sub)}
+	}
+}
+
+func cmdFeesAliasesAdd(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees aliases add")
+	canonical := fs.String("canonical", "", "主编码（对账归并目标键）")
+	alias := fs.String("alias", "", "别名（另一系统的编码或站名）")
+	source := fs.String("source", "", "来源系统 "+strings.Join(append(fees.FeeTypes(), "manual"), "/"))
+	confidence := fs.String("confidence", "manual", "置信 exact/rule/manual（人工确认缺省 manual）")
+	actor := fs.String("actor", "", "建立人（必填——映射可审计）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees aliases add 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	a, err := svc.AddSiteCodeAlias(ctx, fees.SiteCodeAliasInput{
+		Canonical: *canonical, Alias: *alias, Source: *source, Confidence: *confidence,
+	}, *actor)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, struct {
+		ID         string `json:"id"`
+		Canonical  string `json:"canonical"`
+		Alias      string `json:"alias"`
+		Source     string `json:"source"`
+		Confidence string `json:"confidence"`
+		CreatedBy  string `json:"createdBy"`
+	}{ID: a.ID, Canonical: a.Canonical, Alias: a.Alias, Source: string(a.Source),
+		Confidence: a.Confidence, CreatedBy: a.CreatedBy})
+}
+
+func cmdFeesAliasesList(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees aliases list")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees aliases list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	aliases, err := svc.ListSiteCodeAliases(ctx)
+	if err != nil {
+		return err
+	}
+	type wireItem struct {
+		ID         string `json:"id"`
+		Canonical  string `json:"canonical"`
+		Alias      string `json:"alias"`
+		Source     string `json:"source"`
+		Confidence string `json:"confidence"`
+		CreatedBy  string `json:"createdBy"`
+		CreatedAt  string `json:"createdAt"`
+	}
+	out := make([]wireItem, 0, len(aliases))
+	for _, a := range aliases {
+		out = append(out, wireItem{ID: a.ID, Canonical: a.Canonical, Alias: a.Alias,
+			Source: string(a.Source), Confidence: a.Confidence, CreatedBy: a.CreatedBy,
+			CreatedAt: a.CreatedAt.Format(time.RFC3339)})
+	}
+	return writeJSON(stdout, struct {
+		Items []wireItem `json:"items"`
+		Total int        `json:"total"`
+	}{Items: out, Total: len(out)})
+}
+
+func cmdFeesAliasesRemove(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees aliases remove")
+	id := fs.String("id", "", "映射 id（fca_…）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees aliases remove 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if err := svc.RemoveSiteCodeAlias(ctx, *id); err != nil {
+		return err
+	}
+	return writeJSON(stdout, map[string]any{"removed": *id})
+}
+
+func cmdFeesAliasesScan(ctx context.Context, svc *fees.Service, dataDir string, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees aliases scan")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees aliases scan 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	proposals, err := svc.ProposeSiteCodeAliases(ctx, fees.Query(ctx))
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, struct {
+		Items []fees.AliasProposal `json:"items"`
+		Total int                  `json:"total"`
+		Note  string               `json:"note"`
+	}{Items: proposals, Total: len(proposals),
+		Note: "扫描只提议不落库——确认用 fees aliases add（--actor 留痕）"})
+}
+
+// cmdFeesCrossReconcile implements `fees cross-reconcile --year [--month]`
+// — the cross-dataset table (#12 acceptance 2/3).
+func cmdFeesCrossReconcile(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees cross-reconcile")
+	year := fs.Int("year", 0, "对账年份")
+	month := fs.Int("month", 0, "对账月份（缺省整年）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees cross-reconcile 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *year < 2000 || *year > 2100 {
+		return &usageError{msg: "--year 必须在 2000–2100", usage: usage.String()}
+	}
+	res, err := svc.CrossReconcile(ctx, fees.Query(ctx), *year, *month)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, res)
 }

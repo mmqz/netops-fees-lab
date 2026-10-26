@@ -206,6 +206,16 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	// '') so its idempotency keys survive the migration byte-for-byte;
 	// the runtime cross-check above still USES the sheet's name.
 	sum, err := s.importSheet(ctx, opts, sheet, sha, name, "")
+	// #12 acceptance 4 — the data-volume guard rides the warnings
+	// channel on the SUCCESS path only (a failed import says its own
+	// thing): this month vs last month's completed rows, <20% = the
+	// 骤降线. 只提示不阻断 — the operator keeps full agency. (The
+	// multi-sheet channel is out of scope phase 1: its per-sheet rows
+	// are not the type universe; an honest per-type aggregate lands
+	// with its own pass later.)
+	if err == nil {
+		warnings = append(warnings, s.importRowAnomalyWarn(ctx, opts.FeeType, opts.Year, opts.Month, sum.RowsImported)...)
+	}
 	sum.Warnings = warnings
 	return sum, err
 }

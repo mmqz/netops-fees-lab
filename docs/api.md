@@ -869,6 +869,26 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 `{detailSumCents, rows, engineCentsAvailable, systemCents, deltaCents, note}`——明细侧（SQLite）恒可答；系统表侧由 DuckDB 引擎回答该键该账期的分析层金额；**差额只提示不阻断**（可能明细待补，也可能系统表待解释——明细永不覆盖系统表）。默认构建：engineCentsAvailable=false + systemCents/deltaCents 为 null + 诚实 note（**不造零不 501**——半答也是答）。键在分析层无行：systemCents=null +「明细有、系统无」警示 note。
 
+## GET /api/fees/site-code-aliases — 站址编码映射台账（#12 验收 1/5）
+
+读开放——映射是证据（canonical/alias/source/confidence/createdBy/createdAt）。
+
+## POST /api/fees/site-code-aliases — 建立编码映射（#12 人工确认通道）
+
+申报级。`{canonical, alias, source, confidence}`——source ∈ 四费用类型或 manual（纯人工跨界映射）；confidence ∈ exact/rule/manual；**UNIQUE 三元组**（重复 422 携带既有 id）；**留痕**（createdBy=令牌层级/CLI --actor，验收 5：谁在何时建立）。
+
+## POST /api/fees/site-code-aliases/scan — 扫描提议（只提议不落库）
+
+两库站址**骨架比对**（大写+去噪声+数字段去前导零——"HLJ-0001"↔"hlj001" 实测形态），同骨架不同字面=疑为同站双码。**只提议不落库**——确认为建立动作（POST），无任何自动写入。引擎面：默认构建 501（站址宇宙在分析层）。申报级（POST 形态、读的心）。
+
+## DELETE /api/fees/site-code-aliases/{id} — 移除编码映射（管理级治理）
+
+错误映射不得永久毒化对账——移除是刻意的治理动作，Admin 令牌。
+
+## GET /api/fees/cross-reconcile?year=&month= — 跨数据集对账表（#12 验收 2/3）
+
+**甲方核对乙方**：电费台账与塔类详单按**主编码**归并（别名经映射桥重定向，痕迹随行）。逐站 `{canonical, class, electricityCents, towerCents, deltaCents(电−塔), elecRows, towerRows, redirectedFrom}`；信封 `{onlyElectricity, onlyTower, both, aliasesApplied, note}`。**三类分拣**：only_electricity=疑似自建站或编码不一致（#12 实测 7 站形态）/ only_tower=多为共享站（正常）/ both=可进一步核对；排序=异常优先（只在电费→只在塔表→双方），确定性 tiebreak。**对账表是待核实差异而非认定结论**。参数校验先于引擎检查（400 先于 501）；合并为纯函数（同数据同输出）。CLI：`fees cross-reconcile --year [--month]`。
+
 ## POST /api/fees/period-probe — 账期内容探测（#15）
 
 **只读探测，不落库**（无快照、无批次）：multipart `file`（.csv/.xlsx，同导入通道的格式与大小约束），返回该文件首 sheet 的**表型分类 + 三档账期识别**——导入前确认面板的数据面（「先选账期 → 内容识别 → 一致性校验」三档流程的第一步）。

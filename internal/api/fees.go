@@ -1434,3 +1434,147 @@ func (s *Server) handleFeesDetailsReconcile(w http.ResponseWriter, r *http.Reque
 	}
 	respondJSON(w, http.StatusOK, rec)
 }
+
+// ---- 跨数据集对账（#12：站址编码映射 + 电费 vs 塔租对账表） ----
+
+// feeAliasItem is the wire shape of one mapping row.
+type feeAliasItem struct {
+	ID         string `json:"id"`
+	Canonical  string `json:"canonical"`
+	Alias      string `json:"alias"`
+	Source     string `json:"source"`
+	Confidence string `json:"confidence"`
+	CreatedBy  string `json:"createdBy"`
+	CreatedAt  string `json:"createdAt"`
+}
+
+// handleFeesAliasesList implements GET /api/fees/site-code-aliases — the
+// bridge registry, read-open (the mapping is evidence).
+func (s *Server) handleFeesAliasesList(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	aliases, err := s.fees.ListSiteCodeAliases(r.Context())
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	out := make([]feeAliasItem, 0, len(aliases))
+	for _, a := range aliases {
+		out = append(out, feeAliasItem{
+			ID: a.ID, Canonical: a.Canonical, Alias: a.Alias, Source: string(a.Source),
+			Confidence: a.Confidence, CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
+}
+
+// handleFeesAliasesCreate implements POST /api/fees/site-code-aliases —
+// the human confirm channel (declarer tier; the audit trail is the
+// point). 422 detail_refused carries the honest text.
+func (s *Server) handleFeesAliasesCreate(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	var body fees.SiteCodeAliasInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "请求体必须是合法 JSON："+err.Error())
+		return
+	}
+	a, err := s.fees.AddSiteCodeAlias(r.Context(), body, s.feeRuleActor(r))
+	if err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			respondError(w, http.StatusUnprocessableEntity, "detail_refused", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusCreated, feeAliasItem{
+		ID: a.ID, Canonical: a.Canonical, Alias: a.Alias, Source: string(a.Source),
+		Confidence: a.Confidence, CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// handleFeesAliasesRemove implements DELETE /api/fees/site-code-aliases/{id}
+// — the admin-tier governance act (a wrong mapping must not poison the
+// reconcile; removal is deliberate and admin-only).
+func (s *Server) handleFeesAliasesRemove(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	if err := s.fees.RemoveSiteCodeAlias(r.Context(), r.PathValue("id")); err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"removed": r.PathValue("id")})
+}
+
+// handleFeesAliasesScan implements POST /api/fees/site-code-aliases/scan
+// — the read-only proposal pass: same-skeleton pairs across the two
+// imported universes, never written (the human confirm channel is the
+// only writer). Declarer tier (a POST shape, a read's heart).
+func (s *Server) handleFeesAliasesScan(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	engine := fees.Query(r.Context())
+	if !engine.Available() {
+		respondError(w, http.StatusNotImplemented, "engine_not_built", fees.ErrEngineNotBuilt.Error())
+		return
+	}
+	proposals, err := s.fees.ProposeSiteCodeAliases(r.Context(), engine)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"items": proposals, "total": len(proposals),
+		"note": "扫描只提议不落库——确认为建立动作（POST /api/fees/site-code-aliases，申报级，留痕）",
+	})
+}
+
+// handleFeesCrossReconcile implements GET /api/fees/cross-reconcile?
+// year=&month= — the cross-dataset table (#12 acceptance 2/3): per
+// canonical site 电费 vs 塔租 with the three-way class and the alias
+// trail. 501 on default builds (engine face).
+func (s *Server) handleFeesCrossReconcile(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	year, err := strconv.Atoi(single(q, "year"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "year 必须是整数")
+		return
+	}
+	month := 0
+	if raw := single(q, "month"); raw != "" {
+		if month, err = strconv.Atoi(raw); err != nil {
+			respondError(w, http.StatusBadRequest, "bad_request", "month 必须是整数")
+			return
+		}
+	}
+	// the parameter discipline fires BEFORE the engine check (the
+	// 400-before-501 doctrine of the query presets).
+	if year < 2000 || year > 2100 || month < 0 || month > 12 {
+		respondError(w, http.StatusBadRequest, "bad_request", "year 必须在 2000–2100；month 0–12（0=整年）")
+		return
+	}
+	engine := fees.Query(r.Context())
+	if !engine.Available() {
+		respondError(w, http.StatusNotImplemented, "engine_not_built", fees.ErrEngineNotBuilt.Error())
+		return
+	}
+	res, err := s.fees.CrossReconcile(r.Context(), engine, year, month)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, res)
+}

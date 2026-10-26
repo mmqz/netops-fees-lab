@@ -67,3 +67,19 @@ type FeeDetailFilter struct {
 	Status   string
 	Category string
 }
+
+// SiteCodeAlias is one canonical↔alias mapping row (migration v39,
+// issue #12): the two systems name the same physical site differently —
+// the cross-dataset reconcile merges each universe's rows onto the
+// canonical code before comparing. Confidence carries the graded
+// doctrine of fee_site_links (exact/rule/manual); provenance is the
+// acceptance-5 audit (谁在何时建立).
+type SiteCodeAlias struct {
+	ID         string
+	Canonical  string  // 主编码
+	Alias      string  // 另一系统的编码或站名
+	Source     FeeType // 哪个费用域的宇宙（manual = 纯人工跨界映射）
+	Confidence string  // exact | rule | manual
+	CreatedBy  string
+	CreatedAt  time.Time
+}

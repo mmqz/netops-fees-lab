@@ -100,6 +100,10 @@ type DB struct {
 	// line (migration v38) — never touches system-table amounts.
 	FeeDetails *FeeDetailRepo
 
+	// FeeSiteCodeAliases stores the canonical↔alias bridge of #12's
+	// cross-dataset reconcile (migration v39).
+	FeeSiteCodeAliases *FeeSiteCodeAliasRepo
+
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
 	Sequences      *SequenceRepo
@@ -218,6 +222,7 @@ func wire(db *DB, q DBTX) {
 	db.FeeSiteLinks = &FeeSiteLinkRepo{q: q}
 	db.RiskClueDecisions = &RiskClueDecisionRepo{q: q}
 	db.FeeDetails = &FeeDetailRepo{q: q}
+	db.FeeSiteCodeAliases = &FeeSiteCodeAliasRepo{q: q}
 	db.FeeRiskRules = &FeeRiskRuleRepo{q: q}
 }
 
@@ -268,6 +273,10 @@ type Tx struct {
 	// FeeDetails stores the manual-entry evidence tier of #16's completion
 	// line (migration v38) — never touches system-table amounts.
 	FeeDetails *FeeDetailRepo
+
+	// FeeSiteCodeAliases stores the canonical↔alias bridge of #12's
+	// cross-dataset reconcile (migration v39).
+	FeeSiteCodeAliases *FeeSiteCodeAliasRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -409,6 +418,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		RiskClueDecisions:    &RiskClueDecisionRepo{q: sqlTx},
 		FeeRiskRules:         &FeeRiskRuleRepo{q: sqlTx},
 		FeeDetails:           &FeeDetailRepo{q: sqlTx},
+		FeeSiteCodeAliases:   &FeeSiteCodeAliasRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

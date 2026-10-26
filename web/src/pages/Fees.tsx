@@ -47,6 +47,7 @@ import {
   uploadFeeFile,
   uploadFeeSheetsFile,
 } from '../api/client';
+import { FeesCrossReconcile } from './FeesCrossReconcile';
 import { FeesDetails } from './FeesDetails';
 import { FeesOverview } from './FeesOverview';
 import { useToast } from '../components/Toast';
@@ -762,6 +763,9 @@ export function FeesPage() {
 
       {/* #16 完成线 6：明细补录佐证层（差额对账 + 录入 + 台账裁定——永不参与系统表金额） */}
       <FeesDetails />
+
+      {/* #12：跨数据集对账（电费台账 vs 塔类详单按主编码归并 + 站址编码映射桥） */}
+      <FeesCrossReconcile />
 
       <section className="panel">
         <h2 className="panel__title">{FEES_RISKS_TITLE}</h2>

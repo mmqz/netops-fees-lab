@@ -35,10 +35,14 @@ import type {
   ResourceType,
   ClueDecisionItem,
   FeeDuplicatesResult,
+  FeeAliasProposal,
+  FeeCrossReconcileResult,
   FeeDetailInput,
   FeeDetailItem,
   FeeDetailsList,
   FeeDetailReconcile,
+  FeeSiteCodeAlias,
+  FeeSiteCodeAliasesList,
   FeeMonthlyResult,
   FeeTotalsResult,
   FeePeriodProbeResult,
@@ -742,6 +746,49 @@ export function reconcileFeeDetails(params: {
 }): Promise<FeeDetailReconcile> {
   return requestJson<FeeDetailReconcile>(
     `/fees/details/reconcile${buildQuery(params as Record<string, string | undefined>)}`,
+  );
+}
+
+/** GET /api/fees/site-code-aliases —— 编码映射台账（#12） */
+export function fetchFeeAliases(): Promise<FeeSiteCodeAliasesList> {
+  return requestJson<FeeSiteCodeAliasesList>('/fees/site-code-aliases');
+}
+
+/** POST /api/fees/site-code-aliases —— 建立编码映射（#12 人工确认通道，留痕） */
+export function addFeeAlias(input: {
+  canonical: string;
+  alias: string;
+  source: string;
+  confidence: string;
+}): Promise<FeeSiteCodeAlias> {
+  return requestJson<FeeSiteCodeAlias>('/fees/site-code-aliases', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST /api/fees/site-code-aliases/scan —— 扫描提议（只提议不落库） */
+export function scanFeeAliases(): Promise<{ items: FeeAliasProposal[]; total: number; note: string }> {
+  return requestJson<{ items: FeeAliasProposal[]; total: number; note: string }>(
+    '/fees/site-code-aliases/scan', { method: 'POST' },
+  );
+}
+
+/** DELETE /api/fees/site-code-aliases/{id} —— 移除映射（管理级治理） */
+export function removeFeeAlias(id: string): Promise<{ removed: string }> {
+  return requestJson<{ removed: string }>(`/fees/site-code-aliases/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** GET /api/fees/cross-reconcile?year=&month= —— 跨数据集对账表（#12） */
+export function fetchFeeCrossReconcile(params: {
+  year: number;
+  month?: number;
+}): Promise<FeeCrossReconcileResult> {
+  return requestJson<FeeCrossReconcileResult>(
+    `/fees/cross-reconcile${buildQuery(params as Record<string, number | undefined>)}`,
   );
 }
 

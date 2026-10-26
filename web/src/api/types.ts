@@ -1633,6 +1633,55 @@ export interface FeeDetailReconcile {
   note: string;
 }
 
+/** 站址编码映射行（#12：canonical↔alias 双系统编码桥） */
+export interface FeeSiteCodeAlias {
+  id: string;
+  canonical: string;
+  alias: string;
+  source: string;
+  confidence: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** GET /api/fees/site-code-aliases 信封 */
+export interface FeeSiteCodeAliasesList {
+  items: FeeSiteCodeAlias[];
+  total: number;
+}
+
+/** 扫描提议（只提议不落库——确认走建立通道） */
+export interface FeeAliasProposal {
+  canonical: string;
+  alias: string;
+  source: string;
+  why: string;
+}
+
+/** 跨数据集对账行（#12 验收 2/3） */
+export interface FeeCrossRow {
+  canonical: string;
+  class: string;
+  electricityCents: number;
+  towerCents: number;
+  deltaCents: number;
+  elecRows: number;
+  towerRows: number;
+  redirectedFrom?: string;
+}
+
+/** GET /api/fees/cross-reconcile 信封 */
+export interface FeeCrossReconcileResult {
+  year: number;
+  month: number;
+  rows: FeeCrossRow[];
+  onlyElectricity: number;
+  onlyTower: number;
+  both: number;
+  aliasesApplied: number;
+  note: string;
+}
+
 /** #119 风险线索人工裁定（risk_clue_decisions 的 REST 形状） */
 export interface ClueDecisionItem {
   id: string;
