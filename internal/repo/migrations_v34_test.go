@@ -64,7 +64,7 @@ VALUES ('fee_legacy', '账本.xlsx', 'sha125', 'electricity', 2024, 5, 'fee-impo
 
 	// Phase 2: restore the registry and reopen — v34 applies. The
 	// legacy row gains sheet=''.
-	migrations = append(append([]Migration(nil), migrations...), migrationV34, migrationV35)
+	migrations = append(append([]Migration(nil), migrations...), migrationV34, migrationV35, migrationV36)
 	db, err = Open(path)
 	if err != nil {
 		t.Fatalf("reopen with v34: %v", err)
@@ -74,8 +74,8 @@ VALUES ('fee_legacy', '账本.xlsx', 'sha125', 'electricity', 2024, 5, 'fee-impo
 	if err := db.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if version != 35 {
-		t.Fatalf("MAX(version) = %d, want 35 (head after the v34 study upgrade)", version)
+	if version != 36 {
+		t.Fatalf("MAX(version) = %d, want 36 (head after the v34 study upgrade)", version)
 	}
 	got, err := db.FeeBatches.GetByID(ctx, "fee_legacy")
 	if err != nil || got.Sheet != "" {

@@ -849,6 +849,25 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 `GET /api/fees/risks/{scenario}` 的第 9 个成员（参数同其它场景：feeType/year[/month]/limit）。六条**确定性**规则（非统计推断，阈值固定无参数）：`reading-gap`（读数差与填报用量之差 > 0.5 度——**一表多户已排除**：仅当无分摊列或某一方分摊为全量时才判读数差，#8 §0 撤回教训）/ `ratio-sum`（四方分摊比例之和与 1 偏差 > 0.005）/ `chain-break`（同电表跨账期 上月止数≠本月起数 且未标记换表——**已标记换表的合法断开不算线索**）/ `zero-quantity-billing`（用量=0 且金额>0——疑似漏抄后顺延计费）/ `purchase-period`（购电截止日−购电起始日 > 35 天——转供电「长期不报+集中补报」候选，#11：补报可能是合理业务，线索非错误认定）/ `receivable-unreceived`（应收电信−实收电信 > 0——资金回收风险，实收=0 为完全未收形态，#11）。每条线索带行级证据锚点与口径 note（不构成认定结论）；`excluded` = 一表多户未判读数差行数 + 已标记换表的断链行数；缺相应列的文件对应规则自动跳过；#11 两规则依赖购电起止日/应收实收列，旧批次（无该列的一代文件）同样自动跳过（列探测守卫）。
 
+## POST /api/fees/period-probe — 账期内容探测（#15）
+
+**只读探测，不落库**（无快照、无批次）：multipart `file`（.csv/.xlsx，同导入通道的格式与大小约束），返回该文件首 sheet 的**表型分类 + 三档账期识别**——导入前确认面板的数据面（「先选账期 → 内容识别 → 一致性校验」三档流程的第一步）。
+
+```json
+{
+  "kind": "payroll",
+  "kindLabel": "综维工资单",
+  "year": 2026, "month": 9,
+  "confidence": "strong",
+  "basis": "「业务账期」列（30行一致）",
+  "rowsSampled": 30
+}
+```
+
+字段：`kind`/`kindLabel`（表型：tower-settlement 铁塔结算详单 / payroll 综维工资单 / wage-items 导入工资项 / electricity-ledger 电费台账 / perf-sheet 综维绩效单 / unknown 未识别）；`year`/`month`（识别账期，0 = 未知——电费台账仅列名月线索时 year=0）；`confidence`（`strong` A档专用账期字段 / `weak` B档间接线索 / `none` C档无账期字段）；`basis`（识别依据：字段名 + 一致行数 + 歧义注记）；`rowsSampled`（值探测采样行数，上限 50）。
+
+与 `POST /api/fees/imports` 的三档校验**同一套探测逻辑**：A档识别账期与申报不一致 → 422 `fee_import_refused`（两个值都在 message 里）；B档月线索不一致 → 422（依据列名注明弱识别）；一致/无法识别 → 正常导入，批次携带 `periodSource`（auto/unverified/manual）与 `periodBasis`。申报覆盖通道：multipart `periodTrustDeclared=1`（人工确认采用申报值，不一致留痕于批次，`periodSource=unverified`）。综维绩效单（perf-sheet）的「日期」列判定为填表时间，**不参与账期解析**（日期映射被丢弃并留痕）。
+
 ## POST /api/fees/links/scan — 费用-资源分级关联扫描（#63，#58 阶段 3）
 
 对活跃 Parquet 编码全集跑三级匹配：**exact**（逐字节 → 自动确认）/ **rule**（fold / zero_pad 命名规则 → 自动确认 + 规则留痕）/ **fuzzy**（相似度 ≥ 0.8 → pending 提案，每编码至多 3 候选）。人类确认的链接**永不**被扫描覆写；数据面消失的编码其自动链接被清扫（人工决策除外）。返回计数信封 `{codes, exactLinks, ruleLinks, fuzzyProposed, unlinked, humanKept}`。幂等：重复扫描同判定、不重复提案。

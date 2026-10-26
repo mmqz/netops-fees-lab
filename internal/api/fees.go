@@ -110,9 +110,14 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 		}
 		mapping = m.Columns
 	}
+	// #15: the UI's confirmation path — after the period-probe panel
+	// showed a disagreement, the operator chose the DECLARED period;
+	// the override rides the batch (period_source stays unverified).
+	trustPeriod := parseBoolForm(r.FormValue("periodTrustDeclared"))
 
 	summary, err := s.fees.Import(r.Context(), fees.ImportOptions{
 		Path: staged, OriginalName: name, FeeType: feeType, Year: year, Month: month, Mapping: mapping,
+		TrustDeclaredPeriod: trustPeriod,
 	})
 	if err != nil {
 		var dup *fees.ErrDuplicateImport
@@ -150,6 +155,79 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusCreated, summary)
+}
+
+// parseBoolForm reads a multipart form boolean the tolerant way: the
+// HTML checkbox family (1/true/on/yes) and the empty default (false).
+// Anything else is false — the flag is an explicit confirmation, never a
+// tri-state.
+func parseBoolForm(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
+}
+
+// handleFeesPeriodProbe implements POST /api/fees/period-probe (#15): the
+// read-only content probe — upload the fee file, get back the table-kind
+// classification and the three-tier period detection WITHOUT declaring
+// anything and WITHOUT writing anything (no snapshot, no batch). This is
+// the pre-import confirmation panel's data face: the UI shows the
+// detected kind/period/basis, the operator picks or confirms the
+// declaration, then calls POST /api/fees/imports.
+func (s *Server) handleFeesPeriodProbe(w http.ResponseWriter, r *http.Request) {
+	if s.dataDir == "" {
+		s.log.Error("fees period probe rejected: dataDir is not configured",
+			"method", r.Method, "path", r.URL.Path)
+		respondError(w, http.StatusInternalServerError, "internal",
+			"服务器未配置数据目录（dataDir），无法处理费用文件探测")
+		return
+	}
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			respondError(w, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("上传文件超过 10MB 上限（实际 %d 字节）", maxErr.Limit))
+			return
+		}
+		respondError(w, http.StatusBadRequest, "bad_request", "无法解析 multipart 请求："+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "缺少 multipart 字段 \"file\"")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	name := filepath.Base(header.Filename)
+	if name == "" || name == "." || name == "/" {
+		respondError(w, http.StatusBadRequest, "bad_request", "上传文件名无效")
+		return
+	}
+	// Stage under the temp probe area (content-addressed like the import
+	// staging; the probe itself never snapshots — nothing persists).
+	staged, err := stageFeeUpload(s.dataDir, file, name)
+	if err != nil {
+		if errors.Is(err, errUnsupportedFeeExt) || errors.Is(err, errXlsBinaryFormat) {
+			respondError(w, http.StatusUnprocessableEntity, "unsupported_fee_file", err.Error())
+			return
+		}
+		s.log.Error("store fee upload failed", "error", err.Error())
+		respondError(w, http.StatusInternalServerError, "internal", "服务器内部错误，无法保存上传文件")
+		return
+	}
+	sheet, err := fees.ReadFeeFileFirst(staged)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, "fee_import_refused", err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, fees.DetectPeriod(sheet.Headers, sheet.Rows))
 }
 
 // errUnsupportedFeeExt answers a fee upload whose extension is outside
@@ -236,6 +314,7 @@ func (s *Server) handleFeesImportSheets(w http.ResponseWriter, r *http.Request) 
 	}
 	summary, err := s.fees.ImportSheets(r.Context(), fees.SheetsImportOptions{
 		Path: staged, OriginalName: name, Year: year, Month: month,
+		TrustDeclaredPeriod: parseBoolForm(r.FormValue("periodTrustDeclared")),
 	})
 	if err != nil {
 		if errors.Is(err, fees.ErrImportRefused) {
@@ -350,6 +429,8 @@ func (s *Server) handleFeesBatchesList(w http.ResponseWriter, r *http.Request) {
 			FeeType:      string(b.FeeType),
 			FeeTypeLabel: fees.FeeTypeLabel(b.FeeType),
 			Period:       fees.PeriodLabel(b.FeeYear, b.FeeMonth),
+			PeriodSource: b.PeriodSource,
+			PeriodBasis:  b.PeriodBasis,
 			Status:       string(b.Status),
 			RowsTotal:    b.RowsTotal,
 			RowsImported: b.RowsImported,
@@ -365,11 +446,16 @@ func (s *Server) handleFeesBatchesList(w http.ResponseWriter, r *http.Request) {
 // feeBatchItem is the REST shape of one fee batch (camelCase, the API
 // convention).
 type feeBatchItem struct {
-	ID           string     `json:"id"`
-	WorkbookName string     `json:"workbookName"`
-	FeeType      string     `json:"feeType"`
-	FeeTypeLabel string     `json:"feeTypeLabel"`
-	Period       string     `json:"period"`
+	ID           string `json:"id"`
+	WorkbookName string `json:"workbookName"`
+	FeeType      string `json:"feeType"`
+	FeeTypeLabel string `json:"feeTypeLabel"`
+	Period       string `json:"period"`
+	// PeriodSource/PeriodBasis (#15): how the batch's period was
+	// established (auto/unverified/manual) and the 识别依据 — the
+	// provenance the three-tier detection records on every import.
+	PeriodSource string     `json:"periodSource"`
+	PeriodBasis  string     `json:"periodBasis,omitempty"`
 	Status       string     `json:"status"`
 	RowsTotal    int        `json:"rowsTotal"`
 	RowsImported int        `json:"rowsImported"`

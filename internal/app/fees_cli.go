@@ -30,7 +30,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "import-sheets", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions", "verify-sources",
+	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions", "verify-sources",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -89,6 +89,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesImport(ctx, svc, subArgs, stdout, stderr)
 	case "import-sheets":
 		return cmdFeesImportSheets(ctx, svc, subArgs, stdout, stderr)
+	case "period-probe":
+		return cmdFeesPeriodProbe(subArgs, stdout, stderr)
 	case "list":
 		return cmdFeesList(ctx, svc, subArgs, stdout, stderr)
 	case "rollback":
@@ -178,6 +180,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	// must not claim it. Accepted: .csv / .xlsx only.
 	file := fs.String("file", "", "费用文件路径（.csv / .xlsx；.xls 为 Excel 2003 二进制旧格式不受支持，可用 netopsfees convert 批量保真转换，issue #7），必填")
 	strictRows := fs.Bool("strict-rows", false, "严格行校验（#8，默认关闭）：台账可选列（读数/用量/单价/分摊）中无法解析为数字的非空单元格使该行导入失败并列明原因；关闭时按宽松口径导入（坏值降级为空，行不拦），确定性规则仍可经 risks ledger-consistency 随时核查")
+	trustPeriod := fs.Bool("period-trust-declared", false, "人工确认账期（#15，默认关闭）：文件内容识别的账期与 --year/--month 申报不一致时默认拒绝导入；加本标志则采用申报值继续导入，不一致事实留痕于批次（period_source=unverified）")
 	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
@@ -211,7 +214,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	}
 	summary, err := svc.Import(ctx, fees.ImportOptions{
 		Path: *file, FeeType: t, Year: *year, Month: *month, Mapping: mapping,
-		StrictRows: *strictRows,
+		StrictRows: *strictRows, TrustDeclaredPeriod: *trustPeriod,
 	})
 	if err != nil {
 		var dup *fees.ErrDuplicateImport
@@ -236,6 +239,7 @@ func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, 
 	fs, usage := newFlagSet("fees import-sheets")
 	file := fs.String("file", "", "多 sheet 台账工作簿路径（.xlsx；每 sheet 一种费用类型，类型按表名/表头自动判定），必填")
 	strictRows := fs.Bool("strict-rows", false, "严格行校验（#8，默认关闭）：同 fees import")
+	trustPeriod := fs.Bool("period-trust-declared", false, "人工确认账期（#15，默认关闭）：同 fees import——任一 sheet 的内容账期与申报不一致时默认拒绝整本导入，加本标志采用申报值继续并留痕")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
 	if err := fs.Parse(args); err != nil {
@@ -249,12 +253,38 @@ func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, 
 	}
 	summary, err := svc.ImportSheets(ctx, fees.SheetsImportOptions{
 		Path: *file, OriginalName: filepath.Base(*file), Year: *year, Month: *month,
-		StrictRows: *strictRows,
+		StrictRows: *strictRows, TrustDeclaredPeriod: *trustPeriod,
 	})
 	if err != nil {
 		return err
 	}
 	return writeJSON(stdout, summary)
+}
+
+// cmdFeesPeriodProbe implements `fees period-probe --file` (#15): the
+// read-only content probe — table-kind classification + three-tier
+// period detection over the FIRST sheet (the single-sheet channel's
+// data face), no declaration needed, nothing written. The JSON answer
+// is the same PeriodDetection the import pipeline records; the UI's
+// pre-import confirmation panel and the CLI operator share it.
+func cmdFeesPeriodProbe(args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees period-probe")
+	file := fs.String("file", "", "费用文件路径（.csv / .xlsx），必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *file == "" {
+		return &usageError{msg: "fees period-probe 需要 --file", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees period-probe 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	sheet, err := fees.ReadFeeFileFirst(*file)
+	if err != nil {
+		return err
+	}
+	det := fees.DetectPeriod(sheet.Headers, sheet.Rows)
+	return writeJSON(stdout, det)
 }
 
 // cmdFeesList implements `fees list [--status]`.

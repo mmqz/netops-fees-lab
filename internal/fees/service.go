@@ -67,6 +67,12 @@ func (s *Service) analysisDir() string {
 // the human mapping channel is the fallback, never a guess.
 type ImportOptions struct {
 	Path string
+	// TrustDeclaredPeriod (#15): when true, a content-vs-declaration period
+	// DISAGREEMENT does not refuse the import — the override is recorded
+	// in the batch (period_source stays unverified, the message carries
+	// both values). The confirmation channel of the B/A档 mismatch in
+	// unattended CLI form; false (default) keeps the refusal.
+	TrustDeclaredPeriod bool
 	// StrictRows (#8): when true, an optional ledger column cell that is
 	// PRESENT but unparseable (a hand-mangled number) fails the row with its
 	// reason instead of silently degrading to nil. Default false keeps the
@@ -95,13 +101,18 @@ type ImportOptions struct {
 // file manifest and the row-level import errors (bounded — the full error
 // detail stays queryable via the failed-row evidence in the snapshot).
 type ImportSummary struct {
-	BatchID          string   `json:"batchId"`
-	Status           string   `json:"status"`
-	WorkbookName     string   `json:"workbookName"`
-	SHA256           string   `json:"sha256"`
-	FeeType          string   `json:"feeType"`
-	FeeYear          int      `json:"feeYear"`
-	FeeMonth         int      `json:"feeMonth"`
+	BatchID      string `json:"batchId"`
+	Status       string `json:"status"`
+	WorkbookName string `json:"workbookName"`
+	SHA256       string `json:"sha256"`
+	FeeType      string `json:"feeType"`
+	FeeYear      int    `json:"feeYear"`
+	FeeMonth     int    `json:"feeMonth"`
+	// PeriodSource/PeriodBasis (#15): how this batch's period was
+	// established (auto/unverified/manual) and the 识别依据 — the
+	// operator-facing copy of the batch row's provenance fields.
+	PeriodSource     string   `json:"periodSource"`
+	PeriodBasis      string   `json:"periodBasis,omitempty"`
 	RowsTotal        int      `json:"rowsTotal"`
 	RowsImported     int      `json:"rowsImported"`
 	RowsFailed       int      `json:"rowsFailed"`
@@ -228,6 +239,30 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	if mapping["siteCode"] == "" || mapping["amount"] == "" {
 		return ImportSummary{}, refusef("缺少必需列映射（siteCode / amount）——请提供映射 JSON 或修正表头；识别到的表头：%v", sheet.Headers)
 	}
+
+	// #15 three-tier period check: the declared period must not
+	// contradict the sheet's own content evidence — a dedicated period
+	// field (A档) mismatch REFUSES; an indirect clue (B档) refuses on
+	// month disagreement unless the operator trusts the declaration;
+	// no evidence (C档) proceeds marked manual. The verdict rides the
+	// batch row (period_source + period_basis) — 跳过识别也留痕：the
+	// override path records the disagreement verbatim.
+	detection := DetectPeriod(sheet.Headers, rows)
+	check := CheckPeriod(detection, opts.Year, opts.Month, opts.TrustDeclaredPeriod)
+	if check.Refuse {
+		return ImportSummary{}, refusef("%s", check.Message)
+	}
+	// The 综维绩效单 ruling (#15): its 日期 column is the FILING time
+	// (measured: 7 sheets' dates span 2026.6–10 while every period is
+	// 202609) — never period evidence. The date mapping is dropped so
+	// the declared period governs every row; the drop is recorded in
+	// the basis (the mapping the batch actually used).
+	if detection.Kind == TablePerfSheet && mapping["date"] != "" {
+		dropped := mapping["date"]
+		delete(mapping, "date")
+		check.Message += fmt.Sprintf("；表型判定为综维绩效单——「%s」列（填表时间）不参与账期解析，账期以申报为准", dropped)
+	}
+
 	canonical := FeeMapping{FeeType: opts.FeeType, Columns: mapping}.CanonicalMapping()
 
 	// 3. pre-flight idempotency.
@@ -259,8 +294,9 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 		return tx.FeeBatches.Create(ctx, FeeBatch{
 			ID: batchID, WorkbookName: name, SHA256: sha, Sheet: sheetKey, FeeType: opts.FeeType,
 			FeeYear: opts.Year, FeeMonth: opts.Month, SnapshotPath: snapRel, Mapping: canonical,
-			SourcePath: opts.SourcePath,
-			Status:     FeeStatusFailed, CreatedAt: s.clock(),
+			SourcePath:   opts.SourcePath,
+			PeriodSource: check.Source, PeriodBasis: check.Message,
+			Status: FeeStatusFailed, CreatedAt: s.clock(),
 		})
 	}); err != nil {
 		return ImportSummary{}, fmt.Errorf("fees: 记录导入批次: %w", err)
@@ -354,6 +390,7 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	return ImportSummary{
 		BatchID: batchID, Status: "completed", WorkbookName: name, SHA256: sha,
 		FeeType: string(opts.FeeType), FeeYear: opts.Year, FeeMonth: opts.Month,
+		PeriodSource: check.Source, PeriodBasis: check.Message,
 		RowsTotal: len(rows), RowsImported: len(normalized), RowsFailed: len(importErrs),
 		Files: relFiles, Errors: errs,
 	}, nil
@@ -385,6 +422,9 @@ type SheetsImportOptions struct {
 	SourcePath string
 	// StrictRows mirrors ImportOptions.StrictRows (#8).
 	StrictRows bool
+	// TrustDeclaredPeriod mirrors ImportOptions.TrustDeclaredPeriod (#15)
+	// — the per-sheet period-check override, workbook-wide.
+	TrustDeclaredPeriod bool
 }
 
 // SheetBatchResult is one sheet's import outcome inside the multi-sheet
@@ -396,6 +436,8 @@ type SheetBatchResult struct {
 	FeeType          string   `json:"feeType"`
 	BatchID          string   `json:"batchId"`
 	Status           string   `json:"status"`
+	PeriodSource     string   `json:"periodSource"`
+	PeriodBasis      string   `json:"periodBasis,omitempty"`
 	RowsTotal        int      `json:"rowsTotal"`
 	RowsImported     int      `json:"rowsImported"`
 	RowsFailed       int      `json:"rowsFailed"`
@@ -508,6 +550,17 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 				sd.Name, typ, mapping["siteCode"], mapping["amount"], sd.Headers))
 			continue
 		}
+		// #15 pre-flight period check — the same three-tier rule the
+		// single-sheet channel runs inside importSheet, hoisted here so
+		// a mismatching sheet refuses the WHOLE workbook before any
+		// sheet lands (a period error on sheet 2 with sheet 1 already
+		// committed would leave a half-period workbook, the exact
+		// poisoning this issue exists to stop).
+		check := CheckPeriod(DetectPeriod(sd.Headers, sd.Rows), opts.Year, opts.Month, opts.TrustDeclaredPeriod)
+		if check.Refuse {
+			refusals = append(refusals, fmt.Sprintf("工作表 %q（%s）：%s", sd.Name, typ, check.Message))
+			continue
+		}
 		plans = append(plans, sheetPlan{sheet: sd, feeType: typ})
 	}
 	if len(refusals) > 0 {
@@ -523,13 +576,15 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 		summary, err := s.importSheet(ctx, ImportOptions{
 			Path: opts.Path, OriginalName: opts.OriginalName,
 			FeeType: p.feeType, Year: opts.Year, Month: opts.Month,
-			SourcePath: opts.SourcePath,
-			StrictRows: opts.StrictRows,
+			SourcePath:          opts.SourcePath,
+			StrictRows:          opts.StrictRows,
+			TrustDeclaredPeriod: opts.TrustDeclaredPeriod,
 			// Mapping intentionally nil: each sheet's columns differ — the
 			// recognizer runs per sheet inside importSheet.
 		}, p.sheet, sha, name, p.sheet.Name)
 		result := SheetBatchResult{
 			Sheet: p.sheet.Name, FeeType: string(p.feeType),
+			PeriodSource: summary.PeriodSource, PeriodBasis: summary.PeriodBasis,
 			RowsTotal: summary.RowsTotal, RowsImported: summary.RowsImported,
 			RowsFailed: summary.RowsFailed, Files: summary.Files, Errors: summary.Errors,
 			SkippedDuplicate: summary.SkippedDuplicate, ExistingBatch: summary.ExistingBatch,

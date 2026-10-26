@@ -105,6 +105,16 @@ type FeeBatch struct {
 	SnapshotPath string // relative to the data dir (content-addressed)
 	SourcePath   string // absolute path the import actually read (issue #6; '' = unknown/pre-v35)
 	Mapping      string // canonical JSON of the column mapping
+	// PeriodSource is how the batch's period was established (#15,
+	// migration v36): "auto" (A档 — a dedicated period field in the
+	// content agrees with the declaration), "unverified" (B档 — only
+	// indirect evidence, or an operator override of a disagreement),
+	// "manual" (C档 — no period evidence in the content; the human
+	// declaration is the only source). Empty = pre-v36 legacy row.
+	PeriodSource string
+	// PeriodBasis is the 识别依据 (#15 acceptance 4): the probe fields,
+	// agreement counts and ambiguity notes. Empty on legacy rows.
+	PeriodBasis  string
 	Status       FeeStatus
 	RowsTotal    int
 	RowsImported int
