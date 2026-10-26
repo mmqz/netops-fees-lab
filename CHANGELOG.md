@@ -32,6 +32,11 @@
 - **事实源同步**：facts.md 四计数（mcp-tools 4→5、api-routes 42→47、api-fees-routes 16→21、repo-migrations 36→37）+ Admin 闭集测试 7→9 + MCP 注册表闭集 4→5 + 只读注册表不变式钉死；26 处迁移测试 max-version 断言 36→37（必要适配，先例 v10→v11 同款）。
 - 验收：v37 迁移（CHECK 全矩阵注入尝试拒绝 + 审计往返 + 台账序）+ 服务级（创建校验 11 拒绝形态、观察态默认、人类翻转、费用类型隔离、假引擎组合契约）+ duckdb 真机（gt/gte/lt/lte/rows/mom_ratio 窗口、注入守卫双形态、启用后端到端溯源）+ HTTP 通道矩阵（401/201/403/200/422 rule_refused/404/审计 actor 按层级）+ CLI e2e 生命周期（含默认构建 custom-rules 诚实 501）+ MCP（工具调用往返 + 重名拒绝 + 只读变体排除）。
 
+### 新增 — CI 管道落地（.github/workflows/ci.yml，#1/#14 的载体）
+- **四门禁**：linux 默认 tag go（gofmt/vet/test + 前端先建——go:embed 依赖）+ linux duckdb tag go（分析引擎真机验收：风险场景/台账规则/#2 custom-rules——主仓 v0.17.0 拆分时明言移交的本职）/ web（tsc 严格 + vitest）/ windows 默认 tag go（用户平台复验载体；duckdb 无 Windows 路径为已文档化限制——501 即指引）。
+- **止损设计**：concurrency cancel-in-progress——账号级配额瘫痪（issue #1：2026-10-11 起 free 2000 分钟耗尽）期间文件不烧分钟，配额恢复后自动生效；本地门禁与 CI 同集，瘫痪期以本地为事实源。
+- **本地基线实测**（配额瘫痪期的替代验证）：linux 双 tag 17 包全绿 ×2 + windows 交叉编译/vet 全净（duckdb tag 失败形态与文档逐字一致）+ 前端 tsc/vitest 129/build 全绿。
+
 ### 新增 — v0.18 共享底座移植（主仓同步）
 - **两级写门禁 + 默认安全绑定 + 特权操作审计**（#9，主仓 v0.18.0 移植）：`--token` 写通道与 `--read-token` 只读通道分离，缺省绑定 127.0.0.1（默认安全——裸奔对外需显式 `--bind 0.0.0.0`）；申报人员持只读令牌不可再删整个批次；特权操作（回滚/裁定/GC 等）留痕。
 - **MCP 标准注解 + `mcp --read-only` 变体**（#10，主仓 v0.18.0 移植）：工具面携带 MCP 标准注解（readOnly/hint），AI 从协议层即可判断哪些工具可安全调用；`--read-only` 变体编译出纯只读工具面。

@@ -1,0 +1,129 @@
+# NetOps Fees Lab CI.
+#
+# The fees repo split out of mmqz/netops-lab at v0.17.0 carrying the whole
+# fee domain: the import/snapshot/parquet pipeline, the risk scenarios,
+# the DuckDB analysis engine (its build tag and end-to-end tests), and
+# the /fees web workbench. The main repo's ci.yml explicitly hands the
+# duckdb job over ("which carries its own CI") — this file IS that CI,
+# plus the windows gate that issue #1 (复验) and #14 (平台假设) ask for.
+#
+# The go job builds the frontend first: SPA-serving API tests embed
+# internal/webui/dist, which is empty (only .gitkeep) until `vite build`
+# runs — mirroring the local `make test` dependency on `make web`
+# (the Makefile's issue-#13 pre-check gives the same instruction).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The account's Actions spending limit was exhausted on 2026-10-11
+# (private repo, free 2000 min/month; windows bills 2x) and jobs die in
+# ~4s with "recent account payments have failed or your spending limit
+# needs to be increased" (the main repo's ci.yml carries the same note).
+# Nothing in this file can fix that — it is an account-level action
+# (Settings → Billing & plans). What code CAN do is stop burning minutes
+# once the quota resets: cancel-in-progress drops superseded runs from
+# rapid push chains so only the newest commit actually bills.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Linux, default build tag: the full write/import/rules/management
+  # surface (the query presets honestly answer 501 engine_not_built).
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build frontend (embedded by go:embed)
+        run: cd web && npm ci && npm run build
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 -timeout 15m ./...
+
+  # Linux, the duckdb build tag: the analysis engine's real acceptance —
+  # risk scenarios, ledger-consistency rules, and the #2 custom-rules
+  # preset run against the REAL engine (CGO + gcc, mirroring
+  # `make build-duckdb`). This is the job the main repo handed over.
+  duckdb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build frontend (embedded by go:embed)
+        run: cd web && npm ci && npm run build
+      - name: go vet (duckdb)
+        run: go vet -tags duckdb ./...
+      - name: go test (duckdb)
+        run: go test -count=1 -tags duckdb -timeout 25m ./...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: build (tsc strict + vite)
+        run: npm run build
+      - name: test (vitest)
+        run: npm test
+
+  # Issue #1 (复验) / #14 (平台假设): the user's actual environment is
+  # Windows, so the default-tag gate must hold there too — the linux job
+  # alone cannot see TempDir cleanup, path separator or chmod semantics
+  # regressions. The duckdb engine has NO Windows path (mingw-w64 lacks
+  # rstrtmgr — documented, its queries answer 501 with the Docker/WSL2
+  # guidance), so this job runs the DEFAULT tag only, exactly like the
+  # local `make test` a Windows operator runs. Windows minutes bill at
+  # 2x; the job is worth that only because it is the user's platform.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build frontend (embedded by go:embed)
+        run: cd web && npm ci && npm run build
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+        shell: bash
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 -timeout 25m ./...

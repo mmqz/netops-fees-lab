@@ -50,7 +50,7 @@ NetOps Fees Lab 是一个本地优先（local-first）的**站点费用风险分
 
 ## 3. 快速开始
 
-前置要求：**Go 1.27+**（后端）、**Node 18+**（前端；验证于 Node 24 / npm 11）。测试全部本地执行（本仓库不配置 CI）。
+前置要求：**Go 1.27+**（后端）、**Node 18+**（前端；验证于 Node 24 / npm 11）。CI 四门禁（.github/workflows/ci.yml：linux 默认 tag go / linux duckdb tag go / web tsc+vitest / windows 默认 tag go）与本地门禁同集——本地跑过的每一道门 CI 都会再跑一遍；账号级 Actions 配额瘫痪期间（issue #1）本地门禁为事实源。
 
 ```bash
 # 1) 后端测试（16 包全绿；std 构建不含 DuckDB 引擎）
