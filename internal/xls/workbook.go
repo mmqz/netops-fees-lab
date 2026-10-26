@@ -27,6 +27,20 @@ type WorkBook struct {
 	dateMode       uint16
 }
 
+// Close releases the underlying reader (the os.File xls.Open handed over).
+// Idempotent and nil-safe: converting does not need the workbook after
+// writeSheet returns, and a leaked handle keeps the source undeletable on
+// Windows (the CI-windows TempDir flake family).
+func (wb *WorkBook) Close() error {
+	if wb == nil {
+		return nil
+	}
+	if c, ok := wb.rs.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
 // read workbook from ole2 file
 func newWorkBookFromOle2(rs io.ReadSeeker) *WorkBook {
 	wb := new(WorkBook)

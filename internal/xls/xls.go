@@ -9,11 +9,21 @@ import (
 
 // Open one xls file
 func Open(file string, charset string) (*WorkBook, error) {
-	if fi, err := os.Open(file); err == nil {
-		return OpenReader(fi, charset)
-	} else {
+	fi, err := os.Open(file)
+	if err != nil {
 		return nil, err
 	}
+	wb, werr := OpenReader(fi, charset)
+	if werr != nil {
+		// The error path MUST release the handle: a leaked fd keeps the
+		// file undeletable on Windows (t.TempDir's RemoveAll fails with
+		// "being used by another process" — the CI-windows flake of
+		// TestConvertRejectsCorruptXLS). The success path hands ownership
+		// to the WorkBook (its Close closes the file).
+		_ = fi.Close()
+		return nil, werr
+	}
+	return wb, nil
 }
 
 // Open xls file from reader

@@ -115,6 +115,7 @@ func convertXLSX(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = wb.Close() }() // the source handle must not outlive the conversion (Windows)
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
 

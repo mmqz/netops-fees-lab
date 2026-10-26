@@ -50,6 +50,10 @@
 - **测试**：duckdb 聚合钉（坐标 join/计数/诚实 null/覆盖面/确定序/重跑一致）+ HTTP 双构建契约（400 先于 501；501 SKIP + 200 形态）+ 浏览器级实测（agent-browser：geo 夹具两站落点、canvas 320px、worker 资产加载、console/errors 零输出）。
 - 事实源：api-routes 57→58、api-fees-routes 31→32；api.md 新节（示例=真实输出）。
 
+### 修复 — CI 双绿收口：xls.Open 错误路径句柄泄漏（Windows TempDir flake 根因）+ web job Node 20→22（undici 兼容）
+- **TestConvertRejectsCorruptXLS 的 Windows 失败是真 bug**：`xls.Open` 的错误路径（corrupt 文件解析失败）从不关闭 `os.Open` 的句柄——Linux 无碍，Windows 句柄滞留使 `t.TempDir` 的 RemoveAll 报「being used by another process」。修复：错误路径显式 Close；同时补 `WorkBook.Close()`（成功路径所有权移交——convert 两条转换通道用完即关）。CI windows job 18 包仅此一处挂，修复后预期全绿。
+- **web job 的 useSeq.test.tsx worker 崩溃**：vitest 的 forks pool 传输层 undici 在 Node 20 runner 上 `decompress.js` bind 失败（145/150 测试过、第 8 个文件 worker 起不来）——本地 Node 24 全绿。CI node-version 20→22（4 处）。issue #22 报告人的环境即 Node 24，与本地开发者一致。
+
 ## [0.19.1] — 2026-10-26
 
 **版本钉与隔离目录修复版**（patch：#17——两项确定性测试红：发版原子性 + Windows AV 句柄）。
