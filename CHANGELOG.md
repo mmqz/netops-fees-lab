@@ -4,7 +4,7 @@
 
 ## [0.20.0] — 进行中
 
-**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23、排除主导告警与三态空状态 #21、费用页信息架构重构 #19；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
+**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23、排除主导告警与三态空状态 #21、费用页信息架构重构 #19、站点风险地图渲染能力 #18）——七 issue 全量交付版。
 
 ### 修复 — Windows 构建阻断（#22）：`FeesOverview.tsx` 与 `feesOverview.ts` 仅大小写不同，Windows 上 tsc/vite 双双失败
 - **根因**：`web/src/pages/` 下同时存在 `FeesOverview.tsx`（React 组件，大写 F）与 `feesOverview.ts`（纯函数库，小写 f）——Linux/macOS 大小写敏感文件系统两者共存一切正常，Windows 大小写不敏感把它们当同一文件：`import { FeesOverview } from './FeesOverview'` 解析到不含该导出的 `feesOverview.ts`，tsc 报 TS1261/TS1149、vite 报「"FeesOverview" is not exported by "src/pages/feesOverview.ts"」，**前端完全无法构建**（Go 二进制随之缺内嵌前端）。issue 报告人 Windows/Node 24/npm 11 实测复现率 100%。
@@ -42,6 +42,13 @@
 - **趋势图**：`height:auto` 等比放大（1600px 容器 → 396px 高）改为**固定 240px**（内容 meet 居中——图表回到「小图」角色）；**Y 轴 0 基废除**——`trendGeometry` 改数据驱动域（min/max ± 10% span，单值序列 ±5%，非负金额不下探负轴），实测 2.0-2.14 万（±4% 波动）的刻度从 0-2.15 变为 1.99-2.15，波动从「水平线」变为可读形态；`yLo/yHi` 进 `TrendGeometry` 输出。
 - **浏览器级回归**（agent-browser 1600×900 + duckdb 真机 + 三月数据）：7 Tab 渲染与切换 ✓（activeTab 状态迁移、6 隐藏面板、批次标题 DOM 可达）/ 控件 18/18 select + 12/12 input 令牌化 ✓ / 趋势图 240px 高 + 自适应刻度（1.99/2.04/2.10/2.15 万）✓ / console+errors 零输出 ✓。
 - **测试**：前端 150 全过（几何确定性自对照测试因自适应域仍绿——确定性不变，域值数据驱动）；Go 默认 19 包 + duckdb 全绿。
+
+### 新增 — 站点风险地图渲染能力（#18）：十场景线索按站址聚合 + confirmed 关联资源坐标着色落点
+- **职责边界（#16 同款）**：云端只做渲染能力，经纬度数据由本地资源表自带——读取 migration v20 起的结构化 `geo_lat`/`geo_lng` 属性键（导入器把复合「经纬度」列按中国边界启发式拆分入库，前置条件在 schema 层早已就绪）。
+- **数据面**：`Service.RiskMap`——十场景（九内置 + custom-rules）逐个执行按站址聚合，confirmed 关联 → 资源坐标；着色语义 红=已核实（verified）/ 黄=待核实（pending）/ 绿=无线索；`points[]` 站址升序确定序（验收 4 同数据同输出）；`lat/lng` 无坐标诚实 null（绝不猜零）；`linkedSites/geoSites` 覆盖面诚实计数（关联无坐标的站址是已知缺口，报告而非静默缩面）。HTTP `GET /api/fees/risk-map`（参数校验先于引擎检查、默认构建 501 同契约）。
+- **前端**：`FeesRiskMap` 组件（挂总览线索列表之后）——MapLibre 圆点层 + 点选弹窗（站址/资源/线索计数/场景）；**maplibre 库+CSS+worker URL 同点动态 import**（首屏零成本，1.08MB vendor chunk 纯异步——主仓 W5-D 同款纪律，worker URL 必须建图前设置否则 Worker failed to load）；**无坐标数据时面板整体不渲染**（验收 2：列表照常）。
+- **测试**：duckdb 聚合钉（坐标 join/计数/诚实 null/覆盖面/确定序/重跑一致）+ HTTP 双构建契约（400 先于 501；501 SKIP + 200 形态）+ 浏览器级实测（agent-browser：geo 夹具两站落点、canvas 320px、worker 资产加载、console/errors 零输出）。
+- 事实源：api-routes 57→58、api-fees-routes 31→32；api.md 新节（示例=真实输出）。
 
 ## [0.19.1] — 2026-10-26
 

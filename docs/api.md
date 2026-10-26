@@ -926,6 +926,26 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 仅 pending 可驳回：`dismissed`（审计保留，编码与资源对不再自动复提）；非 pending → 409；未知 id 404。CLI 等价：`netopslab fees links confirm|dismiss --id <id>`。
 
+## GET /api/fees/risk-map?feeType=&year=&month= — 站点风险地图数据面（#18——十场景线索按站址聚合 + confirmed 关联资源坐标）
+
+**云端只做渲染能力，经纬度数据由本地资源表自带**（#16 职责边界同款）。参数校验先于引擎检查：非法 `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；**默认构建 501 `engine_not_built`**。数据面：十场景（九内置 + custom-rules）逐个执行按站址聚合，站址经 confirmed 关联（`fee_site_links`）连到资源，读取 migration v20 起的结构化 `geo_lat`/`geo_lng` 属性键（导入器把复合「经纬度」列按中国边界启发式拆分入库）。着色语义：红=已核实（verified，人工确认的真问题）/ 黄=待核实（pending）/ 绿=无线索（confirmed 关联但该账期十场景无线索）。
+
+返回 `RiskMapReport`：`points[]` 按站址升序确定序（每点 `lat`/`lng` 可为 null——关联资源无坐标时诚实空值，前端不落点不猜零；`clueCount`/`pending`/`verified`/`dismissed` 按人工裁定状态计数；`scenarios` 该站线索的场景集合）；`linkedSites`/`geoSites` 诚实覆盖面计数（关联无坐标的站址是地图的已知缺口，报告而非静默缩面）：
+
+```json
+{
+  "feeType": "electricity", "year": 2026, "month": 2,
+  "points": [
+    {"siteCode": "HLJ-01", "lat": 45.75, "lng": 126.63, "clueCount": 1,
+     "pending": 1, "verified": 0, "dismissed": 0,
+     "scenarios": ["idle-billing"], "resourceKey": "HLJ-01"}
+  ],
+  "linkedSites": 2, "geoSites": 1
+}
+```
+
+前端（FeesRiskMap 组件）：有坐标点时地图面板渲染（MapLibre 圆点层 + 点选弹窗：站址/资源/线索计数/场景；maplibre 库+CSS+worker URL 同点动态 import——首屏零成本，主仓 W5-D 同款纪律）；**无坐标数据时面板整体不渲染**（验收 2：列表照常）。
+
 ## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided= — 费用风险十场景（#58 阶段 4；#114 加场景 7；#118 加场景 8；#2 加场景 10 custom-rules——逐条执行已启用的 L1 六元组规则）
 
 **固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨——**#11 补报标注**：线索账期内含购电周期 > 70 天〔正常周期×2〕的行时，note 标注「疑似长期不报后集中补报」并携带最长周期天数，环比涨幅可能是攒报的计量后果而非趋势异常；标注而非排除，攒报是否合理由人判断；依赖购电起止日列，旧批次无列则退化为原行为）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）/ `missing-billing`（有量无费——已确认关联的在网/在建资源该账期窗口内有指标采集点而费用侧无该类型计费记录，跨层组合 #118，账期无记录 ≠ 漏收认定，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。

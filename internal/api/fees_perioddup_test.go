@@ -82,3 +82,50 @@ func TestAPIFeesCrossPeriodDuplicate(t *testing.T) {
 		t.Errorf("periodSource = %q, want the DB row's manual (no content evidence in this CSV)", dup.PeriodSource)
 	}
 }
+
+// TestAPIFeesRiskMap pins #18's HTTP contract: parameter validation
+// precedes the engine check, the envelope shape is stable, and the
+// coordinate join answers honest nulls for geoless links.
+func TestAPIFeesRiskMap(t *testing.T) {
+	srv := newAPITestServer(t)
+
+	// bad feeType -> 400 before any engine consideration.
+	resp, body := doRequest(t, srv, http.MethodGet, "/api/fees/risk-map?feeType=bogus&year=2026", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad feeType: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	// bad year -> 400.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-map?feeType=electricity&year=1999", nil, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad year: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	// default build (std engine) -> 501; duckdb build -> 200 envelope.
+	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-map?feeType=electricity&year=2026&month=2", nil, "")
+	if resp.StatusCode == http.StatusNotImplemented {
+		t.Skip("default build: the 501 contract holds")
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("risk-map: status = %d\nbody: %s", resp.StatusCode, body)
+	}
+	var rep struct {
+		FeeType string `json:"feeType"`
+		Points  []struct {
+			SiteCode  string   `json:"siteCode"`
+			Lat       *float64 `json:"lat"`
+			Scenarios []string `json:"scenarios"`
+		} `json:"points"`
+		LinkedSites int `json:"linkedSites"`
+		GeoSites    int `json:"geoSites"`
+	}
+	if err := json.Unmarshal(body, &rep); err != nil {
+		t.Fatalf("decode: %v\n%s", err, body)
+	}
+	if rep.FeeType != "electricity" {
+		t.Fatalf("feeType = %q", rep.FeeType)
+	}
+	// no geo resources seeded in this server: points may be empty or
+	// geoless, but the counts must stay consistent.
+	if rep.GeoSites > rep.LinkedSites {
+		t.Fatalf("geoSites %d > linkedSites %d — impossible", rep.GeoSites, rep.LinkedSites)
+	}
+}

@@ -50,6 +50,7 @@ import type {
   FeeRuleAuditList,
   FeeRulesList,
   RiskResult,
+  RiskMapReport,
   RollbackResponse,
   RowStatus,
   RuleCode,
@@ -897,4 +898,16 @@ export function setFeeRuleEnabled(id: string, enabled: boolean): Promise<FeeRisk
 /** GET /api/fees/rules/{id}/audit（#2：动作台账 created/enabled/disabled + actor + 变更 JSON） */
 export function fetchFeeRuleAudit(id: string): Promise<FeeRuleAuditList> {
   return requestJson<FeeRuleAuditList>(`/fees/rules/${encodeURIComponent(id)}/audit`);
+}
+
+/** GET /api/fees/risk-map（#18 站点风险地图数据面——云端只做渲染能力，
+ * 坐标由本地资源表自带；无坐标时 points 的 lat/lng 为 null） */
+export function fetchFeeRiskMap(params: {
+  feeType: string;
+  year: number;
+  month?: number;
+}): Promise<RiskMapReport> {
+  return requestJson<RiskMapReport>(
+    `/fees/risk-map${buildQuery(params as Record<string, string | number | undefined>)}`,
+  );
 }

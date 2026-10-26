@@ -1579,3 +1579,42 @@ func (s *Server) handleFeesCrossReconcile(w http.ResponseWriter, r *http.Request
 	}
 	respondJSON(w, http.StatusOK, res)
 }
+
+// handleFeesRiskMap implements GET /api/fees/risk-map?feeType=&year=&month=
+// (#18): the site risk map's data face — the all-scenarios clue roll-up per
+// site, joined with the confirmed-link resources' geo_lat/geo_lng. The geo
+// data comes from the user's own resource sheets (#16 boundary); with no
+// coordinates the points answer lat/lng null and the frontend keeps the
+// list-only shape (acceptance 2).
+func (s *Server) handleFeesRiskMap(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	feeType, err := fees.ParseFeeType(q.Get("feeType"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "feeType 参数必须是 "+
+			strings.Join(fees.FeeTypes(), "/")+"，收到 "+strconv.Quote(q.Get("feeType")))
+		return
+	}
+	year, month, _, err := parseFeesQueryPeriod(q)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	engine := fees.Query(r.Context())
+	report, err := s.fees.RiskMap(r.Context(), engine, fees.RiskQuery{
+		FeeType: feeType, Year: year, Month: month,
+	})
+	if err != nil {
+		if errors.Is(err, fees.ErrEngineNotBuilt) {
+			respondError(w, http.StatusNotImplemented, "engine_not_built",
+				"默认构建未编译 DuckDB 分析引擎——风险地图需要 -tags duckdb 构建")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, report)
+}

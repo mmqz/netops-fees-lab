@@ -106,6 +106,8 @@ func (s *Server) apiRoutes() []route {
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/risks/{scenario}", Tag: "fees", Summary: "费用风险十场景（retired-billing/duplicate-settlement/ledger-mismatch/spike/outlier/unlinked/idle-billing/missing-billing/ledger-consistency/custom-rules；线索 + 行级证据锚点，阈值显式参数化）", Handler: s.handleFeesRisks,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
+		{Method: "GET", Pattern: "/api/fees/risk-map", Tag: "fees", Summary: "站点风险地图（#18：十场景线索按站址聚合 + confirmed 关联资源 geo_lat/geo_lng 坐标；红=已核实/黄=待核实/绿=无线索——坐标由本地资源表自带，无 geo 数据时 points 坐标为空）", Handler: s.handleFeesRiskMap,
+			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/rules", Tag: "fees", Summary: "可配置风险规则列表（#2：L1 六元组 规则名/度量/聚合/维度/算子/阈值/窗口/严重度；?enabled=1 仅已启用；读开放——规则集本身是证据）", Handler: s.handleFeesRulesList},
 		{Method: "POST", Pattern: "/api/fees/rules", Tag: "fees", Summary: "创建可配置风险规则（#2：AI/运营通道，申报级令牌即可；新规则默认停用观察态，人类启用后才参与分析；六元组封闭枚举校验，违例 422 rule_refused）", Handler: s.handleFeesRulesCreate},
 		{Method: "POST", Pattern: "/api/fees/rules/{id}/enable", Tag: "fees", Summary: "启用规则（#2：人类通道，管理级令牌；审计留痕——阈值变更留痕红线的启用侧）", Handler: s.handleFeesRuleSetEnabled, Admin: true},

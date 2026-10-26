@@ -1798,3 +1798,26 @@ export interface FeeRuleAuditList {
   items: FeeRuleAuditEntry[];
   total: number;
 }
+
+/** #18 站点风险地图点位：十场景线索按站址聚合 + confirmed 关联资源坐标 */
+export interface RiskMapPoint {
+  siteCode: string;
+  lat: number | null;
+  lng: number | null;
+  clueCount: number;
+  pending: number;
+  verified: number;
+  dismissed: number;
+  scenarios: string[];
+  resourceKey: string;
+}
+
+/** GET /api/fees/risk-map 信封（linkedSites/GeoSites 是诚实覆盖面计数） */
+export interface RiskMapReport {
+  feeType: string;
+  year: number;
+  month: number;
+  points: RiskMapPoint[];
+  linkedSites: number;
+  geoSites: number;
+}

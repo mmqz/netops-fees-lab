@@ -24,6 +24,7 @@ import { Stepper } from '../components/Stepper';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Spinner } from '../components/Spinner';
 import { centsToYuan, clueKey, formatRiskMetric, riskEmptyState } from './fees-format';
+import { FeesRiskMap } from './FeesRiskMap';
 import {
   centsToWan,
   clueStateLabel,
@@ -743,6 +744,10 @@ export function FeesOverview() {
           </>
         )}
       </div>
+
+      {/* #18 站点风险地图：有坐标数据才渲染（组件内部自判——无 geo 数据
+          返回 null），跨场景线索列表照常（issue 验收 2 的列表形态不变）。 */}
+      <FeesRiskMap feeType={ovType} year={Number(ovYear)} month={resolvedMonth} />
     </section>
   );
 }
