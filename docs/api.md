@@ -884,7 +884,7 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 仅 pending 可驳回：`dismissed`（审计保留，编码与资源对不再自动复提）；非 pending → 409；未知 id 404。CLI 等价：`netopslab fees links confirm|dismiss --id <id>`。
 
-## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided= — 费用风险八场景（#58 阶段 4；#114 加场景 7；#118 加场景 8）
+## GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided= — 费用风险十场景（#58 阶段 4；#114 加场景 7；#118 加场景 8；#2 加场景 10 custom-rules——逐条执行已启用的 L1 六元组规则）
 
 **固定场景 + 显式参数，调用方传不了 SQL**。`scenario` 封闭集：`retired-billing`（退租后仍在计费）/ `duplicate-settlement`（跨批次重复结算）/ `ledger-mismatch`（合同账单金额差异）/ `spike`（电费环比异常上涨——**#11 补报标注**：线索账期内含购电周期 > 70 天〔正常周期×2〕的行时，note 标注「疑似长期不报后集中补报」并携带最长周期天数，环比涨幅可能是攒报的计量后果而非趋势异常；标注而非排除，攒报是否合理由人判断；依赖购电起止日列，旧批次无列则退化为原行为）/ `outlier`（同类站月度金额离群——对总额而非单位成本计算，note 携带规模告诫）/ `unlinked`（零资源计费）/ `idle-billing`（有费无量——已确认关联的站址该账期指标点数为零且费用仍在流，跨层组合，采集缺失与空置不可区分，note 恒携带告诫）/ `missing-billing`（有量无费——已确认关联的在网/在建资源该账期窗口内有指标采集点而费用侧无该类型计费记录，跨层组合 #118，账期无记录 ≠ 漏收认定，note 恒携带告诫）。参数校验先于引擎检查：非法 `scenario` / `feeType` / 越界 `year`（2000–2100）/ `month`（1–12）→ 400；`ratio`/`z` 必须为正数、`minSites`/`limit`/`maxEvidence` 必须为正整数、`diffCents` 必须为非负整数 → 400。**默认构建 501 `engine_not_built`**（与查询预设同契约；`month` 缺省 = 整年各月）。
 
@@ -941,6 +941,40 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 ## GET /api/fees/risk-clue-decisions?scenario=&feeType=&status=&siteCode=&year=&page=&pageSize= — 风险线索裁定台账（#119）
 
 **审计视图**：全部人工裁定，`decidedAt` 最新优先（同秒并列回退 id 序——秒粒度内无次序契约）。过滤器全部可选且为封闭集校验（非法 `scenario`/`feeType`/`status` → 400）；分页走 page/pageSize（limit/offset 亦收，缺省 20、上限 100，PROJECT_BRIEF §9）。返回 `{items[], total, limit, offset}`，items 元素同 POST 的裁定项形状。
+
+## GET /api/fees/rules?enabled= — 可配置风险规则列表（#2）
+
+**读开放**（规则集本身是证据——WHAT fires 不是秘密）。`enabled=1` 仅返回已启用规则；缺省返回全部（观察态停用规则可见，供人类评审待启清单）。返回 `{items[], total, enabledOnly}`，items 元素为完整六元组形状（见 POST 的 201 形状）。
+
+## POST /api/fees/rules — 创建可配置风险规则（#2）
+
+**AI/运营通道**（申报级令牌即可——两级写门禁的第一层；`fee_rules_create` MCP 工具同款服务调用）。**新规则默认停用（观察态）**：创建后不参与任何分析，需人类经管理级 `enable` 路由或 CLI `fees rules enable` 启用（MCP 无启用/停用面——与 #119 人工裁定同一治理红线）。body：
+
+```json
+{"name": "电费单月超阈值", "feeType": "electricity", "metric": "amount",
+ "aggregation": "sum", "dimension": "site_month", "comparator": "gt",
+ "threshold": 500000, "windowMonths": 1, "severity": "high",
+ "description": "单站单月电费合计超过 5000 元（500000 分）"}
+```
+
+- **封闭枚举**（v37 CHECK + 服务双重校验）：`metric ∈ {amount 金额, rows 行数}`、`aggregation ∈ {sum, avg, max, count}`（rows 度量固定 count——行数即聚合）、`dimension` 固定 `site_month`（站址×账期）、`comparator ∈ {gt, gte, lt, lte, mom_ratio 环比涨幅比}`、`severity ∈ {high, medium, low}`；违例 → **422 rule_refused**（message 携带收到的全部枚举值）。
+- **数值边界**：`threshold ≥ 0`（金额类=分、行数类=行数、环比类=涨幅比如 0.30 表示 +30%）；`windowMonths` 1–12（仅 mom_ratio 用作基期回看月数，缺省 1，0 视为 1）；`name` 唯一且 ≤120 字、`description` ≤500 字。
+- **阈值变更留痕**：每次创建落 `created` 审计行（actor=令牌层级：admin/declarer；门禁关闭时 http）。第一期没有更新通道——**改阈值 = 停用旧规则 + 建新规则**，全程审计可追溯。
+- 201 返回 `{id, name, feeType, metric, aggregation, dimension, comparator, threshold, windowMonths, severity, description, enabled:false, createdAt, updatedAt}`（`id` 形如 `rule_<uuid>`）。重名 → 422（name 唯一约束的诚实话术）。
+
+## POST /api/fees/rules/{id}/enable — 启用规则（#2）
+
+**人类通道**（管理级令牌——两级门禁的第二层；申报令牌 403，与 #119 裁定同款）。审计行 `enabled` + `{"enabled":{"from":0,"to":1}}` + actor=admin。200 返回启用后的完整规则形状（`enabled:true`）。不存在 → 404。
+
+## POST /api/fees/rules/{id}/disable — 停用规则（#2）
+
+**人类通道**（管理级令牌）。停用即从 custom-rules 场景消失（已在案线索的裁定不受影响——规则与裁定是两个账本）。审计行 `disabled` + actor=admin。200 返回停用后的完整规则形状（`enabled:false`）。**改阈值的正确姿势**：`disable` 旧规则 → `POST /api/fees/rules` 建新规则 → `enable` 新规则——三步各自留痕，阈值的历史口径完整可追溯（这正是第一期没有 update 通道的原因）。
+
+## GET /api/fees/rules/{id}/audit — 规则动作台账（#2）
+
+**读开放**（留痕的可见性是留痕的意义）。返回 `{ruleId, items[], total}`，items 元素 `{id, ruleId, action, actor, changes, at}`，`action ∈ {created, enabled, disabled}`，`changes` 为变更 JSON（created 行为空），最新优先。不存在 → 404。
+
+**custom-rules 场景消费语义**：`GET /api/fees/risks/custom-rules?feeType=&year=[&month=]` 逐条执行该费用类型下全部已启用规则（引擎在 SQL 构建前对每条规则重校验封闭枚举——规则文本永不进 SQL）；线索携带规则溯源（`metricLabel`=规则口径、`thresholdLabel`=`rule: <规则名>（<聚合> <度量> <算子> <阈值>）`、note 携带 severity+description+教义告诫）、行级证据锚点与已启用规则数的口径 note。默认构建 → 501 engine_not_built（规则表管理不受影响，仅引擎执行需要 duckdb 构建）。
 
 ## 静态资源与 SPA
 

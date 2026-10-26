@@ -41,13 +41,34 @@ func TestMCPToolAnnotationsMatchBehavior(t *testing.T) {
 			t.Errorf("tool %q carries no annotations — issue #10: the four standard hints must be set explicitly", tool.Name)
 			continue
 		}
+		// #2 phase 1: the write-side tool gets its OWN block below — the
+		// pure-query assertions must not silently inherit it.
+		if tool.Name == feeRulesCreateName {
+			if tool.Annotations.ReadOnlyHint {
+				t.Errorf("tool %q: readOnlyHint = true, want false (it writes a rule row)", tool.Name)
+			}
+			if tool.Annotations.DestructiveHint == nil {
+				t.Errorf("tool %q: destructiveHint unset (SDK default) — must be explicitly false", tool.Name)
+			} else if *tool.Annotations.DestructiveHint {
+				t.Errorf("tool %q: destructiveHint = true, want false (creation only, nothing deleted)", tool.Name)
+			}
+			if tool.Annotations.IdempotentHint {
+				t.Errorf("tool %q: idempotentHint = true, want false (same-name repeat errors)", tool.Name)
+			}
+			if tool.Annotations.OpenWorldHint == nil {
+				t.Errorf("tool %q: openWorldHint unset (SDK default) — must be explicitly false", tool.Name)
+			} else if *tool.Annotations.OpenWorldHint {
+				t.Errorf("tool %q: openWorldHint = true, want false (closed local world)", tool.Name)
+			}
+			continue
+		}
 		if !tool.Annotations.ReadOnlyHint {
-			t.Errorf("tool %q: readOnlyHint = false, want true (the whole fee surface is pure query)", tool.Name)
+			t.Errorf("tool %q: readOnlyHint = false, want true (the fee query surface is pure query)", tool.Name)
 		}
 		if tool.Annotations.DestructiveHint == nil {
 			t.Errorf("tool %q: destructiveHint unset (SDK default) — must be explicitly false", tool.Name)
 		} else if *tool.Annotations.DestructiveHint {
-			t.Errorf("tool %q: destructiveHint = true, want false", tool.Name)
+			t.Errorf("tool %q: destructiveHint = true, want false (a pure query deletes nothing)", tool.Name)
 		}
 		if !tool.Annotations.IdempotentHint {
 			t.Errorf("tool %q: idempotentHint = false, want true (re-running a pure query has no extra effect)", tool.Name)

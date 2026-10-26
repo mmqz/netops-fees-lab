@@ -2,7 +2,11 @@
 
 package fees
 
-import "context"
+import (
+	"context"
+
+	"github.com/mmqz/netops-fees-lab/internal/domain"
+)
 
 // stdQueryEngine is the default-build stub: the DuckDB engine (go-duckdb,
 // CGO) compiles only with the `duckdb` build tag (release builds for
@@ -50,6 +54,14 @@ func (stdQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q
 
 func (stdQueryEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, ErrEngineNotBuilt
+}
+
+// RiskCustomRulesPreset (#2 phase 1) on the std stub: the same honest
+// 501 refusal as every other preset — the RULE TABLE itself is fully
+// manageable (create/list/enable/disable/audit) on default builds; only
+// the ENGINE execution needs the duckdb build.
+func (stdQueryEngine) RiskCustomRulesPreset(ctx context.Context, analysisDir string, q RiskQuery, rules []domain.FeeRiskRule) ([]CustomRuleClue, error) {
+	return nil, ErrEngineNotBuilt
 }
 
 func (stdQueryEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {

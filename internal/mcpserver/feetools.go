@@ -41,12 +41,14 @@ func addFeeTools(server *mcp.Server, svc *services.Services) {
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name: feeRisksName,
-		Description: "只读·费用风险九场景查询：运行一个固定风险预设（" +
+		Description: "只读·费用风险十场景查询：运行一个固定风险预设（" +
 			"retired-billing 退租后仍在计费 / duplicate-settlement 跨批次重复结算 / ledger-mismatch 合同账单金额差异 / " +
 			"spike 电费环比异常上涨 / outlier 同类站月度金额离群 / unlinked 零资源计费 / idle-billing 有费无量（账期在计费但指标面零采集点）/ " +
-			"missing-billing 有量无费（资源有采集点但费用面无该类型计费记录，疑似漏收）/ ledger-consistency 台账内部一致性（#5 四条确定性规则：reading-gap 读数差〔一表多户已排除〕/ ratio-sum 四方分摊和 / chain-break 跨账期读数断链〔已标记换表不计〕/ zero-quantity-billing 零用量计费）），返回风险线索" +
+			"missing-billing 有量无费（资源有采集点但费用面无该类型计费记录，疑似漏收）/ ledger-consistency 台账内部一致性（#5 四条确定性规则：reading-gap 读数差〔一表多户已排除〕/ ratio-sum 四方分摊和 / chain-break 跨账期读数断链〔已标记换表不计〕/ zero-quantity-billing 零用量计费）/ " +
+			"custom-rules 可配置规则（#2：已启用的 L1 六元组规则逐条执行，线索携带规则名与严重度）），返回风险线索" +
 			"（触发指标、显式阈值、行级证据锚点 sourceFile+sourceRow+importBatch 可回读快照原文）。" +
-			"阈值用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网），AI 不可调——调参是人类通道（HTTP/CLI）。" +
+			"内置场景阈值用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网），AI 不可调——调参是人类通道（HTTP/CLI）；" +
+			"custom-rules 场景的阈值即规则表内容（规则经 fee_rules_create 创建、人类启用）。" +
 			"输出是待核实线索而非认定结论（账单存在 ≠ 重复付款认定）；线索可携带人工裁定标记 decision=verified（已核实属实）——已驳回（dismissed）的线索默认隐藏并在信封 dismissed 计数（裁定是人类通道 HTTP/CLI，AI 只读）。默认构建未编译分析引擎时本工具明确报错。" +
 			"典型配合：先本工具拿线索，再 resource_search 下钻资源侧。",
 		Annotations: readOnlyHints(),

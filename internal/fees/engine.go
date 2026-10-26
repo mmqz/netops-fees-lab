@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+
+	"github.com/mmqz/netops-fees-lab/internal/domain"
 )
 
 // The QUERY surface (#58's stage-5 preview, the vertical slice's proof):
@@ -113,6 +115,21 @@ type SiteTotal struct {
 	TotalCents int64
 }
 
+// CustomRuleClue is one configurable-rule finding (#2 phase 1): the rule
+// identity (which rides the clue's provenance) plus the bare clue shape.
+// Declared untagged so the interface below can carry it in every build;
+// only the duckdb engine can actually produce non-empty findings.
+type CustomRuleClue struct {
+	RuleID      string
+	RuleName    string
+	Severity    string
+	SiteCode    string
+	Year        int
+	Month       int
+	MetricValue float64
+	Rows        int
+}
+
 // QueryEngine answers the fee analysis presets over the Parquet table at
 // analysisDir. Implementations MUST be safe for concurrent use (the HTTP
 // surface shares one instance).
@@ -163,6 +180,14 @@ type QueryEngine interface {
 	// ZScore (two-sided; metric = the signed z). Requires at least
 	// MinSites peers in the period.
 	RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
+	// RiskCustomRulesPreset (#2 phase 1): runs every GIVEN rule (the
+	// enabled six-tuples of the queried fee type — the service
+	// fetches and filters them; the engine never reads the rule
+	// table itself) against the analysis table. Every SQL fragment
+	// comes from a CLOSED enum re-validated per rule before any
+	// query is built — a rule's text NEVER reaches SQL. The std
+	// build answers the honest 501 contract like every preset.
+	RiskCustomRulesPreset(ctx context.Context, analysisDir string, q RiskQuery, rules []domain.FeeRiskRule) ([]CustomRuleClue, error)
 
 	// ---- the cross-layer scenarios' fee-side primitives ----
 

@@ -75,7 +75,7 @@ VALUES ('fee_legacy', '账本.xlsx', 'sha125', 'electricity', 2024, 5, 'fee-impo
 		t.Fatalf("max version: %v", err)
 	}
 	if version != 36 {
-		t.Fatalf("MAX(version) = %d, want 36 (head after the v34 study upgrade)", version)
+		t.Fatalf("MAX(version) = %d, want 37 (head after the v34 study upgrade)", version)
 	}
 	got, err := db.FeeBatches.GetByID(ctx, "fee_legacy")
 	if err != nil || got.Sheet != "" {

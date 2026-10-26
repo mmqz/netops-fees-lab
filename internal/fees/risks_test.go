@@ -31,6 +31,7 @@ type fakeRiskEngine struct {
 	evidence     map[EvidenceKey][]EvidenceAnchor
 	totals       []TotalsRow
 	duplicates   []DuplicateRow
+	customRules  []CustomRuleClue
 }
 
 func (f *fakeRiskEngine) Available() bool { return true }
@@ -66,6 +67,9 @@ func (f *fakeRiskEngine) RiskSpikePreset(ctx context.Context, analysisDir string
 func (f *fakeRiskEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, nil // honest empty — the note test exercises the envelope tail only
 }
+func (f *fakeRiskEngine) RiskCustomRulesPreset(ctx context.Context, analysisDir string, q RiskQuery, rules []domain.FeeRiskRule) ([]CustomRuleClue, error) {
+	return f.customRules, nil // #2 phase 1: the scripted findings of the composition test
+}
 func (f *fakeRiskEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {
 	return f.periodTotals, nil
 }
@@ -78,8 +82,8 @@ func (f *fakeRiskEngine) EvidenceFor(ctx context.Context, analysisDir string, fe
 
 // TestParseRiskScenario pins the closed enum and its rejection contract.
 func TestParseRiskScenario(t *testing.T) {
-	if len(RiskScenarios()) != 9 {
-		t.Fatalf("scenario count = %d, want 9", len(RiskScenarios()))
+	if len(RiskScenarios()) != 10 {
+		t.Fatalf("scenario count = %d, want 10", len(RiskScenarios()))
 	}
 	for _, s := range riskScenarios {
 		got, err := ParseRiskScenario(string(s))
@@ -822,6 +826,9 @@ func (unavailableEngine) RiskSpikePreset(ctx context.Context, analysisDir string
 }
 func (unavailableEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("unreachable")
+}
+func (unavailableEngine) RiskCustomRulesPreset(ctx context.Context, analysisDir string, q RiskQuery, rules []domain.FeeRiskRule) ([]CustomRuleClue, error) {
+	return nil, errors.New("unreachable")
 }
 func (unavailableEngine) SitePeriodTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]SitePeriodTotal, error) {
 	return nil, errors.New("unreachable")

@@ -108,13 +108,18 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
 | `GET /api/fees/links?status=&grade=&code=&resource_id=` | 关联列表（资源侧 join） |
 | `POST /api/fees/links/{id}/confirm \| dismiss` | 人工确认/驳回模糊提案（人类优先于扫描） |
-| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided=` | 风险八场景（#64/阶段 4 + #114 场景 7 + #118 场景 8；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501；#119 线索携带人工裁定标记、dismissed 默认隐藏计数、`includeDecided` 审计视图） |
+| `GET /api/fees/risks/{scenario}?feeType=&year=&month=&status=&diffCents=&ratio=&z=&minSites=&limit=&maxEvidence=&includeDecided=` | 风险十场景（#64/阶段 4 + #114 场景 7 + #118 场景 8 + #2 场景 10 custom-rules；判定口径与阈值默认值见 §8；参数校验先于引擎检查，默认构建 501；#119 线索携带人工裁定标记、dismissed 默认隐藏计数、`includeDecided` 审计视图） |
+| `GET /api/fees/rules?enabled=` | 可配置规则列表（#2：读开放，`enabled=1` 仅已启用） |
+| `POST /api/fees/rules` | 创建可配置规则（#2：申报级令牌——AI/运营通道；新规则默认停用观察态；封闭枚举违例 422 `rule_refused`；审计行 created + actor=令牌层级） |
+| `POST /api/fees/rules/{id}/enable` | 启用规则（#2：人类通道，管理级令牌；审计行 enabled） |
+| `POST /api/fees/rules/{id}/disable` | 停用规则（#2：人类通道，管理级令牌；改阈值=停用旧+建新+启用新，全程审计） |
+| `GET /api/fees/rules/{id}/audit` | 规则动作台账（#2：created/enabled/disabled + actor + 变更 JSON，最新优先；未知 id 404） |
 | `POST /api/fees/risk-clue-decisions` | 风险线索人工裁定（#119：verify 属实留档 / dismiss 排除永不再现；UPSERT 可复议；人类通道，MCP 无此写面；不依赖引擎——默认构建可裁定） |
 | `GET /api/fees/risk-clue-decisions?scenario=&feeType=&status=&siteCode=&year=` | 裁定台账（最新优先，过滤器封闭集校验；审计视图） |
 
-写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 13 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
+写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 21 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
-## 8. 风险八场景（#64，#58 阶段 4；#114 加场景 7；#118 加场景 8）
+## 8. 风险十场景（#64，#58 阶段 4；#114 加场景 7；#118 加场景 8；#2 加场景 10）
 
 **输出契约（治理教义对齐）**：每场景 = DuckDB 引擎**固定预设 + 参数**（调用方传不了 SQL）；输出**风险线索** `RiskClue{scenario, siteCode, year, month, metricValue, metricLabel, threshold, thresholdLabel, evidence[], evidenceTotal, note}`——`evidence` 为行级证据锚点（`source_file + source_row + import_batch`，经 `GET /api/fees/batches/{id}/evidence?row=N` 可回读快照原文——#86 起该承诺有通道兑现，默认每线索 ≤10 条、上限 50；`evidenceTotal` 为该线索全量行数）。**账单存在 ≠ 认定结论**：一切输出是待核实差异 + 金额 + 证据。信封 `RiskResult{scenario, scenarioCn, feeType, year, month, clues, total, excluded, dismissed, note}`（`dismissed` = 本次被人工驳回而隐藏的线索数，#119）。
 
@@ -129,6 +134,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `idle-billing` | 有费无量 | 已确认关联的站址在该账期窗口内**指标点数为零**且费用仍在流（跨层组合 #114：引擎费用面 × SQLite 指标面；窗口 = 账期自然月 [1日, 末日] 的 RFC3339 字典序；原始需求「停电/无业务量在账」的交叉验证落点） | 无阈值（零点是确定性信号） |
 | `missing-billing` | 有量无费 | 已确认关联的**在网/在建**资源在该账期窗口内**有指标采集点**，而费用侧同账期无该类型计费记录（跨层组合 #118，场景 7 的镜像：SQLite 关联与指标面 × 引擎费用面反查；退休状态资源排除——不给他们计费是正确形态，场景 1 管反向；原始需求「漏收资损」的交叉验证落点） | 无阈值（点数>0 是确定性信号） |
 | `ledger-consistency` | 台账内部一致性 | 六条确定性行级规则（#5+#8+#11）：reading-gap 读数差≠填报用量（一表多户排除）/ ratio-sum 四方分摊和≠1 / chain-break 跨账期读数断链（换表已标记不计）/ zero-quantity-billing 零用量计费 / purchase-period 购电周期>35天（长期不报+集中补报候选）/ receivable-unreceived 应收>实收（资金回收风险）；缺相应列的文件对应规则自动跳过（列探测守卫——纯旧代文件不报错） | 无阈值（规则内固定容差） |
+| `custom-rules` | 可配置规则（#2 第一期：逐条执行该费用类型已启用的 L1 六元组规则 {度量 amount/rows, 聚合 sum/avg/max/count, 维度 site_month, 算子 gt/gte/lt/lte/mom_ratio, 阈值, 窗口 1-12}；SQL 构建前逐条重校验封闭枚举——规则文本永不进 SQL；线索携带规则名/严重度/阈值口径；规则经 MCP `fee_rules_create` 或 HTTP/CLI 创建（默认停用观察态）、人类经管理级路由或 CLI 启用；limit 为**每规则**上限——union 截断会静默丢弃后续规则的线索，违反 #83 教义） | 阈值即规则表内容（每规则六元组） |
 
 **确定性裁决（#59 落地）**：`spike`/`outlier` 只在**单批次** (站址, 账期) 口径上计算——重复行令窗口函数与分布统计非确定；跨批次对被**排除并在信封 `excluded` 计数**（它们是 duplicate-settlement/ledger-mismatch 的线索域），绝不静默丢弃。`spike` 的单月查询收窄**线索窗口**不收窄环比基期（上期恒取全年序列的上一个有账单月）。z-score 用 `stddev_samp` 且同期同类站数 < `minSites` 时该期不出线索（小样本不产统计结论；数学上 n≤11 时单点 |z| 无法达 3，`minSites` 默认 8 + 场景内其余站址会抬高 n，仍以参数为门槛诚实声明）；**指标输出的跨运行稳定性**：DuckDB 向量化多项聚合按块序求和、原始浮点在末位 ULP 摆动——线索集恒确定，z 在 SQL 内取整到 10 位小数使输出字节稳定（比价类单次除法无此问题，不取整）（小样本不产统计结论；数学上 n≤11 时单点 |z| 无法达 3，`minSites` 默认 8 + 场景内其余站址会抬高 n，仍以参数为门槛诚实声明）。
 
@@ -136,9 +142,9 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 
 **场景 8 的诚实注意义务（#118）**：`missing-billing` 交叉的是同两条台账的**反向矛盾**——指标面说资源活着（账期窗口内有采集点），费用面却无该类型计费记录。点数>0 为确定性信号、无阈值可调；metric = 窗口内指标点数（`metricPoints`），`evidenceTotal` 恒 0 且锚点列表为空——**费用侧零行即异常本体**，回读通道指向快照层而非不存在的行。线索 note 恒携带告诫：**账期无记录 ≠ 漏收认定**——季度/年度结算、该费用类型尚未导入、结算主体挂账在其他编码，在该证据形态下全部同相；线索仅供人工核实。退休状态（默认 `停用,退网`）资源不在本场景测量（不给他们计费是正确形态；`retired-billing` 管反向），pending 关联的编码同样不在（人类尚未裁决）。
 
-**人工核实闭环（#119，migration v33）**：八场景输出的是待核实线索，核实成果落库为**裁定行**（`risk_clue_decisions`，身份 = (scenario, fee_type, 站址, 年, 月)，无 FK——站址编码是代码空间事实，批次回滚不触碰，W005/W006 教义）。消费语义：**verified 线索保持可见并标记**（运营的已知问题台账）；**dismissed 线索默认隐藏、信封 `dismissed` 计数**——绝不静默丢弃（#83），重跑不再重复出现（#69 PairDecided 教义：已裁定保持已裁定）；`includeDecided` 参数返回全量标记集。裁定按 (scenario, feeType) 隔离，UPSERT 可复议翻转。写通道仅人类（HTTP POST + CLI `fees clue-decisions verify|dismiss`），**MCP 无写面**——AI 不得替人核实（attribute-changes apply / links confirm 同一治理红线）；`fee_risks` 只读面自动携带标记。
+**人工核实闭环（#119，migration v33）**：场景输出的是待核实线索，核实成果落库为**裁定行**（`risk_clue_decisions`，身份 = (scenario, fee_type, 站址, 年, 月)，无 FK——站址编码是代码空间事实，批次回滚不触碰，W005/W006 教义）。消费语义：**verified 线索保持可见并标记**（运营的已知问题台账）；**dismissed 线索默认隐藏、信封 `dismissed` 计数**——绝不静默丢弃（#83），重跑不再重复出现（#69 PairDecided 教义：已裁定保持已裁定）；`includeDecided` 参数返回全量标记集。裁定按 (scenario, feeType) 隔离，UPSERT 可复议翻转。写通道仅人类（HTTP POST + CLI `fees clue-decisions verify|dismiss`），**MCP 无写面**——AI 不得替人核实（attribute-changes apply / links confirm 同一治理红线）；`fee_risks` 只读面自动携带标记。
 
-**默认构建诚实契约**：八场景与查询预设同走引擎面——未编译（默认构建）一律 501 `engine_not_built`（CLI exit 1 + 文案携带 Docker/WSL2 指引）；参数校验先于引擎检查（坏场景/坏类型/坏阈值 → 400/exit 2）。
+**默认构建诚实契约**：十场景与查询预设同走引擎面——未编译（默认构建）一律 501 `engine_not_built`（CLI exit 1 + 文案携带 Docker/WSL2 指引）；参数校验先于引擎检查（坏场景/坏类型/坏阈值 → 400/exit 2）。
 
 ### CLI
 ```
@@ -151,7 +157,7 @@ netopslab fees --db <path> --data <dir> risks <scenario> --type <t> --year <Y> [
 
 ### 消费面（阶段 5，v0.15.0——三通道同契约）
 
-- **Web 工作台 `/fees`**（嵌入式 UI 导航「费用分析」）：导入（multipart，201/200 双形态 toast）/ 批次列表 / 回滚（ConfirmDialog）；**查询预设面板（#121 浏览器通道补全）**——站址账期汇总与跨批次重复候选两表（整数分自动 /100；501 引导横幅；上限走 HTTP 500 诚实界）；风险八场景钻取（线索表 + 行展开证据锚点 + `excluded`/`dismissed` 计数 + 人工裁定按钮与决策 chip + 审计开关，整数分自动 /100 展示；501 `engine_not_built` 渲染为 Docker/WSL2 引导横幅）；**关联人工确认通道**（重新扫描六计数回执 + 状态/级别筛选 pending 优先 + 确认/驳回——驳回走 ConfirmDialog，配对不再自动复提 + 审计保留）。
+- **Web 工作台 `/fees`**（嵌入式 UI 导航「费用分析」）：导入（multipart，201/200 双形态 toast）/ 批次列表 / 回滚（ConfirmDialog）；**查询预设面板（#121 浏览器通道补全）**——站址账期汇总与跨批次重复候选两表（整数分自动 /100；501 引导横幅；上限走 HTTP 500 诚实界）；风险十场景钻取（线索表 + 行展开证据锚点 + `excluded`/`dismissed` 计数 + 人工裁定按钮与决策 chip + 审计开关，整数分自动 /100 展示；501 `engine_not_built` 渲染为 Docker/WSL2 引导横幅；custom-rules 场景经规则管理面启用后生效）；**关联人工确认通道**（重新扫描六计数回执 + 状态/级别筛选 pending 优先 + 确认/驳回——驳回走 ConfirmDialog，配对不再自动复提 + 审计保留）。
 - **MCP `fee_risks`**（tool #11，只读）：跑同一固定预设，但阈值恒用治理默认值（ratio=0.30 / z=3.0 / minSites=8 / status=停用,退网）——**AI 不可调统计阈值**（调参是人类通道 HTTP/CLI）；场景/费用类型/账期/条数（≤50）四参数；wire shape = HTTP shape（`fees.RiskResult` 原样透传）。工具清单见 [teleagent-integration.md](teleagent-integration.md)。
 - **MCP `fee_totals` / `fee_duplicates`**（tool #12/#13，只读，#120）：聚合面对 AI 开放——各站址账期合计与跨批次重复候选，wire shape = HTTP shape（同信封原样透传）；条数治理边界与 `fee_risks` 同款（缺省 20、上限 50，比 HTTP 的 500 更紧）；`fee_totals` 是「这个站今年电费多少」类基础问句的入口，`fee_risks` 的线索下钻配对面。工具清单见 [teleagent-integration.md](teleagent-integration.md)。
 - **CLI**：见 §6/§8 CLI 段。

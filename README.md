@@ -43,7 +43,7 @@ NetOps Fees Lab 是一个本地优先（local-first）的**站点费用风险分
 - **人工裁定闭环**（#119）：verify 属实留档为「已知问题台账」/ dismiss 排除且**永不再现**（dismissed 计数入信封）；可复议翻转；MCP 无写面。
 - **分级关联**（#63/#58-S3）：`link-scan` 精确/规则自动确认 + 模糊出提案，人工 confirm/dismiss；关联列表含资源侧 join。
 - **双账本交叉**：指标摄入独立通道（`metrics ingest`）+ 资源宇宙导入；`idle-billing`（有费无量，#114）与 `missing-billing`（有量无费，#118）跨账本互证。
-- **AI 消费面（MCP 4 工具）**：`resource_search`（宇宙检索）+ `fee_risks` + `fee_totals` + `fee_duplicates`——闭集只读，TestMCPToolRegistry 钉死。
+- **AI 消费面（MCP 5 工具）**：`resource_search`（宇宙检索）+ `fee_risks` + `fee_totals` + `fee_duplicates`（闭集只读）+ `fee_rules_create`（#2：可配置规则创建通道——首个写侧工具，新规则默认停用观察态，启用留人类 HTTP/CLI；`--read-only` 变体永不注册），TestMCPToolRegistry + facts.md 门禁钉死。
 - **HTTP 40 条路由**：system 3 / imports 9 / resources 2 / metrics 8 / fees 14 / 治理与校验 4；OpenAPI 文档与路由表同源生成（零漂移）。
 - **React 前端**：/fees 费用工作台（风险面板 + 阈值化 + 分页明细 + 批次管理 + 证据下钻 + 关联确认）、概览 / 导入 / 资源 / 问题 / 报告 / API 参考。
 - **底座**：SQLite（modernc.org/sqlite 纯 Go 无 CGO，WAL，事务 + 行级记账）+ 迁移链 v1–v34 **完整保留**（fork 红线 3）；确定性校验规则 E/W/I；HTML/JSON 质量报告；备份与 uploads GC。
@@ -121,8 +121,8 @@ samples/               电信运营导出样例（授权范围见 samples/README
 
 ## 7. CLI 与 MCP
 
-- **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets——均支持 --strict-rows 严格行校验〔#8〕与 --period-trust-declared 账期人工确认〔#15：内容识别账期与申报不一致默认拒绝，覆盖需显式确认并留痕〕 · period-probe〔#15：表型+账期只读内容探测〕 · list · rollback · evidence · query〔totals/rows/duplicates〕 · link-scan · links · risks〔九场景，含 ledger-consistency 台账确定性规则〕 · clue-decisions · verify-sources〔issue #6：批次源文件 SHA256 核对——match/changed/missing，快照完整性一并核对〕）/ `templates` / `mcp` / `gc` / `backup` / `convert`（.xls→.xlsx/.csv 批量保真转换，issue #7） / `testdata`。
-- **MCP**（`netopsfees mcp`，stdio JSON-RPC，`--read-only` 可选）：`resource_search` / `fee_risks` / `fee_totals` / `fee_duplicates` —— 全部只读，全部携带 MCP 2025-06 标准注解（`readOnlyHint=true` 等四提示显式无默认值，issue #10）；`mcp --read-only` 只注册注解只读的工具（当前即全部 4 个）。闭集由 TestMCPToolRegistry + facts.md 门禁双向钉死。
+- **CLI**（`netopsfees <子命令>`，stdout 单 JSON 契约）：`serve` / `analyze` / `import` / `ingest` / `metrics` / `validate` / `report` / `fees`（import · import-sheets——均支持 --strict-rows 严格行校验〔#8〕与 --period-trust-declared 账期人工确认〔#15：内容识别账期与申报不一致默认拒绝，覆盖需显式确认并留痕〕 · period-probe〔#15：表型+账期只读内容探测〕 · list · rollback · evidence · query〔totals/rows/duplicates〕 · link-scan · links · risks〔十场景：九内置 + custom-rules 可配置规则（#2：逐条执行已启用的 L1 六元组规则）〕 · rules〔#2：list / create / enable / disable / audit——规则六元组管理，创建默认停用观察态，启用/停用为人类通道，全程审计留痕〕 · clue-decisions · verify-sources〔issue #6：批次源文件 SHA256 核对——match/changed/missing，快照完整性一并核对〕）/ `templates` / `mcp` / `gc` / `backup` / `convert`（.xls→.xlsx/.csv 批量保真转换，issue #7） / `testdata`。
+- **MCP**（`netopsfees mcp`，stdio JSON-RPC，`--read-only` 可选）：`resource_search` / `fee_risks` / `fee_totals` / `fee_duplicates`（只读）+ `fee_rules_create`（#2 写侧——只建不删、重名拒绝即非幂等、注解如实 `readOnlyHint=false`；启用/停用无 MCP 面）；四提示显式无默认值（issue #10）；`mcp --read-only` 只注册注解只读的工具（4 个——写工具永不进只读面，不变式由 TestMCPReadOnlyRegistryIsReadOnlyHintSet 钉死）。闭集由 TestMCPToolRegistry + facts.md 门禁双向钉死。
 
 ## 8. 常见问题
 

@@ -1,7 +1,7 @@
 package api
 
 // admin_routes_closedset_test.go — the closed-set pin of issue #9 (v0.18):
-// the Admin classification lives in exactly these seven routes of the
+// the Admin classification lives in exactly these nine routes of the
 // single route table; anything else added to the table defaults to the
 // declarer tier. The facts gate (facts_gate_test.go) pins route COUNTS;
 // this pins the PRIVILEGE class — a new admin route must touch this test
@@ -18,6 +18,8 @@ func TestAdminRouteClosedSet(t *testing.T) {
 		"POST /api/fees/risk-clue-decisions":      true,
 		"POST /api/fees/links/{id}/confirm":       true,
 		"POST /api/fees/links/{id}/dismiss":       true,
+		"POST /api/fees/rules/{id}/enable":        true, // #2: the human enable channel
+		"POST /api/fees/rules/{id}/disable":       true, // #2: the human disable channel
 	}
 	got := map[string]bool{}
 	for _, r := range s.apiRoutes() {

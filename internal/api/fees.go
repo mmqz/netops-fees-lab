@@ -1081,3 +1081,158 @@ func (s *Server) handleFeesClueDecisionsList(w http.ResponseWriter, r *http.Requ
 		"items": out, "total": total, "limit": f.Limit, "offset": f.Offset,
 	})
 }
+
+// ---- the configurable risk-rule management of issue #2 (phase 1): the
+// L1 six-tuple rules. Channel doctrine on the HTTP face: create is the
+// DECLARER tier (the AI/operator channel — a fresh rule lands DISABLED,
+// the conservative observation state); enable/disable is the ADMIN tier
+// (the human channel — the same 403 doctrine as clue decisions and link
+// confirms); the audit read is open. Every mutation's audit row carries
+// the token-tier actor (the shared-token world cannot attribute
+// per-person — the tier is the honest identity). ----
+
+// feeRuleItem is the HTTP rule shape (the six-tuple travels whole).
+type feeRuleItem struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	FeeType      string  `json:"feeType"`
+	Metric       string  `json:"metric"`
+	Aggregation  string  `json:"aggregation"`
+	Dimension    string  `json:"dimension"`
+	Comparator   string  `json:"comparator"`
+	Threshold    float64 `json:"threshold"`
+	WindowMonths int     `json:"windowMonths"`
+	Severity     string  `json:"severity"`
+	Description  string  `json:"description,omitempty"`
+	Enabled      bool    `json:"enabled"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+}
+
+func feeRuleItemOf(r domain.FeeRiskRule) feeRuleItem {
+	return feeRuleItem{
+		ID: r.ID, Name: r.Name, FeeType: string(r.FeeType), Metric: r.Metric,
+		Aggregation: r.Aggregation, Dimension: r.Dimension, Comparator: r.Comparator,
+		Threshold: r.Threshold, WindowMonths: r.WindowMonths, Severity: r.Severity,
+		Description: r.Description, Enabled: r.Enabled,
+		CreatedAt: r.CreatedAt.Format(time.RFC3339), UpdatedAt: r.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// feeRuleActor derives the audit actor from the request's token tier: the
+// two-tier shared-token world cannot attribute per-person, so the tier is
+// the honest identity (admin / declarer). With the gate off the actor
+// records the channel itself (http — the single-operator compat row).
+func (s *Server) feeRuleActor(r *http.Request) string {
+	if !s.gateOn() {
+		return "http"
+	}
+	if s.tokenIsAdmin(bearerToken(r)) {
+		return "admin"
+	}
+	return "declarer"
+}
+
+// handleFeesRulesList implements GET /api/fees/rules — every rule
+// (default) or only the enabled ones (?enabled=1). Read-open: the rule
+// set is the evidence of WHAT fires, not a secret.
+func (s *Server) handleFeesRulesList(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	onlyEnabled := r.URL.Query().Get("enabled") == "1"
+	rules, err := s.fees.ListRules(r.Context(), onlyEnabled)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	out := make([]feeRuleItem, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, feeRuleItemOf(rule))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"items": out, "total": len(out), "enabledOnly": onlyEnabled,
+	})
+}
+
+// handleFeesRulesCreate implements POST /api/fees/rules — the AI/operator
+// creation channel (declarer tier suffices; the rule lands DISABLED — a
+// fresh rule fires nothing until a human enables it). 422 rule_refused
+// carries the validation text; a duplicate name answers the same 422
+// (the honest operator-facing vocabulary of the import refusals).
+func (s *Server) handleFeesRulesCreate(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	var body fees.RuleInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "请求体必须是合法 JSON："+err.Error())
+		return
+	}
+	rule, err := s.fees.CreateRule(r.Context(), body, s.feeRuleActor(r))
+	if err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			respondError(w, http.StatusUnprocessableEntity, "rule_refused", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusCreated, feeRuleItemOf(rule))
+}
+
+// handleFeesRuleSetEnabled implements POST /api/fees/rules/{id}/enable
+// and .../disable — the HUMAN channel (Admin routes, the same 403
+// doctrine as clue decisions; the MCP face has no such tool). The op
+// rides the path tail; the audit row records the admin tier.
+func (s *Server) handleFeesRuleSetEnabled(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	id := r.PathValue("id")
+	enable := strings.HasSuffix(r.URL.Path, "/enable")
+	if err := s.fees.SetRuleEnabled(r.Context(), id, enable, s.feeRuleActor(r)); err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	rule, err := s.fees.RuleByID(r.Context(), id)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, feeRuleItemOf(rule))
+}
+
+// handleFeesRuleAudit implements GET /api/fees/rules/{id}/audit — the
+// action ledger of one rule (created/enabled/disabled, newest first):
+// the 阈值变更留痕 red line made visible (read-open like the list).
+func (s *Server) handleFeesRuleAudit(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	// The 404 contract: an unknown rule answers not_found, never an empty
+	// ledger that reads like "no actions ever taken".
+	if _, err := s.fees.RuleByID(r.Context(), r.PathValue("id")); err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	entries, err := s.fees.RuleAudit(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	out := make([]map[string]any, 0, len(entries))
+	for _, a := range entries {
+		out = append(out, map[string]any{
+			"id": a.ID, "ruleId": a.RuleID, "action": a.Action, "actor": a.Actor,
+			"changes": a.Changes, "at": a.At.Format(time.RFC3339),
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"ruleId": r.PathValue("id"), "items": out, "total": len(out),
+	})
+}

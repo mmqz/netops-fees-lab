@@ -128,6 +128,7 @@ func NewServer(svc *services.Services) *mcp.Server {
 		return nil, out, nil
 	})
 	addFeeTools(server, svc)
+	addFeeRuleTool(server, svc) // #2: the write-side creation tool — NewServer ONLY, never --read-only
 	return server
 }
 

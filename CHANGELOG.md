@@ -4,7 +4,7 @@
 
 ## [0.18.0] — 2026-10-26
 
-**fork 首个整合功能版**（0.17.1 之后合入的 v0.18 共享底座移植 + 费用线纵深五连 + 转供电补报治理 + 账期三档内容核验）。核心：写通道两级权限与默认安全、台账纵深（记录键/台账列/源文件完整性/严格行门/.xls 转换）、转供电「长期不报+集中补报」确定性治理（#11）、账期由内容核验而非纯传参（#15）。
+**fork 首个整合功能版**（0.17.1 之后合入的 v0.18 共享底座移植 + 费用线纵深五连 + 转供电补报治理 + 账期三档内容核验 + 可配置风险规则）。核心：写通道两级权限与默认安全、台账纵深（记录键/台账列/源文件完整性/严格行门/.xls 转换）、转供电「长期不报+集中补报」确定性治理（#11）、账期由内容核验而非纯传参（#15）、规则即数据——L1 六元组可配置规则与首个写侧 MCP 工具（#2）。
 
 ### 新增 — 账期三档内容核验：先选账期 → 内容识别 → 一致性校验（#15）
 - **表型分类器**：按特征表头组合（全命中才判定，contains 回退覆盖「N月应付电费」列名族）识别五类真实表——铁塔结算详单（账期月份+需求确认单编号+产品业务确认单编号）/ 综维工资单（员工工资上传批次+业务账期+1.8其他）/ 导入工资项（年份+月份+绩效基数）/ 电费台账（铁塔公司站点编码+电表编号+月应付电费）/ 综维绩效单（报账人+选择开支人员+清单费用合计）；零命中或多族同中 → 未识别（诚实降级，永不误判）。
@@ -23,6 +23,15 @@
 - **列探测 schema 守卫（顺带根治 #5 起的潜在缺陷）**：`duckTableColumns` 探测分区列集——纯旧代文件（无 purchase/receivable 列）下新规则自动跳过且**不再 Binder Error**；该守卫同样覆盖 #5 起的潜在形态（纯 pre-#4/pre-#5 文件对 meter_no/reading_* 引用的同族问题），混合代分区（union_by_name）继续无碍。
 - 真实引擎验收（duckdb 构建）：95 天窗口触发 purchase-period（metric=95，detail 带起止日）/ 34400 元与 13000 元应收缺口触发 receivable-unreceived / 764 天窗口（2024-01-05→2026-02-07）的 spike 线索带补报标注 / 29 天窗口不带标注 / 纯 pre-#11 代分区两预设零报错。默认构建单测：ParseDateISO 22 形态、识别表（含通用日期头反例）、导入往返、严格门（坏日期+坏金额各拒其行）、幂等键不动。
 
+### 新增 — 可配置风险规则（L1 六元组）：规则即数据，新判断不再需要发版（#2）
+- **两表（migration v37）**：`fee_risk_rules`——{度量, 聚合, 维度, 算子, 阈值, 窗口} 六元组行，`fee_type` 定界，`enabled=0` 默认（保守观察态：新规则不点火直到人类启用）；`fee_risk_rule_audit`——动作台账（created/enabled/disabled + actor + 变更 JSON），**阈值变更留痕**红线的落点。第一期没有更新通道：**改阈值 = 停用旧规则 + 建新规则 + 启用新规则**，三步各自审计，历史口径完整可追溯。
+- **通道纪律（三面分治）**：**创建 = AI/运营通道**——HTTP `POST /api/fees/rules`（申报级令牌即可）+ CLI `fees rules create` + MCP `fee_rules_create`（本仓**首个写侧 MCP 工具**，重名拒绝即如实非幂等、注解 `readOnlyHint=false` 四提示全显式、只进 NewServer 永不进 `--read-only` 变体）；**启用/停用 = 人类通道**——HTTP 两条管理级路由（Admin 闭集 7→9）+ CLI `fees rules enable|disable`，MCP 无此面（与 #119 裁定同一治理红线）；**列表/台账 = 读开放**——规则集本身是证据。审计 actor：HTTP 按令牌层级（admin/declarer，门禁关闭记 http）、CLI 记 `--actor`（缺省 cli）、MCP 固定 mcp——共享令牌世界无法按人归因，层级即诚实身份。
+- **封闭枚举三重防线（不可注入）**：v37 CHECK 约束（库层地板）→ 服务校验（422 `rule_refused`，文案携带收到的全部枚举值）→ 引擎 SQL 构建前逐条重校验（白名单算子/聚合片段，规则文本 name/description **永不进 SQL**，阈值走 `%.17f` 数值格式化）。度量 ∈ {amount, rows}、聚合 ∈ {sum, avg, max, count}（rows 固定 count）、维度固定 site_month、算子 ∈ {gt, gte, lt, lt, lte, mom_ratio}、严重度 ∈ {high, medium, low}、阈值 ≥ 0、窗口 1-12。
+- **场景 10 custom-rules**：`fees risks custom-rules` / `GET /api/fees/risks/custom-rules` 逐条执行该费用类型已启用规则——每规则独立查询（聚合=GROUP BY 站址×账期，跨批次合计即该站账期总额——确定性口径），mom_ratio 用窗口作 lag 距离比环比涨幅（spike 同款语义），月过滤收窄线索窗口不收窄基期；**limit 为每规则上限**——union 截断会按迭代序静默丢弃后续规则的线索，违反 #83 教义，故明确声明。线索携带规则溯源（规则名/严重度/六元组阈值口径 + 教义告诫「账单存在 ≠ 认定结论」）+ 行级证据锚点；信封 note 携带启用规则数口径。默认构建规则表管理完全可用、场景执行诚实 501（与全部预设同契约）。
+- **规则管理 CLI**：`fees rules list [--enabled] / create / enable / disable / audit`——stdout 单 JSON 契约；封闭集校验先行（违例 exit 非 0，枚举文案与 HTTP 同源）。
+- **事实源同步**：facts.md 四计数（mcp-tools 4→5、api-routes 42→47、api-fees-routes 16→21、repo-migrations 36→37）+ Admin 闭集测试 7→9 + MCP 注册表闭集 4→5 + 只读注册表不变式钉死；26 处迁移测试 max-version 断言 36→37（必要适配，先例 v10→v11 同款）。
+- 验收：v37 迁移（CHECK 全矩阵注入尝试拒绝 + 审计往返 + 台账序）+ 服务级（创建校验 11 拒绝形态、观察态默认、人类翻转、费用类型隔离、假引擎组合契约）+ duckdb 真机（gt/gte/lt/lte/rows/mom_ratio 窗口、注入守卫双形态、启用后端到端溯源）+ HTTP 通道矩阵（401/201/403/200/422 rule_refused/404/审计 actor 按层级）+ CLI e2e 生命周期（含默认构建 custom-rules 诚实 501）+ MCP（工具调用往返 + 重名拒绝 + 只读变体排除）。
+
 ### 新增 — v0.18 共享底座移植（主仓同步）
 - **两级写门禁 + 默认安全绑定 + 特权操作审计**（#9，主仓 v0.18.0 移植）：`--token` 写通道与 `--read-token` 只读通道分离，缺省绑定 127.0.0.1（默认安全——裸奔对外需显式 `--bind 0.0.0.0`）；申报人员持只读令牌不可再删整个批次；特权操作（回滚/裁定/GC 等）留痕。
 - **MCP 标准注解 + `mcp --read-only` 变体**（#10，主仓 v0.18.0 移植）：工具面携带 MCP 标准注解（readOnly/hint），AI 从协议层即可判断哪些工具可安全调用；`--read-only` 变体编译出纯只读工具面。
@@ -36,7 +45,7 @@
 - **严格行门禁**（#8）：`fees import/import-sheets --strict-rows`——台账可选列「写了但读不出数字」的行拒绝导入（手工涂改值不得以带谎的证据列入账）。
 
 ### 验证
-- 2026-10-26，linux/amd64 · 2 核沙箱：默认构建 `go test -count=1 ./...` 18 包全绿；duckdb 构建（CGO_ENABLED=1 -tags duckdb）fees/app/api 全绿；gofmt 零漂移；`go vet` 干净。Windows 复验仍留 issue #1（account-level Actions 瘫痪，本地门禁为事实源）。
+- 2026-10-26，linux/amd64 · 2 核沙箱：默认构建 `go test -count=1 ./...` 全包全绿（17 包）；duckdb 构建（CGO_ENABLED=1 -tags duckdb）`go test -count=1 ./...` 全包全绿（17 包，含 #2 场景/引擎真机验收）；gofmt 零漂移；`go vet` 双 tag 干净。Windows 复验仍留 issue #1（account-level Actions 瘫痪，本地门禁为事实源）。
 
 
 ## [0.17.1] — 2026-10-25

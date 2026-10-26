@@ -220,13 +220,11 @@ func TestMCPServerResourceSearch(t *testing.T) {
 }
 
 // TestMCPToolRegistry is the §11 SEC-P2 acceptance test: tools/list exposes
-// EXACTLY the thirteen contract tools — resource_search + lab_apply_ops +
-// lab_run_checks + lab_diff_undo + lab_checkpoint (PROJECT_BRIEF_P2 §8) +
-// graph_traverse + graph_impact + graph_context + alerts_query +
-// metrics_query (v0.9 R4) + fee_risks (v0.15, #58 stage 5) + fee_totals /
-// fee_duplicates (#120) — and nothing else: no SQL, shell, file or
-// production tools, and no tool that could create or delete a workspace
-// (§1.4). The COUNT is additionally
+// EXACTLY the five contract tools — resource_search + fee_risks (v0.15,
+// #58 stage 5) + fee_totals / fee_duplicates (#120) + fee_rules_create
+// (#2 phase 1: the first WRITE tool — creation only, NewServer only) —
+// and nothing else: no SQL, shell, file or production tools, and no
+// enable/disable tool (the human channel stays HTTP/CLI). The COUNT is additionally
 // pinned against docs/facts.md by TestMCPToolCountMatchesFactsFile (#110 —
 // the facts-file gate), so the number quoted in prose can never drift from
 // the registry silently.
@@ -251,10 +249,12 @@ func TestMCPToolRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	// The four contract tools of the fees repo, SORTED for comparison (the
-	// closed read-only set; the registry order is unspecified).
+	// The five contract tools of the fees repo, SORTED for comparison (the
+	// closed registry; the order is unspecified). fee_rules_create joined in
+	// #2 phase 1 — the first write tool, registered on NewServer ONLY (the
+	// --read-only twin must never see it — TestMCPReadOnlyRegistryIsReadOnlyHintSet).
 	want := []string{
-		"fee_duplicates", "fee_risks", "fee_totals", "resource_search",
+		"fee_duplicates", "fee_risks", "fee_rules_create", "fee_totals", "resource_search",
 	}
 	names := make([]string, 0, len(list.Tools))
 	for _, tool := range list.Tools {
@@ -270,8 +270,8 @@ func TestMCPToolRegistry(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 4 {
-		t.Fatalf("tools/list exposes %d tools (%v), want exactly the four contract tools %v", len(names), names, want)
+	if len(names) != 5 {
+		t.Fatalf("tools/list exposes %d tools (%v), want exactly the five contract tools %v", len(names), names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {

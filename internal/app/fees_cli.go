@@ -30,7 +30,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "clue-decisions", "verify-sources",
+	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "verify-sources",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -105,6 +105,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesLinks(ctx, svc, subArgs, stdout, stderr)
 	case "risks":
 		return cmdFeesRisks(ctx, svc, dataDir, subArgs, stdout, stderr)
+	case "rules":
+		return cmdFeesRules(ctx, svc, subArgs, stdout, stderr)
 	case "clue-decisions":
 		return cmdFeesClueDecisions(ctx, svc, subArgs, stdout, stderr)
 	case "verify-sources":
@@ -762,4 +764,197 @@ func cmdFeesVerifySources(ctx context.Context, svc *fees.Service, args []string,
 		return fmt.Errorf("%d 个批次的源文件在导入后被改动（明细见 stdout JSON）: %w", report.Changed, errAlreadyPrinted)
 	}
 	return nil
+}
+
+// ---- fees rules (#2 phase 1): the L1 configurable risk-rule management —
+// the {metric, aggregation, dimension, comparator, threshold, window}
+// six-tuples. Channel doctrine: create is the AI/operator channel (the
+// rule lands DISABLED — the conservative observation state); enable/disable
+// is the human channel (CLI here, admin-tier HTTP there; the MCP surface
+// gains create only); every mutation lands its audit row (阈值变更留痕 —
+// phase 1 has no update channel, so a threshold change IS disable-old +
+// create-new, both audited). ----
+
+// cmdFeesRules implements `fees rules list|create|enable|disable|audit`.
+func cmdFeesRules(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees rules 需要 list、create、enable、disable 或 audit 子命令"}
+	}
+	sub, subArgs := args[0], args[1:]
+	switch sub {
+	case "list":
+		return cmdFeesRulesList(ctx, svc, subArgs, stdout, stderr)
+	case "create":
+		return cmdFeesRulesCreate(ctx, svc, subArgs, stdout, stderr)
+	case "enable", "disable":
+		return cmdFeesRulesSetEnabled(ctx, svc, sub == "enable", subArgs, stdout, stderr)
+	case "audit":
+		return cmdFeesRulesAudit(ctx, svc, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("fees rules 子命令必须是 list、create、enable、disable 或 audit，收到 %q", sub)}
+	}
+}
+
+// feeRuleItem is the CLI rule shape (mirrors the HTTP one; the six-tuple
+// travels whole — a rule is evidence, never a black box).
+type feeRuleItem struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	FeeType      string  `json:"feeType"`
+	Metric       string  `json:"metric"`
+	Aggregation  string  `json:"aggregation"`
+	Dimension    string  `json:"dimension"`
+	Comparator   string  `json:"comparator"`
+	Threshold    float64 `json:"threshold"`
+	WindowMonths int     `json:"windowMonths"`
+	Severity     string  `json:"severity"`
+	Description  string  `json:"description,omitempty"`
+	Enabled      bool    `json:"enabled"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+}
+
+func feeRuleItemOf(r domain.FeeRiskRule) feeRuleItem {
+	return feeRuleItem{
+		ID: r.ID, Name: r.Name, FeeType: string(r.FeeType), Metric: r.Metric,
+		Aggregation: r.Aggregation, Dimension: r.Dimension, Comparator: r.Comparator,
+		Threshold: r.Threshold, WindowMonths: r.WindowMonths, Severity: r.Severity,
+		Description: r.Description, Enabled: r.Enabled,
+		CreatedAt: r.CreatedAt.Format(time.RFC3339), UpdatedAt: r.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// cmdFeesRulesList implements `fees rules list [--enabled]`.
+func cmdFeesRulesList(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees rules list")
+	enabled := fs.Bool("enabled", false, "仅列出已启用规则（缺省全部——观察态停用规则也可见）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees rules list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	rules, err := svc.ListRules(ctx, *enabled)
+	if err != nil {
+		return err
+	}
+	out := make([]feeRuleItem, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, feeRuleItemOf(r))
+	}
+	return writeJSON(stdout, struct {
+		Items   []feeRuleItem `json:"items"`
+		Total   int           `json:"total"`
+		Enabled *bool         `json:"enabledOnly"`
+	}{Items: out, Total: len(out), Enabled: enabled})
+}
+
+// cmdFeesRulesCreate implements `fees rules create --name --type --metric
+// --agg --dimension --comparator --threshold [--window] --severity
+// [--description] [--actor]` — the rule lands DISABLED (观察态); a human
+// enables it after review.
+func cmdFeesRulesCreate(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees rules create")
+	name := fs.String("name", "", "规则名，必填（线索溯源展示，唯一）")
+	feeType := fs.String("type", "", "费用类型，必填："+strings.Join(fees.FeeTypes(), " / "))
+	metric := fs.String("metric", "", "度量，必填：amount（金额）/ rows（行数）")
+	agg := fs.String("agg", "", "聚合，必填：sum / avg / max / count（rows 度量固定 count）")
+	dimension := fs.String("dimension", "site_month", "维度，本期固定 site_month（站址×账期）")
+	comparator := fs.String("comparator", "", "算子，必填：gt / gte / lt / lte / mom_ratio（环比涨幅比）")
+	threshold := fs.Float64("threshold", 0, "阈值，必填（金额类=分、行数类=行数、环比类=涨幅比如 0.30 表示 +30%）；≥ 0")
+	window := fs.Int("window", 1, "环比基期回看月数（1-12，仅 mom_ratio 使用，缺省 1）")
+	severity := fs.String("severity", "", "严重度，必填：high / medium / low")
+	desc := fs.String("description", "", "规则口径描述（可选，≤500 字，随线索展示）")
+	actor := fs.String("actor", "cli", "审计留痕的操作者标识（缺省 cli；HTTP 面按令牌层级，MCP 面固定 mcp）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees rules create 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *name == "" || *feeType == "" || *metric == "" || *agg == "" || *comparator == "" || *severity == "" {
+		return &usageError{msg: "fees rules create 需要 --name、--type、--metric、--agg、--comparator、--severity", usage: usage.String()}
+	}
+	rule, err := svc.CreateRule(ctx, fees.RuleInput{
+		Name: *name, FeeType: *feeType, Metric: *metric, Aggregation: *agg,
+		Dimension: *dimension, Comparator: *comparator, Threshold: *threshold,
+		WindowMonths: *window, Severity: *severity, Description: *desc,
+	}, *actor)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, feeRuleItemOf(rule))
+}
+
+// cmdFeesRulesSetEnabled implements `fees rules enable|disable --id
+// [--actor]` — the HUMAN channel (a fresh rule fires nothing until this
+// flip); every flip lands its audit row.
+func cmdFeesRulesSetEnabled(ctx context.Context, svc *fees.Service, enabled bool, args []string, stdout, stderr io.Writer) error {
+	op := "disable"
+	if enabled {
+		op = "enable"
+	}
+	fs, usage := newFlagSet("fees rules " + op)
+	id := fs.String("id", "", "规则 ID，必填（fees rules list 查看）")
+	actor := fs.String("actor", "cli", "审计留痕的操作者标识（缺省 cli）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees rules " + op + " 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "fees rules " + op + " 需要 --id", usage: usage.String()}
+	}
+	if err := svc.SetRuleEnabled(ctx, *id, enabled, *actor); err != nil {
+		return err
+	}
+	rule, err := svc.RuleByID(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, feeRuleItemOf(rule))
+}
+
+// cmdFeesRulesAudit implements `fees rules audit --id` — the action
+// ledger of one rule (created/enabled/disabled, newest first): the
+// 阈值变更留痕 red line made visible.
+func cmdFeesRulesAudit(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees rules audit")
+	id := fs.String("id", "", "规则 ID，必填（fees rules list 查看）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees rules audit 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "fees rules audit 需要 --id", usage: usage.String()}
+	}
+	entries, err := svc.RuleAudit(ctx, *id)
+	if err != nil {
+		return err
+	}
+	out := make([]feeRuleAuditItem, 0, len(entries))
+	for _, a := range entries {
+		out = append(out, feeRuleAuditItem{
+			ID: a.ID, RuleID: a.RuleID, Action: a.Action, Actor: a.Actor,
+			Changes: a.Changes, At: a.At.Format(time.RFC3339),
+		})
+	}
+	return writeJSON(stdout, struct {
+		RuleID string             `json:"ruleId"`
+		Items  []feeRuleAuditItem `json:"items"`
+		Total  int                `json:"total"`
+	}{RuleID: *id, Items: out, Total: len(out)})
+}
+
+// feeRuleAuditItem is the CLI audit-entry shape (mirrors the HTTP one).
+type feeRuleAuditItem struct {
+	ID      int64  `json:"id"`
+	RuleID  string `json:"ruleId"`
+	Action  string `json:"action"`
+	Actor   string `json:"actor"`
+	Changes string `json:"changes,omitempty"`
+	At      string `json:"at"`
 }

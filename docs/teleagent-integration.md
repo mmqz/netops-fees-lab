@@ -1,7 +1,7 @@
 # NetOps Lab — TeleAgent 集成指南（MCP 注册 + CLI 回退）
 
 > ⚠️ **费用仓迁移提示（v0.17.0 fork 起生效）**：本文写作于费用域拆分前的主仓，其工具清单（lab_* / graph_* / alerts_query / metrics_query 共 11 工具）属于主仓 IPRAN 面，
-> **本仓库不存在这些工具**。本仓 MCP 实况：`resource_search` + `fee_risks` / `fee_totals` / `fee_duplicates` 共 4 个纯查询工具，
+> **本仓库不存在这些工具**。本仓 MCP 实况：`resource_search` + `fee_risks` / `fee_totals` / `fee_duplicates` 纯查询 4 工具 + 写侧 `fee_rules_create`（#2：可配置规则创建——只建停用规则，人类经 HTTP/CLI 启用）共 5 个工具，
 > 全部携带 MCP 标准只读注解（`readOnlyHint=true`，issue #10），命令为 `netopsfees mcp [--read-only]`。机读事实源以 [facts.md](facts.md) 为准；本文其余流程性内容（stdio 拉起/回退路径/故障排查思路）仍可参考，但工具名一律以上述 4 个为准。
 
 > ⚠️ **诚实声明**：部署态 TeleAgent 的 MCP 调用**未在本开发环境验证**（环境内没有 TeleAgent 实例；v0.2.0 时点状态与 Phase 1 相同）。已验证的是：进程内 MCP stdio 回环（go-sdk 客户端 × `mcpserver.Run`，`TestMCPServerResourceSearch` / `TestMCPToolRegistry` / `TestMCPLab*` ×4 / `TestMCPGraphToolsRoundTrip` / `TestMCPAlertsMetricsRoundTrip`）**以及**真子进程 stdio 冒烟（`netopslab mcp --db <fresh>` 裸 JSON-RPC initialize + tools/list → 服务器身份与工具清单〔v0.2.0 时点为 5 工具，v0.9 起 10 工具，v0.15.0 起 **11 工具**——当前数以 [facts.md](facts.md) 为机读事实源〕）。**接入部署态时请按本文操作，并把结果（成功/报错/协议差异）反馈给工程组。** 在验证完成前，建议优先使用 CLI 回退路径（§4）——它与 MCP 共用同一引擎，输出同为结构化 JSON。
@@ -34,9 +34,10 @@ NETOPS_DB=/opt/netops/data/netops.db netopslab mcp
 | 工具 | 类别 | 一句话职责 |
 | --- | --- | --- |
 | `resource_search` | 只读 | 检索导入资源（P1，不变） |
-| `fee_risks` | 只读分析 | 费用风险八场景查询（#58 阶段 5 + #114 场景 7 + #118 场景 8：场景+费用类型+账期→线索+行级证据锚点+人工裁定标记；阈值恒用治理默认值，AI 不可调参；已驳回线索默认隐藏并计数；默认构建未编译引擎时明确报错） |
+| `fee_risks` | 只读分析 | 费用风险十场景查询（#58 阶段 5 + #114 场景 7 + #118 场景 8 + #2 场景 10 custom-rules：场景+费用类型+账期→线索+行级证据锚点+人工裁定标记；内置场景阈值恒用治理默认值，AI 不可调参；custom-rules 场景执行已启用规则表；已驳回线索默认隐藏并计数；默认构建未编译引擎时明确报错） |
 | `fee_totals` | 只读分析 | 费用汇总查询（#120：费用类型+账期→各站址合计，整数分；与 HTTP query/totals 同形；limit 缺省 20 上限 50） |
 | `fee_duplicates` | 只读分析 | 跨批次重复结算候选查询（#120：同形 HTTP query/duplicates；候选供人工核对，账单存在 ≠ 认定结论） |
+| `fee_rules_create` | 写侧（#2 首个） | 可配置风险规则创建（L1 六元组封闭枚举；新规则默认停用观察态——不点火直到人类经管理级 HTTP/CLI 启用；重名拒绝=如实非幂等；MCP 无启用/停用面；`--read-only` 变体永不注册） |
 | `graph_traverse` | 只读分析 | 纵向穿透（§10.3 层序 BFS，down/up/both） |
 | `graph_impact` | 只读分析 | 根因候选 + 影响面分类（§10.5/§10.6） |
 | `graph_context` | 只读分析 | 一站式分析上下文（详情 + 邻接 + 最新指标 + 异常） |

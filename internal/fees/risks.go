@@ -103,13 +103,22 @@ const (
 	// yet, or a settlement body billed under another code all look the
 	// same from here.
 	RiskMissingBilling RiskScenario = "missing-billing"
+	// RiskCustomRules (issue #2 phase 1): the L1 CONFIGURABLE rules —
+	// {metric, aggregation, dimension, comparator, threshold, window}
+	// six-tuples stored in fee_risk_rules (migration v37). New rules
+	// start DISABLED (the conservative observation state); a human
+	// enables them; the scenario runs every ENABLED rule of the queried
+	// fee type and tags each clue with the rule's provenance (name +
+	// severity + threshold). The clue set is evidence, never verdicts —
+	// the same doctrine as the built-in scenarios.
+	RiskCustomRules RiskScenario = "custom-rules"
 )
 
 // riskScenarios lists every scenario in canonical order (usage + docs).
 var riskScenarios = []RiskScenario{
 	RiskRetiredBilling, RiskDuplicateSettlement, RiskLedgerMismatch,
 	RiskSpike, RiskOutlier, RiskUnlinked, RiskIdleBilling,
-	RiskMissingBilling, RiskLedgerConsistency,
+	RiskMissingBilling, RiskLedgerConsistency, RiskCustomRules,
 }
 
 // RiskScenarioLabels is the Chinese display name of each scenario.
@@ -123,6 +132,7 @@ var RiskScenarioLabels = map[RiskScenario]string{
 	RiskIdleBilling:         "有费无量",
 	RiskMissingBilling:      "有量无费",
 	RiskLedgerConsistency:   "台账内部一致性",
+	RiskCustomRules:         "可配置规则",
 }
 
 // RiskScenarios lists every scenario id (CLI usage text).
@@ -359,6 +369,10 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 	case RiskLedgerConsistency:
 		var c cluesPack
 		c, err = s.risksLedgerConsistency(ctx, engine, q)
+		clues, excluded, note = c.clues, c.excluded, c.note
+	case RiskCustomRules:
+		var c cluesPack
+		c, err = s.risksCustomRules(ctx, engine, q)
 		clues, excluded, note = c.clues, c.excluded, c.note
 	default:
 		return RiskResult{}, fmt.Errorf("fees: 未实现的风险场景 %q", scenario)
