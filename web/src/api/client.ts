@@ -35,6 +35,7 @@ import type {
   ResourceType,
   ClueDecisionItem,
   FeeDuplicatesResult,
+  FeeMonthlyResult,
   FeeTotalsResult,
   FeePeriodProbeResult,
   FeeRiskRule,
@@ -681,6 +682,16 @@ export function fetchFeeDuplicates(params: {
 }): Promise<FeeDuplicatesResult> {
   return requestJson<FeeDuplicatesResult>(
     `/fees/query/duplicates${buildQuery(params as Record<string, string | number | undefined>)}`,
+  );
+}
+
+/** GET /api/fees/query/monthly（#3 月度趋势序列——全年逐月 rows/sites/totalCents） */
+export function fetchFeeMonthly(params: {
+  feeType: string;
+  year: number;
+}): Promise<FeeMonthlyResult> {
+  return requestJson<FeeMonthlyResult>(
+    `/fees/query/monthly${buildQuery(params as Record<string, string | number | undefined>)}`,
   );
 }
 

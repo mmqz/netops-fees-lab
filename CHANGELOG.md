@@ -8,7 +8,19 @@
 
 ### 新增 — 费用分析展示层二期（#3）：总览 / 趋势 / 线索列表 / 一键分析
 
-**数据面（本期）**：引擎新原语 `MonthlyTotals`（月度趋势序列）——接口/duckdb 实现/std 501 桩三面，`[]MonthlyTotalsRow{month,rows,sites,totalCents}` 按月升序、**有数据的月份才出现**（无数据月份不返回，展示层补空白不造零）；`sites` 去重站址数与总览卡同源；整数分契约（#65 P1-a）贯穿。HTTP `GET /api/fees/query/monthly?feeType=&year=`（**不接受 month 参数**——400 先于 501，与 totals 的参数校验先于引擎检查同一教义）+ CLI `fees query monthly --type --year`（--month 拒绝 exit 2 先于引擎检查）。测试：duckdb 真机验收（多月聚合/缺席月份缺席/类型隔离/空年 nil）+ HTTP 契约（501 形态/400 矩阵/OpenAPI 路由闭集）+ CLI e2e（诚实拒绝/--month exit 2）；`fakeRiskEngine`/`unavailableEngine` 测试替身随接口扩展补桩。事实源：api-routes 47→48、api-fees-routes 21→22。
+**数据面**：引擎新原语 `MonthlyTotals`（月度趋势序列）——接口/duckdb 实现/std 501 桩三面，`[]MonthlyTotalsRow{month,rows,sites,totalCents}` 按月升序、**有数据的月份才出现**（无数据月份不返回，展示层补空白不造零）；`sites` 去重站址数与总览卡同源；整数分契约（#65 P1-a）贯穿。HTTP `GET /api/fees/query/monthly?feeType=&year=`（**不接受 month 参数**——400 先于 501，与 totals 的参数校验先于引擎检查同一教义）+ CLI `fees query monthly --type --year`（--month 拒绝 exit 2 先于引擎检查）。测试：duckdb 真机验收（多月聚合/缺席月份缺席/类型隔离/空年 nil）+ HTTP 契约（501 形态/400 矩阵/OpenAPI 路由闭集）+ CLI e2e（诚实拒绝/--month exit 2）；`fakeRiskEngine`/`unavailableEngine` 测试替身随接口扩展补桩。事实源：api-routes 47→48、api-fees-routes 21→22。
+
+**展示面（前端，零新依赖——零图表库红线延续）**：
+- **总览卡片**：各费用类型本月费用（整数分→万元）/ 环比（跨年取上年 12 月；0 基期与缺月诚实显示「—」不造假 0%）/ 站址数——全部由月度序列推导，`feesOverview.ts` 纯函数可对照测试。
+- **月度趋势图**：纯 SVG 折线（MetricChart 确定性渲染范式——坐标纯函数，同数据同输出）；空月**断线不造零**；环比异常点（≥2× 上一有数据月）空心环高亮 + `<title>` 悬浮（类型/月份/万元/异常点标注）；多类型各色一线。
+- **一键分析（分析路径五步）**：十场景顺序执行（治理默认阈值——单场景调参仍在风险面板），Stepper 五步（看总量→找异常→看详情→交叉验证→出结论）+ 每步摘要；选择变化自动重跑，按钮供显式重跑。
+- **跨场景线索列表**：合并十场景线索（场景标签随行）/ 按证据金额合计或触发指标排序（确定性 tiebreak）/ 行展开证据锚点（sourceFile:sourceRow + 整数分 + 批次）/ #119 人工裁定（属实/排除——排除后重跑即隐、台账留档）/ CSV 导出（口径 note 随行——离机文件也要有「账单存在 ≠ 认定结论」）；空态诚实横幅（「无线索 ≠ 无问题——未导入的费用类型/账期不可见」）。
+- 测试：feesOverview.test.ts 17 顶（补位空月不造零/环比 0 基期 null/几何确定性逐字节对照/断月断线/异常点主序列/金额排序落点/CSV 转义与口径列）——前端 129→146。
+- **浏览器级回归**（agent-browser 1440×900 + duckdb 真机二进制 + 双令牌 serve，三月夹具含同站同期双批次重复与 2.36× spike）：总览卡环比 +261.4% 数学精确 ✓ / SVG 双线四点 ✓ / spike 空心环带「环比异常点」悬浮 ✓ / 一键分析自动跑+类型/月份切换联动重跑 ✓ / 跨场景 3 线索（重复结算 2 批次+零资源计费×2）✓ / 证据展开双锚点双批次 ✓ / 排除线索→重跑即隐（3→2）✓ / CSV 导出零报错 ✓ / 塔类 7 月切换双卡+塔类线索联动 ✓ / 零资源计费空账期诚实横幅 ✓ / console+errors 零输出 ✓。
+
+### 修复 — 信封数组 null 暴雷（#93 教义补完）：零线索场景曾答 `clues: null` 致整页崩
+- **浏览器回归实抓**：零线索场景（idle-billing 于裸夹具）的信封 `clues` 是 Go nil slice → JSON `null` → 前端 `for...of null` 崩掉整个 React 树（整页空白，不止该场景）。#93「数组永不为 null」教义 #7 期只落了 Evidence 字段，信封自身的 Clues 切片漏网——一期风险面板同样埋着此雷（任何零线索查询都会崩，此前只因回归夹件恰好有线索而未爆）。
+- **根治双管**：Go 信封组装处补 `clues == nil → []`（#93 补完——MCP/CLI/HTTP 三消费面同享）；前端 `mergeClues` 边缘容错（`?? []`，注释声明源头已根治、容错为旧服务端形态）。
 
 ### 修复 — Windows 全量测试恒红（#14）：源文件可写提示的平台假设统一
 - **根因**：`sourceWritableWarnings` 按 `runtime.GOOS == "windows"` 平台短路返回 nil（注释假设「Windows 上 POSIX 写位无意义」），但 `TestE2EVerifySources` 与 `TestLedgerColumnsRoundTripAndCompat` 恒断言 0644 源文件必须携带只读建议——实现与测试的平台假设背离，Windows 上 15 包恒 2 红，恒红测试掩盖真实回归。

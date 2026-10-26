@@ -4406,3 +4406,124 @@ body.lab-split-dragging {
   font-weight: 600;
   color: var(--text-muted, #6b7280);
 }
+
+
+/* ---- 费用总览与分析路径（#3 二期：总览卡片 / 趋势图 / 一键分析） ---- */
+.ov-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 10px 0 14px;
+}
+
+.ov-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--bg-elevated, #fff);
+}
+
+.ov-card__title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted, #8896ab);
+}
+
+.ov-card__value {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-card__sub {
+  margin: 0;
+  font-size: 12px;
+}
+
+.ov-mom--up {
+  color: #d24242;
+  font-weight: 600;
+}
+
+.ov-mom--down {
+  color: #2ea44f;
+  font-weight: 600;
+}
+
+.ov-trend {
+  margin: 4px 0 14px;
+}
+
+.ov-trend__title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ov-trend__svg {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated, #fff);
+}
+
+.ov-axis-text {
+  font-size: 10px;
+  fill: #8896ab;
+}
+
+.ov-grid {
+  stroke: #e3e8f0;
+  stroke-width: 1;
+}
+
+.ov-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.ov-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.ov-steps {
+  margin: 8px 0 14px;
+}
+
+.ov-steps__notes {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.ov-steps__notes p {
+  margin: 2px 0;
+}
+
+.ov-clues__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 8px;
+}
+
+.ov-clues__actions {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}

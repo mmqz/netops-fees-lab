@@ -1485,6 +1485,8 @@ export interface RiskEvidenceAnchor {
 /** 一条待核实的风险线索（账单存在 ≠ 认定结论） */
 export interface RiskClue {
   siteCode: string;
+  /** #4 记录键（订单号/电表编号/工单号）——行级业务身份；缺省 = 该批次无记录键列 */
+  recordKey?: string;
   year: number;
   month: number;
   metricValue: number;
@@ -1529,6 +1531,23 @@ export interface FeeTotalsResult {
   year: number;
   month: number;
   items: FeeTotalsRow[];
+  total: number;
+}
+
+/** 月度趋势行（GET /api/fees/query/monthly；#3 展示层数据面；整数分契约） */
+export interface FeeMonthlyRow {
+  month: number;
+  rows: number;
+  sites: number;
+  totalCents: number;
+}
+
+/** GET /api/fees/query/monthly 信封（有数据的月份才出现，无数据月份缺席） */
+export interface FeeMonthlyResult {
+  preset: string;
+  feeType: string;
+  year: number;
+  items: FeeMonthlyRow[];
   total: number;
 }
 

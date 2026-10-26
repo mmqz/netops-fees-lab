@@ -871,6 +871,13 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 			clues[i].Evidence = make([]EvidenceAnchor, 0)
 		}
 	}
+	// The envelope's own array rides the same #93 doctrine: a zero-clue
+	// scenario (idle-billing on a bare fixture) must answer "clues": [],
+	// never null — the browser-side run-all (#3) iterates every envelope
+	// and a null kills the whole page, not just the empty scenario.
+	if clues == nil {
+		clues = make([]RiskClue, 0)
+	}
 	return RiskResult{
 		Scenario:   string(scenario),
 		ScenarioCn: RiskScenarioLabels[scenario],

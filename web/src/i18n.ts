@@ -728,6 +728,50 @@ export const FEES_QUERY_COL_PERIOD = '账期';
 export const FEES_QUERY_COL_BATCHES = '批次数';
 export const FEES_QUERY_EMPTY = '该口径下无记录';
 export const FEES_QUERY_COUNT = (n: number) => `共 ${n} 条`;
+
+// ---- 费用分析展示层（#3 二期：总览 / 趋势 / 一键分析 / 线索列表）----
+export const FEES_OV_TITLE = '费用总览与分析路径';
+export const FEES_OV_DESC =
+  '先看总量、再找异常、逐条核证据——分析路径五步在此页一次走完；卡片与趋势由月度序列直接推导，金额整数分换算。';
+export const FEES_OV_YEAR = '年份';
+export const FEES_OV_MONTH = '月份';
+export const FEES_OV_MONTH_AUTO = '最新有数据月';
+export const FEES_OV_CARD_MONTH_TOTAL = (type: string) => `${type}·本月费用`;
+export const FEES_OV_CARD_MOM = '环比';
+export const FEES_OV_CARD_SITES = (n: number) => `站址数 ${n}`;
+export const FEES_OV_MOM_UP = (r: string) => `+${r}%`;
+export const FEES_OV_MOM_DOWN = (r: string) => `${r}%`;
+export const FEES_OV_MOM_NONE = '—';
+export const FEES_OV_TREND_TITLE = '月度费用趋势（万元）';
+export const FEES_OV_TREND_EMPTY = '所选年份暂无导入数据——先在下方导入面板落一批台账。';
+export const FEES_OV_TREND_SPIKE = '环比异常点';
+export const FEES_OV_TREND_LEGEND_SPIKE = '（空心环=环比异常点）';
+export const FEES_OV_STEPS = ['看总量', '找异常', '看详情', '交叉验证', '出结论'];
+export const FEES_OV_STEP_TOTAL = (wan: string) => `本月合计 ${wan} 万元`;
+export const FEES_OV_STEP_CLUES = (scenarios: number, clues: number) =>
+  `${scenarios} 个场景跑完，${clues} 条待核实线索`;
+export const FEES_OV_STEP_DETAIL = '在线索列表展开证据行逐条核实';
+export const FEES_OV_STEP_CROSS = '切换费用类型/月份对照同一账期的另一面';
+export const FEES_OV_STEP_EXPORT = '导出清单或逐条裁定留档';
+export const FEES_OV_RUN = '一键分析';
+export const FEES_OV_RUNNING = '分析中…';
+export const FEES_OV_RERUN = '重跑分析';
+export const FEES_OV_CLUES_TITLE = '线索列表（跨场景汇总）';
+export const FEES_OV_CLUES_SORT = '排序';
+export const FEES_OV_CLUES_SORT_AMOUNT = '按触发指标';
+export const FEES_OV_CLUES_SORT_METRIC = '按严重信号';
+export const FEES_OV_CLUES_EXPORT = '导出 CSV';
+export const FEES_OV_CLUES_EMPTY = '该账期跑完全部场景无待核实线索——好信号，但「无线索」不等于「无问题」（未导入的费用类型/账期不可见）。';
+export const FEES_OV_CLUES_OF = (type: string, month: string) => `${type} · ${month}`;
+export const FEES_OV_COL_SITE = '站址';
+export const FEES_OV_COL_PERIOD = '账期';
+export const FEES_OV_COL_SCENARIO = '场景';
+export const FEES_OV_COL_METRIC = '触发指标';
+export const FEES_OV_COL_STATE = '状态';
+export const FEES_OV_NOTE = '教义：线索是待核实差异而非认定结论——账单存在 ≠ 认定结论；每条线索展开可见原始行证据。';
+export const FEES_OV_STATE_PENDING = '待核实';
+export const FEES_OV_CLUES_EXPORT_OK = (type: string, month: string) =>
+  `线索清单已导出（${type} · ${month}）——CSV 携带口径列，账单存在 ≠ 认定结论。`;
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

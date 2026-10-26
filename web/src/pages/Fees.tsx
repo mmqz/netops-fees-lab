@@ -47,6 +47,7 @@ import {
   uploadFeeFile,
   uploadFeeSheetsFile,
 } from '../api/client';
+import { FeesOverview } from './FeesOverview';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Drawer } from '../components/Drawer';
@@ -754,6 +755,9 @@ export function FeesPage() {
           <p className="page__desc">{FEES_DESC}</p>
         </div>
       </header>
+
+      {/* #3 二期：费用总览与分析路径（总览卡片 / 月度趋势 / 一键分析 / 跨场景线索列表） */}
+      <FeesOverview />
 
       <section className="panel">
         <h2 className="panel__title">{FEES_RISKS_TITLE}</h2>
