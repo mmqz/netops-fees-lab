@@ -123,6 +123,13 @@ import {
   FEES_RISKS_EVIDENCE_BATCH,
   FEES_RISKS_EVIDENCE_ROWS,
   FEES_RISKS_EMPTY,
+  FEES_TAB_RISKS,
+  FEES_TAB_DETAILS,
+  FEES_TAB_RECONCILE,
+  FEES_TAB_LINKS,
+  FEES_TAB_RULES,
+  FEES_TAB_BATCHES,
+  FEES_TAB_IMPORT,
   FEES_RISKS_EMPTY_EXCLUDED,
   FEES_RISKS_EVIDENCE,
   FEES_RISKS_EVIDENCE_MORE,
@@ -647,6 +654,7 @@ export function FeesPage() {
   }, [qPreset, qType, qYear, qMonth]);
 
   // ---- 风险查询 ----
+  const [feeTab, setFeeTab] = useState<'risks' | 'details' | 'reconcile' | 'links' | 'rules' | 'batches' | 'import'>('risks');
   const [scenario, setScenario] = useState('duplicate-settlement');
   const [riskType, setRiskType] = useState('electricity');
   const [riskYear, setRiskYear] = useState(String(new Date().getFullYear()));
@@ -763,18 +771,37 @@ export function FeesPage() {
       {/* #3 二期：费用总览与分析路径（总览卡片 / 月度趋势 / 一键分析 / 跨场景线索列表） */}
       <FeesOverview />
 
-      {/* #16 完成线 6：明细补录佐证层（差额对账 + 录入 + 台账裁定——永不参与系统表金额） */}
-      <FeesDetails />
+      {/* #19：信息架构三层——总览（首屏）之后的全部区块按 Tab 收纳（渐进披露）。
+          面板保持挂载仅视觉隐藏（fees-tabpane--hidden）：切换不丢各面板的
+          查询状态与结果，与卸载式 Tab 相比是零行为变化。 */}
+      <nav className="tabs fees-tabs" aria-label={FEES_TITLE}>
+        <button type="button" className={`tab${feeTab === 'risks' ? ' tab--active' : ''}`} onClick={() => setFeeTab('risks')}>{FEES_TAB_RISKS}</button>
+        <button type="button" className={`tab${feeTab === 'details' ? ' tab--active' : ''}`} onClick={() => setFeeTab('details')}>{FEES_TAB_DETAILS}</button>
+        <button type="button" className={`tab${feeTab === 'reconcile' ? ' tab--active' : ''}`} onClick={() => setFeeTab('reconcile')}>{FEES_TAB_RECONCILE}</button>
+        <button type="button" className={`tab${feeTab === 'links' ? ' tab--active' : ''}`} onClick={() => setFeeTab('links')}>{FEES_TAB_LINKS}</button>
+        <button type="button" className={`tab${feeTab === 'rules' ? ' tab--active' : ''}`} onClick={() => setFeeTab('rules')}>{FEES_TAB_RULES}</button>
+        <button type="button" className={`tab${feeTab === 'batches' ? ' tab--active' : ''}`} onClick={() => setFeeTab('batches')}>{FEES_TAB_BATCHES}</button>
+        <button type="button" className={`tab${feeTab === 'import' ? ' tab--active' : ''}`} onClick={() => setFeeTab('import')}>{FEES_TAB_IMPORT}</button>
+      </nav>
 
-      {/* #12：跨数据集对账（电费台账 vs 塔类详单按主编码归并 + 站址编码映射桥） */}
-      <FeesCrossReconcile />
 
+      <div className={feeTab === 'details' ? '' : 'fees-tabpane--hidden'}>
+        {/* #16 完成线 6：明细补录佐证层（差额对账 + 录入 + 台账裁定——永不参与系统表金额） */}
+        <FeesDetails />
+      </div>
+
+      <div className={feeTab === 'reconcile' ? '' : 'fees-tabpane--hidden'}>
+        {/* #12：跨数据集对账（电费台账 vs 塔类详单按主编码归并 + 站址编码映射桥） */}
+        <FeesCrossReconcile />
+      </div>
+
+      <div className={feeTab === 'risks' ? '' : 'fees-tabpane--hidden'}>
       <section className="panel">
         <h2 className="panel__title">{FEES_RISKS_TITLE}</h2>
         <div className="filters">
           <label className="field">
             <span>{FEES_RISKS_SCENARIO}</span>
-            <select value={scenario} onChange={(e) => setScenario(e.target.value)}>
+            <select className="select" value={scenario} onChange={(e) => setScenario(e.target.value)}>
               {SCENARIOS.map((s) => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
@@ -782,7 +809,7 @@ export function FeesPage() {
           </label>
           <label className="field">
             <span>{FEES_IMPORT_TYPE}</span>
-            <select value={riskType} onChange={(e) => setRiskType(e.target.value)}>
+            <select className="select" value={riskType} onChange={(e) => setRiskType(e.target.value)}>
               {FEE_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
@@ -790,11 +817,11 @@ export function FeesPage() {
           </label>
           <label className="field field--xs">
             <span>{FEES_IMPORT_YEAR}</span>
-            <input value={riskYear} onChange={(e) => setRiskYear(e.target.value)} inputMode="numeric" />
+            <input className="input" value={riskYear} onChange={(e) => setRiskYear(e.target.value)} inputMode="numeric" />
           </label>
           <label className="field field--xs">
             <span>{FEES_IMPORT_MONTH}</span>
-            <input
+            <input className="input"
               value={riskMonth}
               onChange={(e) => setRiskMonth(e.target.value)}
               inputMode="numeric"
@@ -803,12 +830,12 @@ export function FeesPage() {
           </label>
           <label className="field field--xs">
             <span>{FEES_RISKS_LIMIT}</span>
-            <input value={riskLimit} onChange={(e) => setRiskLimit(e.target.value)} inputMode="numeric" />
+            <input className="input" value={riskLimit} onChange={(e) => setRiskLimit(e.target.value)} inputMode="numeric" />
           </label>
           {scenario === 'retired-billing' && (
             <label className="field">
               <span>{FEES_RISKS_STATUS}</span>
-              <input
+              <input className="input"
                 value={riskStatus}
                 onChange={(e) => setRiskStatus(e.target.value)}
                 placeholder={FEES_RISKS_STATUS_HINT}
@@ -818,7 +845,7 @@ export function FeesPage() {
           {scenario === 'ledger-mismatch' && (
             <label className="field field--xs">
               <span>{FEES_RISKS_DIFF_CENTS}</span>
-              <input
+              <input className="input"
                 value={riskDiffCents}
                 onChange={(e) => setRiskDiffCents(e.target.value)}
                 inputMode="numeric"
@@ -829,7 +856,7 @@ export function FeesPage() {
           {scenario === 'spike' && (
             <label className="field field--xs">
               <span>{FEES_RISKS_RATIO}</span>
-              <input
+              <input className="input"
                 value={riskRatio}
                 onChange={(e) => setRiskRatio(e.target.value)}
                 inputMode="decimal"
@@ -841,11 +868,11 @@ export function FeesPage() {
             <>
               <label className="field field--xs">
                 <span>{FEES_RISKS_Z}</span>
-                <input value={riskZ} onChange={(e) => setRiskZ(e.target.value)} inputMode="decimal" placeholder="3" />
+                <input className="input" value={riskZ} onChange={(e) => setRiskZ(e.target.value)} inputMode="decimal" placeholder="3" />
               </label>
               <label className="field field--xs">
                 <span>{FEES_RISKS_MIN_SITES}</span>
-                <input
+                <input className="input"
                   value={riskMinSites}
                   onChange={(e) => setRiskMinSites(e.target.value)}
                   inputMode="numeric"
@@ -998,7 +1025,7 @@ export function FeesPage() {
         <div className="filters">
           <label className="field">
             <span>{FEES_QUERY_PRESET}</span>
-            <select
+            <select className="select"
               value={qPreset}
               onChange={(e) => {
                 setQPreset(e.target.value as 'totals' | 'duplicates');
@@ -1012,7 +1039,7 @@ export function FeesPage() {
           </label>
           <label className="field">
             <span>{FEES_IMPORT_TYPE}</span>
-            <select value={qType} onChange={(e) => setQType(e.target.value)}>
+            <select className="select" value={qType} onChange={(e) => setQType(e.target.value)}>
               <option value="electricity">{FEE_TYPE_ELECTRICITY}</option>
               <option value="tower_lease">{FEE_TYPE_TOWER_LEASE}</option>
               <option value="repair">{FEE_TYPE_REPAIR}</option>
@@ -1021,11 +1048,11 @@ export function FeesPage() {
           </label>
           <label className="field field--xs">
             <span>{FEES_IMPORT_YEAR}</span>
-            <input value={qYear} onChange={(e) => setQYear(e.target.value)} inputMode="numeric" placeholder="2024" />
+            <input className="input" value={qYear} onChange={(e) => setQYear(e.target.value)} inputMode="numeric" placeholder="2024" />
           </label>
           <label className="field field--xs">
             <span>{FEES_IMPORT_MONTH}</span>
-            <input value={qMonth} onChange={(e) => setQMonth(e.target.value)} inputMode="numeric" placeholder={FEES_RISKS_MONTH_ALL} />
+            <input className="input" value={qMonth} onChange={(e) => setQMonth(e.target.value)} inputMode="numeric" placeholder={FEES_RISKS_MONTH_ALL} />
           </label>
           <button className="btn btn--primary" disabled={qRunning} onClick={() => void runQueryPreset()}>
             {qRunning ? <Spinner /> : FEES_QUERY_RUN}
@@ -1093,14 +1120,16 @@ export function FeesPage() {
           </div>
         )}
       </section>
+      </div>
 
+      <div className={feeTab === 'links' ? '' : 'fees-tabpane--hidden'}>
       <section className="panel">
         <h2 className="panel__title">{FEES_LINKS_TITLE}</h2>
         <p className="page__desc">{FEES_LINKS_DESC}</p>
         <div className="filters">
           <label className="field">
             <span>{FEES_LINKS_STATUS}</span>
-            <select value={linkStatus} onChange={(e) => applyLinkFilter({ status: e.target.value })}>
+            <select className="select" value={linkStatus} onChange={(e) => applyLinkFilter({ status: e.target.value })}>
               <option value="pending">{LINKS_STATUS_PENDING}</option>
               <option value="confirmed">{LINKS_STATUS_CONFIRMED}</option>
               <option value="dismissed">{LINKS_STATUS_DISMISSED}</option>
@@ -1109,7 +1138,7 @@ export function FeesPage() {
           </label>
           <label className="field">
             <span>{FEES_LINKS_GRADE}</span>
-            <select value={linkGrade} onChange={(e) => applyLinkFilter({ grade: e.target.value })}>
+            <select className="select" value={linkGrade} onChange={(e) => applyLinkFilter({ grade: e.target.value })}>
               <option value="exact">{LINKS_GRADE_EXACT}</option>
               <option value="rule">{LINKS_GRADE_RULE}</option>
               <option value="fuzzy">{LINKS_GRADE_FUZZY}</option>
@@ -1188,7 +1217,9 @@ export function FeesPage() {
           )}
         </div>
       </section>
+      </div>
 
+      <div className={feeTab === 'rules' ? '' : 'fees-tabpane--hidden'}>
       <section className="panel">
         <h2 className="panel__title">{FEES_RULES_TITLE}</h2>
         <div className="panel__body">
@@ -1262,11 +1293,11 @@ export function FeesPage() {
             <div className="filters">
               <label className="field">
                 <span>{FEES_RULES_CREATE_NAME}</span>
-                <input value={ruleName} onChange={(e) => setRuleName(e.target.value)} placeholder={FEES_RULES_CREATE_NAME_PH} />
+                <input className="input" value={ruleName} onChange={(e) => setRuleName(e.target.value)} placeholder={FEES_RULES_CREATE_NAME_PH} />
               </label>
               <label className="field">
                 <span>{FEES_IMPORT_TYPE}</span>
-                <select value={ruleType} onChange={(e) => setRuleType(e.target.value)}>
+                <select className="select" value={ruleType} onChange={(e) => setRuleType(e.target.value)}>
                   {FEE_TYPES.map((t) => (
                     <option key={t.value} value={t.value}>{t.label}</option>
                   ))}
@@ -1274,14 +1305,14 @@ export function FeesPage() {
               </label>
               <label className="field">
                 <span>{FEES_RULES_CREATE_METRIC}</span>
-                <select value={ruleMetric} onChange={(e) => setRuleMetric(e.target.value)}>
+                <select className="select" value={ruleMetric} onChange={(e) => setRuleMetric(e.target.value)}>
                   <option value="amount">amount（金额）</option>
                   <option value="rows">rows（行数）</option>
                 </select>
               </label>
               <label className="field">
                 <span>{FEES_RULES_CREATE_AGG}</span>
-                <select value={ruleAgg} onChange={(e) => setRuleAgg(e.target.value)} disabled={ruleMetric === 'rows'}>
+                <select className="select" value={ruleAgg} onChange={(e) => setRuleAgg(e.target.value)} disabled={ruleMetric === 'rows'}>
                   <option value="sum">sum</option>
                   <option value="avg">avg</option>
                   <option value="max">max</option>
@@ -1290,7 +1321,7 @@ export function FeesPage() {
               </label>
               <label className="field">
                 <span>{FEES_RULES_CREATE_COMPARATOR}</span>
-                <select value={ruleComparator} onChange={(e) => setRuleComparator(e.target.value)}>
+                <select className="select" value={ruleComparator} onChange={(e) => setRuleComparator(e.target.value)}>
                   <option value="gt">gt（大于）</option>
                   <option value="gte">gte（大于等于）</option>
                   <option value="lt">lt（小于）</option>
@@ -1300,7 +1331,7 @@ export function FeesPage() {
               </label>
               <label className="field field--xs">
                 <span>{FEES_RULES_CREATE_THRESHOLD}</span>
-                <input
+                <input className="input"
                   value={ruleThreshold}
                   onChange={(e) => setRuleThreshold(e.target.value)}
                   inputMode="decimal"
@@ -1310,12 +1341,12 @@ export function FeesPage() {
               {ruleComparator === 'mom_ratio' && (
                 <label className="field field--xs">
                   <span>{FEES_RULES_CREATE_WINDOW}</span>
-                  <input value={ruleWindow} onChange={(e) => setRuleWindow(e.target.value)} inputMode="numeric" />
+                  <input className="input" value={ruleWindow} onChange={(e) => setRuleWindow(e.target.value)} inputMode="numeric" />
                 </label>
               )}
               <label className="field">
                 <span>{FEES_RULES_CREATE_SEVERITY}</span>
-                <select value={ruleSeverity} onChange={(e) => setRuleSeverity(e.target.value)}>
+                <select className="select" value={ruleSeverity} onChange={(e) => setRuleSeverity(e.target.value)}>
                   <option value="high">high</option>
                   <option value="medium">medium</option>
                   <option value="low">low</option>
@@ -1323,7 +1354,7 @@ export function FeesPage() {
               </label>
               <label className="field">
                 <span>{FEES_RULES_CREATE_DESC}</span>
-                <input value={ruleDescription} onChange={(e) => setRuleDescription(e.target.value)} placeholder={FEES_RULES_CREATE_DESC_PH} />
+                <input className="input" value={ruleDescription} onChange={(e) => setRuleDescription(e.target.value)} placeholder={FEES_RULES_CREATE_DESC_PH} />
               </label>
               <button className="btn btn--primary" disabled={ruleCreating} onClick={() => void doCreateRule()}>
                 {ruleCreating ? <Spinner /> : FEES_RULES_CREATE_SUBMIT}
@@ -1333,7 +1364,9 @@ export function FeesPage() {
           </details>
         </div>
       </section>
+      </div>
 
+      <div className={feeTab === 'batches' ? '' : 'fees-tabpane--hidden'}>
       <section className="panel">
         <h2 className="panel__title">{FEES_BATCHES_TITLE}</h2>
         <div className="panel__body">
@@ -1382,14 +1415,16 @@ export function FeesPage() {
           )}
         </div>
       </section>
+      </div>
 
+      <div className={feeTab === 'import' ? '' : 'fees-tabpane--hidden'}>
       <section className="panel">
         <h2 className="panel__title">{FEES_IMPORT_TITLE}</h2>
         <div className="panel__body">
           <div className="filters">
             <label className="field">
               <span>{FEES_IMPORT_MODE}</span>
-              <select value={importMode} onChange={(e) => setImportMode(e.target.value === 'sheets' ? 'sheets' : 'single')}>
+              <select className="select" value={importMode} onChange={(e) => setImportMode(e.target.value === 'sheets' ? 'sheets' : 'single')}>
                 <option value="single">{FEES_IMPORT_MODE_SINGLE}</option>
                 <option value="sheets">{FEES_IMPORT_MODE_SHEETS}</option>
               </select>
@@ -1397,7 +1432,7 @@ export function FeesPage() {
             {importMode === 'single' && (
               <label className="field">
                 <span>{FEES_IMPORT_TYPE}</span>
-                <select value={importType} onChange={(e) => setImportType(e.target.value)}>
+                <select className="select" value={importType} onChange={(e) => setImportType(e.target.value)}>
                   {FEE_TYPES.map((t) => (
                     <option key={t.value} value={t.value}>{t.label}</option>
                   ))}
@@ -1406,11 +1441,11 @@ export function FeesPage() {
             )}
             <label className="field field--xs">
               <span>{FEES_IMPORT_YEAR}</span>
-              <input value={importYear} onChange={(e) => setImportYear(e.target.value)} inputMode="numeric" />
+              <input className="input" value={importYear} onChange={(e) => setImportYear(e.target.value)} inputMode="numeric" />
             </label>
             <label className="field field--xs">
               <span>{FEES_IMPORT_MONTH}</span>
-              <input value={importMonth} onChange={(e) => setImportMonth(e.target.value)} inputMode="numeric" />
+              <input className="input" value={importMonth} onChange={(e) => setImportMonth(e.target.value)} inputMode="numeric" />
             </label>
             <label className="field">
               <span>{FEES_IMPORT_FILE}</span>
@@ -1457,7 +1492,7 @@ export function FeesPage() {
               )}
               {probeMismatch && (
                 <label className="probe-card__trust">
-                  <input
+                  <input className="input"
                     type="checkbox"
                     checked={trustDeclared}
                     onChange={(e) => setTrustDeclared(e.target.checked)}
@@ -1469,6 +1504,7 @@ export function FeesPage() {
           )}
         </div>
       </section>
+      </div>
 
       <ConfirmDialog
         open={rollbackTarget !== null}

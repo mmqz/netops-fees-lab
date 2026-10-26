@@ -225,11 +225,11 @@ export function FeesCrossReconcile() {
         <div className="filters">
           <label className="field field--short">
             <span>{FEES_X_YEAR}</span>
-            <input value={xYear} onChange={(e) => { setXYear(e.target.value); }} inputMode="numeric" />
+            <input className="input" value={xYear} onChange={(e) => { setXYear(e.target.value); }} inputMode="numeric" />
           </label>
           <label className="field field--short">
             <span>{FEES_X_MONTH}</span>
-            <input value={xMonth} onChange={(e) => { setXMonth(e.target.value); }} inputMode="numeric" />
+            <input className="input" value={xMonth} onChange={(e) => { setXMonth(e.target.value); }} inputMode="numeric" />
           </label>
           <button className="btn" disabled={xRunning} onClick={() => { void runReconcile(); }}>
             {FEES_X_RUN}
@@ -300,15 +300,15 @@ export function FeesCrossReconcile() {
           <div className="filters">
             <label className="field">
               <span>{FEES_X_ALIAS_CANONICAL}</span>
-              <input value={inCanonical} onChange={(e) => { setInCanonical(e.target.value); }} />
+              <input className="input" value={inCanonical} onChange={(e) => { setInCanonical(e.target.value); }} />
             </label>
             <label className="field">
               <span>{FEES_X_ALIAS_ALIAS}</span>
-              <input value={inAlias} onChange={(e) => { setInAlias(e.target.value); }} />
+              <input className="input" value={inAlias} onChange={(e) => { setInAlias(e.target.value); }} />
             </label>
             <label className="field">
               <span>{FEES_X_ALIAS_SOURCE}</span>
-              <select value={inSource} onChange={(e) => { setInSource(e.target.value); }}>
+              <select className="select" value={inSource} onChange={(e) => { setInSource(e.target.value); }}>
                 {ALIAS_SOURCES.map((s) => (
                   <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
@@ -316,7 +316,7 @@ export function FeesCrossReconcile() {
             </label>
             <label className="field">
               <span>{FEES_X_ALIAS_CONFIDENCE}</span>
-              <select value={inConfidence} onChange={(e) => { setInConfidence(e.target.value); }}>
+              <select className="select" value={inConfidence} onChange={(e) => { setInConfidence(e.target.value); }}>
                 <option value="manual">manual（人工）</option>
                 <option value="rule">rule（规则）</option>
                 <option value="exact">exact（精确）</option>

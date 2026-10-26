@@ -4,7 +4,7 @@
 
 ## [0.20.0] — 进行中
 
-**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23、排除主导告警与三态空状态 #21；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
+**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23、排除主导告警与三态空状态 #21、费用页信息架构重构 #19；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
 
 ### 修复 — Windows 构建阻断（#22）：`FeesOverview.tsx` 与 `feesOverview.ts` 仅大小写不同，Windows 上 tsc/vite 双双失败
 - **根因**：`web/src/pages/` 下同时存在 `FeesOverview.tsx`（React 组件，大写 F）与 `feesOverview.ts`（纯函数库，小写 f）——Linux/macOS 大小写敏感文件系统两者共存一切正常，Windows 大小写不敏感把它们当同一文件：`import { FeesOverview } from './FeesOverview'` 解析到不含该导出的 `feesOverview.ts`，tsc 报 TS1261/TS1149、vite 报「"FeesOverview" is not exported by "src/pages/feesOverview.ts"」，**前端完全无法构建**（Go 二进制随之缺内嵌前端）。issue 报告人 Windows/Node 24/npm 11 实测复现率 100%。
@@ -35,6 +35,13 @@
 - **文案准确性裁决**：措辞**不声称「全部被排除」**——excluded/(total+excluded) 比例无法知道完整参与面（需要额外一次引擎往返），一个错误的「全部被排除」本身就是新的误导；诚实文案只说「可能是无法分析形态」并指出审计通道。
 - **前端三态空状态**（验收 3/4）：`riskEmptyState(clueCount, excluded, monthHasData)` 纯函数裁决 `'no-data' | 'excluded-zero' | 'clean'`——风险面板（Fees.tsx）：`excluded-zero` 渲染警告色 banner（与 `clean` 的中性空态视觉区分）；总览页（FeesOverview.tsx）：无数据月引导导入文案 + 各场景 warnings 聚合告警条（`【场景名】告警文本`）。三态文案与颜色全部可区分。
 - **测试**：后端 `TestExcludedDominanceWarns`（跨批次夹具 0 线索+排除 → warnings+note 双通道断言；干净零线索 → 零告警不误报）+ 前端 `riskEmptyState` 四分支纯函数测试（无数据优先/排除零/干净零/有线索不介入）。**不阻断查询、不改任何线索产出逻辑**（验收 5）。
+
+### 优化 — 费用页信息架构重构（#19）：13 区块平铺 → 总览首屏 + 7-Tab 渐进披露；控件令牌化；趋势图高度上限与 Y 轴自适应
+- **Tab 收纳**：总览（FeesOverview——指标卡/趋势/线索列表）保持首屏，其余全部区块按 7 个 Tab 收纳（风险查询〔十场景+查询预设〕/ 明细补录 / 对账与映射 / 费用关联 / 风险规则 / 费用批次 / 导入费用）。**面板保持挂载仅视觉隐藏**（`fees-tabpane--hidden`）——切换零状态丢失（各面板的查询结果与表单输入原样保留），与卸载式 Tab 相比零行为变化；复用设计系统既有 `.tabs/.tab/.tab--active` 令牌。
+- **控件令牌化**：费用域四页面（Fees/FeesOverview/FeesDetails/FeesCrossReconcile）全部 `<select>`（21 个）与文本 `<input>`（33 个）接 `.select`/`.input` 设计令牌——直角灰框的原生控件观感与侧栏现代感割裂的问题终结（checkbox/file 保持原生形态）。
+- **趋势图**：`height:auto` 等比放大（1600px 容器 → 396px 高）改为**固定 240px**（内容 meet 居中——图表回到「小图」角色）；**Y 轴 0 基废除**——`trendGeometry` 改数据驱动域（min/max ± 10% span，单值序列 ±5%，非负金额不下探负轴），实测 2.0-2.14 万（±4% 波动）的刻度从 0-2.15 变为 1.99-2.15，波动从「水平线」变为可读形态；`yLo/yHi` 进 `TrendGeometry` 输出。
+- **浏览器级回归**（agent-browser 1600×900 + duckdb 真机 + 三月数据）：7 Tab 渲染与切换 ✓（activeTab 状态迁移、6 隐藏面板、批次标题 DOM 可达）/ 控件 18/18 select + 12/12 input 令牌化 ✓ / 趋势图 240px 高 + 自适应刻度（1.99/2.04/2.10/2.15 万）✓ / console+errors 零输出 ✓。
+- **测试**：前端 150 全过（几何确定性自对照测试因自适应域仍绿——确定性不变，域值数据驱动）；Go 默认 19 包 + duckdb 全绿。
 
 ## [0.19.1] — 2026-10-26
 

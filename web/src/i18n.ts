@@ -605,6 +605,15 @@ export const FEES_RISKS_RATIO = '环比阈值';
 export const FEES_RISKS_Z = 'z 阈值';
 export const FEES_RISKS_MIN_SITES = '最少样本';
 export const FEES_RISKS_EMPTY = '该场景在选定范围内无风险线索。';
+
+/** #19 费用页信息架构：Tab 收纳（渐进披露——次要配置不再 13 区块平铺） */
+export const FEES_TAB_RISKS = '风险查询';
+export const FEES_TAB_DETAILS = '明细补录';
+export const FEES_TAB_RECONCILE = '对账与映射';
+export const FEES_TAB_LINKS = '费用关联';
+export const FEES_TAB_RULES = '风险规则';
+export const FEES_TAB_BATCHES = '费用批次';
+export const FEES_TAB_IMPORT = '导入费用';
 /** #21 三态空状态：确实 0 条（中性）与「有排除的 0 条」（告警色）必须可区分 */
 export const FEES_RISKS_EMPTY_EXCLUDED = (n: number) =>
   `本场景 0 条线索，但另有 ${n} 个对象被排除出统计——0 条可能意味着「无法分析」而非「无异常」，请核对重复导入/多批次。`;

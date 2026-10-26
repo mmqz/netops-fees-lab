@@ -4461,9 +4461,12 @@ body.lab-split-dragging {
   font-weight: 600;
 }
 
+/* #19：高度有上限——width:100% + height:auto 会在宽容器上把 640x220 的
+ * viewBox 等比放大到 550px+（首屏被一张低信息量的图占满的根因之一）。
+ * 固定 240px 高、内容 meet 居中：任何容器宽度下图表都是「小图」角色。 */
 .ov-trend__svg {
   width: 100%;
-  height: auto;
+  height: 240px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-elevated, #fff);
@@ -4538,4 +4541,15 @@ body.lab-split-dragging {
 
 .det-reject-inline input {
   width: 180px;
+}
+
+/* #19：Tab 收纳的隐藏面板——保持挂载（各面板内部状态与请求不因切换丢失），
+ * 仅视觉隐藏；与卸载式 Tab 相比是零行为变化的渐进披露。 */
+.fees-tabpane--hidden {
+  display: none;
+}
+
+/* #19：费用页 Tab 条与面板的间距 */
+.fees-tabs {
+  margin-bottom: 16px;
 }

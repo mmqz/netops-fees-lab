@@ -79,6 +79,10 @@ export interface TrendGeometry {
   xTicks: Array<{ x: number; label: number }>;
   spikeMonths: number[];
   maxCents: number;
+  /** #19：Y 轴自适应域（非零基）——压扁 ±8% 波动的 0 基轴已废除；
+   * yLo/yMax 如实暴露给 UI（轴刻度已带单位，无需额外提示）。 */
+  yLo: number;
+  yHi: number;
 }
 
 export const TREND_VIEW_W = 640;
@@ -99,17 +103,35 @@ export function centsToWan(cents: number): string {
 export function trendGeometry(series: TrendSeries[]): TrendGeometry {
   const all = series.flatMap((s) => s.slots.filter((m) => m.point !== null).map((m) => m.point!.totalCents));
   const maxCents = all.length === 0 ? 0 : Math.max(...all);
+  // #19：Y 轴自适应域——8 个月 ±8% 的波动在 0 基轴下是一条水平线（issue #19
+  // 实测），数据驱动域让波动可见；刻度标签如实标注量级，绝不伪装。
+  const minCents = all.length === 0 ? 0 : Math.min(...all);
+  let yLo = minCents;
+  let yHi = maxCents;
+  if (yHi === yLo) {
+    // 单值序列：以值本身 5% 作上下界（值 0 → ±1 分），图形仍是一条平线
+    const pad = Math.max(Math.abs(yHi) * 0.05, 1);
+    yLo -= pad;
+    yHi += pad;
+  } else {
+    const pad = (yHi - yLo) * 0.1;
+    yLo -= pad;
+    yHi += pad;
+  }
+  if (minCents >= 0 && yLo < 0) yLo = 0; // 非负金额不下探负轴（冲销负值除外）
   const innerW = TREND_VIEW_W - PAD_L - PAD_R;
   const innerH = TREND_VIEW_H - PAD_T - PAD_B;
   const xOf = (month: number): number => PAD_L + ((month - 1) / 11) * innerW;
-  const yOf = (cents: number): number => (maxCents <= 0 ? 0 : TREND_VIEW_H - PAD_B - (cents / maxCents) * innerH);
+  const yOf =
+    (cents: number): number =>
+      yHi === yLo ? TREND_VIEW_H - PAD_B : TREND_VIEW_H - PAD_B - ((cents - yLo) / (yHi - yLo)) * innerH;
 
   const yTicks: Array<{ x: number; y: number; label: string }> = [];
   for (let i = 0; i < Y_TICKS; i += 1) {
-    const cents = (maxCents / (Y_TICKS - 1)) * i;
+    const cents = yLo + ((yHi - yLo) / (Y_TICKS - 1)) * i;
     yTicks.push({
       x: PAD_L - 8,
-      y: yOf(i === 0 ? 0 : cents) + 4,
+      y: yOf(cents) + 4,
       label: centsToWan(Math.round(cents)),
     });
   }
@@ -147,7 +169,7 @@ export function trendGeometry(series: TrendSeries[]): TrendGeometry {
   const xTicks: Array<{ x: number; label: number }> = [];
   for (let m = 1; m <= 12; m += 1) xTicks.push({ x: xOf(m), label: m });
 
-  return { paths, yTicks, xTicks, spikeMonths, maxCents };
+  return { paths, yTicks, xTicks, spikeMonths, maxCents, yLo, yHi };
 }
 
 /** 跨场景合并后的线索视图（分析路径第 3 步「看详情」的行模型）。 */

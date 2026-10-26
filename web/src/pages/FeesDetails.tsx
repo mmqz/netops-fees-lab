@@ -251,15 +251,15 @@ export function FeesDetails() {
         <div className="filters">
           <label className="field">
             <span>{FEES_DET_RECON_LINK}</span>
-            <input value={recLink} onChange={(e) => { setRecLink(e.target.value); }} />
+            <input className="input" value={recLink} onChange={(e) => { setRecLink(e.target.value); }} />
           </label>
           <label className="field field--short">
             <span>{FEES_DET_RECON_PERIOD}</span>
-            <input value={recPeriod} onChange={(e) => { setRecPeriod(e.target.value); }} inputMode="numeric" />
+            <input className="input" value={recPeriod} onChange={(e) => { setRecPeriod(e.target.value); }} inputMode="numeric" />
           </label>
           <label className="field">
             <span>费用类型</span>
-            <select value={recType} onChange={(e) => { setRecType(e.target.value); }}>
+            <select className="select" value={recType} onChange={(e) => { setRecType(e.target.value); }}>
               {DET_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
@@ -306,15 +306,15 @@ export function FeesDetails() {
           <div className="filters">
             <label className="field">
               <span>{FEES_DET_COL_LINK}</span>
-              <input value={inLink} onChange={(e) => { setInLink(e.target.value); }} />
+              <input className="input" value={inLink} onChange={(e) => { setInLink(e.target.value); }} />
             </label>
             <label className="field field--short">
               <span>{FEES_DET_RECON_PERIOD}</span>
-              <input value={inPeriod} onChange={(e) => { setInPeriod(e.target.value); }} inputMode="numeric" />
+              <input className="input" value={inPeriod} onChange={(e) => { setInPeriod(e.target.value); }} inputMode="numeric" />
             </label>
             <label className="field">
               <span>费用类型</span>
-              <select value={inType} onChange={(e) => { setInType(e.target.value); }}>
+              <select className="select" value={inType} onChange={(e) => { setInType(e.target.value); }}>
                 {DET_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
@@ -322,7 +322,7 @@ export function FeesDetails() {
             </label>
             <label className="field">
               <span>{FEES_DET_ADD_CATEGORY}</span>
-              <input
+              <input className="input"
                 value={inCategory}
                 onChange={(e) => { setInCategory(e.target.value); }}
                 list="fees-det-category-suggestions"
@@ -335,19 +335,19 @@ export function FeesDetails() {
             </label>
             <label className="field field--short">
               <span>{FEES_DET_ADD_AMOUNT}</span>
-              <input value={inAmount} onChange={(e) => { setInAmount(e.target.value); }} inputMode="decimal" />
+              <input className="input" value={inAmount} onChange={(e) => { setInAmount(e.target.value); }} inputMode="decimal" />
             </label>
             <label className="field">
               <span>{FEES_DET_ADD_ITEM}</span>
-              <input value={inItem} onChange={(e) => { setInItem(e.target.value); }} />
+              <input className="input" value={inItem} onChange={(e) => { setInItem(e.target.value); }} />
             </label>
             <label className="field">
               <span>{FEES_DET_ADD_REASON}</span>
-              <input value={inReason} onChange={(e) => { setInReason(e.target.value); }} />
+              <input className="input" value={inReason} onChange={(e) => { setInReason(e.target.value); }} />
             </label>
             <label className="field">
               <span>{FEES_DET_ADD_SOURCE}</span>
-              <input value={inSource} onChange={(e) => { setInSource(e.target.value); }} />
+              <input className="input" value={inSource} onChange={(e) => { setInSource(e.target.value); }} />
             </label>
             <button className="btn" disabled={adding} onClick={() => { void doAdd(); }}>
               {FEES_DET_ADD_SUBMIT}
@@ -358,7 +358,7 @@ export function FeesDetails() {
         <div className="filters">
           <label className="field">
             <span>{FEES_DET_LIST_LINK}</span>
-            <input
+            <input className="input"
               value={listLink}
               onChange={(e) => { setListLink(e.target.value); }}
               placeholder="HLJ-0001 / W8522883"
@@ -366,7 +366,7 @@ export function FeesDetails() {
           </label>
           <label className="field">
             <span>{FEES_DET_COL_STATUS}</span>
-            <select value={listStatus} onChange={(e) => { setListStatus(e.target.value); }}>
+            <select className="select" value={listStatus} onChange={(e) => { setListStatus(e.target.value); }}>
               <option value="">全部</option>
               <option value="pending">{FEES_DET_STATUS_PENDING}</option>
               <option value="confirmed">{FEES_DET_STATUS_CONFIRMED}</option>
@@ -422,7 +422,7 @@ export function FeesDetails() {
                           </button>{' '}
                           {rejectTarget !== null && rejectTarget.id === d.id ? (
                             <span className="det-reject-inline">
-                              <input
+                              <input className="input"
                                 value={rejectReason}
                                 onChange={(e) => { setRejectReason(e.target.value); }}
                                 placeholder={FEES_DET_REJECT_PH}

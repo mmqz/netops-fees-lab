@@ -392,7 +392,7 @@ export function FeesOverview() {
         <div className="filters">
           <label className="field field--short">
             <span>{FEES_OV_YEAR}</span>
-            <input
+            <input className="input"
               value={ovYear}
               onChange={(e) => {
                 setOvYear(e.target.value);
@@ -402,7 +402,7 @@ export function FeesOverview() {
           </label>
           <label className="field">
             <span>{FEES_OV_MONTH}</span>
-            <select
+            <select className="select"
               value={ovMonthSel}
               onChange={(e) => {
                 setOvMonthSel(e.target.value);
@@ -418,7 +418,7 @@ export function FeesOverview() {
           </label>
           <label className="field">
             <span>费用类型</span>
-            <select
+            <select className="select"
               value={ovType}
               onChange={(e) => {
                 setOvType(e.target.value);
@@ -596,7 +596,7 @@ export function FeesOverview() {
               <div className="ov-clues__actions">
                 <label className="field field--inline">
                   <span>{FEES_OV_CLUES_SORT}</span>
-                  <select
+                  <select className="select"
                     value={sortKey}
                     onChange={(e) => {
                       setSortKey(e.target.value === 'metric' ? 'metric' : 'amount');
