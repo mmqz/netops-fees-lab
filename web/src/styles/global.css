@@ -4527,3 +4527,15 @@ body.lab-split-dragging {
   gap: 10px;
   align-items: flex-end;
 }
+
+/* ---- 明细驳回的内联原因表单（#16：驳回原因必填的行内两步流） ---- */
+.det-reject-inline {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.det-reject-inline input {
+  width: 180px;
+}

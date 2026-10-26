@@ -174,8 +174,8 @@ VALUES ('chg_v11_bad','res_v11_dev','bat_v11','mgmt_ip','a','b','bogus','s',3,?)
 	// metrics, W21 type expansion, W22 run state), v31→v32 (#75 fee paths,
 	// #80 checkpoint paths): the reopened registry applies every registered
 	// migration, advancing MAX(version) with the registry head.
-	if maxV != 37 {
-		t.Errorf("max schema version after upgrade = %d, want 37", maxV)
+	if maxV != 38 {
+		t.Errorf("max schema version after upgrade = %d, want 38", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

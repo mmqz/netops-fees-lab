@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "verify-sources",
+	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "details", "verify-sources",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -109,6 +110,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesRules(ctx, svc, subArgs, stdout, stderr)
 	case "clue-decisions":
 		return cmdFeesClueDecisions(ctx, svc, subArgs, stdout, stderr)
+	case "details":
+		return cmdFeesDetails(ctx, svc, subArgs, stdout, stderr)
 	case "verify-sources":
 		return cmdFeesVerifySources(ctx, svc, subArgs, stdout, stderr)
 	default:
@@ -974,4 +977,168 @@ type feeRuleAuditItem struct {
 	Actor   string `json:"actor"`
 	Changes string `json:"changes,omitempty"`
 	At      string `json:"at"`
+}
+
+// ---- 明细层 CLI（#16 完成线 6：fees details add/list/status/reconcile） ----
+
+// cmdFeesDetails dispatches `fees details <add|list|status|reconcile>`.
+func cmdFeesDetails(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return &usageError{msg: "fees details 需要 add、list、status 或 reconcile 子命令"}
+	}
+	sub, subArgs := args[0], args[1:]
+	switch sub {
+	case "add":
+		return cmdFeesDetailsAdd(ctx, svc, subArgs, stdout, stderr)
+	case "list":
+		return cmdFeesDetailsList(ctx, svc, subArgs, stdout, stderr)
+	case "status":
+		return cmdFeesDetailsStatus(ctx, svc, subArgs, stdout, stderr)
+	case "reconcile":
+		return cmdFeesDetailsReconcile(ctx, svc, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("fees details 子命令必须是 add、list、status 或 reconcile，收到 %q", sub)}
+	}
+}
+
+// feeDetailWire is the CLI detail shape (mirrors the HTTP camelCase
+// contract — the two channels answer the same envelope).
+type feeDetailWire struct {
+	ID           string `json:"id"`
+	LinkKey      string `json:"linkKey"`
+	Period       string `json:"period"`
+	FeeType      string `json:"feeType"`
+	Category     string `json:"category"`
+	AmountCents  int64  `json:"amountCents"`
+	ItemName     string `json:"itemName,omitempty"`
+	Status       string `json:"status"`
+	CreatedBy    string `json:"createdBy"`
+	CreatedAt    string `json:"createdAt"`
+	VerifiedBy   string `json:"verifiedBy,omitempty"`
+	RejectReason string `json:"rejectReason,omitempty"`
+}
+
+func feeDetailWireOf(d domain.FeeDetail) feeDetailWire {
+	w := feeDetailWire{
+		ID: d.ID, LinkKey: d.LinkKey, Period: d.Period, FeeType: string(d.FeeType),
+		Category: d.Category, AmountCents: d.AmountCents, ItemName: d.ItemName,
+		Status: d.Status, CreatedBy: d.CreatedBy, CreatedAt: d.CreatedAt.Format(time.RFC3339),
+		VerifiedBy: d.VerifiedBy, RejectReason: d.RejectReason,
+	}
+	return w
+}
+
+// cmdFeesDetailsAdd implements `fees details add --link-key --period
+// --type --category --amount-yuan [--item-name ...] [--actor]` — the
+// three #16 mandates are flags, the optional fields are flags too.
+func cmdFeesDetailsAdd(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees details add")
+	linkKey := fs.String("link-key", "", "关联键：站址编码或工号（这笔钱属于谁——#16 三强制之一）")
+	period := fs.String("period", "", "账期 YYYYMM（哪个月——#16 三强制之一）")
+	feeType := fs.String("type", "", "费用类型 "+strings.Join(fees.FeeTypes(), "/"))
+	category := fs.String("category", "", "分类（建议集或本地自建，非空即可）")
+	amountYuan := fs.String("amount-yuan", "", "金额（元，两位小数；负数=冲销——#16 三强制之一）")
+	itemName := fs.String("item-name", "", "原始项目名（可选，照抄原始表）")
+	reason := fs.String("reason", "", "事由（可选）")
+	sourceFile := fs.String("source-file", "", "来源文件名（可选，追溯）")
+	actor := fs.String("actor", "", "录入人（必填——人工数据必须有来源痕迹）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees details add 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if *amountYuan == "" {
+		return &usageError{msg: "fees details add 需要 --amount-yuan（金额是三强制之一）", usage: usage.String()}
+	}
+	yuan, err := strconv.ParseFloat(*amountYuan, 64)
+	if err != nil {
+		return &usageError{msg: "--amount-yuan 必须是数字：" + err.Error(), usage: usage.String()}
+	}
+	detail, err := svc.AddDetail(ctx, fees.DetailInput{
+		LinkKey: *linkKey, Period: *period, FeeType: *feeType, Category: *category,
+		AmountYuan: &yuan, ItemName: *itemName, Reason: *reason, SourceFile: *sourceFile,
+	}, *actor)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, feeDetailWireOf(detail))
+}
+
+// cmdFeesDetailsList implements `fees details list [--link-key --period
+// --type --status --category]`.
+func cmdFeesDetailsList(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees details list")
+	linkKey := fs.String("link-key", "", "按关联键过滤（站址编码或工号）")
+	period := fs.String("period", "", "按账期过滤 YYYYMM")
+	feeType := fs.String("type", "", "按费用类型过滤 "+strings.Join(fees.FeeTypes(), "/"))
+	status := fs.String("status", "", "按状态过滤 pending/confirmed/rejected/unmatched")
+	category := fs.String("category", "", "按分类过滤")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees details list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	details, err := svc.ListDetails(ctx, domain.FeeDetailFilter{
+		LinkKey: *linkKey, Period: *period, FeeType: domain.FeeType(*feeType),
+		Status: *status, Category: *category,
+	})
+	if err != nil {
+		return err
+	}
+	out := make([]feeDetailWire, 0, len(details))
+	for _, d := range details {
+		out = append(out, feeDetailWireOf(d))
+	}
+	return writeJSON(stdout, struct {
+		Items []feeDetailWire `json:"items"`
+		Total int             `json:"total"`
+	}{Items: out, Total: len(out)})
+}
+
+// cmdFeesDetailsStatus implements `fees details status --id --to
+// confirmed|rejected|unmatched [--reason] [--actor]` — the human
+// verification channel with provenance.
+func cmdFeesDetailsStatus(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees details status")
+	id := fs.String("id", "", "明细 id（fd_…）")
+	to := fs.String("to", "", "目标状态 confirmed/rejected/unmatched")
+	reason := fs.String("reason", "", "驳回原因（rejected 时必填）")
+	actor := fs.String("actor", "", "核实人（必填——核实留痕）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees details status 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	if err := svc.SetDetailStatus(ctx, *id, *to, *actor, *reason); err != nil {
+		return err
+	}
+	detail, err := svc.DetailByID(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, feeDetailWireOf(detail))
+}
+
+// cmdFeesDetailsReconcile implements `fees details reconcile --link-key
+// --period --type` — the 差额提示 (hint, never a block); the default
+// build answers the detail side with the honest engine-absent note.
+func cmdFeesDetailsReconcile(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees details reconcile")
+	linkKey := fs.String("link-key", "", "关联键（站址编码或工号）")
+	period := fs.String("period", "", "账期 YYYYMM")
+	feeType := fs.String("type", "", "费用类型 "+strings.Join(fees.FeeTypes(), "/"))
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "fees details reconcile 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	rec, err := svc.ReconcileDetails(ctx, fees.Query(ctx), *linkKey, *period, *feeType)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, rec)
 }

@@ -47,6 +47,7 @@ import {
   uploadFeeFile,
   uploadFeeSheetsFile,
 } from '../api/client';
+import { FeesDetails } from './FeesDetails';
 import { FeesOverview } from './FeesOverview';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -758,6 +759,9 @@ export function FeesPage() {
 
       {/* #3 二期：费用总览与分析路径（总览卡片 / 月度趋势 / 一键分析 / 跨场景线索列表） */}
       <FeesOverview />
+
+      {/* #16 完成线 6：明细补录佐证层（差额对账 + 录入 + 台账裁定——永不参与系统表金额） */}
+      <FeesDetails />
 
       <section className="panel">
         <h2 className="panel__title">{FEES_RISKS_TITLE}</h2>

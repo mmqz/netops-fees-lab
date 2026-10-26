@@ -853,6 +853,22 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 `GET /api/fees/risks/{scenario}` 的第 9 个成员（参数同其它场景：feeType/year[/month]/limit）。六条**确定性**规则（非统计推断，阈值固定无参数）：`reading-gap`（读数差与填报用量之差 > 0.5 度——**一表多户已排除**：仅当无分摊列或某一方分摊为全量时才判读数差，#8 §0 撤回教训）/ `ratio-sum`（四方分摊比例之和与 1 偏差 > 0.005）/ `chain-break`（同电表跨账期 上月止数≠本月起数 且未标记换表——**已标记换表的合法断开不算线索**）/ `zero-quantity-billing`（用量=0 且金额>0——疑似漏抄后顺延计费）/ `purchase-period`（购电截止日−购电起始日 > 35 天——转供电「长期不报+集中补报」候选，#11：补报可能是合理业务，线索非错误认定）/ `receivable-unreceived`（应收电信−实收电信 > 0——资金回收风险，实收=0 为完全未收形态，#11）。每条线索带行级证据锚点与口径 note（不构成认定结论）；`excluded` = 一表多户未判读数差行数 + 已标记换表的断链行数；缺相应列的文件对应规则自动跳过；#11 两规则依赖购电起止日/应收实收列，旧批次（无该列的一代文件）同样自动跳过（列探测守卫）。
 
+## GET /api/fees/details?linkKey=&period=&feeType=&status=&category= — 明细层台账（#16 完成线 6）
+
+人工补录佐证层的台账（最新在前，全过滤项可选）。明细**永不参与系统表金额计算**——它是证据不是权威。读开放。
+
+## POST /api/fees/details — 明细补录（#16：三强制=关联键+金额+录入留痕）
+
+申报级令牌即可（AI/运营通道）。body：`{linkKey, period:"YYYYMM", feeType, category, amountYuan|amountCents, ...可选}`——除三强制外**全部可选不阻断**（itemName/reason/sourceFile/sourceRow/remark 等）；**分类为建议集+本地自建**（#16：「提供分类建议，但允许本地自建分类」——后端只强制非空）；金额整数分契约（#65 P1-a，amountYuan 二选一、两形态并存必须一致、负数=冲销）；**同指纹重复拒绝 422 detail_refused**（同键同类别同金额同项目名——铁律 5，拒绝文案携带既有 id）；created_by 由令牌层级诚实承担（admin/declarer/http）。422 携带三强制违规文案。
+
+## POST /api/fees/details/{id}/status — 明细核实裁定（管理级人类通道）
+
+`{status:"confirmed|rejected|unmatched", rejectReason}`——rejected **必填原因**；核实留痕（verified_by/verified_at/reject_reason）。401/403/404/422 同全局纪律。
+
+## GET /api/fees/details/reconcile?linkKey=&period=&feeType= — 差额提示（只提示不阻断）
+
+`{detailSumCents, rows, engineCentsAvailable, systemCents, deltaCents, note}`——明细侧（SQLite）恒可答；系统表侧由 DuckDB 引擎回答该键该账期的分析层金额；**差额只提示不阻断**（可能明细待补，也可能系统表待解释——明细永不覆盖系统表）。默认构建：engineCentsAvailable=false + systemCents/deltaCents 为 null + 诚实 note（**不造零不 501**——半答也是答）。键在分析层无行：systemCents=null +「明细有、系统无」警示 note。
+
 ## POST /api/fees/period-probe — 账期内容探测（#15）
 
 **只读探测，不落库**（无快照、无批次）：multipart `file`（.csv/.xlsx，同导入通道的格式与大小约束），返回该文件首 sheet 的**表型分类 + 三档账期识别**——导入前确认面板的数据面（「先选账期 → 内容识别 → 一致性校验」三档流程的第一步）。

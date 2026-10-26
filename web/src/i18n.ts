@@ -772,6 +772,45 @@ export const FEES_OV_NOTE = '教义：线索是待核实差异而非认定结论
 export const FEES_OV_STATE_PENDING = '待核实';
 export const FEES_OV_CLUES_EXPORT_OK = (type: string, month: string) =>
   `线索清单已导出（${type} · ${month}）——CSV 携带口径列，账单存在 ≠ 认定结论。`;
+
+// ---- 明细层（#16 完成线 6：人工补录佐证——永不参与系统表金额）----
+export const FEES_DET_TITLE = '费用明细补录（佐证层）';
+export const FEES_DET_DESC =
+  '明细层解释系统表金额的去向：人工补录、仅作佐证、永不参与系统表金额计算——差额只提示不阻断。三强制：关联键 + 金额 + 录入留痕；其余全部可选。';
+export const FEES_DET_RECON_TITLE = '差额对账（只提示，不阻断）';
+export const FEES_DET_RECON_RUN = '对账';
+export const FEES_DET_RECON_LINK = '关联键（站址编码或工号）';
+export const FEES_DET_RECON_PERIOD = '账期 YYYYMM';
+export const FEES_DET_RECON_DETAIL_SUM = '明细合计';
+export const FEES_DET_RECON_SYSTEM = '系统表金额';
+export const FEES_DET_RECON_DELTA = '差额';
+export const FEES_DET_RECON_ROWS = (n: number) => `明细 ${n} 条`;
+export const FEES_DET_ADD_TITLE = '补录一条明细';
+export const FEES_DET_ADD_CATEGORY = '分类（建议集或本地自建）';
+export const FEES_DET_ADD_AMOUNT = '金额（元，负数=冲销）';
+export const FEES_DET_ADD_ITEM = '原始项目名（可选）';
+export const FEES_DET_ADD_REASON = '事由（可选）';
+export const FEES_DET_ADD_SOURCE = '来源文件（可选）';
+export const FEES_DET_ADD_SUBMIT = '录入';
+export const FEES_DET_ADD_OK = (id: string) => `明细已录入（${id}）——待核实状态，差额提示自动更新。`;
+export const FEES_DET_ADD_REQUIRED = '三强制缺一不可：关联键 / 账期 / 费用类型 / 分类 / 金额 都必须填。';
+export const FEES_DET_COL_LINK = '关联键';
+export const FEES_DET_COL_PERIOD = '账期';
+export const FEES_DET_COL_CATEGORY = '分类';
+export const FEES_DET_COL_AMOUNT = '金额';
+export const FEES_DET_COL_STATUS = '状态';
+export const FEES_DET_STATUS_PENDING = '待核实';
+export const FEES_DET_STATUS_CONFIRMED = '已核实';
+export const FEES_DET_STATUS_REJECTED = '已驳回';
+export const FEES_DET_STATUS_UNMATCHED = '无系统对应';
+export const FEES_DET_STATUS_BY = (by: string, at: string) => `${by} · ${at}`;
+export const FEES_DET_CONFIRM = '核实';
+export const FEES_DET_REJECT = '驳回';
+export const FEES_DET_REJECT_REASON = '驳回原因（必填）';
+export const FEES_DET_REJECT_PH = '如：重复填报 / 金额有误';
+export const FEES_DET_EMPTY = '暂无明细——系统表金额中无佐证的部分就在这里补。';
+export const FEES_DET_LIST_LINK = '按关联键过滤';
+export const FEES_DET_403_HINT = '裁定是管理级通道——请使用管理令牌。';
 export const API_REF_HINT =
   '本页目录由 /api/openapi.json 实时渲染（后端路由表的投影，与实现零漂移）。AI 集成方直接读取该 JSON 端点即可发现全部接口。';
 export const API_REF_ENDPOINTS = '个端点';

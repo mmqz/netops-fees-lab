@@ -35,6 +35,10 @@ import type {
   ResourceType,
   ClueDecisionItem,
   FeeDuplicatesResult,
+  FeeDetailInput,
+  FeeDetailItem,
+  FeeDetailsList,
+  FeeDetailReconcile,
   FeeMonthlyResult,
   FeeTotalsResult,
   FeePeriodProbeResult,
@@ -692,6 +696,52 @@ export function fetchFeeMonthly(params: {
 }): Promise<FeeMonthlyResult> {
   return requestJson<FeeMonthlyResult>(
     `/fees/query/monthly${buildQuery(params as Record<string, string | number | undefined>)}`,
+  );
+}
+
+/** GET /api/fees/details —— 明细台账（#16：过滤 linkKey/period/feeType/status/category） */
+export function fetchFeeDetails(params: {
+  linkKey?: string;
+  period?: string;
+  feeType?: string;
+  status?: string;
+  category?: string;
+}): Promise<FeeDetailsList> {
+  return requestJson<FeeDetailsList>(
+    `/fees/details${buildQuery(params as Record<string, string | undefined>)}`,
+  );
+}
+
+/** POST /api/fees/details —— 明细补录（申报级；三强制外全部可选） */
+export function addFeeDetail(input: FeeDetailInput): Promise<FeeDetailItem> {
+  return requestJson<FeeDetailItem>('/fees/details', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST /api/fees/details/{id}/status —— 明细裁定（管理级：confirmed/rejected/unmatched） */
+export function setFeeDetailStatus(
+  id: string,
+  status: string,
+  rejectReason?: string,
+): Promise<FeeDetailItem> {
+  return requestJson<FeeDetailItem>(`/fees/details/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, rejectReason: rejectReason ?? '' }),
+  });
+}
+
+/** GET /api/fees/details/reconcile —— 差额提示（明细侧 vs 系统表侧） */
+export function reconcileFeeDetails(params: {
+  linkKey: string;
+  period: string;
+  feeType: string;
+}): Promise<FeeDetailReconcile> {
+  return requestJson<FeeDetailReconcile>(
+    `/fees/details/reconcile${buildQuery(params as Record<string, string | undefined>)}`,
   );
 }
 

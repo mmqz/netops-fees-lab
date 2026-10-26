@@ -90,10 +90,15 @@ type DB struct {
 	// dismissed (suppressed from the default risk output, counted in
 	// the envelope). Human-only writes — the MCP face gains no tool.
 	RiskClueDecisions *RiskClueDecisionRepo
+
 	// FeeRiskRules stores the L1 configurable risk rules of issue #2
 	// (phase 1, migration v37) — the six-tuple rows an AI can create and
 	// a human enables; every mutation lands its audit row.
 	FeeRiskRules *FeeRiskRuleRepo
+
+	// FeeDetails stores the manual-entry evidence tier of #16's completion
+	// line (migration v38) — never touches system-table amounts.
+	FeeDetails *FeeDetailRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -212,6 +217,7 @@ func wire(db *DB, q DBTX) {
 	db.FeeBatches = &FeeBatchRepo{q: q}
 	db.FeeSiteLinks = &FeeSiteLinkRepo{q: q}
 	db.RiskClueDecisions = &RiskClueDecisionRepo{q: q}
+	db.FeeDetails = &FeeDetailRepo{q: q}
 	db.FeeRiskRules = &FeeRiskRuleRepo{q: q}
 }
 
@@ -258,6 +264,10 @@ type Tx struct {
 	// (phase 1, migration v37) — the six-tuple rows an AI can create and
 	// a human enables; every mutation lands its audit row.
 	FeeRiskRules *FeeRiskRuleRepo
+
+	// FeeDetails stores the manual-entry evidence tier of #16's completion
+	// line (migration v38) — never touches system-table amounts.
+	FeeDetails *FeeDetailRepo
 
 	// Phase 2 simulation workbench aggregates (DDL v5).
 	Workspaces     *WorkspaceRepo
@@ -398,6 +408,7 @@ func (d *DB) Do(ctx context.Context, fn func(tx *Tx) error) (err error) {
 		FeeSiteLinks:         &FeeSiteLinkRepo{q: sqlTx},
 		RiskClueDecisions:    &RiskClueDecisionRepo{q: sqlTx},
 		FeeRiskRules:         &FeeRiskRuleRepo{q: sqlTx},
+		FeeDetails:           &FeeDetailRepo{q: sqlTx},
 	}
 	defer func() {
 		if p := recover(); p != nil {

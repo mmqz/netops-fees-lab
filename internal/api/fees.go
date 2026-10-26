@@ -1269,3 +1269,168 @@ func (s *Server) handleFeesRuleAudit(w http.ResponseWriter, r *http.Request) {
 		"ruleId": r.PathValue("id"), "items": out, "total": len(out),
 	})
 }
+
+// ---- 明细层（#16 完成线第 6 条：人工补录佐证层——永不参与系统表金额） ----
+
+// feeDetailItem is the wire shape of one detail row (the domain struct
+// carries no JSON tags — the API owns the camelCase contract).
+type feeDetailItem struct {
+	ID             string   `json:"id"`
+	LinkKey        string   `json:"linkKey"`
+	Period         string   `json:"period"`
+	FeeType        string   `json:"feeType"`
+	Category       string   `json:"category"`
+	AmountCents    int64    `json:"amountCents"`
+	OccurredOn     string   `json:"occurredOn,omitempty"`
+	ItemName       string   `json:"itemName,omitempty"`
+	Quantity       *float64 `json:"quantity,omitempty"`
+	QuantityUnit   string   `json:"quantityUnit,omitempty"`
+	UnitPriceCents *int64   `json:"unitPriceCents,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
+	Location       string   `json:"location,omitempty"`
+	WorkOrderNo    string   `json:"workOrderNo,omitempty"`
+	InvoiceNo      string   `json:"invoiceNo,omitempty"`
+	Counterparty   string   `json:"counterparty,omitempty"`
+	SourceFile     string   `json:"sourceFile,omitempty"`
+	SourceRow      int      `json:"sourceRow,omitempty"`
+	Remark         string   `json:"remark,omitempty"`
+	Status         string   `json:"status"`
+	CreatedBy      string   `json:"createdBy"`
+	CreatedAt      string   `json:"createdAt"`
+	VerifiedBy     string   `json:"verifiedBy,omitempty"`
+	VerifiedAt     string   `json:"verifiedAt,omitempty"`
+	RejectReason   string   `json:"rejectReason,omitempty"`
+}
+
+func feeDetailItemOf(d domain.FeeDetail) feeDetailItem {
+	it := feeDetailItem{
+		ID: d.ID, LinkKey: d.LinkKey, Period: d.Period, FeeType: string(d.FeeType),
+		Category: d.Category, AmountCents: d.AmountCents, OccurredOn: d.OccurredOn,
+		ItemName: d.ItemName, Quantity: d.Quantity, QuantityUnit: d.QuantityUnit,
+		UnitPriceCents: d.UnitPriceCents, Reason: d.Reason, Location: d.Location,
+		WorkOrderNo: d.WorkOrderNo, InvoiceNo: d.InvoiceNo, Counterparty: d.Counterparty,
+		SourceFile: d.SourceFile, SourceRow: d.SourceRow, Remark: d.Remark,
+		Status: d.Status, CreatedBy: d.CreatedBy, CreatedAt: d.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if d.VerifiedAt != nil {
+		it.VerifiedAt = d.VerifiedAt.UTC().Format(time.RFC3339)
+	}
+	it.VerifiedBy = d.VerifiedBy
+	it.RejectReason = d.RejectReason
+	return it
+}
+
+// handleFeesDetailsList implements GET /api/fees/details?linkKey=&period=
+// &feeType=&status=&category= — the entry journal, newest first. Read-open:
+// the evidence tier is as much evidence as the rules list.
+func (s *Server) handleFeesDetailsList(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	filter := domain.FeeDetailFilter{
+		LinkKey:  strings.TrimSpace(q.Get("linkKey")),
+		Period:   strings.TrimSpace(q.Get("period")),
+		FeeType:  domain.FeeType(q.Get("feeType")),
+		Status:   strings.TrimSpace(q.Get("status")),
+		Category: strings.TrimSpace(q.Get("category")),
+	}
+	details, err := s.fees.ListDetails(r.Context(), filter)
+	if err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			respondError(w, http.StatusUnprocessableEntity, "detail_refused", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	out := make([]feeDetailItem, 0, len(details))
+	for _, d := range details {
+		out = append(out, feeDetailItemOf(d))
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
+}
+
+// handleFeesDetailsCreate implements POST /api/fees/details — the
+// AI/operator entry channel (declarer tier suffices; the three #16
+// mandates are the floor, everything else is optional by design).
+// 422 detail_refused carries the honest refusal text.
+func (s *Server) handleFeesDetailsCreate(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	var body fees.DetailInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "请求体必须是合法 JSON："+err.Error())
+		return
+	}
+	detail, err := s.fees.AddDetail(r.Context(), body, s.feeRuleActor(r))
+	if err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			respondError(w, http.StatusUnprocessableEntity, "detail_refused", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusCreated, feeDetailItemOf(detail))
+}
+
+// handleFeesDetailsStatus implements POST /api/fees/details/{id}/status —
+// the human verification channel (审核=管理级, mirroring clue decisions):
+// confirmed / rejected (reason required) / unmatched, provenance recorded.
+func (s *Server) handleFeesDetailsStatus(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	id := r.PathValue("id")
+	var body struct {
+		Status       string `json:"status"`
+		RejectReason string `json:"rejectReason"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "bad_request", "请求体必须是合法 JSON："+err.Error())
+		return
+	}
+	if err := s.fees.SetDetailStatus(r.Context(), id, body.Status, s.feeRuleActor(r), body.RejectReason); err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			respondError(w, http.StatusUnprocessableEntity, "detail_refused", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	detail, err := s.fees.DetailByID(r.Context(), id)
+	if err != nil {
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, feeDetailItemOf(detail))
+}
+
+// handleFeesDetailsReconcile implements GET /api/fees/details/reconcile?
+// linkKey=&period=&feeType= — the 差额提示 (hint, never a block). Default
+// builds answer the detail-side sum with engineCentsAvailable=false and
+// the honest note (no fake zero, no 501 — half an answer is still an
+// answer here).
+func (s *Server) handleFeesDetailsReconcile(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	q := r.URL.Query()
+	rec, err := s.fees.ReconcileDetails(r.Context(), fees.Query(r.Context()),
+		strings.TrimSpace(q.Get("linkKey")), strings.TrimSpace(q.Get("period")), q.Get("feeType"))
+	if err != nil {
+		if errors.Is(err, fees.ErrImportRefused) {
+			respondError(w, http.StatusUnprocessableEntity, "detail_refused", err.Error())
+			return
+		}
+		s.respondErrorFor(w, r, err, "")
+		return
+	}
+	respondJSON(w, http.StatusOK, rec)
+}

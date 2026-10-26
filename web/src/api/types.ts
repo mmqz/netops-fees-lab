@@ -1571,6 +1571,68 @@ export interface FeeDuplicatesResult {
   total: number;
 }
 
+/** 明细层行（#16 完成线 6：人工补录佐证层——永不参与系统表金额） */
+export interface FeeDetailItem {
+  id: string;
+  linkKey: string;
+  period: string;
+  feeType: string;
+  category: string;
+  amountCents: number;
+  occurredOn?: string;
+  itemName?: string;
+  quantity?: number;
+  quantityUnit?: string;
+  unitPriceCents?: number;
+  reason?: string;
+  location?: string;
+  workOrderNo?: string;
+  invoiceNo?: string;
+  counterparty?: string;
+  sourceFile?: string;
+  sourceRow?: number;
+  remark?: string;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  rejectReason?: string;
+}
+
+/** GET /api/fees/details 信封 */
+export interface FeeDetailsList {
+  items: FeeDetailItem[];
+  total: number;
+}
+
+/** 明细补录请求体（三强制：linkKey/period/feeType/category/amount） */
+export interface FeeDetailInput {
+  linkKey: string;
+  period: string;
+  feeType: string;
+  category: string;
+  amountYuan: number;
+  itemName?: string;
+  reason?: string;
+  sourceFile?: string;
+  sourceRow?: number;
+  remark?: string;
+}
+
+/** GET /api/fees/details/reconcile —— 差额提示（只提示不阻断） */
+export interface FeeDetailReconcile {
+  linkKey: string;
+  period: string;
+  feeType: string;
+  rows: number;
+  detailSumCents: number;
+  engineCentsAvailable: boolean;
+  systemCents: number | null;
+  deltaCents: number | null;
+  note: string;
+}
+
 /** #119 风险线索人工裁定（risk_clue_decisions 的 REST 形状） */
 export interface ClueDecisionItem {
   id: string;

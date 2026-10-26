@@ -12,9 +12,9 @@
 | --- | --- | --- |
 | `mcp-tools` | 5 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
 | `mcp-tools-readonly` | 4 | `internal/mcpserver.TestMCPReadOnlyToolCountMatchesFactsFile`：`--read-only` 变体握手 `tools/list` 实数（issue #10；不变式=full 面中 `readOnlyHint=true` 的子集，另由 `TestMCPReadOnlyRegistryIsReadOnlyHintSet` 钉死） |
-| `api-routes` | 48 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
-| `api-fees-routes` | 22 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
-| `repo-migrations` | 37 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
+| `api-routes` | 52 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `api-fees-routes` | 26 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
+| `repo-migrations` | 38 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |
 
 **MCP 工具清单（5 个，费用仓拆分后实况）**：`resource_search`（资源宇宙检索，AI 发现面）+ 费用域 4 个 `fee_risks` / `fee_totals` / `fee_duplicates` / `fee_rules_create`（#2 第一期：首个写侧工具——可配置风险规则创建通道，新规则默认停用，启用/停出留在人类 HTTP/CLI 侧）。查询面无 SQL/Shell/SSH/文件工具；风险线索裁定与关联确认留在人类/HTTP/CLI 侧。全部 5 工具带 MCP 2025-06 标准注解且四项显式无默认值（issue #10）：四个查询工具 `readOnlyHint=true` / `idempotentHint=true`，`fee_rules_create` 如实标 `readOnlyHint=false` / `idempotentHint=false`（重名拒绝）/ `destructiveHint=false`（只建不删）；`mcp --read-only` 变体只注册注解 `readOnlyHint=true` 的工具（当前即 4 个——写工具永不进只读面，不变式由 `TestMCPReadOnlyRegistryIsReadOnlyHintSet` 钉死）。

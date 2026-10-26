@@ -22,6 +22,15 @@
 - **浏览器回归实抓**：零线索场景（idle-billing 于裸夹具）的信封 `clues` 是 Go nil slice → JSON `null` → 前端 `for...of null` 崩掉整个 React 树（整页空白，不止该场景）。#93「数组永不为 null」教义 #7 期只落了 Evidence 字段，信封自身的 Clues 切片漏网——一期风险面板同样埋着此雷（任何零线索查询都会崩，此前只因回归夹件恰好有线索而未爆）。
 - **根治双管**：Go 信封组装处补 `clues == nil → []`（#93 补完——MCP/CLI/HTTP 三消费面同享）；前端 `mergeClues` 边缘容错（`?? []`，注释声明源头已根治、容错为旧服务端形态）。
 
+### 新增 — 费用明细补录佐证层（#16 完成线第 6 条）：三强制 + 建议集分类 + 差额只提示
+- **职责边界（#16 铁律）**：明细层解释系统表金额的去向——人工补录、仅作佐证、**永不参与系统表金额计算**；系统表（权威）金额以此为准，差额只提示不阻断（可能明细待补，也可能系统表待解释）。规格 docs/fee-detail-schema.md 移植入仓并附 v2 修订（#16 对 v1 的三处裁决：关联键通用化 link_key、分类闭集→建议集+本地自建、与系统表差额通用化）。
+- **migration v38**：`fee_detail_lines`——三强制 NOT NULL 落地（link_key 关联键=站址编码或工号 / amount_cents 整数分负数=冲销 / created_by+created_at 录入留痕）；status 闭集 CHECK（pending/confirmed/rejected/unmatched）；可选列全部 nullable（缺即真缺，不造空串零值）；三索引（关联三元组/状态）。
+- **三面分治**：录入=AI/运营通道（HTTP POST /api/fees/details 申报级 + CLI `fees details add`——--actor 必填承载录入留痕）；裁定=人类通道（HTTP /{id}/status 管理级〔Admin 闭集 10〕 + CLI `fees details status`——rejected 必填原因，核实留痕 verified_by/at/reason）；读=开放（list/reconcile）。
+- **治理细节**：金额双门形态（amountYuan 元表单 / amountCents 分程序——并存必须一致，浮点进分走四舍五入绝不截断）；**同指纹重复拒绝 422 detail_refused**（同键同类别同金额同项目名——规格铁律 5，文案携带既有 id 供查验）；category 后端只强制非空（#16「允许本地自建」压过 v1 闭集——12 类建议集在 UI datalist 预填）。
+- **差额对账 reconcile**：Σ明细（SQLite 恒可答）vs 系统表侧（DuckDB 引擎答该键分析层金额）——差额只提示；默认构建 engineCentsAvailable=false + 系统侧 null + 诚实 note（**不造零不 501——半答也是答**）；键在分析层无行 → systemCents=null +「明细有、系统无」警示。
+- 测试：v38 迁移（往返/CHECK 双闭集/指纹探针/核实 trail/过滤）+ 服务级（三强制 11 拒绝形态/双门金额/指纹拒绝与改名逃生/状态流 reason 纪律/reconcile 三态含引擎缺席）+ duckdb 真机（reconcile 真系统侧：裸差-970000/补齐归零/缺席键不造零）+ HTTP 通道矩阵（401/201/422×6/403/200/404/reconcile 诚实缺席）+ CLI e2e 生命周期；事实源 api-routes 48→52、api-fees-routes 22→26、repo-migrations 37→38、Admin 闭集 9→10。
+- 前端：FeesDetails 面板（差额对账卡三格/录入表单 datalist 建议集/台账过滤+内联驳回两步流〔原因必填守卫〕+核实 chip+留痕展示）；浏览器级回归（duckdb 真机）：对账 52,000 系统侧/录入后差额 -52,000→-47,000 自动联动/驳回原因留痕/核实流转/零报错。
+
 ### 修复 — Windows 全量测试恒红（#14）：源文件可写提示的平台假设统一
 - **根因**：`sourceWritableWarnings` 按 `runtime.GOOS == "windows"` 平台短路返回 nil（注释假设「Windows 上 POSIX 写位无意义」），但 `TestE2EVerifySources` 与 `TestLedgerColumnsRoundTripAndCompat` 恒断言 0644 源文件必须携带只读建议——实现与测试的平台假设背离，Windows 上 15 包恒 2 红，恒红测试掩盖真实回归。
 - **修复（issue 方案 A）**：删除平台短路。Go 的 `os.Stat` 在 Windows 上把只读属性（`FILE_ATTRIBUTE_READONLY`）映射进 mode 位——普通文件报 0666、`attrib +R` 后报 0444（issue 作者实机钉死）——单一 `&0o200` 探针**跨平台为真**。原短路反而使 Windows 用户收不到 #6 的源文件可写提示；现在三个平台（linux/WSL2/Windows）行为一致：可写源带建议、只读源静默。
