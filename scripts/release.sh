@@ -20,16 +20,16 @@
 #                   an existing release (e.g. the empty v0.9.0 shell)
 #
 # Assets per release:
-#   netops-lab-<TAG>-source.tar.gz        git archive of the tag
-#   netops-lab-<TAG>-linux-amd64.tar.gz   bin/netopslab (default build)
-#   netops-lab-<TAG>-linux-amd64-duckdb.tar.gz  (with --with-duckdb)
+#   netops-fees-<TAG>-source.tar.gz        git archive of the tag
+#   netops-fees-<TAG>-linux-amd64.tar.gz   bin/netopsfees (default build)
+#   netops-fees-<TAG>-linux-amd64-duckdb.tar.gz  (with --with-duckdb)
 #
 # PAT: read at runtime from ~/.git-credentials (600, never committed).
 # The frontend MUST be built first (make web) — the Go build embeds
 # whatever is in internal/webui/dist.
 set -euo pipefail
 
-REPO="mmqz/netops-lab"
+REPO="mmqz/netops-fees-lab"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
@@ -75,31 +75,31 @@ fi
 # 2. the linux binary: from BIN_REF when backfilling, else from HEAD.
 BUILD_REF="${BIN_REF:-HEAD}"
 echo "building default binary from $BUILD_REF …"
-git archive --format=tar "--prefix=netops-lab-build/" "$BUILD_REF" | (mkdir -p "$REL/build" && tar -x -C "$REL/build")
+git archive --format=tar "--prefix=netops-fees-build/" "$BUILD_REF" | (mkdir -p "$REL/build" && tar -x -C "$REL/build")
 # The build needs the webui dist of THAT tree — dist is gitignored, so build
 # it from the extracted tree with the current toolchain (dist content is a
 # deterministic function of web/ + node_modules, not of the host dist).
 (
-  cd "$REL/build/netops-lab-build"
+  cd "$REL/build/netops-fees-build"
   cp -r "$REPO_ROOT/web/node_modules" web/node_modules 2>/dev/null || (cd web && npm ci --no-audit --no-fund --silent)
   (cd web && npx tsc -b && npm run build >/dev/null 2>&1)
-  go build -o "$REL/netopslab" ./cmd/netopslab
+  go build -o "$REL/netopsfees" ./cmd/netopsfees
   if [ "$WITH_DUCKDB" = yes ]; then
-    CGO_ENABLED=1 go build -tags duckdb -o "$REL/netopslab-duckdb" ./cmd/netopslab
+    CGO_ENABLED=1 go build -tags duckdb -o "$REL/netopsfees-duckdb" ./cmd/netopsfees
   fi
 )
 
 # 3. source tarball from the tagged tree.
-git archive --format=tar.gz --prefix="netops-lab-$TAG/" -o "$REL/netops-lab-$TAG-source.tar.gz" "$TAG"
+git archive --format=tar.gz --prefix="netops-fees-$TAG/" -o "$REL/netops-fees-$TAG-source.tar.gz" "$TAG"
 
 # 4. binary tarballs.
-BIN="$REL/netops-lab-$TAG-linux-amd64.tar.gz"
-tar -czf "$BIN" -C "$REL" --transform "s|^netopslab|netopslab|" netopslab
-ASSETS=("netops-lab-$TAG-source.tar.gz" "netops-lab-$TAG-linux-amd64.tar.gz")
+BIN="$REL/netops-fees-$TAG-linux-amd64.tar.gz"
+tar -czf "$BIN" -C "$REL" --transform "s|^netopsfees|netopsfees|" netopsfees
+ASSETS=("netops-fees-$TAG-source.tar.gz" "netops-fees-$TAG-linux-amd64.tar.gz")
 if [ "$WITH_DUCKDB" = yes ]; then
-  DDB="$REL/netops-lab-$TAG-linux-amd64-duckdb.tar.gz"
-  tar -czf "$DDB" -C "$REL" --transform "s|^netopslab-duckdb|netopslab-duckdb|" netopslab-duckdb
-  ASSETS+=("netops-lab-$TAG-linux-amd64-duckdb.tar.gz")
+  DDB="$REL/netops-fees-$TAG-linux-amd64-duckdb.tar.gz"
+  tar -czf "$DDB" -C "$REL" --transform "s|^netopsfees-duckdb|netopsfees-duckdb|" netopsfees-duckdb
+  ASSETS+=("netops-fees-$TAG-linux-amd64-duckdb.tar.gz")
 fi
 
 # 5. find-or-create the release, then upload every asset. An existing
