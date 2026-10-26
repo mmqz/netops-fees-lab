@@ -4313,3 +4313,96 @@ body.lab-split-dragging {
   display: inline-block;
   margin-right: 8px;
 }
+
+/* ---- 费用页 /fees：导入前账期探测卡（#15）与可配置规则面板（#2）---- */
+.field--check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+}
+.field--check input[type='checkbox'] {
+  width: auto;
+}
+.panel__desc {
+  margin: 0 0 12px;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.probe-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--bg-subtle, #f9fafb);
+}
+.probe-card__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.probe-card__grid > div {
+  min-width: 0;
+}
+.probe-card__basis {
+  grid-column: 1 / -1;
+}
+.probe-card__grid dt {
+  font-size: 0.78rem;
+  color: var(--text-muted, #6b7280);
+  margin-bottom: 2px;
+}
+.probe-card__grid dd {
+  margin: 0;
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+.probe-card__verdict {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.probe-card__verdict--ok {
+  color: #047857;
+}
+.probe-card__verdict--mismatch {
+  color: #b45309;
+}
+.probe-card__trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.probe-card__trust input[type='checkbox'] {
+  width: auto;
+  margin-top: 2px;
+}
+.rule-create {
+  margin-top: 14px;
+  border-top: 1px dashed var(--border, #e5e7eb);
+  padding-top: 12px;
+}
+.rule-create summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.rule-create .hint {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted, #6b7280);
+}
+.drawer__actions {
+  margin-top: 16px;
+}
+.probe-card__title {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+}

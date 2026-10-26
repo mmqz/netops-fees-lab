@@ -1608,3 +1608,61 @@ export interface FeeLinkScanResult {
   unlinked: number;
   humanKept: number;
 }
+
+/** POST /api/fees/period-probe 结果（#15：表型分类 + 三档账期识别，只读不落库——
+ * 导入前确认面板的数据面；kind=未识别时 year/month 为 0） */
+export interface FeePeriodProbeResult {
+  kind: string;
+  /** 中文表型名（与 CLI/HTTP 文档同源） */
+  kindLabel: string;
+  year: number;
+  month: number;
+  /** strong | weak | none */
+  confidence: string;
+  basis: string;
+  /** 采样行数（≤50） */
+  rowsSampled: number;
+}
+
+/** GET/POST /api/fees/rules 的规则行（#2：L1 六元组，enabled=false 即观察态） */
+export interface FeeRiskRule {
+  id: string;
+  name: string;
+  feeType: string;
+  metric: string;
+  aggregation: string;
+  dimension: string;
+  comparator: string;
+  threshold: number;
+  windowMonths: number;
+  severity: string;
+  description?: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /api/fees/rules 信封 */
+export interface FeeRulesList {
+  items: FeeRiskRule[];
+  total: number;
+  enabledOnly: boolean;
+}
+
+/** GET /api/fees/rules/{id}/audit 的动作台账行（#2：阈值变更留痕的可见面） */
+export interface FeeRuleAuditEntry {
+  id: number;
+  ruleId: string;
+  /** created | enabled | disabled */
+  action: string;
+  actor: string;
+  changes?: string;
+  at: string;
+}
+
+/** GET /api/fees/rules/{id}/audit 信封 */
+export interface FeeRuleAuditList {
+  ruleId: string;
+  items: FeeRuleAuditEntry[];
+  total: number;
+}

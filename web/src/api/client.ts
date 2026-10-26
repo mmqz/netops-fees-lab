@@ -36,6 +36,10 @@ import type {
   ClueDecisionItem,
   FeeDuplicatesResult,
   FeeTotalsResult,
+  FeePeriodProbeResult,
+  FeeRiskRule,
+  FeeRuleAuditList,
+  FeeRulesList,
   RiskResult,
   RollbackResponse,
   RowStatus,
@@ -579,12 +583,18 @@ export function uploadFeeFile(
   feeType: string,
   year: number,
   month: number,
+  trustDeclaredPeriod = false,
 ): Promise<FeeImportSummary> {
   const form = new FormData();
   form.append('file', file);
   form.append('feeType', feeType);
   form.append('year', String(year));
   form.append('month', String(month));
+  if (trustDeclaredPeriod) {
+    // #15：探测面板显示识别与申报不一致后，操作者选择以申报为准——
+    // 覆盖留痕导入（period_source=unverified），永不静默。
+    form.append('periodTrustDeclared', '1');
+  }
   return requestJson<FeeImportSummary>('/fees/imports', {
     method: 'POST',
     body: form,
@@ -592,11 +602,19 @@ export function uploadFeeFile(
 }
 
 /** POST /api/fees/imports/sheets（#125 多 sheet 台账：无 feeType，每 sheet 自动判型） */
-export function uploadFeeSheetsFile(file: File, year: number, month: number): Promise<FeeSheetsImportSummary> {
+export function uploadFeeSheetsFile(
+  file: File,
+  year: number,
+  month: number,
+  trustDeclaredPeriod = false,
+): Promise<FeeSheetsImportSummary> {
   const form = new FormData();
   form.append('file', file);
   form.append('year', String(year));
   form.append('month', String(month));
+  if (trustDeclaredPeriod) {
+    form.append('periodTrustDeclared', '1');
+  }
   return requestJson<FeeSheetsImportSummary>('/fees/imports/sheets', {
     method: 'POST',
     body: form,
@@ -723,4 +741,52 @@ export function decideFeeRiskClue(body: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+/** POST /api/fees/period-probe（#15：multipart 只读探测——导入前确认面板的数据面；
+ * 表型分类 + 三档账期识别 strong/weak/none，不落库） */
+export function probeFeePeriod(file: File): Promise<FeePeriodProbeResult> {
+  const form = new FormData();
+  form.append('file', file);
+  return requestJson<FeePeriodProbeResult>('/fees/period-probe', {
+    method: 'POST',
+    body: form,
+  });
+}
+
+/** GET /api/fees/rules?enabled=（#2：规则列表——读开放，规则集本身是证据） */
+export function fetchFeeRules(enabledOnly: boolean): Promise<FeeRulesList> {
+  return requestJson<FeeRulesList>(`/fees/rules${enabledOnly ? '?enabled=1' : ''}`);
+}
+
+/** POST /api/fees/rules（#2：创建——申报级写通道；新规则默认停用观察态） */
+export function createFeeRule(input: {
+  name: string;
+  feeType: string;
+  metric: string;
+  aggregation: string;
+  dimension: string;
+  comparator: string;
+  threshold: number;
+  windowMonths: number;
+  severity: string;
+  description: string;
+}): Promise<FeeRiskRule> {
+  return requestJson<FeeRiskRule>('/fees/rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST /api/fees/rules/{id}/enable|disable（#2：人类通道，管理级令牌） */
+export function setFeeRuleEnabled(id: string, enabled: boolean): Promise<FeeRiskRule> {
+  return requestJson<FeeRiskRule>(`/fees/rules/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, {
+    method: 'POST',
+  });
+}
+
+/** GET /api/fees/rules/{id}/audit（#2：动作台账 created/enabled/disabled + actor + 变更 JSON） */
+export function fetchFeeRuleAudit(id: string): Promise<FeeRuleAuditList> {
+  return requestJson<FeeRuleAuditList>(`/fees/rules/${encodeURIComponent(id)}/audit`);
 }
