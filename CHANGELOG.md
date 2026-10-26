@@ -2,6 +2,20 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.18.1] — 2026-10-26
+
+**Windows 测试恒红根治 + 发布渠道修复版**（patch：#14；渠道：release.sh 拆仓适配与 v0.17.1 回补——v0.18.0 发布后随即落地）。
+
+### 修复 — Windows 全量测试恒红（#14）：源文件可写提示的平台假设统一
+- **根因**：`sourceWritableWarnings` 按 `runtime.GOOS == "windows"` 平台短路返回 nil（注释假设「Windows 上 POSIX 写位无意义」），但 `TestE2EVerifySources` 与 `TestLedgerColumnsRoundTripAndCompat` 恒断言 0644 源文件必须携带只读建议——实现与测试的平台假设背离，Windows 上 15 包恒 2 红，恒红测试掩盖真实回归。
+- **修复（issue 方案 A）**：删除平台短路。Go 的 `os.Stat` 在 Windows 上把只读属性（`FILE_ATTRIBUTE_READONLY`）映射进 mode 位——普通文件报 0666、`attrib +R` 后报 0444（issue 作者实机钉死）——单一 `&0o200` 探针**跨平台为真**。原短路反而使 Windows 用户收不到 #6 的源文件可写提示；现在三个平台（linux/WSL2/Windows）行为一致：可写源带建议、只读源静默。
+- **正当适配甄别**：`polish_test.go` 的 Windows 分支（`TestOpenPathWithSpecialCharacters`）非同族问题——OS 禁止 `?` 入文件名，它调整的是测试输入而非断言，两侧平台假设一致，保留。
+- 验收：`GOOS=windows go build ./...` + `go vet ./...` 交叉全净；linux 全量 `go test -count=1 ./...` 17 包全绿（两测试本轮直接复跑通过）；windows CI 门禁（7582b04 落地）为持续载体。
+
+### 修复 — 发布渠道：release.sh 拆仓适配 + v0.17.1 渠道回补
+- `scripts/release.sh` 自主仓搬来时四处硬编码未换（REPO=`mmqz/netops-lab`、`./cmd/netopslab`、二进制名 `netopslab`、资产前缀 `netops-lab-`）——主仓 #74「九个版本只打 tag 不发 Release」的根因之一就是发布脚本不可复用，本次在费用仓实战启用前修正。
+- **v0.18.0 正式发布**（三资产：source 2.0MB / linux-amd64 20.9MB / linux-amd64-duckdb 40.9MB）+ **v0.17.1 渠道回补**（fork 基点版此前 tag 已推但 Release 从未发布，`--binary v0.17.1` 从历史 tag 重建二进制，三资产）——费用仓发布渠道自本版起完整可用。
+
 ## [0.18.0] — 2026-10-26
 
 **fork 首个整合功能版**（0.17.1 之后合入的 v0.18 共享底座移植 + 费用线纵深五连 + 转供电补报治理 + 账期三档内容核验 + 可配置风险规则）。核心：写通道两级权限与默认安全、台账纵深（记录键/台账列/源文件完整性/严格行门/.xls 转换）、转供电「长期不报+集中补报」确定性治理（#11）、账期由内容核验而非纯传参（#15）、规则即数据——L1 六元组可配置规则与首个写侧 MCP 工具（#2）。

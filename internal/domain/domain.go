@@ -29,7 +29,7 @@ const RuleVersion = "1.0.0"
 // (#5), source-file integrity (#6), .xls convert (#7), --strict-rows (#8),
 // and the transfer-supply catch-up columns + two deterministic rules + spike
 // annotation (#11).
-const AppVersion = "v0.18.0"
+const AppVersion = "v0.18.1"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

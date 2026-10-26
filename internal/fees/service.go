@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -625,13 +624,17 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 // itself never writes source files (os.Open -> snapshot copy), but a
 // WRITABLE source is one careless "fix the number in Excel" away from a
 // broken evidence chain, and until now nothing even noticed. The notice
-// is non-blocking (the operator keeps full agency); on Windows the POSIX
-// write bit is meaningless, so the check is skipped there rather than
-// firing a permanent false alarm on every file.
+// is non-blocking (the operator keeps full agency).
+//
+// Cross-platform truth (#14): Go's os.Stat maps the Windows read-only
+// attribute (FILE_ATTRIBUTE_READONLY) into the mode bits — a normal file
+// reports 0666 there, `attrib +R` reports 0444 — so the single `&0o200`
+// probe is truthful on every platform. The former windows short-circuit
+// (#14's root cause) assumed the write bit was meaningless on Windows;
+// in fact that mapping is exactly what makes the shared check correct,
+// and skipping it left Windows users without the advice while the tests
+// kept asserting it — the platform assumptions of impl and tests diverged.
 func sourceWritableWarnings(path string) []string {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil // unreadable = the import will surface the real error
