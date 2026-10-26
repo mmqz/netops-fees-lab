@@ -34,7 +34,13 @@ S2,2024-06,20.00
 S3,2024-06,30.00
 `
 
-// importTwoMonths runs the two-partition import and returns its summary.
+// importTwoMonths runs the import and returns its summary. Since #20 the
+// declared partition owns the layout (one file per batch), so the
+// multi-file rollback shape this suite exercises is completed by planting
+// a SECOND partition file by hand — the exact pre-#20 legacy shape
+// (a batch whose rows once split across month=05/month=06 partitions).
+// Rollback must clean BOTH files whatever their partitions; the hand
+// plant keeps that coverage without waiting for a legacy database.
 func importTwoMonths(t *testing.T, svc *Service, dir string) ImportSummary {
 	t.Helper()
 	src := writeCSV(t, dir, "two-months.csv", csvTwoMonths)
@@ -47,7 +53,30 @@ func importTwoMonths(t *testing.T, svc *Service, dir string) ImportSummary {
 	if sum.Status != "completed" || sum.RowsImported != 3 {
 		t.Fatalf("summary = %+v, want a completed 3-row import", sum)
 	}
+	plantLegacySecondPartition(t, dir, sum.BatchID)
 	return sum
+}
+
+// plantLegacySecondPartition copies the batch's live file into the 2024-06
+// partition (pre-#20 shape). BatchParquetFiles walks by file name, so the
+// rollback set for the batch becomes 2 files across 2 partitions.
+func plantLegacySecondPartition(t *testing.T, dir, batchID string) {
+	t.Helper()
+	analysis := filepath.Join(dir, "analysis")
+	live, err := BatchParquetFiles(analysis, batchID)
+	if err != nil || len(live) != 1 {
+		t.Fatalf("live files = %v (err %v), want the single #20 file to copy from", live, err)
+	}
+	dst := filepath.Join(analysis, "fees", "fee_type=electricity", "year=2024", "month=06", "batch-"+batchID+".parquet")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("mkdir legacy partition: %v", err)
+	}
+	// A schema-only (zero-row) parquet: the plant exists for the DELETE and
+	// RESTORE paths, not for row counting — the row-count assertions must
+	// keep reading exactly the real import's rows.
+	if err := writeOneParquet(dst, nil); err != nil {
+		t.Fatalf("plant legacy partition file: %v", err)
+	}
 }
 
 // liveBatchFiles asserts the batch has exactly n live partition files and
@@ -132,12 +161,14 @@ func TestRollbackAtomicUnderIOFault(t *testing.T) {
 		t.Fatalf("batch = %+v (err %v), want completed — a failed rollback must not have happened", b, err)
 	}
 	live := liveBatchFiles(t, analysisDir, sum.BatchID, 2)
-	// row counts unchanged — the files carry their full payload.
-	if got := countParquetRows(t, live[0]); got != 1 {
-		t.Errorf("month=05 rows = %d, want 1 (unchanged)", got)
+	// row counts unchanged — the real import's rows all sit in the
+	// declared month=05 partition (#20); the planted month=06 legacy
+	// file is schema-only (0 rows).
+	if got := countParquetRows(t, live[0]); got != 3 {
+		t.Errorf("month=05 rows = %d, want 3 (unchanged — every row lives in the declared partition)", got)
 	}
-	if got := countParquetRows(t, live[1]); got != 2 {
-		t.Errorf("month=06 rows = %d, want 2 (unchanged)", got)
+	if got := countParquetRows(t, live[1]); got != 0 {
+		t.Errorf("month=06 rows = %d, want 0 (unchanged — the planted legacy file is schema-only)", got)
 	}
 	// the quarantine tree is gone after a successful undo.
 	if _, err := os.Stat(rollbackQuarantineRoot(analysisDir, sum.BatchID)); !os.IsNotExist(err) {
@@ -235,7 +266,9 @@ func TestRollbackDoubleFaultMarksFailed(t *testing.T) {
 	if err != nil || sum2.Status != "completed" || sum2.RowsImported != 3 {
 		t.Fatalf("re-import after the torn rollback = %+v (err %v), want the recovery import", sum2, err)
 	}
-	liveBatchFiles(t, analysisDir, sum2.BatchID, 2)
+	// #20: the recovery import lands as ONE declared-partition file (the
+	// planted legacy second file belonged to the failed batch, not this one).
+	liveBatchFiles(t, analysisDir, sum2.BatchID, 1)
 
 	// GC reclaims the stranded remains once past the milestone: the live
 	// orphan file (the failed batch is not keep-set) and the quarantine dir.
@@ -254,7 +287,9 @@ func TestRollbackDoubleFaultMarksFailed(t *testing.T) {
 	if _, err := os.Stat(rollbackQuarantineRoot(analysisDir, sum.BatchID)); !os.IsNotExist(err) {
 		t.Errorf("the failed batch's quarantine must be swept (stat err = %v)", err)
 	}
-	liveBatchFiles(t, analysisDir, sum2.BatchID, 2) // the recovery import survives
+	// #20: the recovery import lands as ONE declared-partition file (the
+	// planted legacy second file belonged to the failed batch, not this one).
+	liveBatchFiles(t, analysisDir, sum2.BatchID, 1) // the recovery import survives
 }
 
 // TestRollbackAdoptsTornQuarantine pins the crash-window adoption: a

@@ -97,19 +97,24 @@ type partitionFile struct {
 }
 
 // writeParquetPartitions writes the normalized rows of one import batch
-// into the analysis table. Rows are grouped by their own (year, month)
-// period; each group lands as ONE file under the batch's staging dir,
-// then all files are atomically renamed into their partition dirs. The
-// fee_type partition component is the batch's declared type. Returns the
-// per-file manifest (path + row count) in (year, month) order.
-func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string, rows []NormalizedRow) ([]partitionFile, error) {
+// into the analysis table. Since #20 the partition is the batch's DECLARED
+// period (year, month) — every row lands in ONE file under that partition.
+// The row-local period (normalizeRow still parses it, and a garbage value is
+// still a row failure) no longer moves the partition: the batch row, the
+// snapshot directory and the analysis partition must tell the SAME period
+// story (#20 root cause B — a row-local period used to silently rehome the
+// data into another month's partition while fee_batches kept the declaration,
+// so a cross-period re-import doubled the FIRST month and the three faces
+// disagreed). A row/declaration disagreement rides the import warnings.
+// The fee_type partition component is the batch's declared type. Returns
+// the per-file manifest (path + row count) — exactly one file.
+func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string, year, month int, rows []NormalizedRow) ([]partitionFile, error) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	byPeriod := make(map[[2]int][]feeParquetRow)
+	group := make([]feeParquetRow, 0, len(rows))
 	for _, r := range rows {
-		key := [2]int{r.Year, r.Month}
-		byPeriod[key] = append(byPeriod[key], feeParquetRow{
+		group = append(group, feeParquetRow{
 			SiteCode:        r.SiteCode,
 			AmountCents:     r.AmountCents,
 			SourceFile:      r.SourceFile,
@@ -133,10 +138,9 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 			ReceivedCents:   r.ReceivedCents,
 		})
 	}
-	keys := make([][2]int, 0, len(byPeriod))
-	for k := range byPeriod {
-		keys = append(keys, k)
-	}
+	// Single declared partition (#20): the one (year, month) the batch row
+	// records — see the function comment.
+	keys := [][2]int{{year, month}}
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i][0] != keys[j][0] {
 			return keys[i][0] < keys[j][0]
@@ -152,6 +156,7 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 	files := make([]partitionFile, 0, len(keys))
 	for _, k := range keys {
 		year, month := k[0], k[1]
+		rowsFor := group
 		// relPath is a LOGICAL path (path.Join: always '/') — it flows into
 		// the batch manifest, the HTTP API's files[] and the CLI JSON
 		// output, so it is a cross-platform contract like
@@ -163,10 +168,10 @@ func writeParquetPartitions(analysisDir string, feeType FeeType, batchID string,
 			fmt.Sprintf("month=%02d", month),
 			"batch-"+batchID+".parquet")
 		staged := fmt.Sprintf("year=%d_month=%02d.parquet", year, month)
-		if err := writeOneParquet(filepath.Join(staging, staged), byPeriod[k]); err != nil {
+		if err := writeOneParquet(filepath.Join(staging, staged), rowsFor); err != nil {
 			return nil, err
 		}
-		files = append(files, partitionFile{relPath: rel, staged: staged, rows: len(byPeriod[k])})
+		files = append(files, partitionFile{relPath: rel, staged: staged, rows: len(rowsFor)})
 	}
 	// commit: atomic rename per file into the live partition dirs
 	for _, f := range files {

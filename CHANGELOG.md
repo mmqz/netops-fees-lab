@@ -4,13 +4,25 @@
 
 ## [0.20.0] — 进行中
 
-**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
+**跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24；后续条目随完成追加——tag 打点前本段始终诚实反映已合入内容）。
 
 ### 修复 — Windows 构建阻断（#22）：`FeesOverview.tsx` 与 `feesOverview.ts` 仅大小写不同，Windows 上 tsc/vite 双双失败
 - **根因**：`web/src/pages/` 下同时存在 `FeesOverview.tsx`（React 组件，大写 F）与 `feesOverview.ts`（纯函数库，小写 f）——Linux/macOS 大小写敏感文件系统两者共存一切正常，Windows 大小写不敏感把它们当同一文件：`import { FeesOverview } from './FeesOverview'` 解析到不含该导出的 `feesOverview.ts`，tsc 报 TS1261/TS1149、vite 报「"FeesOverview" is not exported by "src/pages/feesOverview.ts"」，**前端完全无法构建**（Go 二进制随之缺内嵌前端）。issue 报告人 Windows/Node 24/npm 11 实测复现率 100%。
 - **修复（方案 A）**：纯函数库改名消除碰撞——`git mv feesOverview.ts feesOverviewModel.ts` + `git mv feesOverview.test.ts feesOverviewModel.test.ts`（Model 后缀申明「展示层确定性核心=纯数据模型」职责，与组件名拉开）；引用同步两处（`FeesOverview.tsx` 的 import 与头注释 / 测试文件自引用）；`Fees.tsx` 的 `import { FeesOverview } from './FeesOverview'` 保持指向组件未动（issue 特别警示的误改点）。
 - **门禁（方案 C）**：新增 `web/scripts/check-case-collisions.mjs`（Node 跨平台，递归扫描 src/public，同目录仅大小写不同即 exit 1——错误信息带先例编号）；`package.json` 新增 `lint:case` script；CI 前端 job 在 build 前加「case-collision gate (#22)」步骤——**同类碰撞从此在 CI 就地拦死，不再漏到 Windows 检出时**。脚本负例已实测（注入 Foo.ts/foo.ts 组 exit 1 + 双名打印）。
 - **验证**：Linux 侧 tsc 0 错 / vitest 146/146 全过（与 issue 报告人改名后实测一致）/ vite build 成功 / 门禁 clean（49 files）；Windows 侧由 issue 报告人本地验证结论背书（改名后 tsc+build+146 测试全过、Go 构建通过）——CI 含 Windows job，推送后由其复验。
+
+### 修复 — 跨账期重复导入静默翻倍（#20）：同 SHA 跨月默认拒绝 + 分区跟随申报账期 + verify-batches 三面审计
+- **根因**：幂等键 `(sha256, feeType, year, month, mapping, sheet)` 含账期——同一文件换 `--month` 重导即绕过预检，数据静默翻倍；且分析层分区取自行内账期列（无约束），与批次表/快照目录的申报账期互相矛盾（三处账期不一致）。
+- **方案 A（守卫）**：`refuseCrossPeriodDuplicate`——同 SHA 在**其他账期**存在 completed 批次时默认拒绝（message 带两个账期值 + 既有批次号 + 双通道覆盖提示：CLI `--allow-period-duplicate` / HTTP `allowPeriodDuplicate=1`）；单 sheet 与多 sheet 两通道同守卫；**同账期重复导入不拦截**（幂等信息性应答保持既有语义——跨账期守卫只在「本次将写入新账期数据」时介入）。
+- **方案 B（分区跟随申报）**：`writeParquetPartitions` 分区键改为申报账期（`fee_batches.period` 一致性铁律）——行内账期列仍解析（垃圾值仍是行错误）但不再决定分区；不一致行计数进 `warnings`（`N 行的行内账期证据与申报账期 YYYY-MM 不一致——已按申报账期入分区`）并经 `AppendPeriodBasis` 落批次 `period_basis` 留痕（migration 零新增——复用 v36 列）。旧行为（#60 行级分片）在 #15 三档校验后已无合法入口（A 档全表一致；B/C 档不一致本就是缺陷），行为变更在测试中显式钉死。
+- **方案 C（审计）**：`fees verify-batches` 子命令——逐 completed 批次核对 fee_batches ↔ 快照目录路径 ↔ 分析层 Parquet 分区三面账期（`snapshot-period` / `analysis-partition` / `analysis-missing`）+ 同 SHA 多账期家族报告（`duplicate-sha-period`，家族成员逐个点名）；只报告不改动，problems 非空 exit 非零（verify-sources 同款 stdout 单 JSON + errAlreadyPrinted 纪律）；向后兼容——历史污染不报错只报出。
+- **测试**：service 级 5 顶（默认拒绝含双账期+批次号 / 覆盖成功留痕于 warnings+period_basis / 多 sheet 工作簿级守卫 / verify-batches 干净→污染两态 / #24 三路径字段一致）+ 分区语义钉（`TestDeclaredPeriodOwnsPartition`：行内 06 行落申报 05 分区 + 警告计数 + 批次留痕）+ CLI e2e（拒绝→覆盖→verify-batches 报告 exit 纪律）+ HTTP（422 双值 / 201 覆盖审计 / 幂等重复 200 完整字段）；duckdb 引擎夹具按「一文件一申报账期」重构（真实月度台账形态），7 项引擎测试全绿。
+
+### 修复 — 幂等重复响应字段残缺（#24）：两个重复分支共用 `summaryFromBatch`，字段集合与正常路径一致
+- **根因**：`ImportSummary` 三条路径手工拼装——预检重复分支缺 `PeriodSource/PeriodBasis/Files/Warnings`；竞态分支更缺 `WorkbookName`；`periodSource` 空串与字段缺省不可区分，审计链（files/warnings）在重复时静默消失。
+- **修复**：单一构造函数 `summaryFromBatch(existing)`——批次行为唯一事实源（身份字段全部回填库值；`files[]` 从分析层恢复（`BatchParquetFiles`——批次行不存 manifest，分析层才是数据所在）；warnings 回填 `#6` 源文件可写提醒）；两条重复分支共用，结构性杜绝再次漂移。
+- **裁决**：legacy 批次（pre-v36）`periodSource` 库值为空时如实回空（诚实优先——验收标准「非空」针对 #15 之后批次，测试以新批次钉非空+等于库值）。
 
 ## [0.19.1] — 2026-10-26
 

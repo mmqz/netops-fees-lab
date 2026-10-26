@@ -42,29 +42,39 @@ import (
 func importRiskFixture(t *testing.T, svc *Service) {
 	t.Helper()
 	ctx := context.Background()
-	files := []struct{ name, body string }{
-		{"spike-a.csv", "站址编码,账期,电费(元)\nS-SPIKE,2024-05,100.00\nS-FLAT,2024-05,100.00\n"},
-		{"spike-b.csv", "站址编码,账期,电费(元)\nS-SPIKE,2024-06,250.00\nS-FLAT,2024-06,105.00\n"},
-		{"dup-a.csv", "站址编码,账期,电费(元),备注\nS-DUP,2024-05,100.00,台账A\nS-DUP,2024-06,100.00,台账A\n"},
-		{"dup-b.csv", "站址编码,账期,电费(元),备注\nS-DUP,2024-05,100.00,台账B\nS-DUP,2024-06,100.00,台账B\n"},
-		{"ledg-a.csv", "站址编码,账期,电费(元)\nS-LEDG,2024-05,200.00\n"},
-		{"ledg-b.csv", "站址编码,账期,电费(元)\nS-LEDG,2024-05,250.00\n"},
-		{"peers.csv", "站址编码,账期,电费(元)\nS-O01,2024-05,100.00\nS-O02,2024-05,100.00\nS-O03,2024-05,100.00\nS-O04,2024-05,100.00\nS-O05,2024-05,100.00\nS-O06,2024-05,100.00\nS-O07,2024-05,100.00\nS-O08,2024-05,100.00\nS-O09,2024-05,100.00\nS-O10,2024-05,100.00\nS-O11,2024-05,100.00\nS-O12,2024-05,100.00\n"},
-		{"outlier.csv", "站址编码,账期,电费(元)\nS-OUT,2024-05,1000.00\n"},
-		{"wild.csv", "站址编码,账期,电费(元)\nS-WILD,2024-06,900.00\nRETIRED-SITE,2024-06,777.00\nACTIVE-SITE,2024-06,555.00\nPENDING-SITE,2024-06,444.00\n"},
+	// #20: the declared period owns the partition — a file's rows land in
+	// the DECLARED month, so multi-month fixtures import as one file per
+	// declared month (the real monthly-ledger shape: one file per month).
+	files := []struct {
+		name    string
+		year, m int
+		body    string
+	}{
+		{"spike-a.csv", 2024, 5, "站址编码,账期,电费(元)\nS-SPIKE,2024-05,100.00\nS-FLAT,2024-05,100.00\n"},
+		{"spike-b.csv", 2024, 6, "站址编码,账期,电费(元)\nS-SPIKE,2024-06,250.00\nS-FLAT,2024-06,105.00\n"},
+		{"dup-a-05.csv", 2024, 5, "站址编码,账期,电费(元),备注\nS-DUP,2024-05,100.00,台账A\n"},
+		{"dup-a-06.csv", 2024, 6, "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账A\n"},
+		{"dup-b-05.csv", 2024, 5, "站址编码,账期,电费(元),备注\nS-DUP,2024-05,100.00,台账B\n"},
+		{"dup-b-06.csv", 2024, 6, "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账B\n"},
+		{"ledg-a.csv", 2024, 5, "站址编码,账期,电费(元)\nS-LEDG,2024-05,200.00\n"},
+		{"ledg-b.csv", 2024, 5, "站址编码,账期,电费(元)\nS-LEDG,2024-05,250.00\n"},
+		{"peers.csv", 2024, 5, "站址编码,账期,电费(元)\nS-O01,2024-05,100.00\nS-O02,2024-05,100.00\nS-O03,2024-05,100.00\nS-O04,2024-05,100.00\nS-O05,2024-05,100.00\nS-O06,2024-05,100.00\nS-O07,2024-05,100.00\nS-O08,2024-05,100.00\nS-O09,2024-05,100.00\nS-O10,2024-05,100.00\nS-O11,2024-05,100.00\nS-O12,2024-05,100.00\n"},
+		{"outlier.csv", 2024, 5, "站址编码,账期,电费(元)\nS-OUT,2024-05,1000.00\n"},
+		{"wild.csv", 2024, 6, "站址编码,账期,电费(元)\nS-WILD,2024-06,900.00\nRETIRED-SITE,2024-06,777.00\nACTIVE-SITE,2024-06,555.00\nPENDING-SITE,2024-06,444.00\n"},
 		// #105: the zero-base spike shape — ¥0.00 in 07 followed by ¥900 in
 		// 08 is the STRONGEST month-over-month rise there is, but the ratio
 		// is undefined on a zero base: it must appear in the EXCLUDED
 		// envelope (it used to be invisible in both counters). Months 07/08
 		// keep it out of the month-05 outlier stats.
-		{"zero-base.csv", "站址编码,账期,电费(元)\nS-ZERO,2024-07,0.00\nS-ZERO,2024-08,900.00\n"},
+		{"zero-base-07.csv", 2024, 7, "站址编码,账期,电费(元)\nS-ZERO,2024-07,0.00\n"},
+		{"zero-base-08.csv", 2024, 8, "站址编码,账期,电费(元)\nS-ZERO,2024-08,900.00\n"},
 	}
 	for _, f := range files {
 		p := filepath.Join(t.TempDir(), f.name)
 		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: 5}); err != nil {
+		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: f.year, Month: f.m}); err != nil {
 			t.Fatalf("import %s: %v", f.name, err)
 		}
 	}

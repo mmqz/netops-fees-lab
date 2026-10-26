@@ -1,6 +1,8 @@
 package fees
 
 import (
+	"path"
+
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/mmqz/netops-fees-lab/internal/domain"
 	"github.com/mmqz/netops-fees-lab/internal/repo"
+	"sort"
 )
 
 // Service orchestrates the fee import pipeline (#61): read → recognize →
@@ -78,6 +81,14 @@ type ImportOptions struct {
 	// pre-#8 behavior byte-for-byte — the lenient import and the on-demand
 	// scenario-9 rules remain the warning surface.
 	StrictRows bool
+	// AllowPeriodDuplicate (#20): when true, importing a file whose SHA256
+	// already landed as a COMPLETED batch under a DIFFERENT period does not
+	// refuse — the override is recorded on the batch (period_basis) and the
+	// import warnings. Default false refuses with both periods + the batch
+	// id: the same bytes under two periods is silent double-counting by
+	// construction (the idempotency key includes the period, so the
+	// per-key duplicate check cannot see it).
+	AllowPeriodDuplicate bool
 	// SourcePath is the ABSOLUTE path the import actually reads (issue #6):
 	// recorded on the batch so 'fees verify-sources' can re-hash the file
 	// later and notice tampering. Set by Service.Import from Path ('' =
@@ -202,6 +213,17 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 		return ImportSummary{}, err
 	}
 
+	// #20 cross-period guard: same bytes under another completed period is
+	// double-counting the per-key check cannot see. The override (when
+	// given) rides the warnings + the batch's period_basis.
+	periodDupNote, err := s.refuseCrossPeriodDuplicate(ctx, sha, name, opts.Year, opts.Month, opts.AllowPeriodDuplicate)
+	if err != nil {
+		return ImportSummary{}, err
+	}
+	if periodDupNote != "" {
+		warnings = append(warnings, periodDupNote)
+	}
+
 	// The single-sheet channel keeps the pre-v34 batch coordinate (sheet
 	// '') so its idempotency keys survive the migration byte-for-byte;
 	// the runtime cross-check above still USES the sheet's name.
@@ -216,7 +238,7 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if err == nil {
 		warnings = append(warnings, s.importRowAnomalyWarn(ctx, opts.FeeType, opts.Year, opts.Month, sum.RowsImported)...)
 	}
-	sum.Warnings = warnings
+	sum.Warnings = append(warnings, sum.Warnings...)
 	return sum, err
 }
 
@@ -282,12 +304,9 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 		return ImportSummary{}, fmt.Errorf("fees: 幂等性预检: %w", preflightErr)
 	}
 	if preflightErr == nil {
-		return ImportSummary{
-			BatchID: existing.ID, Status: "completed", WorkbookName: existing.WorkbookName,
-			SHA256: sha, FeeType: string(opts.FeeType), FeeYear: opts.Year, FeeMonth: opts.Month,
-			RowsTotal: existing.RowsTotal, RowsImported: existing.RowsImported, RowsFailed: existing.RowsFailed,
-			SkippedDuplicate: true, ExistingBatch: existing.ID,
-		}, &ErrDuplicateImport{BatchID: existing.ID}
+		// #24: the duplicate answer carries the COMPLETE field set —
+		// the batch row is the source of truth, not a hand-picked subset.
+		return s.summaryFromBatch(ctx, existing, opts), &ErrDuplicateImport{BatchID: existing.ID}
 	}
 
 	// 4. snapshot.
@@ -299,18 +318,31 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	// batch row: created as failed (the retry-open default); flips to
 	// completed at the commit point. A crash between here and the flip
 	// leaves a failed row + (at worst) GC-able orphans.
+	basis := check.Message
+	// #20 audit trail: the cross-period override (when given) appends to
+	// the batch's own basis — the durable record of what the refusal would
+	// have carried. period_source stays what the three-tier check decided
+	// (an override keeps it unverified; the trail is the point).
+	if opts.AllowPeriodDuplicate {
+		if note, gerr := s.refuseCrossPeriodDuplicate(ctx, sha, name, opts.Year, opts.Month, true); gerr == nil && note != "" {
+			basis += "；" + note
+		}
+	}
 	if err := s.db.Do(ctx, func(tx *repo.Tx) error {
 		return tx.FeeBatches.Create(ctx, FeeBatch{
 			ID: batchID, WorkbookName: name, SHA256: sha, Sheet: sheetKey, FeeType: opts.FeeType,
 			FeeYear: opts.Year, FeeMonth: opts.Month, SnapshotPath: snapRel, Mapping: canonical,
 			SourcePath:   opts.SourcePath,
-			PeriodSource: check.Source, PeriodBasis: check.Message,
+			PeriodSource: check.Source, PeriodBasis: basis,
 			Status: FeeStatusFailed, CreatedAt: s.clock(),
 		})
 	}); err != nil {
 		return ImportSummary{}, fmt.Errorf("fees: 记录导入批次: %w", err)
 	}
 
+	// periodBasisNote carries #20's row/declaration disagreement summary
+	// (filled after normalization; appended to the batch basis + warnings).
+	var periodBasisNote string
 	// 5. normalize.
 	siteIdx := headerIndex(sheet.Headers, mapping["siteCode"])
 	amountIdx := headerIndex(sheet.Headers, mapping["amount"])
@@ -357,14 +389,38 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 		}, refusef("%d 行全部规范化失败（首个：%s）", len(rows), importErrs[0].Error())
 	}
 
-	// 6. Parquet partitions (staged → atomic rename).
-	files, err := writeParquetPartitions(s.analysisDir(), opts.FeeType, batchID, normalized)
+	// 6. Parquet partitions (staged → atomic rename). #20: the partition is
+	// the DECLARED period — the batch row, the snapshot dir and the analysis
+	// partition must tell one period story. A row-local period that
+	// disagrees (reachable via --period-trust-declared or an unrecognized
+	// mapped period column) is counted and warned, never silently rehomed.
+	var periodDisagree int
+	for _, nr := range normalized {
+		if nr.Year != opts.Year || nr.Month != opts.Month {
+			periodDisagree++
+		}
+	}
+	if periodDisagree > 0 {
+		periodBasisNote = fmt.Sprintf(
+			"%d 行的行内账期证据与申报账期 %04d-%02d 不一致——已按申报账期入分区（分区跟随申报是 #20 起的一致性铁律）",
+			periodDisagree, opts.Year, opts.Month)
+	}
+	files, err := writeParquetPartitions(s.analysisDir(), opts.FeeType, batchID, opts.Year, opts.Month, normalized)
 	if err != nil {
 		_ = s.db.FeeBatches.MarkFailed(ctx, batchID, len(rows), 0, "Parquet 写入失败: "+err.Error())
 		return ImportSummary{}, fmt.Errorf("fees: 批次 %s: %w", batchID, err)
 	}
 
 	// 7. commit point.
+	if periodBasisNote != "" {
+		// #20: the disagreement is durable on the batch row, not just the
+		// response — appended before the completed flip, same db handle.
+		if berr := s.db.Do(ctx, func(tx *repo.Tx) error {
+			return tx.FeeBatches.AppendPeriodBasis(ctx, batchID, "；"+periodBasisNote)
+		}); berr != nil {
+			return ImportSummary{}, fmt.Errorf("fees: 批次 %s 账期留痕: %w", batchID, berr)
+		}
+	}
 	now := s.clock()
 	var errs []string
 	if importErrs != nil {
@@ -381,12 +437,9 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 			_ = s.db.FeeBatches.MarkFailed(ctx, batchID, len(rows), 0, "幂等竞态：同键批次已先完成")
 			existing, gerr := s.db.FeeBatches.CompletedByIdempotencyKey(ctx, sha, opts.FeeType, opts.Year, opts.Month, canonical, sheetKey)
 			if gerr == nil {
-				return ImportSummary{
-					BatchID: existing.ID, Status: "completed", SHA256: sha,
-					FeeType: string(opts.FeeType), FeeYear: opts.Year, FeeMonth: opts.Month,
-					RowsTotal: existing.RowsTotal, RowsImported: existing.RowsImported,
-					RowsFailed: existing.RowsFailed, SkippedDuplicate: true, ExistingBatch: existing.ID,
-				}, &ErrDuplicateImport{BatchID: existing.ID}
+				// #24: same complete-field discipline as the pre-flight branch —
+				// one builder, no drift between the two duplicate paths.
+				return s.summaryFromBatch(ctx, existing, opts), &ErrDuplicateImport{BatchID: existing.ID}
 			}
 		}
 		return ImportSummary{}, fmt.Errorf("fees: 提交批次 %s: %w", batchID, err)
@@ -396,12 +449,17 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	for _, f := range files {
 		relFiles = append(relFiles, f.relPath)
 	}
+	basisOut := check.Message
+	if periodBasisNote != "" {
+		basisOut += "；" + periodBasisNote
+	}
 	return ImportSummary{
 		BatchID: batchID, Status: "completed", WorkbookName: name, SHA256: sha,
 		FeeType: string(opts.FeeType), FeeYear: opts.Year, FeeMonth: opts.Month,
-		PeriodSource: check.Source, PeriodBasis: check.Message,
+		PeriodSource: check.Source, PeriodBasis: basisOut,
 		RowsTotal: len(rows), RowsImported: len(normalized), RowsFailed: len(importErrs),
 		Files: relFiles, Errors: errs,
+		Warnings: warningsFor(periodBasisNote),
 	}, nil
 }
 
@@ -434,6 +492,9 @@ type SheetsImportOptions struct {
 	// TrustDeclaredPeriod mirrors ImportOptions.TrustDeclaredPeriod (#15)
 	// — the per-sheet period-check override, workbook-wide.
 	TrustDeclaredPeriod bool
+	// AllowPeriodDuplicate mirrors ImportOptions.AllowPeriodDuplicate
+	// (#20) — workbook-wide, one declaration for every sheet batch.
+	AllowPeriodDuplicate bool
 }
 
 // SheetBatchResult is one sheet's import outcome inside the multi-sheet
@@ -538,6 +599,12 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 		return SheetsImportSummary{}, err
 	}
 
+	// #20 cross-period guard — workbook-wide (every sheet batch of this
+	// import shares the declaration, so one guard covers them all).
+	if _, err := s.refuseCrossPeriodDuplicate(ctx, sha, name, opts.Year, opts.Month, opts.AllowPeriodDuplicate); err != nil {
+		return SheetsImportSummary{}, err
+	}
+
 	// Classification pre-pass: EVERY sheet must resolve (type + mandatory
 	// columns) before ANY sheet imports — the all-or-nothing refusal that
 	// makes "completed with missing data" impossible.
@@ -597,7 +664,7 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 			RowsTotal: summary.RowsTotal, RowsImported: summary.RowsImported,
 			RowsFailed: summary.RowsFailed, Files: summary.Files, Errors: summary.Errors,
 			SkippedDuplicate: summary.SkippedDuplicate, ExistingBatch: summary.ExistingBatch,
-			Warnings: warnings,
+			Warnings: append(append([]string{}, warnings...), summary.Warnings...),
 		}
 		if result.SkippedDuplicate && result.BatchID == "" {
 			result.BatchID = summary.ExistingBatch
@@ -688,6 +755,143 @@ type SourceVerifyReport struct {
 	Missing int                `json:"missing"`
 	Unknown int                `json:"unknown"`
 	Results []SourceVerifyItem `json:"results"`
+}
+
+// VerifyBatchProblem is one inconsistency `fees verify-batches` (#20 方案 C)
+// reports. Kind is one of: "snapshot-period" (the snapshot directory's
+// year/month disagrees with fee_batches), "analysis-partition" (a Parquet
+// partition of the batch disagrees with fee_batches), "analysis-missing"
+// (a completed batch has no Parquet file at all — rolled-back-elsewhere or
+// GC'd), "duplicate-sha-period" (the same file hash lives under more than
+// one period — the #20 core shape).
+type VerifyBatchProblem struct {
+	Kind    string `json:"kind"`
+	BatchID string `json:"batchId"`
+	Detail  string `json:"detail"`
+}
+
+// VerifyBatchesReport is the verify-batches envelope: every completed batch
+// checked against its snapshot path, its analysis partitions and the file's
+// other-period duplicates. Clean = zero problems (the counts still tell the
+// story). Read-only: the report NEVER mutates or refuses anything —
+// historical pollution is surfaced, the operator decides (roll back the bad
+// batch, re-import, or accept with eyes open).
+type VerifyBatchesReport struct {
+	BatchesChecked int                  `json:"batchesChecked"`
+	Problems       []VerifyBatchProblem `json:"problems"`
+}
+
+// VerifyBatches is #20 方案 C: the batch row, the snapshot directory and the
+// analysis partitions each record a period — they must agree. A same-SHA
+// family spanning several periods is the cross-period duplicate the import
+// guard now refuses at the door; pre-guard history shows up here.
+func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error) {
+	batches, err := s.db.FeeBatches.List(ctx, "")
+	if err != nil {
+		return VerifyBatchesReport{}, fmt.Errorf("fees: 读取费用批次: %w", err)
+	}
+	report := VerifyBatchesReport{Problems: []VerifyBatchProblem{}}
+
+	// sha -> set of distinct periods (completed batches only — a failed
+	// attempt blocks nothing and double-counts nothing).
+	type periodKey struct{ y, m int }
+	shaPeriods := make(map[string]map[periodKey]string) // sha -> period -> batch id
+
+	for _, b := range batches {
+		if b.Status != FeeStatusCompleted {
+			continue
+		}
+		report.BatchesChecked++
+
+		// 1. snapshot path vs batch row: fee-imports/<type>/<year>/<mm>/<sha>_<name>
+		if parts := strings.Split(b.SnapshotPath, "/"); len(parts) >= 4 {
+			if y, err1 := strconv.Atoi(parts[2]); err1 == nil {
+				if m, err2 := strconv.Atoi(parts[3]); err2 == nil {
+					if y != b.FeeYear || m != b.FeeMonth {
+						report.Problems = append(report.Problems, VerifyBatchProblem{
+							Kind:    "snapshot-period",
+							BatchID: b.ID,
+							Detail:  fmt.Sprintf("批次账期 %04d-%02d 与快照目录 %s（%04d-%02d）不一致", b.FeeYear, b.FeeMonth, b.SnapshotPath, y, m),
+						})
+					}
+				}
+			}
+		}
+
+		// 2. analysis partitions vs batch row: every live parquet file of the
+		// batch must sit under year=<row>/month=<row>. The pre-#20 layout
+		// (row-local partitions) is exactly what this check surfaces.
+		files, ferr := BatchParquetFiles(s.analysisDir(), b.ID)
+		if ferr != nil {
+			report.Problems = append(report.Problems, VerifyBatchProblem{
+				Kind:    "analysis-partition",
+				BatchID: b.ID,
+				Detail:  "扫描分析层失败: " + ferr.Error(),
+			})
+		} else if len(files) == 0 {
+			report.Problems = append(report.Problems, VerifyBatchProblem{
+				Kind:    "analysis-missing",
+				BatchID: b.ID,
+				Detail:  "completed 批次在分析层无 Parquet 文件（已回滚/被 GC？）",
+			})
+		} else {
+			for _, f := range files {
+				if !s.partitionMatches(f, b.FeeYear, b.FeeMonth) {
+					report.Problems = append(report.Problems, VerifyBatchProblem{
+						Kind:    "analysis-partition",
+						BatchID: b.ID,
+						Detail:  fmt.Sprintf("批次账期 %04d-%02d 与分析层分区 %s 不一致", b.FeeYear, b.FeeMonth, relPathOf(s.analysisDir(), f)),
+					})
+				}
+			}
+		}
+
+		// 3. accumulate the sha-period family
+		if shaPeriods[b.SHA256] == nil {
+			shaPeriods[b.SHA256] = make(map[periodKey]string)
+		}
+		shaPeriods[b.SHA256][periodKey{b.FeeYear, b.FeeMonth}] = b.ID
+	}
+
+	// 4. same sha under several periods — the #20 shape; name every member.
+	for sha, periods := range shaPeriods {
+		if len(periods) < 2 {
+			continue
+		}
+		members := make([]string, 0, len(periods))
+		for pk, id := range periods {
+			members = append(members, fmt.Sprintf("%04d-%02d（批次 %s）", pk.y, pk.m, id))
+		}
+		sort.Strings(members)
+		for pk, id := range periods {
+			report.Problems = append(report.Problems, VerifyBatchProblem{
+				Kind:    "duplicate-sha-period",
+				BatchID: id,
+				Detail:  fmt.Sprintf("文件（SHA256 前 12 位 %s）同时存在于多个账期：%s ——同文件多账期会把数据重复入账", sha[:12], strings.Join(members, "、")),
+			})
+			_ = pk
+		}
+	}
+
+	return report, nil
+}
+
+// partitionMatches checks one analysis-layer file path against the expected
+// (year, month): the hive path .../year=YYYY/month=MM/batch-<id>.parquet.
+func (s *Service) partitionMatches(absPath string, year, month int) bool {
+	parts := strings.Split(filepath.ToSlash(absPath), "/")
+	wantY := fmt.Sprintf("year=%d", year)
+	wantM := fmt.Sprintf("month=%02d", month)
+	var haveY, haveM string
+	for _, p := range parts {
+		switch {
+		case strings.HasPrefix(p, "year="):
+			haveY = p
+		case strings.HasPrefix(p, "month="):
+			haveM = p
+		}
+	}
+	return haveY == wantY && haveM == wantM
 }
 
 // VerifySources re-hashes every fee batch's recorded source file against
@@ -799,6 +1003,98 @@ func (s *Service) refuseModeConflict(ctx context.Context, sha, name string, mode
 			name, other, b.ID, b.FeeType, b.FeeYear, b.FeeMonth)
 	}
 	return nil
+}
+
+// summaryFromBatch (#24) rebuilds a COMPLETE ImportSummary from an
+// existing batch row — the two duplicate branches (pre-flight hit and
+// commit-race hit) used to hand-build partial structs, so the same
+// duplicate was reported with a different field set depending on which
+// internal path hit (periodSource empty, workbookName missing, files
+// and warnings silently absent). The batch row is the single source:
+// every identity field comes back exactly as recorded; files[] is
+// recovered from the analysis layer (the batch row does not store the
+// manifest); the caller layers SkippedDuplicate/ExistingBatch on top.
+func (s *Service) summaryFromBatch(ctx context.Context, existing domain.FeeBatch, opts ImportOptions) ImportSummary {
+	sum := ImportSummary{
+		BatchID: existing.ID, Status: string(existing.Status),
+		WorkbookName: existing.WorkbookName, SHA256: existing.SHA256,
+		FeeType: string(existing.FeeType), FeeYear: existing.FeeYear, FeeMonth: existing.FeeMonth,
+		PeriodSource: existing.PeriodSource, PeriodBasis: existing.PeriodBasis,
+		RowsTotal: existing.RowsTotal, RowsImported: existing.RowsImported, RowsFailed: existing.RowsFailed,
+		SkippedDuplicate: true, ExistingBatch: existing.ID,
+	}
+	// files[]: the analysis layer is where the batch's data lives — the
+	// honest manifest for a duplicate answer (legacy pre-#65 batches may
+	// legitimately have none left after a rollback).
+	if rels, err := BatchParquetFiles(s.analysisDir(), existing.ID); err == nil {
+		for _, p := range rels {
+			sum.Files = append(sum.Files, relPathOf(s.analysisDir(), p))
+		}
+	}
+	// warnings: what the import WOULD have warned about is knowable now —
+	// the source file is at hand (writable-source advice of #6).
+	sum.Warnings = sourceWritableWarnings(opts.Path)
+	return sum
+}
+
+// warningsFor renders the import-sheet-level warning list for the normal
+// path's summary: #20's row/declaration disagreement note when present,
+// nil otherwise (the outer Import appends its own warnings — file-level
+// notices and the cross-period override — onto this list).
+func warningsFor(note string) []string {
+	if note == "" {
+		return nil
+	}
+	return []string{note}
+}
+
+// refuseCrossPeriodDuplicate is #20's guard A: the per-key idempotency
+// check includes the period in its key, so the SAME file re-imported under
+// a different --year/--month sails past it and doubles the data silently.
+// The SHA256 is the strong invariant the key lacks — same bytes, other
+// period, completed batch => refuse (both periods + the batch id + the
+// override flag in the message). With allow set the refusal degrades to the
+// audit warning string (the caller records it on the batch and the summary).
+func (s *Service) refuseCrossPeriodDuplicate(ctx context.Context, sha, name string, year, month int, allow bool) (string, error) {
+	completed, err := s.db.FeeBatches.CompletedBySHA(ctx, sha)
+	if err != nil {
+		// #104 discipline: a failed guard check must not read as "no
+		// conflict" — the guarantee would be silently void.
+		return "", fmt.Errorf("fees: 跨账期重复预检: %w", err)
+	}
+	// Same-period batches are NOT this guard's business: the per-key
+	// idempotency check answers them informationally (the duplicate import
+	// that re-asks an already-imported period must keep getting "skipped:
+	// batch X" even when the file also has foreign-period history — refusing
+	// here would mask the idempotent answer with a cross-period error and
+	// leave the operator thinking their period was wrong).
+	samePeriod := false
+	var foreign *domain.FeeBatch
+	for i := range completed {
+		b := completed[i]
+		if b.FeeYear == year && b.FeeMonth == month {
+			samePeriod = true
+			continue
+		}
+		if foreign == nil {
+			foreign = &completed[i]
+		}
+	}
+	if foreign == nil || samePeriod {
+		// no foreign-period history — or the declared period already holds
+		// this file's batch: the per-key idempotency check is about to
+		// answer informationally, and THAT answer (skipped: batch X) is the
+		// honest one for a re-ask of an already-imported period.
+		return "", nil
+	}
+	b := *foreign
+	// multi-sheet siblings share the file hash by construction, but a
+	// sibling always shares the workbook's ONE declared period — a
+	// different-period hit is never a sibling of this import.
+	if allow {
+		return fmt.Sprintf("跨账期重复覆盖：文件已作为 %04d-%02d 导入（批次 %s，类型 %s）——本次以 --allow-period-duplicate 显式按申报账期 %04d-%02d 导入，事实留痕于批次", b.FeeYear, b.FeeMonth, b.ID, b.FeeType, year, month), nil
+	}
+	return "", refusef("文件 %s（SHA256 前 12 位 %s）已作为账期 %04d-%02d 导入过（批次 %s，类型 %s），与本次申报账期 %04d-%02d 不同——同一文件按另一账期再导入会把同一数据重复入账且账期口径互相矛盾；若确属补录/重分类，请显式覆盖（CLI：--allow-period-duplicate；HTTP 表单：allowPeriodDuplicate=true）", name, sha[:12], b.FeeYear, b.FeeMonth, b.ID, b.FeeType, year, month)
 }
 
 // normalizeRow converts one source row into a NormalizedRow. Period
@@ -1380,6 +1676,18 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// relPathOf converts an analysis-layer ABSOLUTE file path into the
+// logical forward-slash relative form the summary's files[] carries (the
+// cross-platform contract of #75 — the disk path joins the OS separator,
+// the contract path never does).
+func relPathOf(analysisDir, abs string) string {
+	rel, err := filepath.Rel(analysisDir, abs)
+	if err != nil {
+		return filepath.ToSlash(abs)
+	}
+	return path.Join(filepath.ToSlash(rel))
 }
 
 func filePaths(base string, files []partitionFile) []string {

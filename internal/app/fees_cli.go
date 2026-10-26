@@ -31,7 +31,7 @@ import (
 // closed-set test (usage_closset_test.go) pins it against the switch via
 // go/ast, in both directions.
 var feesSubcommands = []string{
-	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "details", "aliases", "cross-reconcile", "verify-sources",
+	"import", "import-sheets", "period-probe", "list", "rollback", "evidence", "query", "link-scan", "links", "risks", "rules", "clue-decisions", "details", "aliases", "cross-reconcile", "verify-sources", "verify-batches",
 }
 
 // splitFeeArgs parses the leading --db / --data flags of the fees command
@@ -118,6 +118,8 @@ func cmdFees(args []string, stdout, stderr io.Writer) error {
 		return cmdFeesCrossReconcile(ctx, svc, subArgs, stdout, stderr)
 	case "verify-sources":
 		return cmdFeesVerifySources(ctx, svc, subArgs, stdout, stderr)
+	case "verify-batches":
+		return cmdFeesVerifyBatches(ctx, svc, subArgs, stdout, stderr)
 	default:
 		return &usageError{msg: fmt.Sprintf("fees 子命令必须是 %s，收到 %q", commandEnum(feesSubcommands), sub)}
 	}
@@ -190,6 +192,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	file := fs.String("file", "", "费用文件路径（.csv / .xlsx；.xls 为 Excel 2003 二进制旧格式不受支持，可用 netopsfees convert 批量保真转换，issue #7），必填")
 	strictRows := fs.Bool("strict-rows", false, "严格行校验（#8，默认关闭）：台账可选列（读数/用量/单价/分摊）中无法解析为数字的非空单元格使该行导入失败并列明原因；关闭时按宽松口径导入（坏值降级为空，行不拦），确定性规则仍可经 risks ledger-consistency 随时核查")
 	trustPeriod := fs.Bool("period-trust-declared", false, "人工确认账期（#15，默认关闭）：文件内容识别的账期与 --year/--month 申报不一致时默认拒绝导入；加本标志则采用申报值继续导入，不一致事实留痕于批次（period_source=unverified）")
+	allowPeriodDup := fs.Bool("allow-period-duplicate", false, "跨账期重复覆盖（#20，默认关闭）：同一文件（SHA256 相同）已按另一账期导入过时默认拒绝——本标志显式确认按本次申报账期再导入，覆盖事实留痕于批次 period_basis 与导入 warnings")
 	feeType := fs.String("type", "", "费用类型："+strings.Join(fees.FeeTypes(), " / ")+"，必填")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
@@ -224,6 +227,7 @@ func cmdFeesImport(ctx context.Context, svc *fees.Service, args []string, stdout
 	summary, err := svc.Import(ctx, fees.ImportOptions{
 		Path: *file, FeeType: t, Year: *year, Month: *month, Mapping: mapping,
 		StrictRows: *strictRows, TrustDeclaredPeriod: *trustPeriod,
+		AllowPeriodDuplicate: *allowPeriodDup,
 	})
 	if err != nil {
 		var dup *fees.ErrDuplicateImport
@@ -249,6 +253,7 @@ func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, 
 	file := fs.String("file", "", "多 sheet 台账工作簿路径（.xlsx；每 sheet 一种费用类型，类型按表名/表头自动判定），必填")
 	strictRows := fs.Bool("strict-rows", false, "严格行校验（#8，默认关闭）：同 fees import")
 	trustPeriod := fs.Bool("period-trust-declared", false, "人工确认账期（#15，默认关闭）：同 fees import——任一 sheet 的内容账期与申报不一致时默认拒绝整本导入，加本标志采用申报值继续并留痕")
+	allowPeriodDup := fs.Bool("allow-period-duplicate", false, "跨账期重复覆盖（#20，默认关闭）：同 fees import——同一文件（SHA256 相同）已按另一账期导入过时默认拒绝，本标志显式确认并留痕")
 	year := fs.Int("year", 0, "文件声明的账期年份（2000–2100），必填")
 	month := fs.Int("month", 0, "文件声明的账期月份（1–12），必填")
 	if err := fs.Parse(args); err != nil {
@@ -263,6 +268,7 @@ func cmdFeesImportSheets(ctx context.Context, svc *fees.Service, args []string, 
 	summary, err := svc.ImportSheets(ctx, fees.SheetsImportOptions{
 		Path: *file, OriginalName: filepath.Base(*file), Year: *year, Month: *month,
 		StrictRows: *strictRows, TrustDeclaredPeriod: *trustPeriod,
+		AllowPeriodDuplicate: *allowPeriodDup,
 	})
 	if err != nil {
 		return err
@@ -786,6 +792,37 @@ func cmdFeesVerifySources(ctx context.Context, svc *fees.Service, args []string,
 	}
 	if report.Changed > 0 {
 		return fmt.Errorf("%d 个批次的源文件在导入后被改动（明细见 stdout JSON）: %w", report.Changed, errAlreadyPrinted)
+	}
+	return nil
+}
+
+// cmdFeesVerifyBatches implements `fees verify-batches` (#20 方案 C): the
+// three-face period consistency audit — fee_batches vs the snapshot path vs
+// the analysis partitions, plus the same-SHA-multi-period family report.
+// Read-only: nothing is mutated, nothing is refused; a non-empty problem
+// count exits non-zero so the operator's terminal sees it (stdout keeps the
+// one JSON envelope, errAlreadyPrinted discipline).
+func cmdFeesVerifyBatches(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("fees verify-batches")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "verify-batches 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	report, err := svc.VerifyBatches(ctx)
+	if err != nil {
+		return err
+	}
+	enc, jerr := json.MarshalIndent(report, "", "  ")
+	if jerr != nil {
+		return jerr
+	}
+	if _, err := stdout.Write(append(enc, '\n')); err != nil {
+		return err
+	}
+	if len(report.Problems) > 0 {
+		return fmt.Errorf("发现 %d 处批次/快照/分析层账期不一致（明细见 stdout JSON）: %w", len(report.Problems), errAlreadyPrinted)
 	}
 	return nil
 }

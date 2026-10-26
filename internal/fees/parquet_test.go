@@ -12,10 +12,14 @@ import (
 )
 
 // TestWriteParquetPartitionsLayout pins the analysis layer's physical
-// layout (#60): hive partition dirs (fee_type/year/month), one file per
-// batch×period, rows readable back with the pure-Go reader (the write
-// path must not depend on the duckdb engine to be verifiable), staging
-// removed after commit.
+// layout (#60) under the #20 declared-partition ruling: hive partition
+// dirs (fee_type/year/month), ONE file per batch — under the batch's
+// DECLARED period. The row-local periods below deliberately disagree
+// (2024-05 ×2, 2024-06, 2023-12 against a declared 2024-05): #20 pins
+// that they all land under the DECLARED partition (the batch row, the
+// snapshot dir and the analysis partition tell one period story), rows
+// readable back with the pure-Go reader (the write path must not depend
+// on the duckdb engine to be verifiable), staging removed after commit.
 func TestWriteParquetPartitionsLayout(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	rows := []NormalizedRow{
@@ -24,7 +28,7 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 		{SiteCode: "S1", AmountCents: 30025, Year: 2024, Month: 6, SourceFile: "h_f.csv", SourceRow: 4, ImportBatch: "fee_b1"},
 		{SiteCode: "S3", AmountCents: 5000, Year: 2023, Month: 12, SourceFile: "h_f.csv", SourceRow: 5, ImportBatch: "fee_b1"},
 	}
-	files, err := writeParquetPartitions(dir, FeeTypeElectricity, "fee_b1", rows)
+	files, err := writeParquetPartitions(dir, FeeTypeElectricity, "fee_b1", 2024, 5, rows)
 	if err != nil {
 		t.Fatalf("writeParquetPartitions: %v", err)
 	}
@@ -32,9 +36,7 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 	// constants, NOT filepath.Join — the API/CLI echo them verbatim, so
 	// the expectation must not flip with the test platform's separator.
 	want := []string{
-		"fees/fee_type=electricity/year=2023/month=12/batch-fee_b1.parquet",
 		"fees/fee_type=electricity/year=2024/month=05/batch-fee_b1.parquet",
-		"fees/fee_type=electricity/year=2024/month=06/batch-fee_b1.parquet",
 	}
 	if len(files) != len(want) {
 		t.Fatalf("files = %v, want %v", files, want)
@@ -51,13 +53,11 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 			t.Errorf("partition file missing: %v", err)
 		}
 	}
-	// row counts add up to the input.
-	total := 0
-	for _, f := range files {
-		total += f.rows
-	}
-	if total != len(rows) {
-		t.Errorf("manifest rows total = %d, want %d", total, len(rows))
+	// row counts add up to the input — ALL of them in the ONE declared
+	// partition (the #20 pin: rows whose own period disagrees are never
+	// rehomed to another month).
+	if len(files) != 1 || files[0].rows != len(rows) {
+		t.Errorf("manifest = %+v, want 1 file with all %d rows under the declared partition", files, len(rows))
 	}
 	// the batch's staging dir is cleaned up (the .staging parent may
 	// remain for concurrent batches — it must at least be EMPTY).
@@ -68,9 +68,9 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 	if entries, err := os.ReadDir(filepath.Join(dir, "fees", ".staging")); err == nil && len(entries) != 0 {
 		t.Errorf(".staging must be empty after the commit, has %d entries", len(entries))
 	}
-	// read one partition back with the pure-Go reader and verify the
+	// read the partition back with the pure-Go reader and verify the
 	// payload + lineage columns (hive columns are NOT in the file).
-	p := filepath.Join(dir, want[1])
+	p := filepath.Join(dir, want[0])
 	f, err := os.Open(p)
 	if err != nil {
 		t.Fatalf("open parquet: %v", err)
@@ -83,8 +83,8 @@ func TestWriteParquetPartitionsLayout(t *testing.T) {
 		t.Fatalf("read parquet: %v", err)
 	}
 	_ = r.Close()
-	if n != 2 {
-		t.Fatalf("read %d rows, want 2", n)
+	if n != 4 {
+		t.Fatalf("read %d rows, want 4 (every row, despite their disagreeing own periods)", n)
 	}
 	if got[0].SiteCode != "S1" || got[0].AmountCents != 10050 || got[0].SourceRow != 2 ||
 		got[0].SourceFile != "h_f.csv" || got[0].ImportBatch != "fee_b1" {
@@ -103,10 +103,10 @@ func TestBatchParquetFilesAndRemove(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	rowsB1 := []NormalizedRow{{SiteCode: "S1", AmountCents: 100, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b1"}}
 	rowsB2 := []NormalizedRow{{SiteCode: "S1", AmountCents: 200, Year: 2024, Month: 5, SourceRow: 2, ImportBatch: "fee_b2"}}
-	if _, err := writeParquetPartitions(dir, FeeTypeRepair, "fee_b1", rowsB1); err != nil {
+	if _, err := writeParquetPartitions(dir, FeeTypeRepair, "fee_b1", 2024, 5, rowsB1); err != nil {
 		t.Fatalf("write b1: %v", err)
 	}
-	if _, err := writeParquetPartitions(dir, FeeTypeRepair, "fee_b2", rowsB2); err != nil {
+	if _, err := writeParquetPartitions(dir, FeeTypeRepair, "fee_b2", 2024, 5, rowsB2); err != nil {
 		t.Fatalf("write b2: %v", err)
 	}
 	files1, err := BatchParquetFiles(dir, "fee_b1")

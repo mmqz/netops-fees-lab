@@ -83,6 +83,24 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return nil
 }
 
+// AppendPeriodBasis (#20) appends an audit note to a batch's period_basis —
+// the durable record of a row/declaration period disagreement (the data
+// landed under the declared partition while some rows' own period evidence
+// said otherwise) or of a --allow-period-duplicate override. Idempotent-safe:
+// appending the same note twice writes it twice (the caller owns dedup by
+// construction — the note is computed once per import).
+func (r *FeeBatchRepo) AppendPeriodBasis(ctx context.Context, id, note string) error {
+	res, err := r.q.ExecContext(ctx,
+		`UPDATE fee_batches SET period_basis = period_basis || ? WHERE id = ?`, note, id)
+	if err != nil {
+		return fmt.Errorf("repo: append fee batch period basis: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("repo: append fee batch period basis: %w: %s", domain.ErrNotFound, id)
+	}
+	return nil
+}
+
 // MarkCompleted flips a failed batch to completed with the final counts and
 // the completion timestamp — the commit point of the whole import. The
 // partial unique index fires here: a second completed batch with the same

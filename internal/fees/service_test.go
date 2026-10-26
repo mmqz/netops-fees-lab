@@ -188,10 +188,12 @@ func TestCrossBatchCoexistenceAndDuplicates(t *testing.T) {
 	_ = db
 }
 
-// TestRowPeriodOverridesDeclared pins the period semantics: each ROW's
-// own period column wins over the declared batch period (a file spanning
-// months splits into its partitions).
-func TestRowPeriodOverridesDeclared(t *testing.T) {
+// TestDeclaredPeriodOwnsPartition pins #20's ruling: the DECLARED period
+// owns the analysis partition. The row-local period column is still parsed
+// (a garbage value fails the row), but a DISAGREEMENT never rehomes the
+// data — every row lands under the declaration, the disagreement count
+// rides the warnings and the batch's period_basis.
+func TestDeclaredPeriodOwnsPartition(t *testing.T) {
 	svc, _, dir := newService(t)
 	ctx := context.Background()
 	src := writeCSV(t, dir, "spans.csv", `站址编码,账期,电费(元)
@@ -203,8 +205,34 @@ S3,2024-06,300.00
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if len(sum.Files) != 2 {
-		t.Fatalf("files = %v, want month=05 + month=06 partitions", sum.Files)
+	// ONE file, under the DECLARED month=05 — the 2024-06 rows are NOT
+	// rehomed (#20: batch row, snapshot dir and analysis partition tell
+	// one period story).
+	if len(sum.Files) != 1 || !strings.Contains(sum.Files[0], "month=05") {
+		t.Fatalf("files = %v, want exactly the declared month=05 partition", sum.Files)
+	}
+	// The two 2024-06 rows disagree — the warning names the count, the
+	// declared period and the ruling.
+	var found bool
+	for _, w := range sum.Warnings {
+		if strings.Contains(w, "2 行的行内账期证据与申报账期 2024-05 不一致") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want the row/declaration disagreement note", sum.Warnings)
+	}
+	if !strings.Contains(sum.PeriodBasis, "行内账期证据与申报账期") {
+		t.Fatalf("periodBasis = %q, want the durable disagreement trail", sum.PeriodBasis)
+	}
+	// The batch row carries the same trail (#20 acceptance: the record is
+	// durable, not just the response).
+	b, err := svc.List(ctx, FeeStatusCompleted)
+	if err != nil || len(b) != 1 {
+		t.Fatalf("list = %v (err %v), want the one batch", b, err)
+	}
+	if !strings.Contains(b[0].PeriodBasis, "行内账期证据与申报账期") {
+		t.Fatalf("batch periodBasis = %q, want the durable trail", b[0].PeriodBasis)
 	}
 }
 

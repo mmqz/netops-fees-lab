@@ -30,18 +30,24 @@ import (
 func importCustomRulesFixture(t *testing.T, svc *Service) {
 	t.Helper()
 	ctx := context.Background()
-	files := []struct{ name, body string }{
-		{"may.csv", "站址编码,账期,电费(元)\nS-SPIKE,2024-05,100.00\nS-FLAT,2024-05,100.00\n"},
-		{"june.csv", "站址编码,账期,电费(元)\nS-SPIKE,2024-06,250.00\nS-FLAT,2024-06,105.00\n"},
-		{"dup-a.csv", "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账A\n"},
-		{"dup-b.csv", "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账B\n"},
+	// #20: one file per declared month (the row-local 账期 column agrees
+	// with the declaration — the partition follows the declaration).
+	files := []struct {
+		name string
+		m    int
+		body string
+	}{
+		{"may.csv", 5, "站址编码,账期,电费(元)\nS-SPIKE,2024-05,100.00\nS-FLAT,2024-05,100.00\n"},
+		{"june.csv", 6, "站址编码,账期,电费(元)\nS-SPIKE,2024-06,250.00\nS-FLAT,2024-06,105.00\n"},
+		{"dup-a.csv", 6, "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账A\n"},
+		{"dup-b.csv", 6, "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账B\n"},
 	}
 	for _, f := range files {
 		p := filepath.Join(t.TempDir(), f.name)
 		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: 5}); err != nil {
+		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: f.m}); err != nil {
 			t.Fatalf("import %s: %v", f.name, err)
 		}
 	}

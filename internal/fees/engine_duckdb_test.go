@@ -20,16 +20,21 @@ func TestDuckEngineTotalsAndDuplicates(t *testing.T) {
 	ctx := context.Background()
 	// two batches covering the same site+period (the duplicate-settlement
 	// shape) + one batch of another period.
-	for _, f := range []struct{ name, body string }{
-		{"a.csv", "站址编码,账期,电费(元)\nS1,2024-05,100.00\nS2,2024-05,50.00\n"},
-		{"b.csv", "站址编码,账期,电费(元)\nS1,2024-05,300.00\n"},
-		{"c.csv", "站址编码,账期,电费(元)\nS1,2024-06,70.00\n"},
+	// #20: c.csv declares June (its rows land under the declaration).
+	for _, f := range []struct {
+		name string
+		m    int
+		body string
+	}{
+		{"a.csv", 5, "站址编码,账期,电费(元)\nS1,2024-05,100.00\nS2,2024-05,50.00\n"},
+		{"b.csv", 5, "站址编码,账期,电费(元)\nS1,2024-05,300.00\n"},
+		{"c.csv", 6, "站址编码,账期,电费(元)\nS1,2024-06,70.00\n"},
 	} {
 		p := filepath.Join(dir, f.name)
 		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: 5}); err != nil {
+		if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeElectricity, Year: 2024, Month: f.m}); err != nil {
 			t.Fatalf("import %s: %v", f.name, err)
 		}
 	}

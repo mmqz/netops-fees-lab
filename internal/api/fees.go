@@ -117,7 +117,8 @@ func (s *Server) handleFeesImport(w http.ResponseWriter, r *http.Request) {
 
 	summary, err := s.fees.Import(r.Context(), fees.ImportOptions{
 		Path: staged, OriginalName: name, FeeType: feeType, Year: year, Month: month, Mapping: mapping,
-		TrustDeclaredPeriod: trustPeriod,
+		TrustDeclaredPeriod:  trustPeriod,
+		AllowPeriodDuplicate: parseBoolForm(r.FormValue("allowPeriodDuplicate")),
 	})
 	if err != nil {
 		var dup *fees.ErrDuplicateImport

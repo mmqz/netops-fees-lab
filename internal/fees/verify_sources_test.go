@@ -137,8 +137,10 @@ func TestWritableSourceWarning(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	svc := fees.NewService(db, dir)
+	// declare 2026-01 = the rows' own period: the read-only silence this
+	// test pins must not be polluted by #20's disagreement warning.
 	sum2, err := svc.Import(context.Background(), fees.ImportOptions{
-		Path: ro, FeeType: "electricity", Year: 2026, Month: 2,
+		Path: ro, FeeType: "electricity", Year: 2026, Month: 1,
 	})
 	if err != nil {
 		t.Fatalf("import ro: %v", err)

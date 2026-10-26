@@ -906,7 +906,9 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 字段：`kind`/`kindLabel`（表型：tower-settlement 铁塔结算详单 / payroll 综维工资单 / wage-items 导入工资项 / electricity-ledger 电费台账 / perf-sheet 综维绩效单 / unknown 未识别）；`year`/`month`（识别账期，0 = 未知——电费台账仅列名月线索时 year=0）；`confidence`（`strong` A档专用账期字段 / `weak` B档间接线索 / `none` C档无账期字段）；`basis`（识别依据：字段名 + 一致行数 + 歧义注记）；`rowsSampled`（值探测采样行数，上限 50）。
 
-与 `POST /api/fees/imports` 的三档校验**同一套探测逻辑**：A档识别账期与申报不一致 → 422 `fee_import_refused`（两个值都在 message 里）；B档月线索不一致 → 422（依据列名注明弱识别）；一致/无法识别 → 正常导入，批次携带 `periodSource`（auto/unverified/manual）与 `periodBasis`。申报覆盖通道：multipart `periodTrustDeclared=1`（人工确认采用申报值，不一致留痕于批次，`periodSource=unverified`）。综维绩效单（perf-sheet）的「日期」列判定为填表时间，**不参与账期解析**（日期映射被丢弃并留痕）。
+与 `POST /api/fees/imports` 的三档校验**同一套探测逻辑**：A档识别账期与申报不一致 → 422 `fee_import_refused`（两个值都在 message 里）；B档月线索不一致 → 422（依据列名注明弱识别）；一致/无法识别 → 正常导入，批次携带 `periodSource`（auto/unverified/manual）与 `periodBasis`。申报覆盖通道：multipart `periodTrustDeclared=1`（人工确认采用申报值，不一致留痕于批次，`periodSource=unverified`）。
+
+**跨账期重复导入拦截（#20）**：同一文件（SHA256 相同）已按**另一账期**存在 completed 批次时，导入默认 422 `fee_import_refused`（message 携带两个账期值、既有批次号与覆盖方式提示）——幂等键含账期，跨月重导会静默翻倍数据且批次/快照/分析层三处账期口径互相矛盾。显式覆盖：multipart `allowPeriodDuplicate=1`（覆盖事实留痕于批次 `period_basis` 与响应 `warnings`）。同账期重复导入不受影响——仍走幂等信息性应答（200 + `skippedDuplicate`）。**分析层分区跟随申报账期**（#20 根因 B 根治）：行内账期列与申报不一致的行按申报账期入分区，不一致计数进 `warnings` 与批次留痕，绝不静默改写分区归属。配套审计子命令 `fees verify-batches`：逐 completed 批次核对 fee_batches ↔ 快照目录 ↔ 分析层分区三面账期 + 同 SHA 多账期家族报告（只报告不改动；problems 非空时 exit 非零）。综维绩效单（perf-sheet）的「日期」列判定为填表时间，**不参与账期解析**（日期映射被丢弃并留痕）。
 
 ## POST /api/fees/links/scan — 费用-资源分级关联扫描（#63，#58 阶段 3）
 

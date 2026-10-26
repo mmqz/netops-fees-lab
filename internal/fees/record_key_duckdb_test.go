@@ -18,7 +18,7 @@ import (
 	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
-func importRK(t *testing.T, dir, name string, rows string) {
+func importRK(t *testing.T, dir, name string, rows string, month int) {
 	t.Helper()
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
@@ -32,7 +32,7 @@ func importRK(t *testing.T, dir, name string, rows string) {
 		t.Fatal(err)
 	}
 	if _, err := svc.Import(context.Background(), ImportOptions{
-		Path: path, FeeType: "electricity", Year: 2026, Month: 1,
+		Path: path, FeeType: "electricity", Year: 2026, Month: month,
 	}); err != nil {
 		t.Fatalf("import %s: %v", name, err)
 	}
@@ -45,7 +45,7 @@ func importRK(t *testing.T, dir, name string, rows string) {
 func TestDuplicateSettlementRecordKeySemantics(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	importRK(t, dir, "jan.csv",
-		"T-01,OD-1,1880,2026-01\nT-01,OD-2,520,2026-01\nT-01,OD-3,175,2026-01\n")
+		"T-01,OD-1,1880,2026-01\nT-01,OD-2,520,2026-01\nT-01,OD-3,175,2026-01\n", 1)
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestDuplicateSettlementRecordKeySemantics(t *testing.T) {
 
 	// The same order re-imported as another batch: IS the duplicate shape.
 	dir2 := testsupport.TempDir(t)
-	importRK(t, dir2, "jan-a.csv", "T-02,OD-9,1000,2026-01\n")
+	importRK(t, dir2, "jan-a.csv", "T-02,OD-9,1000,2026-01\n", 1)
 	// second file, same order number — a distinct batch
 	{
 		db2, err := repo.Open(filepath.Join(dir2, "netops.db"))
@@ -96,7 +96,7 @@ func TestDuplicateSettlementRecordKeySemantics(t *testing.T) {
 
 	// Different orders across batches at one site: NOT duplicates.
 	dir3 := testsupport.TempDir(t)
-	importRK(t, dir3, "x.csv", "T-03,OD-A,500,2026-01\n")
+	importRK(t, dir3, "x.csv", "T-03,OD-A,500,2026-01\n", 1)
 	{
 		db3, err := repo.Open(filepath.Join(dir3, "netops.db"))
 		if err != nil {
@@ -131,8 +131,8 @@ func TestDuplicateSettlementRecordKeySemantics(t *testing.T) {
 // pretending the rise is a price anomaly.
 func TestSpikeAnnotatesRecordCountChange(t *testing.T) {
 	dir := testsupport.TempDir(t)
-	importRK(t, dir, "jan.csv", "T-01,OD-1,1000,2026-01\n")
-	importRK(t, dir, "feb.csv", "T-01,OD-1,1000,2026-02\nT-01,OD-2,4000,2026-02\n")
+	importRK(t, dir, "jan.csv", "T-01,OD-1,1000,2026-01\n", 1)
+	importRK(t, dir, "feb.csv", "T-01,OD-1,1000,2026-02\nT-01,OD-2,4000,2026-02\n", 2)
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestSpikeAnnotatesRecordCountChange(t *testing.T) {
 func TestRowsQueryRecordKeyDrillDown(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	importRK(t, dir, "jan.csv",
-		"T-01,OD-1,1880,2026-01\nT-01,OD-2,520,2026-01\n")
+		"T-01,OD-1,1880,2026-01\nT-01,OD-2,520,2026-01\n", 1)
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatal(err)

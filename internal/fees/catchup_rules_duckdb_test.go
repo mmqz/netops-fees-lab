@@ -20,7 +20,11 @@ import (
 	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
-func importCatchUpCSV(t *testing.T, dir, name, body string) {
+// importCatchUpCSV imports one catch-up fixture file under its own declared
+// period (#20: the declared period owns the partition — the row-local 账期
+// column must agree with the declaration for the data to land in the
+// intended month).
+func importCatchUpCSV(t *testing.T, dir, name, body string, month int) {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -33,7 +37,7 @@ func importCatchUpCSV(t *testing.T, dir, name, body string) {
 	t.Cleanup(func() { _ = db.Close() })
 	svc := NewService(db, dir)
 	if _, err := svc.Import(context.Background(), ImportOptions{
-		Path: path, FeeType: "electricity", Year: 2026, Month: 4,
+		Path: path, FeeType: "electricity", Year: 2026, Month: month,
 	}); err != nil {
 		t.Fatalf("import %s: %v", name, err)
 	}
@@ -52,7 +56,7 @@ func TestCatchUpRulesFire(t *testing.T) {
 			// normal 30-day cycle, receivable == received — silent
 			"NORM-01,2026-03-17,2026-04-15,5000,5000,5000,2026-04\n"+
 			// normal cycle but partial payment — fires receivable-unreceived (130 元)
-			"PART-01,2026-03-17,2026-04-15,13000,0,13000,2026-04\n")
+			"PART-01,2026-03-17,2026-04-15,13000,0,13000,2026-04\n", 4)
 	clues := ledgerConsistencyRows(t, dir, 2026, 0)
 	byRule := rulesOf(clues)
 	c, ok := byRule["purchase-period"]
@@ -97,12 +101,12 @@ func TestSpikeCatchUpAnnotation(t *testing.T) {
 	// January: normal 30-day window, 1000 元.
 	importCatchUpCSV(t, dir, "jan.csv",
 		"站址编码,购电起始日,购电截止日,应收电信,实收电信,电费(元),账期\n"+
-			"T-01,2025-12-17,2026-01-15,1000,1000,1000,2026-01\n")
+			"T-01,2025-12-17,2026-01-15,1000,1000,1000,2026-01\n", 1)
 	// February: one row, 764-day window (2024-01-05 → 2026-02-07, the
 	// #11 extreme — 2+ years of electricity billed at once), 61500 元.
 	importCatchUpCSV(t, dir, "feb.csv",
 		"站址编码,购电起始日,购电截止日,应收电信,实收电信,电费(元),账期\n"+
-			"T-01,2024-01-05,2026-02-07,34400,0,61500,2026-02\n")
+			"T-01,2024-01-05,2026-02-07,34400,0,61500,2026-02\n", 2)
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -134,9 +138,9 @@ func TestSpikeCatchUpAnnotation(t *testing.T) {
 func TestSpikeNoAnnotationBelowLine(t *testing.T) {
 	dir := testsupport.TempDir(t)
 	importCatchUpCSV(t, dir, "jan.csv",
-		"站址编码,购电起始日,购电截止日,电费(元),账期\nT-02,2025-12-17,2026-01-15,1000,2026-01\n")
+		"站址编码,购电起始日,购电截止日,电费(元),账期\nT-02,2025-12-17,2026-01-15,1000,2026-01\n", 1)
 	importCatchUpCSV(t, dir, "feb.csv",
-		"站址编码,购电起始日,购电截止日,电费(元),账期\nT-02,2026-01-16,2026-02-14,6000,2026-02\n") // 29-day window
+		"站址编码,购电起始日,购电截止日,电费(元),账期\nT-02,2026-01-16,2026-02-14,6000,2026-02\n", 2) // 29-day window
 	db, err := repo.Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatal(err)
