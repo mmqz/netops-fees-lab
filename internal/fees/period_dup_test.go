@@ -293,3 +293,82 @@ func getBatchRow(t *testing.T, svc *Service, id string) (domain.FeeBatch, error)
 	}
 	return domain.FeeBatch{}, os.ErrNotExist
 }
+
+// assertNoDuplicateWarnings is #25's general guard: no byte-identical
+// strings inside one warnings list — a duplicate entry means two sources
+// appended unconditionally again.
+func assertNoDuplicateWarnings(t *testing.T, ws []string) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(ws))
+	for _, w := range ws {
+		if _, dup := seen[w]; dup {
+			t.Fatalf("warnings carry a byte-identical duplicate: %q (all: %q)", w, ws)
+		}
+		seen[w] = struct{}{}
+	}
+}
+
+// TestDuplicateWarningsNoDupes (#25 方案 B): a duplicate import writes
+// NOTHING, so its answer carries only the library-recorded trail — the
+// current-run notices (the #6 writable-source advice) used to be derived
+// inside summaryFromBatch AND prepended again by the Import merge,
+// landing the same string twice, byte for byte (1 warning on the fresh
+// path, 2 identical on the duplicate path). Now: fresh import warns about
+// the writable source; the duplicate answer's warnings stay empty (the
+// durable record rides periodBasis/periodSource); the multi-sheet
+// channel's skipped sheets are equally clean.
+func TestDuplicateWarningsNoDupes(t *testing.T) {
+	svc, dir := newFeeService(t)
+	ctx := context.Background()
+	path := plainCSVDup(t, dir, "dup-warnings.csv")
+
+	first, err := svc.Import(ctx, ImportOptions{
+		Path: path, FeeType: FeeTypeElectricity, Year: 2026, Month: 2,
+	})
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	assertNoDuplicateWarnings(t, first.Warnings)
+	if len(first.Warnings) == 0 {
+		t.Fatal("fresh import of a writable (0644) source must carry the #6 advice — fixture drifted?")
+	}
+
+	second, err := svc.Import(ctx, ImportOptions{
+		Path: path, FeeType: FeeTypeElectricity, Year: 2026, Month: 2,
+	})
+	if err == nil {
+		t.Fatal("duplicate import must answer ErrDuplicateImport")
+	}
+	if second.SkippedDuplicate != true {
+		t.Fatalf("summary = %+v, want skippedDuplicate", second)
+	}
+	if len(second.Warnings) != 0 {
+		t.Fatalf("duplicate answer warnings = %q, want empty (#25 方案 B: only the library record — the current run wrote nothing)", second.Warnings)
+	}
+
+	// The multi-sheet channel's skipped sheets: the pre-#25 merge
+	// prepended the workbook-level advice onto every sheet result,
+	// duplicated for the skipped ones.
+	xlsxPath := threeTypeLedger(t, t.TempDir())
+	xopts := SheetsImportOptions{Path: xlsxPath, OriginalName: "2024年05月费用.xlsx", Year: 2024, Month: 5}
+	if _, err := svc.ImportSheets(ctx, xopts); err != nil {
+		t.Fatalf("first ImportSheets: %v", err)
+	}
+	sheetsSecond, err := svc.ImportSheets(ctx, xopts)
+	if err != nil {
+		t.Fatalf("re-import must be informational, got %v", err)
+	}
+	skipped := 0
+	for _, b := range sheetsSecond.Batches {
+		assertNoDuplicateWarnings(t, b.Warnings)
+		if b.SkippedDuplicate {
+			skipped++
+			if len(b.Warnings) != 0 {
+				t.Fatalf("skipped sheet %s warnings = %q, want empty (library record only)", b.Sheet, b.Warnings)
+			}
+		}
+	}
+	if skipped == 0 {
+		t.Fatal("re-import must skip the already-imported sheets — fixture drifted?")
+	}
+}

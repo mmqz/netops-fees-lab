@@ -804,7 +804,7 @@ netopslab query --db <path> nearest  --type base_station --lat 45.80 --lng 126.5
 
 ## POST /api/fees/imports — 费用数据导入（multipart，#58/#60/#61）
 
-multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进制旧格式，不受支持**——识别层与快照层均以 #92 专门消息拒收并引导「另存为 .xlsx（或导出 .csv）」，CLI `fees import` 帮助文案同口径）+ `feeType`（electricity/tower_lease/repair/maintenance）+ `year` + `month`（声明账期）+ 可选 `map`（列映射 JSON：`{"columns":{"siteCode":"站址编码","amount":"电费(元)","period":"账期"}}`，缺省表头自动识别；识别不到必需列 → 422）。管线：快照（内容寻址不可变）→ 规范化（金额/账期/站址编码；行失败计数不致命）→ Parquet 分区大表（`fee_type/year/month` hive 分区，行级账期优先于声明账期）→ 批次行（幂等键 = 哈希×类型×账期×映射）。**幂等**：同文件重导 → **200**（非 201）+ `skippedDuplicate=true` + `existingBatch`（informational，与 CLI 同严重级语义）。新导入 → **201** + 摘要（计数/分区文件清单/行错误）。全部行失败 → 422 `fee_rows_failed`（错误明细在摘要，重试通道开放）。参数非法 → 400；扩展名不支持（.csv/.xlsx 之外）→ 422 `unsupported_fee_file`。设计全貌见 [fees-layer.md](fees-layer.md)。
+multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进制旧格式，不受支持**——识别层与快照层均以 #92 专门消息拒收并引导「另存为 .xlsx（或导出 .csv）」，CLI `fees import` 帮助文案同口径）+ `feeType`（electricity/tower_lease/repair/maintenance）+ `year` + `month`（声明账期）+ 可选 `map`（列映射 JSON：`{"columns":{"siteCode":"站址编码","amount":"电费(元)","period":"账期"}}`，缺省表头自动识别；识别不到必需列 → 422）。管线：快照（内容寻址不可变）→ 规范化（金额/账期/站址编码；行失败计数不致命）→ Parquet 分区大表（`fee_type/year/month` hive 分区，行级账期优先于声明账期）→ 批次行（幂等键 = 哈希×类型×账期×映射）。**幂等**：同文件重导 → **200**（非 201）+ `skippedDuplicate=true` + `existingBatch`（informational，与 CLI 同严重级语义）。**重复应答的 `warnings` 为空（#25 方案 B）**：重复导入未写入任何数据，当前次运行的提醒（源文件可写建议 #6、骤降线 #12）描述的是一个没有发生的导入事件——不应出现；持久审计记录由 `periodSource`/`periodBasis` 字段携带（#20 覆盖留痕等），测试钉死「warnings 无重复项」且重复路径为空。新导入 → **201** + 摘要（计数/分区文件清单/行错误；`warnings` 携带本次导入的提醒——源文件可写建议等，绝不重复拼接）。全部行失败 → 422 `fee_rows_failed`（错误明细在摘要，重试通道开放）。参数非法 → 400；扩展名不支持（.csv/.xlsx 之外）→ 422 `unsupported_fee_file`。设计全貌见 [fees-layer.md](fees-layer.md)。
 
 ## POST /api/fees/imports/sheets — 多 sheet 台账整本导入（#125）
 
@@ -812,7 +812,7 @@ multipart 字段：`file`（.csv/.xlsx，≤10MB；**.xls 为 Excel 2003 二进�
 
 multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类型证据，请用单 sheet 通道显式声明）+ `year` + `month`。**没有 `feeType` 字段**——传了直接 400 指引去单 sheet 通道。
 
-- 幂等重复导入（同一文件、同模式）→ **200**，每个条目 `skippedDuplicate=true` + `existingBatch`（informational，与单 sheet 通道同一教义）；
+- 幂等重复导入（同一文件、同模式）→ **200**，每个条目 `skippedDuplicate=true` + `existingBatch`（informational，与单 sheet 通道同一教义）；被跳过的 sheet 条目 `warnings` 为空（#25：未写入即无当前次提醒，库内留痕在 `periodBasis`）；
 - 全新导入 → **201** + `batches[]`（sheet/feeType/batchId/行数/文件清单）+ `skippedSheets[]`（装饰性 sheet 按名列出，绝不静默丢弃）；
 - CSV、不可判定 sheet、必备列映射失败、与单 sheet 模式跨模式重导 → **422 `fee_import_refused`**（**全部 sheet 先分类后落地**，拒绝发生在任何数据落地之前，列出全部肇事 sheet）；
 - 中途服务器故障（部分 sheet 已落地）→ **500 `fee_import_partial`**，消息点名已落地批次（可查询/可回滚）与失败原因。

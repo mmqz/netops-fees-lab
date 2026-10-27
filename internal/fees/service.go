@@ -238,6 +238,14 @@ func (s *Service) Import(ctx context.Context, opts ImportOptions) (ImportSummary
 	if err == nil {
 		warnings = append(warnings, s.importRowAnomalyWarn(ctx, opts.FeeType, opts.Year, opts.Month, sum.RowsImported)...)
 	}
+	if sum.SkippedDuplicate {
+		// #25: a duplicate answer carries ONLY the library record — the
+		// current run wrote nothing, so the current-run warnings (source
+		// writability, 骤降线) do not apply; periodBasis/periodSource fields
+		// already carry the durable trail. Prepending the outer copy here is
+		// what used to duplicate the source-writable advice byte-for-byte.
+		return sum, err
+	}
 	sum.Warnings = append(warnings, sum.Warnings...)
 	return sum, err
 }
@@ -664,7 +672,17 @@ func (s *Service) ImportSheets(ctx context.Context, opts SheetsImportOptions) (S
 			RowsTotal: summary.RowsTotal, RowsImported: summary.RowsImported,
 			RowsFailed: summary.RowsFailed, Files: summary.Files, Errors: summary.Errors,
 			SkippedDuplicate: summary.SkippedDuplicate, ExistingBatch: summary.ExistingBatch,
-			Warnings: append(append([]string{}, warnings...), summary.Warnings...),
+			// #25: a skipped-duplicate sheet wrote nothing — its warnings stay
+			// empty (the library record rides periodBasis); a fresh sheet gets
+			// the workbook-level notices (source writability of #6) prepended
+			// to its own, the pre-#25 merge that used to emit the advice twice
+			// for duplicates once ran unconditionally.
+			Warnings: func() []string {
+				if summary.SkippedDuplicate {
+					return nil
+				}
+				return append(append([]string{}, warnings...), summary.Warnings...)
+			}(),
 		}
 		if result.SkippedDuplicate && result.BatchID == "" {
 			result.BatchID = summary.ExistingBatch
@@ -1031,9 +1049,14 @@ func (s *Service) summaryFromBatch(ctx context.Context, existing domain.FeeBatch
 			sum.Files = append(sum.Files, relPathOf(s.analysisDir(), p))
 		}
 	}
-	// warnings: what the import WOULD have warned about is knowable now —
-	// the source file is at hand (writable-source advice of #6).
-	sum.Warnings = sourceWritableWarnings(opts.Path)
+	// warnings (#25 方案 B): a duplicate import writes NOTHING — the
+	// current-run notices (source writability of #6, the 骤降线 of #12)
+	// describe an import event that did not happen, and re-deriving
+	// them here is exactly what used to land byte-identical duplicates
+	// when the callers prepended their own copy. The durable record
+	// rides the periodBasis/periodSource fields already; the warnings
+	// list of a duplicate answer stays empty — only the library-recorded
+	// trail, never fresh advice about a file nobody re-read.
 	return sum
 }
 
