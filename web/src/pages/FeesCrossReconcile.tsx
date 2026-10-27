@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { FeeAliasProposal, FeeCrossReconcileResult, FeeSiteCodeAlias } from '../api/types';
+import { useFeesDataYear } from '../hooks/useFeesDataYear';
 import {
   addFeeAlias,
   fetchFeeAliases,
@@ -77,7 +78,9 @@ export function FeesCrossReconcile() {
   const toast = useToast();
 
   // ---- 对账表 ----
-  const [xYear, setXYear] = useState(String(new Date().getFullYear()));
+  // v0.20.3 数据优先年份默认：对账两面的年份输入同盲区修复（useFeesDataYear
+  // 套用纪律三条——初始日历年、发现落地一次性切最新有数据年、用户先改则不抢）。
+  const { year: xYear, setYear: setXYear } = useFeesDataYear();
   const [xMonth, setXMonth] = useState('');
   const [xResult, setXResult] = useState<FeeCrossReconcileResult | null>(null);
   const [xRunning, setXRunning] = useState(false);

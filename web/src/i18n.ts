@@ -22,7 +22,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.20.2';
+export const APP_VERSION = 'v0.20.3';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -761,6 +761,12 @@ export const FEES_OV_MOM_DOWN = (r: string) => `${r}%`;
 export const FEES_OV_MOM_NONE = '—';
 export const FEES_OV_TREND_TITLE = '月度费用趋势（万元）';
 export const FEES_OV_TREND_EMPTY = '所选年份暂无导入数据——先在下方导入面板落一批台账。';
+export const FEES_OV_YEAR_EMPTY = (year: string) =>
+  `${year} 年全年无导入数据——该年分析没有输入。`;
+export const FEES_OV_YEAR_EMPTY_KNOWN = (years: string) =>
+  `有数据的年份：${years}——年份框切过去即可查看。`;
+export const FEES_OV_YEAR_EMPTY_ALL =
+  '尚未导入任何费用数据——先在「费用台账」页导入，分析才有输入。';
 export const FEES_OV_TREND_SPIKE = '环比异常点';
 export const FEES_OV_TREND_LEGEND_SPIKE = '（空心环=环比异常点）';
 export const FEES_OV_STEPS = ['看总量', '找异常', '看详情', '交叉验证', '出结论'];

@@ -25,6 +25,7 @@ import { ErrorBlock } from '../components/ErrorBlock';
 import { Spinner } from '../components/Spinner';
 import { centsToYuan, clueKey, formatRiskMetric, riskEmptyState } from './fees-format';
 import { FeesRiskMap } from './FeesRiskMap';
+import { useFeesDataYear } from '../hooks/useFeesDataYear';
 import {
   centsToWan,
   clueStateLabel,
@@ -37,6 +38,7 @@ import {
   slotOf,
   sortMergedClues,
   trendGeometry,
+  yearEmptyBanner,
   TREND_VIEW_H,
   TREND_VIEW_W,
   type ClueSortKey,
@@ -50,6 +52,9 @@ import {
   FEES_OV_CARD_SITES,
   FEES_OV_CLUES_EMPTY,
   FEES_OV_CLUES_EMPTY_NOT_ANALYZED,
+  FEES_OV_YEAR_EMPTY,
+  FEES_OV_YEAR_EMPTY_KNOWN,
+  FEES_OV_YEAR_EMPTY_ALL,
   FEES_RISKS_NO_DATA,
   FEES_OV_CLUES_EXPORT,
   FEES_OV_CLUES_EXPORT_OK,
@@ -128,7 +133,10 @@ export function FeesOverview() {
   const toast = useToast();
 
   // ---- 总览参数 ----
-  const [ovYear, setOvYear] = useState(String(new Date().getFullYear()));
+  // v0.20.3 数据优先年份默认：初始仍是当前年（首帧不空），发现落地后
+  // 一次性切到最新有数据年（2024 数据环境不再落在 2026 空白仪表盘上）；
+  // 用户碰过年份框后永不再抢。dataYears 同时是年份诚实空态的判据。
+  const { year: ovYear, setYear: setOvYear, dataYears } = useFeesDataYear();
   const [ovMonthSel, setOvMonthSel] = useState(''); // '' = 最新有数据月
   const [ovType, setOvType] = useState('electricity');
 
@@ -238,6 +246,13 @@ export function FeesOverview() {
   }, [slots]);
 
   const hasAnyData = dataMonths.length > 0;
+
+  /** 年份诚实空态裁决（v0.20.3）：所选年全年无数据（resolvedMonth=0）时
+   * 的横幅形态——旧版这里整页空白，运营者只能看图猜年份。 */
+  const yearEmptyKind = useMemo(
+    () => (resolvedMonth > 0 ? 'none' : yearEmptyBanner(dataYears, Number(ovYear))),
+    [resolvedMonth, dataYears, ovYear],
+  );
 
   /** 一键分析：十场景顺序执行（治理默认阈值；单场景调参在风险面板）。 */
   const runAll = useCallback(async () => {
@@ -459,6 +474,28 @@ export function FeesOverview() {
 
         {!ovLoading && !ovError.includes('年份') && (
           <>
+            {/* v0.20.3 年份诚实空态：所选年全年无数据（resolvedMonth=0）时
+                旧版这里整页空白（卡片横幅条件 resolvedMonth>0 不成立、趋势
+                不渲染、一键分析不跑）。四态裁决（yearEmptyBanner）分家文案：
+                全库无数据→只引导导入；该年空+清单已知→指路有数据年份；
+                发现未知→只说该年无数据，绝不猜清单。 */}
+            {yearEmptyKind !== 'none' && (
+              <div className="banner banner--hint" role="note">
+                <p>
+                  {yearEmptyKind === 'all-empty'
+                    ? FEES_OV_YEAR_EMPTY_ALL
+                    : FEES_OV_YEAR_EMPTY(ovYear)}
+                </p>
+                {yearEmptyKind === 'year-empty' && (
+                  <p>
+                    {FEES_OV_YEAR_EMPTY_KNOWN(
+                      (dataYears ?? []).map(String).join('、'),
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
+
             {cards.length === 0 && resolvedMonth > 0 && (
               <div className="banner banner--hint">
                 {FEES_OV_TREND_EMPTY}（{monthLabel}）
@@ -763,8 +800,13 @@ export function FeesOverview() {
       </div>
 
       {/* #18 站点风险地图：有坐标数据才渲染（组件内部自判——无 geo 数据
-          返回 null），跨场景线索列表照常（issue 验收 2 的列表形态不变）。 */}
-      <FeesRiskMap feeType={ovType} year={Number(ovYear)} month={resolvedMonth} />
+          返回 null），跨场景线索列表照常（issue 验收 2 的列表形态不变）。
+          v0.20.3：resolvedMonth<=0（所选年全年无数据）时月度地图没有可
+          定义的账期范围——不挂载不取数，month=0 永不再发给后端（旧版
+          正是把 month=0 发出去才把「month 必须是 1–12」校验错浮上页面的）。 */}
+      {resolvedMonth > 0 && (
+        <FeesRiskMap feeType={ovType} year={Number(ovYear)} month={resolvedMonth} />
+      )}
     </section>
   );
 }

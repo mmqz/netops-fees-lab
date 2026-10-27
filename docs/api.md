@@ -833,6 +833,12 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 证据链的**第三级兑现**：风险线索/导入错误携带 `source_file + source_row + import_batch` 锚点，本端点把锚点回读成**快照里的原始行**——从「结论」到「原文」一步可查。`row` 是**源文件自身的行号**（表头 = 1；与每条线索的 `sourceRow`、导入错误 detail 里的行号同口径），非法（非整数 / < 1）→ 400。返回 `EvidenceRow{batchId, sourceFile, originalName, feeType, year, month, row, header[], cells[]}`（`header` + `cells` 逐列对位，运营者无需再打开原始文件）。未知批次 id → 404。**纯文件读取，无引擎参与**：任何构建（含默认构建）都可读。快照不可变且**按设计在回滚后存活**，故 `rolled_back` 批次的证据同样可回读（证据寿命 > 批次寿命，与 §`POST /api/fees/batches/{id}/rollback` 同一教义）。CLI 等价：`netopslab fees evidence --batch <id> --row <n>`。
 
+## GET /api/fees/years — 费用数据年份发现（v0.20.3）
+
+年份输入的**数据优先默认**与总览**年份诚实空态**的判据面：`{"years":[2023,2024]}`——有分析行的年份**升序**列表。旧观感缺陷：年份输入一律默认当前年，2024 数据环境打开总览是 2026 的空白仪表盘 + 风险地图把 `month=0` 发给后端浮出「month 必须是 1–12 的整数」校验错——日历替数据做了主。本端点让前端「默认跟随数据」：有数据年取最新有数据年，无数据回退当前年。
+
+**路径级发现，两种构建都作答（无 501）**：年份清单解析自引擎读表用的同一 glob（`analysis/fees/fee_type=*/year=*/month=*/*.parquet`）的 `year=` 分区组件——目录在场是元数据不是引擎查询，与 `read_parquet` 实际会扫的面**零漂移**。**回滚后的空分区目录不算在场**（glob 匹配文件不匹配目录——回滚删净的年份诚实缺席）；坏 glob（数据目录含 `[`）如实 500 上报，绝不伪装成「无数据」（#105 教义）；stray 路径不具写入器五段分区形则跳过，不炸年份选择器。无参数；只读开放（同其它读面）。
+
 ## GET /api/fees/query/totals?feeType=&year=&month=&limit= — 站址费用汇总
 
 **固定预设 + 参数**（调用方传不了 SQL——MCP 红线延续到引擎面）。`month` 可省（整年）；`limit` 默认 20。返回 `{preset,feeType,year,month,items:[{siteCode,rows,totalCents}],total}`（按 totalCents 降序）。**金额为整数分**（`totalCents`，#65 P1-a：金额在解析/存储/聚合/输出全链路走 int64 分，杜绝浮点对账误差；展示层自行 /100）。**默认构建 501 `engine_not_built`**（DuckDB 引擎随 `-tags duckdb` CGO 构建编译；Windows 原生无 duckdb 路径——用 Docker/WSL2，见 fees-layer.md §5；导入/快照/Parquet 写入不受影响）。

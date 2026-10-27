@@ -96,6 +96,7 @@ func (s *Server) apiRoutes() []route {
 		{Method: "GET", Pattern: "/api/fees/batches", Tag: "fees", Summary: "费用导入批次列表（status 过滤，最新在前；含 periodSource/periodBasis 账期来源与依据 #15）", Handler: s.handleFeesBatchesList},
 		{Method: "POST", Pattern: "/api/fees/batches/{id}/rollback", Tag: "fees", Summary: "回滚费用批次（删分析行、保快照证据；管理级）", Handler: s.handleFeesRollback, Admin: true},
 		{Method: "GET", Pattern: "/api/fees/batches/{id}/evidence", Tag: "fees", Summary: "费用证据回读：快照第 N 行原文（row=源文件自身编号，表头=1；source_row 锚点的第三级证据，回滚批次仍可读）", Handler: s.handleFeesEvidence},
+		{Method: "GET", Pattern: "/api/fees/years", Tag: "fees", Summary: "费用数据年份发现（有分析行的年份升序列表；路径级分区在场清单——回滚后的空分区目录不算在场，两种构建都作答；年份输入默认跟随数据而非日历 + 总览年份诚实空态的判据）", Handler: s.handleFeesDataYears},
 		{Method: "GET", Pattern: "/api/fees/query/totals", Tag: "fees", Summary: "费用分析：站址汇总（feeType/year[/month]，DuckDB 引擎需 duckdb 构建）", Handler: s.handleFeesQueryTotals,
 			ExtraStatuses: map[int]string{http.StatusNotImplemented: "engine_not_built — 默认构建未编译 DuckDB 分析引擎（需 -tags duckdb）"}},
 		{Method: "GET", Pattern: "/api/fees/query/monthly", Tag: "fees", Summary: "费用分析：月度趋势序列（#3——feeType/year 全年逐月 rows/sites/totalCents；无数据月份不返回，展示层补空白不造零）", Handler: s.handleFeesQueryMonthly,

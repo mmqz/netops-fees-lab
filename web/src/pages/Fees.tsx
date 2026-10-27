@@ -50,6 +50,7 @@ import {
 import { FeesCrossReconcile } from './FeesCrossReconcile';
 import { FeesDetails } from './FeesDetails';
 import { FeesOverview } from './FeesOverview';
+import { useFeesDataYear } from '../hooks/useFeesDataYear';
 import { useToast } from '../components/Toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Drawer } from '../components/Drawer';
@@ -609,9 +610,10 @@ export function FeesPage() {
   }
 
   // ---- 查询预设（#121：浏览器通道补全——汇总/重复候选两表面板） ----
+  // v0.20.3 数据优先年份默认：同总览（useFeesDataYear 套用纪律三条）。
   const [qPreset, setQPreset] = useState<'totals' | 'duplicates'>('totals');
   const [qType, setQType] = useState('electricity');
-  const [qYear, setQYear] = useState(String(new Date().getFullYear()));
+  const { year: qYear, setYear: setQYear } = useFeesDataYear();
   const [qMonth, setQMonth] = useState('');
   const [qTotals, setQTotals] = useState<FeeTotalsResult | null>(null);
   const [qDuplicates, setQDuplicates] = useState<FeeDuplicatesResult | null>(null);
@@ -658,7 +660,9 @@ export function FeesPage() {
   const [feeTab, setFeeTab] = useState<'risks' | 'details' | 'reconcile' | 'links' | 'rules' | 'batches' | 'import'>('risks');
   const [scenario, setScenario] = useState('duplicate-settlement');
   const [riskType, setRiskType] = useState('electricity');
-  const [riskYear, setRiskYear] = useState(String(new Date().getFullYear()));
+  // v0.20.3 数据优先年份默认：风险面板同年份盲区修复（2024 数据环境不再
+  // 默认落 2026 空结果）；发现失败静默回退日历年。
+  const { year: riskYear, setYear: setRiskYear } = useFeesDataYear();
   const [riskMonth, setRiskMonth] = useState('');
   const [riskLimit, setRiskLimit] = useState('50');
   // #89: the per-scenario thresholds — visible only for their scenario, so

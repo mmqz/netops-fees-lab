@@ -22,13 +22,12 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.20.2 is
-// the zero-money honesty patch (#29 tower settlement multi-line headers +
-// the type-scoped amount 口径 + the all-zero import warning, #31 reconcile
-// reads presence by rows and warns dead money faces, #30 spike exclusions
-// classified with per-class advice, #32 verify-batches gains the data
-// face, #28 the bare-t.TempDir sweep + gate).
-const AppVersion = "v0.20.2"
+// the health endpoint, the MCP server implementation and the CLI. v0.20.3 is
+// the data-first year patch (GET /api/fees/years path-level discovery — the
+// year pickers default to the latest year WITH data instead of the calendar,
+// the overview answers a dataless year with the honest year-empty banner
+// instead of a blank dashboard, and the risk map never sends month=0).
+const AppVersion = "v0.20.3"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

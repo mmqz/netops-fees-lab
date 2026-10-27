@@ -1553,6 +1553,12 @@ export interface FeeMonthlyResult {
   total: number;
 }
 
+/** GET /api/fees/years 信封（v0.20.3：有分析行的年份升序——路径级发现，
+ * 两种构建都作答；空列表=尚未导入任何费用数据，绝非 null） */
+export interface FeeYearsResult {
+  years: number[];
+}
+
 /** 跨批次重复结算候选行（GET /api/fees/query/duplicates；候选非认定） */
 export interface FeeDuplicatesRow {
   siteCode: string;

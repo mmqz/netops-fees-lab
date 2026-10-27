@@ -61,6 +61,58 @@ func (s *Service) analysisDir() string {
 	return filepath.Join(s.dir, "analysis")
 }
 
+// DataYears answers the years the analysis face actually carries rows for,
+// ascending — the read-open face behind the year pickers' data-first
+// default and the overview's honest year-empty banner (the old calendar
+// default opened a 2026 dashboard against 2024 data: blank cards, a
+// misleading month-validation error from the risk map's month=0, and the
+// operator left to guess which year to type).
+//
+// The discovery is PATH-LEVEL, deliberately: the same glob the engines
+// read with (feeTableGlob), parsed for its year= partition component —
+// so it answers in EVERY build (directory presence is metadata, not an
+// engine query — no 501), and it can never drift from what read_parquet
+// would actually scan. An empty-after-rollback partition (directory
+// alive, files gone) is honestly ABSENT — glob matches files, not
+// directories. A glob error surfaces to the caller instead of reading
+// as empty (#105's lesson: a "[" in the data dir must never be masked
+// into "no data"). Stray paths that don't carry the writer's five-part
+// partition shape are skipped, never fatal to the picker.
+func (s *Service) DataYears() ([]int, error) {
+	matches, err := filepath.Glob(feeTableGlob(s.analysisDir()))
+	if err != nil {
+		return nil, fmt.Errorf("fees: 数据年份发现: %w", err)
+	}
+	root := s.analysisDir()
+	seen := make(map[int]bool, len(matches))
+	for _, m := range matches {
+		rel, rerr := filepath.Rel(root, m)
+		if rerr != nil {
+			continue
+		}
+		// fees/fee_type=X/year=Y/month=M/file.parquet — the year is the
+		// third component; ToSlash first (#32's lesson: Linux never sees
+		// the Windows separator Glob answers with there).
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) != 5 || !strings.HasPrefix(parts[2], "year=") {
+			continue
+		}
+		y, perr := strconv.Atoi(strings.TrimPrefix(parts[2], "year="))
+		if perr != nil {
+			continue
+		}
+		seen[y] = true
+	}
+	// Non-nil empty slice: the fresh-install answer is "years: []", never
+	// null — absence is a statement, and the JSON face says it as [].
+	years := make([]int, 0, len(seen))
+	for y := range seen {
+		years = append(years, y)
+	}
+	sort.Ints(years)
+	return years, nil
+}
+
 // ImportOptions is one import request: the file, the declared fee type
 // and period (the operator's statement), and the confirmed core-column
 // mapping (target field → source header). When Mapping is empty the

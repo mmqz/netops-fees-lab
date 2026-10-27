@@ -19,6 +19,7 @@ import {
   slotOf,
   sortMergedClues,
   trendGeometry,
+  yearEmptyBanner,
 } from './feesOverviewModel';
 
 describe('padMonthly', () => {
@@ -117,6 +118,26 @@ describe('centsToWan', () => {
     expect(centsToWan(33_990_000)).toBe('33.99');
     expect(centsToWan(1_000_000)).toBe('1');
     expect(centsToWan(0)).toBe('0');
+  });
+});
+
+describe('yearEmptyBanner（v0.20.3 年份诚实空态四态裁决）', () => {
+  it('null（发现未知/失败）→ generic：只说该年无数据，绝不猜清单', () => {
+    expect(yearEmptyBanner(null, 2026)).toBe('generic');
+  });
+
+  it('[]（确证全库无导入）→ all-empty：只引导导入，不谈切年份', () => {
+    expect(yearEmptyBanner([], 2026)).toBe('all-empty');
+  });
+
+  it('该年不在数据年份清单 → year-empty：横幅可指路有数据的年份', () => {
+    // 实测形态：数据在 2024，日历 2026 打开总览——最需要的正是这句指路。
+    expect(yearEmptyBanner([2023, 2024], 2026)).toBe('year-empty');
+  });
+
+  it('该年在清单中 → none：防御性归位（月度序列才是空态裁决者）', () => {
+    expect(yearEmptyBanner([2023, 2024], 2024)).toBe('none');
+    expect(yearEmptyBanner([2024], 2024)).toBe('none');
   });
 });
 

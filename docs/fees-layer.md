@@ -103,6 +103,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `GET /api/fees/batches?status=` | 批次列表（最新在前，中文类型标签 + 账期渲染） |
 | `POST /api/fees/batches/{id}/rollback` | 回滚（删分析行保快照；409/404 守卫） |
 | `GET /api/fees/batches/{id}/evidence?row=` | 证据回读：快照第 N 行原文（#86；row = 源文件自身编号，表头 = 1；`source_row` 锚点的第三级证据，回滚批次仍可读） |
+| `GET /api/fees/years` | 数据年份发现（v0.20.3：有分析行的年份升序；路径级分区在场清单——回滚后的空分区目录不算在场，两种构建都作答无 501；年份输入默认跟随数据而非日历、总览年份诚实空态的判据面，详见 api.md） |
 | `GET /api/fees/query/totals?feeType=&year=&month=&limit=` | 站址汇总预设 |
 | `GET /api/fees/query/duplicates?feeType=&year=&month=` | 跨批次重复结算候选预设 |
 | `POST /api/fees/links/scan` | 分级关联扫描（exact/rule 自动确认，fuzzy 提案） |
@@ -117,7 +118,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 | `POST /api/fees/risk-clue-decisions` | 风险线索人工裁定（#119：verify 属实留档 / dismiss 排除永不再现；UPSERT 可复议；人类通道，MCP 无此写面；不依赖引擎——默认构建可裁定） |
 | `GET /api/fees/risk-clue-decisions?scenario=&feeType=&status=&siteCode=&year=` | 裁定台账（最新优先，过滤器封闭集校验；审计视图） |
 
-写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 21 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
+写路由过 v0.11-R13 令牌写门禁（POST 一律 Bearer）；查询预设默认构建答 **501 `engine_not_built`**（诚实契约）。全部端点进 OpenAPI 文档（`fees` tag 共 33 条路由，路由表生成零漂移；计数以 [facts.md](facts.md) 为机读事实源，`TestAPIRouteCountsMatchFactsFile` 比对路由表实数钉死——v0.20.3 修正了本行停更的 21 条旧数）。实测：duckdb 二进制上 `query/totals` 跨批聚合 2233.56 与 `query/duplicates` 唯一候选命中——与 CLI 旅程逐字一致。
 
 ## 8. 风险十场景（#64，#58 阶段 4；#114 加场景 7；#118 加场景 8；#2 加场景 10）
 

@@ -44,6 +44,7 @@ import type {
   FeeSiteCodeAlias,
   FeeSiteCodeAliasesList,
   FeeMonthlyResult,
+  FeeYearsResult,
   FeeTotalsResult,
   FeePeriodProbeResult,
   FeeRiskRule,
@@ -702,6 +703,12 @@ export function fetchFeeMonthly(params: {
   return requestJson<FeeMonthlyResult>(
     `/fees/query/monthly${buildQuery(params as Record<string, string | number | undefined>)}`,
   );
+}
+
+/** GET /api/fees/years（v0.20.3 数据年份发现——路径级分区在场清单，升序；
+ * 年份输入默认跟随数据而非日历的判据面） */
+export function fetchFeeYears(): Promise<FeeYearsResult> {
+  return requestJson<FeeYearsResult>('/fees/years');
 }
 
 /** GET /api/fees/details —— 明细台账（#16：过滤 linkKey/period/feeType/status/category） */

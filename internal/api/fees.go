@@ -399,6 +399,25 @@ func stageFeeUpload(dataDir string, file io.Reader, name string) (string, error)
 	return storeUpload(filepath.Join(dataDir, "uploads", "fees"), data, name)
 }
 
+// handleFeesDataYears implements GET /api/fees/years — the year picker's
+// data-first default + the honest year-empty banner (the old calendar
+// default answered a 2026 dashboard against 2024 data with blank cards
+// and the risk map's month-validation error). Read-open in EVERY build:
+// the discovery is path-level (partition file presence), not an engine
+// query — the default build answers too, no 501 here.
+func (s *Server) handleFeesDataYears(w http.ResponseWriter, r *http.Request) {
+	if s.fees == nil {
+		respondError(w, http.StatusInternalServerError, "internal", "费用分析服务未装配")
+		return
+	}
+	years, err := s.fees.DataYears()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal", "数据年份发现失败: "+err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"years": years})
+}
+
 // handleFeesBatchesList implements GET /api/fees/batches?status= — the
 // fee import batch list (newest first; empty status = all).
 func (s *Server) handleFeesBatchesList(w http.ResponseWriter, r *http.Request) {

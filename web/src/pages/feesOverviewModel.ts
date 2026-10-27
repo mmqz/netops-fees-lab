@@ -50,6 +50,32 @@ export function slotOf(slots: MonthSlot[], month: number): MonthSlot | null {
   return slots.find((s) => s.month === month) ?? null;
 }
 
+export type YearEmptyKind = 'none' | 'all-empty' | 'year-empty' | 'generic';
+
+/**
+ * yearEmptyBanner — 年份诚实空态裁决（v0.20.3，纯函数）。
+ *
+ * 旧观感缺陷：所选年全年无数据时（resolvedMonth 解析为 0）总览整页空白
+ * ——卡片横幅条件（resolvedMonth > 0）不成立、趋势不渲染、一键分析不跑，
+ * 加上风险地图把 month=0 发给后端浮出校验错，运营者只好看图猜年份。
+ *
+ * 裁决四态（空态文案的分家依据——「该年无数据」「全库无数据」「清单可
+ * 指引」是三个不同的陈述，绝不共用一句话）：
+ * - 'none'：该年有数据（resolvedMonth<=0 时理论到不了这，防御性返回——
+ *   不渲染任何横幅，让真正的空月横幅接管）；
+ * - 'year-empty'：该年无数据且已知有数据的年份清单 → 横幅带「有数据的
+ *   年份：…」指路（2024 数据环境打开 2026 时最需要的正是这句话）；
+ * - 'all-empty'：全库确证无任何导入 → 横幅只引导导入，不谈「切年份」；
+ * - 'generic'：年份发现未知（发现失败/在途）→ 横幅只说该年无数据，绝不
+ *   猜清单（未知 ≠ 无数据——null 与 [] 语义分家）。
+ */
+export function yearEmptyBanner(dataYears: number[] | null, year: number): YearEmptyKind {
+  if (dataYears === null) return 'generic';
+  if (dataYears.length === 0) return 'all-empty';
+  if (dataYears.includes(year)) return 'none';
+  return 'year-empty';
+}
+
 /**
  * trendGeometry 把 1–4 条费用类型的 12 月序列投影进 SVG viewBox。
  * 坐标计算是纯函数（MetricChart 的确定性渲染教义）；max==0（全空）时

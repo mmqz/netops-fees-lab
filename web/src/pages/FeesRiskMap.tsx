@@ -44,6 +44,15 @@ export function FeesRiskMap(props: { feeType: string; year: number; month: numbe
 
   useEffect(() => {
     let cancelled = false;
+    // v0.20.3 双护栏的内层：month<=0（账期未解析/所选年全年无数据）没有
+    // 可定义的地图范围——不取数不落态（外层 FeesOverview 已不挂载本组件，
+    // 这里防的是未来其它挂载点；旧版正是把 month=0 发出去吃 400 校验错）。
+    if (month <= 0) {
+      setReport(null);
+      setError('');
+      setLoading(false);
+      return;
+    }
     setError('');
     setLoading(true);
     fetchFeeRiskMap({ feeType, year, month })
@@ -71,6 +80,11 @@ export function FeesRiskMap(props: { feeType: string; year: number; month: numbe
     if (error.includes('501') || error.includes('engine')) return null;
     return <ErrorBlock message={error} />;
   }
+
+  // v0.20.3：month<=0 不渲染（与外层护栏互为冗余——本组件自身也绝不
+  // 在无可定义账期范围时占位）。数据未到时 report 仍为 null，走下方
+  // 「无坐标不渲染」同款空态。
+  if (month <= 0) return null;
 
   // #26 修复 1：geoPoints 为空即整体不渲染——无 report 前置（数据未达时
   // 也不预挂地图）；loading 窗口期本面板保持不出现，数据到了自然恢复。
