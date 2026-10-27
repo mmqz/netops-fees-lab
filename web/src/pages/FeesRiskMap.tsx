@@ -5,13 +5,19 @@ import type { RiskMapReport } from '../api/types';
 import { formatApiErrorText } from '../api/client';
 import { ErrorBlock } from '../components/ErrorBlock';
 import { Spinner } from '../components/Spinner';
+import { computeFitTarget, filterGeoPoints, pointColor } from './feesRiskMapModel';
 
 /**
  * FeesRiskMap — #18 站点风险地图：十场景线索按站址聚合，confirmed 关联资源
  * 的 geo_lat/geo_lng 落点着色（红=已核实 / 黄=待核实 / 绿=无线索）。
  *
- * 职责边界（#16 同款）：云端只做渲染能力，经纬度数据由本地资源表自带——
- * 无坐标数据时本组件整体不渲染（验收 2：列表照常，地图不出现）。
+ * 职责边界（#16 同款）：云端只做渲染能力，经纬度数据由本地资源表自带。
+ *
+ * 空数据纪律（#26 修复 1）：**无坐标即整体不渲染，不以数据是否到达为前提**
+ * ——数据未到达时也不预挂地图组件（旧代码在 report===null 窗口期挂图，
+ * 空点位流进 fitBounds 触发 MapLibre「Invalid LngLat latitude value」必现异常）。
+ * 视口决策全部走 feesRiskMapModel.computeFitTarget（0 点不碰视口 / 单点居中
+ * 定焦 / 多点 fitBounds——#26 修复 2+3），组件不自算经纬度。
  *
  * 渲染教义：确定性（同数据同输出）——点位数据驱动、无随机、无动画漂移；
  * maplibre 与其 CSS **动态 import**（零首屏成本——首屏不为此付出 1MB+）。
@@ -19,17 +25,6 @@ import { Spinner } from '../components/Spinner';
 
 const ESRI_DARK = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const ESRI_ATTR = '<a href="https://www.arcgis.com/" target="_blank" rel="noreferrer">© Esri</a>';
-
-/** 着色令牌：红/黄/绿与全局告警色系一致 */
-const COLOR_VERIFIED = '#d64541'; // 已核实（人工确认的真问题）
-const COLOR_PENDING = '#e6a817'; // 待核实（诚实的默认态）
-const COLOR_CLEAN = '#3f9e63'; // 无线索
-
-function pointColor(p: { verified: number; pending: number }): string {
-  if (p.verified > 0) return COLOR_VERIFIED;
-  if (p.pending > 0) return COLOR_PENDING;
-  return COLOR_CLEAN;
-}
 
 const MAP_H = 320;
 
@@ -39,6 +34,11 @@ export function FeesRiskMap(props: { feeType: string; year: number; month: numbe
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  // 数据版本号：每次成功取数自增，作 MapCanvas 的 remount key——
+  // MapCanvas 的建图 effect 是挂载期一次性的（[], 挂载时把点位快照进 GeoJSON
+  // source），账期/费用类型切换后点位集变了就必须重挂（#26 连带修复：
+  // 旧代码无 key，切换后地图显示过期点位）。
+  const [dataSeq, setDataSeq] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
 
@@ -48,7 +48,10 @@ export function FeesRiskMap(props: { feeType: string; year: number; month: numbe
     setLoading(true);
     fetchFeeRiskMap({ feeType, year, month })
       .then((r) => {
-        if (!cancelled) setReport(r);
+        if (!cancelled) {
+          setReport(r);
+          setDataSeq((n) => n + 1);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(formatApiErrorText(err));
@@ -61,16 +64,18 @@ export function FeesRiskMap(props: { feeType: string; year: number; month: numbe
     };
   }, [feeType, year, month]);
 
-  // 无坐标数据 → 整体不渲染（issue 验收 2）；引擎缺席（501）同 current 形态。
-  const geoPoints = (report?.points ?? []).filter(
-    (p): p is typeof p & { lat: number; lng: number } => p.lat !== null && p.lng !== null,
-  );
-  if (report !== null && geoPoints.length === 0) return null;
+  // 错误先行（#26 修复时重排）：非 501 错误必须可见，不能被下面
+  // 「无坐标不渲染」吞掉——错误面板优先于一切空态。
   if (error !== '' && report === null) {
     // 501（默认构建无引擎）静默——与页面其它引擎依赖面板同款降级
     if (error.includes('501') || error.includes('engine')) return null;
     return <ErrorBlock message={error} />;
   }
+
+  // #26 修复 1：geoPoints 为空即整体不渲染——无 report 前置（数据未达时
+  // 也不预挂地图）；loading 窗口期本面板保持不出现，数据到了自然恢复。
+  const geoPoints = filterGeoPoints(report?.points ?? []);
+  if (geoPoints.length === 0) return null;
 
   return (
     <section className="panel">
@@ -88,6 +93,7 @@ export function FeesRiskMap(props: { feeType: string; year: number; month: numbe
         )}
       </div>
       <MapCanvas
+        key={dataSeq}
         containerRef={containerRef}
         mapRef={mapRef}
         points={geoPoints}
@@ -137,7 +143,7 @@ function MapCanvas(props: {
               { id: 'basemap', type: 'raster', source: 'basemap' },
             ],
           } as StyleSpecification,
-          center: [126.63, 45.75], // 数据驱动 fit 会立即接管
+          center: [126.63, 45.75], // 数据驱动视口会立即接管
           zoom: 4,
           attributionControl: false,
         });
@@ -174,16 +180,19 @@ function MapCanvas(props: {
               'circle-stroke-color': '#ffffff',
             },
           });
-          // fit 到点位面（同数据同 fit——确定性）
-          const lons = points.map((p) => p.lng);
-          const lats = points.map((p) => p.lat);
-          map.fitBounds(
-            [
-              [Math.min(...lons), Math.min(...lats)],
-              [Math.max(...lons), Math.max(...lats)],
-            ],
-            { padding: 48, maxZoom: 12, duration: 0 },
-          );
+          // 视口目标来自模型层（#26 修复 2+3）：
+          // - 0 点 → 'none'：不碰视口（绝不把空数组塞进 fitBounds——
+          //   Math.min(...[]) === Infinity 会抛 Invalid LngLat；父层保证 ≥1 点，
+          //   这里是第二道保险）；
+          // - 单点 → setCenter+setZoom（min==max 的退化矩形不交给 fitBounds）；
+          // - 多点 → fitBounds 外接矩形（同数据同 fit——确定性）。
+          const target = computeFitTarget(points);
+          if (target.kind === 'point') {
+            map.setCenter(target.center);
+            map.setZoom(target.zoom);
+          } else if (target.kind === 'bounds') {
+            map.fitBounds(target.bounds, { padding: 48, maxZoom: 12, duration: 0 });
+          }
           map.on('click', 'sites-circle', (e) => {
             const f = e.features?.[0];
             if (!f || !map) return;
@@ -206,7 +215,8 @@ function MapCanvas(props: {
       map?.remove();
       mapRef.current = null;
     };
-    // points 由父组件每次数据变化重挂（key 控制），此处只在挂载时建图。
+    // points 由父组件每次数据变化重挂（dataSeq 作 key——见 FeesRiskMap 注释），
+    // 此处只在挂载时建图。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
