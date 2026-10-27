@@ -49,6 +49,7 @@ import {
   FEES_OV_CARD_MONTH_TOTAL,
   FEES_OV_CARD_SITES,
   FEES_OV_CLUES_EMPTY,
+  FEES_OV_CLUES_EMPTY_NOT_ANALYZED,
   FEES_RISKS_NO_DATA,
   FEES_OV_CLUES_EXPORT,
   FEES_OV_CLUES_EXPORT_OK,
@@ -299,6 +300,14 @@ export function FeesOverview() {
     }
     return out;
   }, [results]);
+
+  // #27：空态裁决提前计算（四态）——「not-analyzed」是零线索且存在告警
+  // （场景被前置检查拦下：空资源库/无关联/空指标面/空费用面），与「干净零」
+  // 在颜色与措辞上都必须可区分，绝不能渲染成「好信号」。
+  const emptyKind = useMemo(
+    () => riskEmptyState(merged.length, totalExcluded, monthHasData, allWarnings.length > 0),
+    [merged.length, totalExcluded, monthHasData, allWarnings.length],
+  );
 
   const decideClue = useCallback(
     async (m: { scenario: string; clue: RiskClue }, status: 'verified' | 'dismissed') => {
@@ -628,13 +637,21 @@ export function FeesOverview() {
               </div>
             )}
             {!runRunning && results !== null && merged.length === 0 && (
-              /* #21 三态空状态（riskEmptyState 裁决）：'no-data' 引导导入、
+              /* #21+#27 空状态（riskEmptyState 四态裁决）：'no-data' 引导导入、
                   'clean' 中性好信号；'excluded-zero' 的告警条由上方 allWarnings
-                  浮出（该月任一场景有排除主导即触发）——三者文案与颜色可区分。 */
-              <div className="banner banner--hint">
-                {riskEmptyState(merged.length, totalExcluded, monthHasData) === 'no-data'
+                  浮出（该月任一场景有排除主导即触发）；'not-analyzed'（#27）
+                  是场景被前置检查拦下的形态——告警色，措辞绝不说「好信号」。 */
+              <div
+                className={
+                  emptyKind === 'not-analyzed' ? 'banner banner--warning' : 'banner banner--hint'
+                }
+                role={emptyKind === 'not-analyzed' ? 'note' : undefined}
+              >
+                {emptyKind === 'no-data'
                   ? FEES_RISKS_NO_DATA
-                  : FEES_OV_CLUES_EMPTY}
+                  : emptyKind === 'not-analyzed'
+                    ? FEES_OV_CLUES_EMPTY_NOT_ANALYZED
+                    : FEES_OV_CLUES_EMPTY}
               </div>
             )}
             {!runRunning && results !== null && merged.length > 0 && (

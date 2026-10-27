@@ -617,6 +617,10 @@ export const FEES_TAB_IMPORT = '导入费用';
 /** #21 三态空状态：确实 0 条（中性）与「有排除的 0 条」（告警色）必须可区分 */
 export const FEES_RISKS_EMPTY_EXCLUDED = (n: number) =>
   `本场景 0 条线索，但另有 ${n} 个对象被排除出统计——0 条可能意味着「无法分析」而非「无异常」，请核对重复导入/多批次。`;
+/** #27 第四态空状态：场景被前置检查拦下（空资源库/无关联/空指标面/空费用面）——
+ * 告警色渲染，绝不说「无异常」；具体原因与下一步在上方 warnings 告警条里 */
+export const FEES_RISKS_EMPTY_NOT_ANALYZED =
+  '本场景本次未产出分析结论（前置数据面为空，原因与下一步见上方说明）——「未分析」不是「无异常」。';
 export const FEES_RISKS_NO_DATA = '该账期无导入数据——先导入费用文件，分析才有输入。';
 export const FEES_RISKS_EXCLUDED = (a: number) => `已排除 ${a} 个跨批次 (站址, 账期)（属于重复结算/金额差异场景的线索域）`;
 export const FEES_RISKS_EVIDENCE = '证据锚点';
@@ -775,6 +779,10 @@ export const FEES_OV_CLUES_SORT_AMOUNT = '按触发指标';
 export const FEES_OV_CLUES_SORT_METRIC = '按严重信号';
 export const FEES_OV_CLUES_EXPORT = '导出 CSV';
 export const FEES_OV_CLUES_EMPTY = '该账期跑完全部场景无待核实线索——好信号，但「无线索」不等于「无问题」（未导入的费用类型/账期不可见）。';
+/** #27 第四态：全部场景零线索且存在「未分析」场景——不是好信号，是数据面
+ * 还不齐（原因见上方告警条）；与「干净零」在颜色与措辞上都必须可区分 */
+export const FEES_OV_CLUES_EMPTY_NOT_ANALYZED =
+  '全部场景零待核实线索，且存在未分析场景（前置数据面为空，原因与下一步见上方告警条）——先补齐数据面再读结论，这不是「无异常」也不是「好信号」。';
 export const FEES_OV_CLUES_OF = (type: string, month: string) => `${type} · ${month}`;
 export const FEES_OV_COL_SITE = '站址';
 export const FEES_OV_COL_PERIOD = '账期';

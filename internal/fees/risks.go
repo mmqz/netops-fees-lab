@@ -341,6 +341,7 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		clues    []RiskClue
 		excluded int
 		note     string
+		warnings []string
 		err      error
 	)
 	switch scenario {
@@ -359,19 +360,19 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 	case RiskRetiredBilling:
 		var c cluesPack
 		c, err = s.risksRetiredBilling(ctx, engine, q)
-		clues, excluded, note = c.clues, c.excluded, c.note
+		clues, excluded, note, warnings = c.clues, c.excluded, c.note, c.warnings
 	case RiskUnlinked:
 		var c cluesPack
 		c, err = s.risksUnlinked(ctx, engine, q)
-		clues, excluded, note = c.clues, c.excluded, c.note
+		clues, excluded, note, warnings = c.clues, c.excluded, c.note, c.warnings
 	case RiskIdleBilling:
 		var c cluesPack
 		c, err = s.risksIdleBilling(ctx, engine, q)
-		clues, excluded, note = c.clues, c.excluded, c.note
+		clues, excluded, note, warnings = c.clues, c.excluded, c.note, c.warnings
 	case RiskMissingBilling:
 		var c cluesPack
 		c, err = s.risksMissingBilling(ctx, engine, q)
-		clues, excluded, note = c.clues, c.excluded, c.note
+		clues, excluded, note, warnings = c.clues, c.excluded, c.note, c.warnings
 	case RiskLedgerConsistency:
 		var c cluesPack
 		c, err = s.risksLedgerConsistency(ctx, engine, q)
@@ -386,15 +387,20 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 	if err != nil {
 		return RiskResult{}, err
 	}
-	return s.finishClues(ctx, engine, q, scenario, clues, excluded, note), nil
+	return s.finishClues(ctx, engine, q, scenario, clues, excluded, note, warnings), nil
 }
 
 // cluesPack is the cross-layer compositions' return shape (clues + the
-// excluded count + the scenario-specific note).
+// excluded count + the scenario-specific note). warnings (#27) carries
+// the scenario's own "未分析" notices — the empty-cross-face prechecks
+// (empty resource library, no confirmed links, empty metrics face, empty
+// fee face) ride here so the UI can render them as alert bars; they flow
+// into RiskResult.warnings alongside finishClues' #21 exclusion warnings.
 type cluesPack struct {
 	clues    []RiskClue
 	excluded int
 	note     string
+	warnings []string
 }
 
 // risksLedgerConsistency composes scenario 9 (#5/#8): the engine preset
@@ -492,12 +498,33 @@ func itoa(i int) string {
 	return string(b[pos:])
 }
 
+// unanalyzedPack (#27) builds the "cannot analyze — here is why and what
+// to do next" answer: zero clues, the explanation as the note (CLI and
+// MCP consumers read the note), and the SAME text in warnings so UIs
+// render it as an alert bar — the #21 channel: 「无法分析」必须与「分析后
+// 无发现」在输出上可区分, an all-hit or all-exclude answer from an empty
+// cross face is noise or vacuity, never a finding.
+func unanalyzedPack(why string) cluesPack {
+	return cluesPack{clues: nil, note: why, warnings: []string{why}}
+}
+
 // risksRetiredBilling composes scenario 1: fee-side per-(site, period)
 // totals (engine) × confirmed links → resource status (SQLite). A clue
 // fires when the linked resource's status is in the query's retired set;
 // the metric is the billed amount — the anomaly is "money still flowing",
 // the amount is the size of it.
 func (s *Service) risksRetiredBilling(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	// #27 §8: the scenario's universe is the confirmed-link pairs. With
+	// ZERO confirmed links (an empty resource library, or links not yet
+	// proposed) nothing can ever fire — "0 clues" would dress a vacuous
+	// face up as "analyzed, all clear". Name the state instead.
+	confirmed, err := s.db.FeeSiteLinks.List(ctx, repo.FeeLinkFilter{Status: domain.LinkStatusConfirmed})
+	if err != nil {
+		return cluesPack{}, fmt.Errorf("fees: retired-billing 列已确认关联: %w", err)
+	}
+	if len(confirmed) == 0 {
+		return unanalyzedPack("停用计费未分析：无任何已确认关联（confirmed 关联为空——资源库为空或尚未建立费用编码关联）——本场景的宇宙是已确认关联的站址×资源状态，关联面为空时无可分析对象；请先导入资源并建立关联后重跑本场景"), nil
+	}
 	rows, err := engine.SitePeriodTotals(ctx, s.analysisDir(), q.FeeType, q.Year, q.Month)
 	if err != nil {
 		return cluesPack{}, err
@@ -564,6 +591,24 @@ func (s *Service) risksRetiredBilling(ctx context.Context, engine QueryEngine, q
 // human already ruled it out; a pending one is the human channel's
 // business, not a fresh clue).
 func (s *Service) risksUnlinked(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	// #27: the empty-library precheck — with ZERO linkable resources every
+	// fee code necessarily looks unlinked, and the scenario would emit the
+	// whole fee face as "clues" (200+ noise rows drowning the real finds).
+	// "Cannot analyze" and "analyzed, found some" must stay distinguishable
+	// (#21's principle, the reverse direction). A PARTIAL library keeps
+	// the normal path: how much to import is the operator's call, the
+	// system does not second-guess it (the issue's explicit ruling).
+	byType, err := s.db.Resources.CountByType(ctx)
+	if err != nil {
+		return cluesPack{}, fmt.Errorf("fees: unlinked 统计可关联资源: %w", err)
+	}
+	linkable := 0
+	for _, t := range LinkableResourceTypes {
+		linkable += byType[t]
+	}
+	if linkable == 0 {
+		return unanalyzedPack("零资源计费未分析：资源库为空（站址/机房/基站等可关联资源计数为 0）——此时所有费用编码都必然显得「无关联」，产出的是噪音而非线索；请先导入资源（站址/机房/基站）后重跑本场景"), nil
+	}
 	rows, err := engine.SiteTotalsAll(ctx, s.analysisDir(), q.FeeType, q.Year, q.Month)
 	if err != nil {
 		return cluesPack{}, err
@@ -609,6 +654,16 @@ func (s *Service) risksUnlinked(ctx context.Context, engine QueryEngine, q RiskQ
 // business). The note carries the honest caveat: 采集缺失与空置在该证据
 // 形态下不可区分.
 func (s *Service) risksIdleBilling(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	// #27 §8: with a COMPLETELY empty metrics face every confirmed-linked
+	// billed site fires at once (the count is necessarily zero) — the
+	// mirror of unlinked's empty-library flood. A metrics face that merely
+	// lacks points for SOME resources is the normal per-site signal shape
+	// (the note already carries the collection-gap caveat honestly).
+	if total, err := s.db.Metrics.CountMetricPoints(ctx); err != nil {
+		return cluesPack{}, fmt.Errorf("fees: idle-billing 统计指标总点数: %w", err)
+	} else if total == 0 {
+		return unanalyzedPack("零量计费未分析：指标采集面为空（全库无任何指标点）——此时所有已关联站址的指标点数必然为 0，全部命中是数据覆盖问题而非发现；请先导入指标数据后重跑本场景"), nil
+	}
 	rows, err := engine.SitePeriodTotals(ctx, s.analysisDir(), q.FeeType, q.Year, q.Month)
 	if err != nil {
 		return cluesPack{}, err
@@ -699,19 +754,44 @@ func (s *Service) risksIdleBilling(ctx context.Context, engine QueryEngine, q Ri
 // (resource vanished → rollback cascade) stay silent; real DB failures
 // abort the report, never silently dropping links from it.
 func (s *Service) risksMissingBilling(ctx context.Context, engine QueryEngine, q RiskQuery) (cluesPack, error) {
+	// #27 §8: three empty-face prechecks, most fundamental first —
+	//
+	//   1. no confirmed links: the scenario's universe IS the confirmed
+	//      pairs; empty universe is vacuous, and "0 clues" must say so
+	//      instead of dressing as clean;
+	//   2. an entirely empty metrics face: no resource can be "alive",
+	//      every count is zero — the all-exclude vacuity;
+	//   3. an empty fee face for the queried type/period: EVERY alive
+	//      resource would fire at once — the all-hit flood (querying a
+	//      month whose ledger was never imported looks identical to a
+	//      month where every bill genuinely vanished; the honest answer
+	//      names the range problem, it does not invent 200 漏收 clues).
+	links, err := s.db.FeeSiteLinks.List(ctx, repo.FeeLinkFilter{Status: domain.LinkStatusConfirmed})
+	if err != nil {
+		return cluesPack{}, fmt.Errorf("fees: missing-billing 列关联: %w", err)
+	}
+	if len(links) == 0 {
+		return unanalyzedPack("有量无费未分析：无任何已确认关联（资源库为空或尚未建立费用编码关联）——本场景的宇宙是已确认关联的资源，关联面为空时无可分析对象；请先导入资源并建立关联后重跑本场景"), nil
+	}
+	if total, err := s.db.Metrics.CountMetricPoints(ctx); err != nil {
+		return cluesPack{}, fmt.Errorf("fees: missing-billing 统计指标总点数: %w", err)
+	} else if total == 0 {
+		return unanalyzedPack("有量无费未分析：指标采集面为空（全库无任何指标点）——「有量无费」的判定需要指标面先有数据（「有量」无从谈起）；请先导入指标数据后重跑本场景"), nil
+	}
 	rows, err := engine.SitePeriodTotals(ctx, s.analysisDir(), q.FeeType, q.Year, q.Month)
 	if err != nil {
 		return cluesPack{}, err
+	}
+	if len(rows) == 0 {
+		return unanalyzedPack("有量无费未分析：费用侧该类型/账期无任何计费记录——空费用面会让全部有量资源命中，属数据范围问题而非漏收线索；请核对费用类型与账期范围，或先导入该账期费用数据后重跑本场景"), nil
 	}
 	billed := make(map[string]struct{}, len(rows))
 	for _, r := range rows {
 		key := fmt.Sprintf("%s|%04d-%02d", r.SiteCode, r.Year, r.Month)
 		billed[key] = struct{}{}
 	}
-	links, err := s.db.FeeSiteLinks.List(ctx, repo.FeeLinkFilter{Status: domain.LinkStatusConfirmed})
-	if err != nil {
-		return cluesPack{}, fmt.Errorf("fees: missing-billing 列关联: %w", err)
-	}
+	// links were fetched by the #27 precheck above — the confirmed list
+	// is the scenario's universe and doubles as the walk set here.
 	months := []int{q.Month}
 	if q.Month == 0 {
 		months = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
@@ -800,7 +880,7 @@ func periodWindow(year, month int) (string, string) {
 // anchor-less clue carries [] (the arrays-are-never-null discipline of
 // the whole API surface), and the frontend renders it defensively.
 func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQuery,
-	scenario RiskScenario, clues []RiskClue, excluded int, note string) RiskResult {
+	scenario RiskScenario, clues []RiskClue, excluded int, note string, packWarnings []string) RiskResult {
 
 	sort.SliceStable(clues, func(i, j int) bool {
 		if clues[i].MetricValue != clues[j].MetricValue {
@@ -901,7 +981,9 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 	// (the excluded/(total+excluded) ratio cannot know the full
 	// participation face without another engine roundtrip, and a false
 	// "全部被排除" would be its own misinformation).
-	var warnings []string
+	// #27: the cross-layer compositions' own precheck notices ("未分析")
+	// ride the SAME channel — they arrive as packWarnings and merge here.
+	warnings := packWarnings
 	if excluded > 0 {
 		switch {
 		case total == 0:

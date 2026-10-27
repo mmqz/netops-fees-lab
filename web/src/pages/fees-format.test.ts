@@ -133,7 +133,7 @@ describe('selectLinkFilter — 关联筛选变更必须回到第 1 页（#109-A�
   });
 });
 
-describe('riskEmptyState（#21 三态空态裁决）', () => {
+describe('riskEmptyState（#21 三态 + #27 第四态空态裁决）', () => {
   it('无数据月 → no-data（引导导入，不是分析结论）', () => {
     expect(riskEmptyState(0, 0, false)).toBe('no-data');
     // 即使有排除数，无数据月仍优先引导导入（排除数来自别的账期口径）
@@ -142,7 +142,17 @@ describe('riskEmptyState（#21 三态空态裁决）', () => {
   it('0 条线索 + 有排除 → excluded-zero（无法分析 ≠ 无异常，告警色）', () => {
     expect(riskEmptyState(0, 203, true)).toBe('excluded-zero');
   });
-  it('有数据、无排除、0 条 → clean（中性的「未发现」）', () => {
+  it('0 条线索 + 有告警无排除 → not-analyzed（#27 前置检查拦下，绝不说「无异常」）', () => {
+    expect(riskEmptyState(0, 0, true, true)).toBe('not-analyzed');
+    // 排除数优先于告警：有排除的 0 条仍是 excluded-zero（更具体的形态）
+    expect(riskEmptyState(0, 203, true, true)).toBe('excluded-zero');
+    // 无数据月优先于 not-analyzed（引导导入是更根本的动作）
+    expect(riskEmptyState(0, 0, false, true)).toBe('no-data');
+  });
+  it('有告警但有线索 → clean（空态逻辑不介入，告警条照常浮出）', () => {
+    expect(riskEmptyState(7, 0, true, true)).toBe('clean');
+  });
+  it('有数据、无排除、0 条、无告警 → clean（中性的「未发现」）', () => {
     expect(riskEmptyState(0, 0, true)).toBe('clean');
   });
   it('有线索 → clean（空态逻辑不介入）', () => {

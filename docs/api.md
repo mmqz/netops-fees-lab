@@ -983,6 +983,8 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 阈值默认值（显式参数化，见 fees-layer.md §8）：`status=停用,退网`、`diffCents=0`、`ratio=0.30`、`z=3.0`、`minSites=8`、`limit=100`（上限 1000）、`maxEvidence=10`（上限 50）。`spike`/`outlier` 的 `excluded` 为被排除的跨批次 (站址, 账期) 数——重复行令窗口/分布非确定（#59），跨批次对属 duplicate-settlement/ledger-mismatch 的线索域，排除即声明。
 
+**信封 `warnings[]`（#21 排除主导 + #27 未分析）**：非阻塞结构化告警，note 携带同文（CLI/MCP 读 note，UI 以告警条渲染数组）。两类来源：① **排除主导**（#21）——`0 条线索 + 有排除数`或排除占比过半时，「无法分析」绝不伪装成「分析后无异常」；② **跨层场景前置检查「未分析」（#27）**——四个跨层组合场景（`retired-billing`/`unlinked`/`idle-billing`/`missing-billing`）在**交叉面整体为空**时不产出线索、以 note+warnings 说明原因与下一步：`unlinked` 的资源库为空（可关联资源计数 0——否则全部编码必然「无关联」，是 200+ 条噪音而非发现；**部分导入照常分析**，导入多少是运营决策）；`retired-billing` 无任何已确认关联（宇宙为空，0 条线索不得伪装成「干净」）；`idle-billing` 全库无任何指标点（否则全部已关联站址必然零点，是数据覆盖问题而非发现）；`missing-billing` 三重门（无已确认关联 / 全库无指标点 / 费用侧该类型账期无任何记录——空费用面会让全部有量资源命中，属数据范围问题而非漏收线索）。前端据此渲染第四态空状态（`not-analyzed`，告警色——与「干净零」可区分）。
+
 **人工裁定的消费语义（#119，migration v33）**：线索可携带 `decision`（`verified` 已核实属实 / `dismissed` 已排除）与 `decidedAt`。默认输出 = pending + verified（verified 是运营的已知问题台账，标记可见）；**dismissed 默认隐藏、计数入信封 `dismissed`**——绝不静默丢弃（#83 教义），重跑不再重复出现（#69 的 PairDecided 教义：已裁定的线索保持已裁定）。`includeDecided=1|true` 返回全量标记集（审计视图）；`includeDecided` 非法值 → 400。裁定按 (scenario, feeType) 隔离——驳回一条 missing-billing 线索不影响同站的 spike 线索或其铁塔租费口径。
 
 ## POST /api/fees/risk-clue-decisions — 风险线索人工裁定（#119）

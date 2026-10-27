@@ -123,6 +123,7 @@ import {
   FEES_RISKS_EVIDENCE_BATCH,
   FEES_RISKS_EVIDENCE_ROWS,
   FEES_RISKS_EMPTY,
+  FEES_RISKS_EMPTY_NOT_ANALYZED,
   FEES_TAB_RISKS,
   FEES_TAB_DETAILS,
   FEES_TAB_RECONCILE,
@@ -910,13 +911,27 @@ export function FeesPage() {
             ))}
             <p className="muted muted--small">{riskResult.note}</p>
             {riskResult.clues.length === 0 ? (
-              /* #21 三态空状态（riskEmptyState 裁决）：'excluded-zero' 是「可能
-                  无法分析」的告警形态（警告色），'clean' 才是中性的「未发现」。
-                  风险面板按查询时态（无月度序列探针）只有后两态。 */
-              riskEmptyState(riskResult.clues.length, riskResult.excluded, true) ===
-              'excluded-zero' ? (
+              /* #21+#27 空状态（riskEmptyState 四态裁决）：'excluded-zero' 是
+                  「有排除的 0 条」（告警色），'not-analyzed' 是场景被前置检查
+                  拦下（空资源库/无关联/空指标面/空费用面——告警色，绝不说
+                  「无异常」），'clean' 才是中性的「未发现」。 */
+              riskEmptyState(
+                riskResult.clues.length,
+                riskResult.excluded,
+                true,
+                (riskResult.warnings?.length ?? 0) > 0,
+              ) === 'excluded-zero' ? (
                 <div className="banner banner--warning" role="note">
                   {FEES_RISKS_EMPTY_EXCLUDED(riskResult.excluded)}
+                </div>
+              ) : riskEmptyState(
+                riskResult.clues.length,
+                riskResult.excluded,
+                true,
+                (riskResult.warnings?.length ?? 0) > 0,
+              ) === 'not-analyzed' ? (
+                <div className="banner banner--warning" role="note">
+                  {FEES_RISKS_EMPTY_NOT_ANALYZED}
                 </div>
               ) : (
                 <p className="empty">{FEES_RISKS_EMPTY}</p>

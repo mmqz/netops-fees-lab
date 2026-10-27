@@ -245,8 +245,23 @@ func TestMCPFeesDataDirRoundTrip(t *testing.T) {
 	if sc == nil {
 		t.Fatalf("fee_risks result carries no structuredContent: %v", result)
 	}
-	if total, _ := sc["total"].(float64); total != 2 {
-		t.Fatalf("fee_risks unlinked total = %v, want 2 (both imported codes have no resource link) — structured %v", sc["total"], sc)
+	// #27: no resources are imported in this round trip — the empty-library
+	// precheck answers 「未分析」 (0 clues + the reason in note AND warnings,
+	// the same text on both channels) instead of the pre-#27 all-hit noise
+	// ("both codes look unlinked" was vacuously true of an empty library).
+	if total, _ := sc["total"].(float64); total != 0 {
+		t.Fatalf("fee_risks unlinked total = %v, want 0 (empty resource library → unanalyzed) — structured %v", sc["total"], sc)
+	}
+	note, _ := sc["note"].(string)
+	if !strings.Contains(note, "零资源计费未分析") {
+		t.Fatalf("fee_risks unlinked note = %q, want the 未分析 explanation", note)
+	}
+	warnings, _ := sc["warnings"].([]any)
+	if len(warnings) != 1 {
+		t.Fatalf("fee_risks unlinked warnings = %v, want the same text riding the warnings channel", sc["warnings"])
+	}
+	if w, _ := warnings[0].(string); w != note {
+		t.Fatalf("fee_risks unlinked warnings = %q, want the #21 channel contract (same text as note): %q", w, note)
 	}
 
 	// The control: same db, an empty analysis tree → the honest zero.

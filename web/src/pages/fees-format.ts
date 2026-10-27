@@ -79,21 +79,27 @@ export function selectLinkFilter(
 }
 
 /**
- * 风险线索空态的三态裁决（#21）：「无法分析」与「分析后无发现」必须可区分。
+ * 风险线索空态的四态裁决（#21 三态 + #27 第四态）：「无法分析」与「分析后
+ * 无发现」必须可区分。
  *
- * - 'no-data'       该账期无导入数据——引导去导入，不是分析结论；
- * - 'excluded-zero' 0 条线索但有排除数——可能「数据被排除后无法分析」，
- *                   告警色渲染，绝不与「本月正常」混同；
- * - 'clean'         有数据、无排除、确实 0 条——中性的「未发现」。
+ * - 'no-data'        该账期无导入数据——引导去导入，不是分析结论；
+ * - 'excluded-zero'  0 条线索但有排除数——可能「数据被排除后无法分析」，
+ *                    告警色渲染，绝不与「本月正常」混同；
+ * - 'not-analyzed'   0 条线索且有告警但无排除数（#27 的「未分析」形态：
+ *                    空资源库/无关联/空指标面/空费用面的前置检查拦下了
+ *                    场景）——告警色渲染，绝不说「无异常」或「好信号」；
+ * - 'clean'          有数据、无排除、确实 0 条——中性的「未发现」。
  */
-export type RiskEmptyKind = 'no-data' | 'excluded-zero' | 'clean';
+export type RiskEmptyKind = 'no-data' | 'excluded-zero' | 'not-analyzed' | 'clean';
 
 export function riskEmptyState(
   clueCount: number,
   excluded: number,
   monthHasData: boolean,
+  hasWarnings = false,
 ): RiskEmptyKind {
   if (!monthHasData) return 'no-data';
   if (clueCount === 0 && excluded > 0) return 'excluded-zero';
+  if (clueCount === 0 && hasWarnings) return 'not-analyzed';
   return 'clean';
 }

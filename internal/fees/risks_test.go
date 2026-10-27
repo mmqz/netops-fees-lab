@@ -597,7 +597,14 @@ func TestRiskClueDecisionSemantics(t *testing.T) {
 	seedMetricPoints(t, db, "mbat_unb_a", "res_unb_a", "2024-05-02T00:00:00Z")
 	seedMetricPoints(t, db, "mbat_unb_b", "res_unb_b", "2024-05-04T00:00:00Z", "2024-05-09T00:00:00Z")
 
-	engine := &fakeRiskEngine{} // no bills at all — both sites fire
+	// #27: the fee face must EXIST (some site bills) — a completely empty
+	// fee face is the all-hit noise shape the missing-billing precheck now
+	// names as 「未分析」 instead of emitting every alive resource. The
+	// decision-semantics vehicle therefore bills GATE-BILLED-1 while the
+	// two UNBILLED sites stay bill-less: the per-site signal shape.
+	engine := &fakeRiskEngine{
+		periodTotals: []SitePeriodTotal{{SiteCode: "GATE-BILLED-1", Year: 2024, Month: 5, Rows: 1, TotalCents: 12000}},
+	}
 	q := RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5}
 
 	res, err := svc.Risks(ctx, engine, RiskMissingBilling, q)
@@ -848,4 +855,94 @@ func (unavailableEngine) SiteTotalsAll(ctx context.Context, analysisDir string, 
 }
 func (unavailableEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
 	return nil, errors.New("unreachable")
+}
+
+// TestRisksUnanalyzedPrechecks (#27): the empty-cross-face prechecks.
+// An empty resource library, zero confirmed links, an entirely empty
+// metrics face, or an empty fee face for the queried scope makes the
+// cross-layer scenarios answer 「未分析」 — zero clues + the reason + the
+// next step, riding BOTH the note (CLI/MCP consumers) and warnings (the
+// #21 UI alert channel) — instead of an all-hit noise flood (unlinked's
+// 200+ rows) or a vacuous all-clear. Partial faces keep the normal path
+// (pinned by the four composition tests above: seeded resources, links,
+// points and fee rows all keep their clue sets).
+func TestRisksUnanalyzedPrechecks(t *testing.T) {
+	ctx := context.Background()
+	// The fee face exists (rows on both primitives) so the gates fire on
+	// the CROSS face being empty, never on a missing fee face (except
+	// missing-billing's own gate 3, which needs the fee face empty).
+	feeFace := &fakeRiskEngine{
+		siteTotals:   []SiteTotal{{SiteCode: "WILD-1", Rows: 2, TotalCents: 30000}},
+		periodTotals: []SitePeriodTotal{{SiteCode: "WILD-1", Year: 2024, Month: 5, Rows: 2, TotalCents: 30000}},
+	}
+	assertUnanalyzed := func(t *testing.T, res RiskResult, wantFrag string) {
+		t.Helper()
+		if res.Total != 0 || len(res.Clues) != 0 {
+			t.Fatalf("clues = %d (%+v), want the unanalyzed zero-clue answer", res.Total, res.Clues)
+		}
+		if !strings.Contains(res.Note, wantFrag) {
+			t.Errorf("note missing %q: %s", wantFrag, res.Note)
+		}
+		if len(res.Warnings) != 1 || res.Warnings[0] != res.Note {
+			t.Errorf("warnings = %+v, want the #21 channel carrying the same text as the note", res.Warnings)
+		}
+	}
+
+	// 1. unlinked on a completely empty resource library: the pre-#27
+	// answer was the WHOLE fee face as clues — the noise flood.
+	svc, _, _ := newService(t)
+	res, err := svc.Risks(ctx, feeFace, RiskUnlinked, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(unlinked, empty library): %v", err)
+	}
+	assertUnanalyzed(t, res, "零资源计费未分析：资源库为空")
+
+	// 2. retired-billing with zero confirmed links (nothing seeded at
+	// all): vacuous universe named instead of an all-clear.
+	svc2, _, _ := newService(t)
+	res, err = svc2.Risks(ctx, feeFace, RiskRetiredBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(retired-billing, no links): %v", err)
+	}
+	assertUnanalyzed(t, res, "停用计费未分析：无任何已确认关联")
+
+	// 3. idle-billing: confirmed link + fee rows exist, but the metrics
+	// face is COMPLETELY empty — every linked billed site would fire at
+	// once (the mirror flood).
+	svc3, db3, _ := newService(t)
+	seedLinkResource(t, db3, "res_gate_idle", "GATE-IDLE-1", "在网")
+	res, err = svc3.Risks(ctx, feeFace, RiskIdleBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(idle-billing, empty metrics): %v", err)
+	}
+	assertUnanalyzed(t, res, "零量计费未分析：指标采集面为空")
+
+	// 4a. missing-billing with no confirmed links at all.
+	svc4, _, _ := newService(t)
+	res, err = svc4.Risks(ctx, feeFace, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(missing-billing, no links): %v", err)
+	}
+	assertUnanalyzed(t, res, "有量无费未分析：无任何已确认关联")
+
+	// 4b. missing-billing: links exist, metrics face entirely empty.
+	svc5, db5, _ := newService(t)
+	seedLinkResource(t, db5, "res_gate_mb", "GATE-MB-1", "在网")
+	res, err = svc5.Risks(ctx, feeFace, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(missing-billing, empty metrics): %v", err)
+	}
+	assertUnanalyzed(t, res, "有量无费未分析：指标采集面为空")
+
+	// 4c. missing-billing: links + points exist, but the fee face for the
+	// queried type/period is EMPTY (the fake returns no rows) — every
+	// alive resource would fire at once.
+	svc6, db6, _ := newService(t)
+	seedLinkResource(t, db6, "res_gate_fee", "GATE-FEE-1", "在网")
+	seedMetricPoints(t, db6, "mbat_gate_fee", "res_gate_fee", "2024-05-05T00:00:00Z")
+	res, err = svc6.Risks(ctx, &fakeRiskEngine{}, RiskMissingBilling, RiskQuery{FeeType: FeeTypeElectricity, Year: 2024, Month: 5})
+	if err != nil {
+		t.Fatalf("Risks(missing-billing, empty fee face): %v", err)
+	}
+	assertUnanalyzed(t, res, "有量无费未分析：费用侧该类型/账期无任何计费记录")
 }
