@@ -1032,7 +1032,16 @@ func (s *Service) queueDataTarget(batchID string, files []string) error {
 		return fmt.Errorf("批次号 %q 不在白名单字符集（[A-Za-z0-9_-]）内", batchID)
 	}
 	for _, f := range files {
-		if strings.ContainsAny(f, `'\`) {
+		// Windows-path lesson (the CI run that failed on windows-latest):
+		// the analysis paths are OS-native and backslash-separated there —
+		// the raw byte check refused EVERY batch on Windows and the two
+		// verify tests went red exactly there, green on Linux. Normalize
+		// with ToSlash FIRST (the query face does the same), then check:
+		// a quote byte would be the only way out of a SQL string literal,
+		// and a backslash SURVIVING ToSlash means data corruption, not a
+		// path separator.
+		p := filepath.ToSlash(f)
+		if strings.Contains(p, "'") || strings.Contains(p, "\\") {
 			return fmt.Errorf("分析层路径 %s 含引号/反斜杠字节，拒绝进入查询文本", relPathOf(s.analysisDir(), f))
 		}
 	}
