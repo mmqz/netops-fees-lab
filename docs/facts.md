@@ -38,9 +38,9 @@
 
 | key | 当前值 | 口径（复算命令，仓库根目录执行） |
 | --- | --- | --- |
-| `go-top-level-tests` | 432 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
-| `go-test-packages` | 16 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
-| `vitest-tests` | 129 | `cd web && npx vitest run` 的 `Tests` 计数（7 文件） |
+| `go-top-level-tests` | 518 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
+| `go-test-packages` | 17 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
+| `vitest-tests` | 162 | `cd web && npx vitest run` 的 `Tests` 计数（7 文件） |
 
 **更新纪律**：改动测试面的提交（新增/删除/迁移任何测试）按门禁流程顺手更新本表三行与 README 的测试计数行；漏更不会让任何本地门禁变红——所以散文里的测试数字永远只作快照读，裁决权在复算命令。CHANGELOG 各版本段的测试数是**历史记录**（当轮实测），不随本表回改。
 

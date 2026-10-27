@@ -22,12 +22,12 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.20.0 is
-// the cross-platform correctness release: it opens with the Windows build
-// fix (#22 — the FeesOverview/feesOverview case collision and its CI gate)
-// and continues with fee-pipeline hardening for cross-period duplicates and
-// clue explainability.
-const AppVersion = "v0.20.0"
+// the health endpoint, the MCP server implementation and the CLI. v0.20.1 is
+// the v0.20.0 feedback patch: honest-empty discipline all over the risk
+// surface (#26 risk-map never mounts without coordinates, #27 the four
+// cross-layer scenarios answer 未分析 instead of all-hit noise on empty
+// faces, #25 duplicate-import warnings carry only the library record).
+const AppVersion = "v0.20.1"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

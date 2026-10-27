@@ -2,6 +2,36 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.20.1] — 2026-10-27
+
+**v0.20.0 实测反馈三连修版**（patch：风险地图空数据挂载异常 #26、跨层场景空面噪音/空集治理 #27、重复导入 warnings 双份 #25）——诚实空态纪律贯穿风险面。
+
+### 修复 — 风险地图空数据必现异常（#26）：无坐标时不再挂载，`Math.min(...[])`=Infinity 永不到达 MapLibre
+- **根因 A（挂载前置失效）**：`report !== null && geoPoints.length === 0` 的 report 前置让「数据未到达」窗口期绕过空判断照常挂载地图——空点位流进 fitBounds 触发 MapLibre「Invalid LngLat latitude value」**每次页面加载必现**（空资源库环境 100% 复现）。修复：geoPoints 为空即整体不渲染（无前置）；错误检查前置重排（非 501 错误不被空态吞掉）。
+- **根因 B（空数组视口）**：视口决策迁入纯函数 `feesRiskMapModel.computeFitTarget`——0 点 `{kind:'none'}` 不碰视口（Infinity 永不到达 MapLibre）、单点 `setCenter+setZoom(10)`（min==max 退化矩形不交给 fitBounds）、多点 fitBounds 外接矩形；组件不再自算经纬度。
+- **连带修复（注释谎言）**：`MapCanvas` 建图 effect 一次性（`[]` 依赖）而声称的「父组件 key 重挂」从未存在——切换费用类型/账期后地图渲染**过期点位**；现以 `dataSeq`（每次成功取数自增）作 remount key。
+- **测试**：新增 `feesRiskMapModel.test.ts` 10 顶（0/1/多点/两点同位/负纬度边界 + 坐标过滤 + 着色优先级）；**浏览器级实测**（duckdb 构建 + 4 点全 null 坐标复现形态）：控制台零输出零页面错误、「站点风险地图」节不渲染、交互全程干净。
+- **验收**：5 条全部闭环（issue 报告人 §七 清单逐项）。
+
+### 修复 — 跨层场景空面治理（#27）：「无法分析」绝不伪装成「发现」或「干净」
+- **unlinked（本 issue）**：资源库为空（可关联资源计数 0）时不再把全量站址报成线索（203 条噪音淹没真实发现）——0 线索 + 原因 + 下一步动作，note 与 warnings 双通道同文（CLI/MCP 读 note，UI 告警条渲染数组）；**部分导入照常分析**（导入多少是运营决策，系统不代判）。
+- **§八核对全数收口**：`retired-billing` 无任何已确认关联（空宇宙不得伪装「干净」）；`idle-billing` 全库无任何指标点（已关联站址必然零点——镜像噪音洪水）；`missing-billing` 三重门（无关联 / 全库无指标点 / 费用侧该类型账期零记录——查未导入账期与「全体漏收」同相，诚实答案是命名数据范围问题而非发明 200 条漏收线索）。
+- **通道**：`cluesPack.warnings` 新字段流入 `RiskResult.warnings`，与 #21 排除主导告警同一通道同一教义（note 恒携带同文）。
+- **前端**：`riskEmptyState` 三态扩**四态**——新增 `'not-analyzed'`（0 线索 + 有告警无排除数），告警色渲染，措辞绝不说「无异常」或「好信号」；单场景面板与总览 run-all 两处接入。
+- **测试**：`TestRisksUnanalyzedPrechecks`（std 构建 fake 引擎 + 真 SQLite）钉死七个空面分支 + 通道契约；四个既有组合测试（部分导入形态）**零改动全过**（行为不变的证明）；既有 MCP e2e 断言按新契约更新（空库 → 未分析应答）。
+- **浏览器级实测**：总览四场景 `【场景名】未分析` 告警条与真实线索并存；单场景面板四态空态文案实测渲染。
+- **文档**：fees-layer.md 新增前置门表格；api.md 补全 warnings 契约（#21 的文档欠账一并补上）。
+
+### 修复 — 重复导入 warnings 双份（#25）：重复应答只回填库中记录（方案 B 语义修复）
+- **根因**：`summaryFromBatch`（#24）重新派生源文件可写建议（#6）+ 外层 `Import` 合并又前置自己那份——同一字符串逐字节两次（首次 1 条、重复 2 条，与 issue 实测一致）。
+- **修复（方案 B）**：重复导入未写入任何数据——当前次运行的提醒（#6 可写建议、#12 骤降线）描述一个没有发生的导入事件，不应出现；持久审计记录由 `periodSource`/`periodBasis` 携带。单 sheet 提前返回不前置；多 sheet 通道同病一并根治（被跳过的 sheet 条目 warnings 置空，工作簿级提示只前置给实际写入的 sheet）；**首次导入 warnings 完全不变**。
+- **测试**：`TestDuplicateWarningsNoDupes`——通用守卫（任何 warnings 列表无逐字节重复）+ 重复路径为空 + 多 sheet 跳过条目为空 + 首次路径照常建议。
+- **文档**：api.md 单 sheet 与多 sheet 幂等应答的 warnings 语义（重复应答为空，留痕在 periodBasis）。
+
+### 测试与门禁
+- 顶层测试 516 → **518**（+2：fees 未分析前置门 1 + 重复 warnings 1；前端 vitest 160 → **162**：风险地图模型 10 + riskEmptyState 四态 +2）；默认 17 包 + duckdb 17 包全绿；tsc 0 错；case-collision gate clean（52 文件）；CI 四 job（go/duckdb/web/windows）全绿（run 40439924680）。
+- facts.md 三计数行同步（518 / 17 / 162——v0.20.0 期间漂移的旧值一并校正）。
+
 ## [0.20.0] — 2026-10-27
 
 **跨平台正确性与费用管道加固版**（minor：Windows 构建阻断修复 #22、跨账期重复导入拦截 #20、幂等重复响应字段完整化 #24、四场景 thresholdLabel 可解释化 #23、排除主导告警与三态空状态 #21、费用页信息架构重构 #19、站点风险地图渲染能力 #18）——七 issue 全量交付版。
