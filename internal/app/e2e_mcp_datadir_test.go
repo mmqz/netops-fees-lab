@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +52,7 @@ func TestMCPCreatesDefaultDataDir(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	cwd := filepath.Join(tmp, "cwd")
 	if err := os.MkdirAll(cwd, 0o755); err != nil {
 		t.Fatalf("mkdir cwd: %v", err)
@@ -132,7 +133,7 @@ func buildDuckdbE2E(t *testing.T) string {
 func mcpJSONRPC(t *testing.T, bin, db, dataDir string, callArgs map[string]any) map[string]any {
 	t.Helper()
 	cmd := exec.Command(bin, "mcp", "--db", db, "--data", dataDir)
-	cmd.Dir = t.TempDir() // nothing may depend on the CWD
+	cmd.Dir = testsupport.TempDir(t) // nothing may depend on the CWD
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)
@@ -224,7 +225,7 @@ func mcpJSONRPC(t *testing.T, bin, db, dataDir string, callArgs map[string]any) 
 func TestMCPFeesDataDirRoundTrip(t *testing.T) {
 	bin := buildDuckdbE2E(t)
 
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	data := filepath.Join(tmp, "thedata")
 	empty := filepath.Join(tmp, "emptydata")

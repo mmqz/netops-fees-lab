@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func withoutV34(t *testing.T) {
 //  3. the same (sha, sheet, type, period, mapping) still refuses a second
 //     completed batch — the one-completed-per-key doctrine is unchanged.
 func TestMigrationV34AddsFeeBatchSheet(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	ctx := context.Background()
 

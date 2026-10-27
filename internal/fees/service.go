@@ -134,6 +134,13 @@ type ImportSummary struct {
 	// source file at import time — the read-only-directory advice rides
 	// here; the import itself never refuses on them).
 	Warnings []string `json:"warnings,omitempty"`
+	// AmountColumn (#29): the header the import actually read the amount
+	// from. On sheets carrying several same-family amount variants (the
+	// tower settlement's 产品服务费合计 ×4) the operator must see WHICH 口径
+	// landed without opening the mapping JSON. Empty when a legacy path
+	// resolved no amount (never happens on fresh imports — amount mapping
+	// is mandatory).
+	AmountColumn string `json:"amountColumn,omitempty"`
 }
 
 // Import runs the full pipeline for one file the way it always worked
@@ -267,6 +274,22 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	if mapping == nil {
 		_, suggested := Recognize(sheet.Headers)
 		mapping = suggested
+	}
+	// #29: the type-scoped amount table outranks the GENERIC recognizer —
+	// but only when the operator did NOT hand an explicit mapping (an
+	// explicit --map is the 口径 declaration that always wins). The tower
+	// settlement detail carries several 产品服务费合计 variants plus
+	// 罚责赠费合计; the generic contains-fallback used to grab the FIRST
+	// header containing 费用 — on the real 157-column sheet that was an
+	// all-zero variant column and 454 rows landed with totalCents 0 and
+	// zero warnings. The scoped table matches the full normalized header
+	// (exact, never contains), in 口径 priority: 出账费用（不含税） first.
+	amountVariants := 0
+	if opts.Mapping == nil {
+		if h, ok, variants := RecognizeAmountForType(opts.FeeType, sheet.Headers); ok {
+			mapping["amount"] = h
+			amountVariants = variants
+		}
 	}
 	// #5: the optional ledger columns join the same mapping (explicit wins;
 	// the recognizer fills; nil rides). They resolve by header index next.
@@ -457,9 +480,50 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 	for _, f := range files {
 		relFiles = append(relFiles, f.relPath)
 	}
+	// #29 stop-the-bleed: a fresh batch whose EVERY imported row carries
+	// amount 0 is almost certainly a wrong-column import (the 157-column
+	// settlement shape — the recognizer grabbed an all-zero variant).
+	// The batch still completes (rows, evidence and rollback all stand);
+	// the warning names the shape so the 零金额 never masquerades as
+	// "导好了". A legitimate all-zero month is possible only in the sense
+	// that every row's own number is 0 — the text tells the operator to
+	// check the MAPPING, never claims the data is wrong outright.
+	var zeroAmountNote string
+	if len(normalized) > 0 {
+		allZero := true
+		for _, nr := range normalized {
+			if nr.AmountCents != 0 {
+				allZero = false
+				break
+			}
+		}
+		if allZero {
+			zeroAmountNote = fmt.Sprintf(
+				"已导入 %d 行金额全部为 0——极可能是金额列未正确识别（该表共 %d 列）。这批数据无法参与任何金额分析；请核对金额列映射或用映射 JSON 指定金额列，必要时回滚本批次后重新导入",
+				len(normalized), len(sheet.Headers))
+		}
+	}
+	// #29 acceptance 5 — 多金额列口径声明: when the type-scoped table picked
+	// ONE column out of a non-trivial same-stem family, the import says
+	// which 口径 landed and how many siblings stayed behind. Only the
+	// scoped-hit path counts variants (the generic fallback's choice is
+	// not a 口径 declaration).
+	var amountVariantNote string
+	if amountVariants > 1 {
+		amountVariantNote = fmt.Sprintf(
+			"金额列按塔类结算口径取「%s」；表内共有 %d 个同族金额列（历史调增/待退回等变体）——如需其他口径请用映射 JSON 显式指定",
+			mapping["amount"], amountVariants)
+	}
 	basisOut := check.Message
 	if periodBasisNote != "" {
 		basisOut += "；" + periodBasisNote
+	}
+	sumWarnings := warningsFor(periodBasisNote)
+	if zeroAmountNote != "" {
+		sumWarnings = append(sumWarnings, zeroAmountNote)
+	}
+	if amountVariantNote != "" {
+		sumWarnings = append(sumWarnings, amountVariantNote)
 	}
 	return ImportSummary{
 		BatchID: batchID, Status: "completed", WorkbookName: name, SHA256: sha,
@@ -467,7 +531,8 @@ func (s *Service) importSheet(ctx context.Context, opts ImportOptions, sheet She
 		PeriodSource: check.Source, PeriodBasis: basisOut,
 		RowsTotal: len(rows), RowsImported: len(normalized), RowsFailed: len(importErrs),
 		Files: relFiles, Errors: errs,
-		Warnings: warningsFor(periodBasisNote),
+		Warnings:     sumWarnings,
+		AmountColumn: mapping["amount"],
 	}, nil
 }
 
@@ -781,7 +846,13 @@ type SourceVerifyReport struct {
 // partition of the batch disagrees with fee_batches), "analysis-missing"
 // (a completed batch has no Parquet file at all — rolled-back-elsewhere or
 // GC'd), "duplicate-sha-period" (the same file hash lives under more than
-// one period — the #20 core shape).
+// one period — the #20 core shape); and since #32 the DATA-VALIDITY face:
+// "zero-amount" (every row of the batch carries amount 0 — the #29
+// wrong-column import shape: 454 rows, totalCents all 0, zero warnings),
+// "empty-site-code" (every row's site code is blank — an import-guard
+// regression fingerprint), "all-negative-amount" (every amount negative —
+// a parse/口径 anomaly: refunds netting everything to the minus side
+// deserve eyes).
 type VerifyBatchProblem struct {
 	Kind    string `json:"kind"`
 	BatchID string `json:"batchId"`
@@ -794,26 +865,57 @@ type VerifyBatchProblem struct {
 // story). Read-only: the report NEVER mutates or refuses anything —
 // historical pollution is surfaced, the operator decides (roll back the bad
 // batch, re-import, or accept with eyes open).
+//
+// #32: the problems split into two tiers — PeriodProblems (the #20
+// three-face period consistency, unchanged) and DataProblems (the
+// data-validity checks — an all-zero-amount batch used to sail through
+// verify-batches as problems: [], and a clean audit on garbage data is
+// worse than no audit: it hands the operator a false all-clear). Problems
+// keeps the merged list for the pre-#32 consumers (CLI exit code, HTTP
+// readers). DataChecksSkipped=true names the default-build shape honestly:
+// without the duckdb engine the data face CANNOT be checked, and a silent
+// skip would be the exact false-security this tool must never hand out.
 type VerifyBatchesReport struct {
-	BatchesChecked int                  `json:"batchesChecked"`
-	Problems       []VerifyBatchProblem `json:"problems"`
+	BatchesChecked    int                  `json:"batchesChecked"`
+	Problems          []VerifyBatchProblem `json:"problems"`
+	PeriodProblems    []VerifyBatchProblem `json:"periodProblems"`
+	DataProblems      []VerifyBatchProblem `json:"dataProblems"`
+	DataChecksSkipped bool                 `json:"dataChecksSkipped,omitempty"`
 }
 
-// VerifyBatches is #20 方案 C: the batch row, the snapshot directory and the
-// analysis partitions each record a period — they must agree. A same-SHA
-// family spanning several periods is the cross-period duplicate the import
-// guard now refuses at the door; pre-guard history shows up here.
-func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error) {
+// batchDataTarget is the #32 data face's worklist entry: one completed
+// batch's live parquet files (the same set the partition walk saw).
+type batchDataTarget struct {
+	id    string
+	files []string
+}
+
+// VerifyBatches is #20 方案 C plus the #32 data-validity face: the
+// batch row, the snapshot directory and the analysis partitions each
+// record a period — they must agree; a same-SHA family spanning several
+// periods is the cross-period duplicate the import guard now refuses at
+// the door (pre-guard history shows up here). Since #32 every completed
+// batch's Parquet ALSO gets a money-health aggregate — all-zero amounts
+// (the #29 wrong-column import sailed through as problems: []), blank
+// site codes, all-negative amounts. Read-only as ever: the operator
+// decides. The engine param names the data face's dependency — default
+// builds honestly set DataChecksSkipped instead of pretending.
+func (s *Service) VerifyBatches(ctx context.Context, engine QueryEngine) (VerifyBatchesReport, error) {
 	batches, err := s.db.FeeBatches.List(ctx, "")
 	if err != nil {
 		return VerifyBatchesReport{}, fmt.Errorf("fees: 读取费用批次: %w", err)
 	}
-	report := VerifyBatchesReport{Problems: []VerifyBatchProblem{}}
+	report := VerifyBatchesReport{
+		Problems:       []VerifyBatchProblem{},
+		PeriodProblems: []VerifyBatchProblem{},
+		DataProblems:   []VerifyBatchProblem{},
+	}
 
 	// sha -> set of distinct periods (completed batches only — a failed
 	// attempt blocks nothing and double-counts nothing).
 	type periodKey struct{ y, m int }
 	shaPeriods := make(map[string]map[periodKey]string) // sha -> period -> batch id
+	var dataTargets []batchDataTarget
 
 	for _, b := range batches {
 		if b.Status != FeeStatusCompleted {
@@ -826,7 +928,7 @@ func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error
 			if y, err1 := strconv.Atoi(parts[2]); err1 == nil {
 				if m, err2 := strconv.Atoi(parts[3]); err2 == nil {
 					if y != b.FeeYear || m != b.FeeMonth {
-						report.Problems = append(report.Problems, VerifyBatchProblem{
+						report.PeriodProblems = append(report.PeriodProblems, VerifyBatchProblem{
 							Kind:    "snapshot-period",
 							BatchID: b.ID,
 							Detail:  fmt.Sprintf("批次账期 %04d-%02d 与快照目录 %s（%04d-%02d）不一致", b.FeeYear, b.FeeMonth, b.SnapshotPath, y, m),
@@ -841,13 +943,13 @@ func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error
 		// (row-local partitions) is exactly what this check surfaces.
 		files, ferr := BatchParquetFiles(s.analysisDir(), b.ID)
 		if ferr != nil {
-			report.Problems = append(report.Problems, VerifyBatchProblem{
+			report.PeriodProblems = append(report.PeriodProblems, VerifyBatchProblem{
 				Kind:    "analysis-partition",
 				BatchID: b.ID,
 				Detail:  "扫描分析层失败: " + ferr.Error(),
 			})
 		} else if len(files) == 0 {
-			report.Problems = append(report.Problems, VerifyBatchProblem{
+			report.PeriodProblems = append(report.PeriodProblems, VerifyBatchProblem{
 				Kind:    "analysis-missing",
 				BatchID: b.ID,
 				Detail:  "completed 批次在分析层无 Parquet 文件（已回滚/被 GC？）",
@@ -855,12 +957,23 @@ func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error
 		} else {
 			for _, f := range files {
 				if !s.partitionMatches(f, b.FeeYear, b.FeeMonth) {
-					report.Problems = append(report.Problems, VerifyBatchProblem{
+					report.PeriodProblems = append(report.PeriodProblems, VerifyBatchProblem{
 						Kind:    "analysis-partition",
 						BatchID: b.ID,
 						Detail:  fmt.Sprintf("批次账期 %04d-%02d 与分析层分区 %s 不一致", b.FeeYear, b.FeeMonth, relPathOf(s.analysisDir(), f)),
 					})
 				}
+			}
+			// queue the batch for the #32 money-health pass; a refused
+			// queue entry is NAMED as its own data problem, never skipped.
+			if terr := s.queueDataTarget(b.ID, files); terr != nil {
+				report.DataProblems = append(report.DataProblems, VerifyBatchProblem{
+					Kind:    "data-check-refused",
+					BatchID: b.ID,
+					Detail:  "数据有效性检查未运行: " + terr.Error(),
+				})
+			} else {
+				dataTargets = append(dataTargets, batchDataTarget{id: b.ID, files: files})
 			}
 		}
 
@@ -882,7 +995,7 @@ func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error
 		}
 		sort.Strings(members)
 		for pk, id := range periods {
-			report.Problems = append(report.Problems, VerifyBatchProblem{
+			report.PeriodProblems = append(report.PeriodProblems, VerifyBatchProblem{
 				Kind:    "duplicate-sha-period",
 				BatchID: id,
 				Detail:  fmt.Sprintf("文件（SHA256 前 12 位 %s）同时存在于多个账期：%s ——同文件多账期会把数据重复入账", sha[:12], strings.Join(members, "、")),
@@ -891,7 +1004,56 @@ func (s *Service) VerifyBatches(ctx context.Context) (VerifyBatchesReport, error
 		}
 	}
 
+	// 5. the #32 data-validity face: only the real engine can aggregate
+	// Parquet. The default build sets the honest skip flag — a silent skip
+	// would hand out exactly the false all-clear this tool must never
+	// produce (the issue's own verdict: 「检查通过」比「没检查」更危险).
+	if engine != nil && engine.Available() {
+		probs, derr := s.verifyBatchDataHealth(ctx, dataTargets)
+		if derr != nil {
+			return VerifyBatchesReport{}, derr
+		}
+		report.DataProblems = append(report.DataProblems, probs...)
+	} else {
+		report.DataChecksSkipped = true
+	}
+	report.Problems = append(report.Problems, report.PeriodProblems...)
+	report.Problems = append(report.Problems, report.DataProblems...)
 	return report, nil
+}
+
+// queueDataTarget validates one batch's file set before it may reach the
+// #32 query face: ids are re-checked against the strict whitelist and any
+// path carrying a quote/backslash byte is refused (the SQL text carries
+// ONLY system-generated paths — the same discipline as feeTableGlob; a
+// refused entry is named in the report, never silently skipped).
+func (s *Service) queueDataTarget(batchID string, files []string) error {
+	if !safeBatchID(batchID) {
+		return fmt.Errorf("批次号 %q 不在白名单字符集（[A-Za-z0-9_-]）内", batchID)
+	}
+	for _, f := range files {
+		if strings.ContainsAny(f, `'\`) {
+			return fmt.Errorf("分析层路径 %s 含引号/反斜杠字节，拒绝进入查询文本", relPathOf(s.analysisDir(), f))
+		}
+	}
+	return nil
+}
+
+// safeBatchID is the #32 SQL face's whitelist: ids are system-generated
+// (fee_<uuid>), and the guard keeps a future writer's regression from
+// ever reaching the query text.
+func safeBatchID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // partitionMatches checks one analysis-layer file path against the expected

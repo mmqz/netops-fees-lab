@@ -8,6 +8,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,7 +38,7 @@ func TestE2EVerifySources(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := writeLedgerCSV(t, dir, "01月台账.csv", "HLJ-0001", "100.00")
 	db := filepath.Join(dir, "netops.db")
 

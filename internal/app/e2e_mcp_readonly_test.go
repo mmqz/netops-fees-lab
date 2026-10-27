@@ -8,6 +8,7 @@ package app
 import (
 	"bufio"
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +45,7 @@ func TestMCPReadOnlyStdioSmoke(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	cmd := exec.Command(e2eBin, "mcp", "--db", db, "--read-only")

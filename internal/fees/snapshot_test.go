@@ -1,6 +1,7 @@
 package fees
 
 import (
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func TestSnapshotPathIsLogicalContract(t *testing.T) {
 	// WriteSnapshot resolves the logical path onto the local filesystem
 	// (this test runs on the host OS; on Windows the FromSlash boundary
 	// is what makes it pass).
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := filepath.Join(dir, "source.csv")
 	if err := os.WriteFile(src, []byte("站址编码,电费(元),账期\nS1,1.00,2024-05\n"), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)

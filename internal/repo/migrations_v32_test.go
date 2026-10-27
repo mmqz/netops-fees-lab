@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func withoutV32(t *testing.T) {
 // raw SQL because the Go write side already emits the logical form and
 // could not produce them — the same evidence shape as v31's test.
 func TestMigrationV32NormalizesCheckpointPaths(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 
 	// Phase 1: a genuine v31 database with one workspace, one legacy

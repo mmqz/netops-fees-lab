@@ -7,6 +7,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ func TestCLIFeesCrossPeriodDuplicateAndVerify(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	src := filepath.Join(tmp, "dup.csv")
 	if err := os.WriteFile(src, []byte("站址编码,电费(元)\nHLJ-01,100.00\nHLJ-02,200.00\n"), 0o644); err != nil {

@@ -52,6 +52,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"sort"
@@ -78,7 +79,7 @@ func TestMetricsScaleProbe(t *testing.T) {
 		t.Fatalf("METRICS_SCALE_PROBE = %q: series >= 100 and days >= 7 required", raw)
 	}
 	ctx := context.Background()
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	db, err := Open(filepath.Join(dir, "netops.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)

@@ -484,10 +484,10 @@ func TestEngineAvailabilityDefaultBuild(t *testing.T) {
 	if e.Available() {
 		t.Skip("this binary was built with -tags duckdb; the stub check belongs to the default build")
 	}
-	if _, err := e.Totals(context.Background(), t.TempDir(), FeeTypeElectricity, 2024, 5, 0); !errors.Is(err, ErrEngineNotBuilt) {
+	if _, err := e.Totals(context.Background(), testsupport.TempDir(t), FeeTypeElectricity, 2024, 5, 0); !errors.Is(err, ErrEngineNotBuilt) {
 		t.Fatalf("Totals err = %v, want ErrEngineNotBuilt", err)
 	}
-	if _, err := e.Duplicates(context.Background(), t.TempDir(), FeeTypeElectricity, 2024, 0, 20); !errors.Is(err, ErrEngineNotBuilt) {
+	if _, err := e.Duplicates(context.Background(), testsupport.TempDir(t), FeeTypeElectricity, 2024, 0, 20); !errors.Is(err, ErrEngineNotBuilt) {
 		t.Fatalf("Duplicates err = %v, want ErrEngineNotBuilt", err)
 	}
 }

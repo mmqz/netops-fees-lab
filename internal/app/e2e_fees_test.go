@@ -8,6 +8,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func TestCLIFeesFlow(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	src := writeFeeCSV(t, tmp, "may-bills.csv",
@@ -159,7 +160,7 @@ func TestCLIFeesRisksContract(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// usage errors: no scenario, bogus scenario, missing --type/--year.
@@ -207,7 +208,7 @@ func TestCLIFeesClueDecisions(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	base := []string{"fees", "--db", db, "--data", tmp, "clue-decisions"}
 
@@ -337,7 +338,7 @@ func TestCLIFeesImportSheets(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 	src := writeFeeLedgerXLSX(t, tmp, "2024年05月费用.xlsx")
 

@@ -10,6 +10,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func TestConvertCLIContract(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	fixture := repoFixturePath(t, "ledger-2003-format.xls")
 
 	out, code := runCLI(t, "convert", "--in", fixture, "--out", filepath.Join(tmp, "out"))
@@ -57,7 +58,7 @@ func TestConvertCLICorruptBatchExitsOne(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	in := filepath.Join(tmp, "in")
 	if err := os.MkdirAll(in, 0o755); err != nil {
 		t.Fatal(err)
@@ -96,7 +97,7 @@ func TestConvertOutputFeedsFeesImport(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	fixture := repoFixturePath(t, "ledger-2003-format.xls")
 	if _, code := runCLI(t, "convert", "--in", fixture, "--out", tmp, "--format", "csv"); code != 0 {
 		t.Fatalf("convert csv: exit %d", code)

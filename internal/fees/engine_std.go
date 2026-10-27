@@ -51,8 +51,8 @@ func (stdQueryEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir 
 	return nil, 0, ErrEngineNotBuilt
 }
 
-func (stdQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
-	return nil, 0, ErrEngineNotBuilt
+func (stdQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, SpikeExcluded, error) {
+	return nil, SpikeExcluded{}, ErrEngineNotBuilt
 }
 
 func (stdQueryEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
@@ -76,5 +76,11 @@ func (stdQueryEngine) SiteTotalsAll(ctx context.Context, analysisDir string, fee
 }
 
 func (stdQueryEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
+	return nil, ErrEngineNotBuilt
+}
+
+// CrossUniverseTotals on the std stub: the same honest 501 refusal as
+// every other preset (#31 — the reconcile surface degrades identically).
+func (stdQueryEngine) CrossUniverseTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]TotalsRow, error) {
 	return nil, ErrEngineNotBuilt
 }

@@ -10,6 +10,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ import (
 )
 
 func TestUploadTargetMatches(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	data := []byte("the exact staged bytes, 逐字节一致")
 	sum := sha256.Sum256(data)
 

@@ -81,6 +81,46 @@ LIMIT %d`,
 	return out, rows.Err()
 }
 
+// CrossUniverseTotals (#31) is the reconcile's input primitive: the FULL
+// per-site totals of one fee type and period — no limit, no total-first
+// ranking, site_code ascending. Presence evidence, not display evidence:
+// a site with rows but 0 cents (the #29 wrong-column import shape) MUST
+// reach the merge with its row count intact — the display Totals' top-N
+// ordering parked exactly those sites past the LIMIT and the classify
+// read the missing tower rows as absence (only_electricity). DuckDB's
+// GROUP BY never drops a site that HAS rows; 0-cent rows answer 0-cents.
+func (duckQueryEngine) CrossUniverseTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]TotalsRow, error) {
+	if analysisEmpty(analysisDir) {
+		return nil, nil
+	}
+	db, err := openAnalysis()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+	query := fmt.Sprintf(`
+SELECT site_code, count(*) AS rows, sum(amount_cents) AS total_cents
+FROM read_parquet('%s', hive_partitioning = true, union_by_name = true)
+WHERE fee_type = '%s' %s
+GROUP BY site_code
+ORDER BY site_code`,
+		feeTableGlob(analysisDir), string(feeType), periodFilter(year, month))
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("fees: 查询对账全域汇总: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []TotalsRow
+	for rows.Next() {
+		var r TotalsRow
+		if err := rows.Scan(&r.SiteCode, &r.Rows, &r.TotalCents); err != nil {
+			return nil, fmt.Errorf("fees: 读取对账全域汇总行: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // MonthlyTotals is the #3 display-layer trend primitive: one row per
 // month WITH data of the fee type's year, ascending by month. The
 // distinct-site count rides along so the overview's site-count question

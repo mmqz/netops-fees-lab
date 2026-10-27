@@ -3,6 +3,7 @@ package fees
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,7 +95,7 @@ func threeTypeLedger(t *testing.T, dir string) string {
 func TestImportSheetsThreeTypeLedger(t *testing.T) {
 	svc, _, dir := newService(t)
 	ctx := context.Background()
-	path := threeTypeLedger(t, t.TempDir())
+	path := threeTypeLedger(t, testsupport.TempDir(t))
 
 	sum, err := svc.ImportSheets(ctx, SheetsImportOptions{
 		Path: path, OriginalName: "2024年05月费用.xlsx", Year: 2024, Month: 5,
@@ -193,7 +194,7 @@ func readParquetRows(t *testing.T, path string) []feeParquetRow {
 func TestImportSheetsIdempotency(t *testing.T) {
 	svc, _, dir := newService(t)
 	ctx := context.Background()
-	path := threeTypeLedger(t, t.TempDir())
+	path := threeTypeLedger(t, testsupport.TempDir(t))
 
 	first, err := svc.ImportSheets(ctx, SheetsImportOptions{
 		Path: path, OriginalName: "2024年05月费用.xlsx", Year: 2024, Month: 5,
@@ -295,7 +296,7 @@ func TestImportSheetsRefusesUnclassifiableSheet(t *testing.T) {
 func TestImportSheetsModeConflictMultiThenSingle(t *testing.T) {
 	svc, _, _ := newService(t)
 	ctx := context.Background()
-	path := threeTypeLedger(t, t.TempDir())
+	path := threeTypeLedger(t, testsupport.TempDir(t))
 
 	if _, err := svc.ImportSheets(ctx, SheetsImportOptions{
 		Path: path, OriginalName: "2024年05月费用.xlsx", Year: 2024, Month: 5,
@@ -318,7 +319,7 @@ func TestImportSheetsModeConflictMultiThenSingle(t *testing.T) {
 func TestImportSheetsModeConflictSingleThenMulti(t *testing.T) {
 	svc, _, _ := newService(t)
 	ctx := context.Background()
-	path := threeTypeLedger(t, t.TempDir())
+	path := threeTypeLedger(t, testsupport.TempDir(t))
 
 	if _, err := svc.Import(ctx, ImportOptions{
 		Path: path, OriginalName: "2024年05月费用.xlsx",
@@ -342,7 +343,7 @@ func TestImportSheetsModeConflictSingleThenMulti(t *testing.T) {
 func TestCrossCheckDeclaredType(t *testing.T) {
 	svc, _, _ := newService(t)
 	ctx := context.Background()
-	path := threeTypeLedger(t, t.TempDir())
+	path := threeTypeLedger(t, testsupport.TempDir(t))
 
 	// contradiction: sheet 电费 declared tower_lease → refuse.
 	if err := crossCheckDeclaredType(FeeTypeTowerLease, SheetData{

@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func withoutV31(t *testing.T) {
 // pass through byte-for-byte, the version advances to 31, and a second
 // reopen (idempotency) changes nothing.
 func TestMigrationV31NormalizesFeeSnapshotPaths(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 
 	// Phase 1: a genuine v30 database with legacy backslash rows plus a

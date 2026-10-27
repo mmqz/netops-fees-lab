@@ -190,8 +190,14 @@ type QueryEngine interface {
 	RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
 	// RiskSpikePreset (scenario 4): single-batch (site, period)
 	// totals whose month-over-period rise ratio reaches Ratio.
-	// Metric = the rise ratio.
-	RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error)
+	// Metric = the rise ratio. The second return is the EXCLUSION
+	// BREAKDOWN (#30): CrossBatch pairs (scenarios 2/3's clues) and
+	// ZeroBase pairs (环比基期 ≤ 0 — the rise ratio is undefined there;
+	// the strongest spike shape, #105) — the old single int could not
+	// tell the two apart and the envelope's advice pointed every
+	// operator at 重复导入 even when the whole excluded mass was zero
+	// bases (the #29 all-zero import's mirror image).
+	RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, SpikeExcluded, error)
 	// RiskOutlierPreset (scenario 5): single-batch (site, period)
 	// totals whose z-score against the same-period peers reaches
 	// ZScore (two-sided; metric = the signed z). Requires at least
@@ -220,7 +226,39 @@ type QueryEngine interface {
 	// year). Deterministic anchor order: (import_batch, source_row,
 	// amount_cents).
 	EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error)
+	// CrossUniverseTotals (#31) answers the FULL per-site totals of one
+	// fee type and period — NO limit, NO total-first ranking, site_code
+	// ascending. The reconcile needs PRESENCE evidence (how many rows a
+	// side carries), and the display-oriented Totals (top-N, largest
+	// total first) systematically truncates the zero-amount tail: a
+	// 500+ site tower sheet whose amounts all landed 0 (the #29 shape)
+	// lost its zero-total sites past the 500th row, and a site with 4
+	// tower rows but 0 cents classified as only_electricity — presence
+	// dressed up as absence. Universe semantics: every site that HAS
+	// rows is answered, 0 cents included.
+	CrossUniverseTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]TotalsRow, error)
 }
+
+// SpikeExcluded is the spike scenario's exclusion breakdown (#30): the
+// two exclusion classes carry completely different operator actions —
+// CrossBatch pairs point at duplicate imports (verify-batches), ZeroBase
+// pairs point at zero-billed base months (data-import health, the #29
+// all-zero shape) — and a merged int made every warning read like the
+// first kind.
+type SpikeExcluded struct {
+	// CrossBatch: (site, period) pairs billed by more than one batch —
+	// scenarios 2/3's clue face, out of the single-batch ratio window.
+	CrossBatch int `json:"crossBatch"`
+	// ZeroBase: single-batch pairs whose previous billed month's total
+	// is ≤ 0 — the rise ratio is undefined; a zero base followed by
+	// charges is the strongest spike shape (#105) and the count tells
+	// the operator how much of the excluded mass needs EYES (#30).
+	ZeroBase int `json:"zeroBase"`
+}
+
+// Total returns the two-class sum — the envelope's excluded count keeps
+// its pre-#30 arithmetic byte-for-byte.
+func (se SpikeExcluded) Total() int { return se.CrossBatch + se.ZeroBase }
 
 // Query is the package-level engine entry: NewQueryEngine returns the
 // duckdb-tagged implementation when compiled in, else the std stub. Wired

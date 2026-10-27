@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func newFeeBatch(id string, sha string, status domain.FeeStatus) domain.FeeBatch
 // index enforces "one completed batch per key" while failed/rolled_back
 // rows never occupy the key, and MAX(version) advances to 29.
 func TestMigrationV29AddsFeeBatches(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 	db, err := Open(path)
 	if err != nil {

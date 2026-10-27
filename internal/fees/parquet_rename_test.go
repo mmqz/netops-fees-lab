@@ -2,6 +2,7 @@ package fees
 
 import (
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,7 +74,7 @@ func TestRenameWithRetryPolicy(t *testing.T) {
 // failure: the plan step must land the file in its quarantine slot once
 // the simulated sharing window clears.
 func TestQuarantineFileRidesTransientRename(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	live := filepath.Join(dir, "fees", "fee_type=electricity", "year=2026", "month=10", "batch-x.parquet")
 	if err := os.MkdirAll(filepath.Dir(live), 0o755); err != nil {
 		t.Fatal(err)
@@ -113,8 +114,8 @@ func TestQuarantineFileRidesTransientRename(t *testing.T) {
 // batch whose file is already gone answers success, not an error.
 func TestQuarantineFileMissingSourceIsSuccess(t *testing.T) {
 	plan := rollbackPlan{
-		live:       filepath.Join(t.TempDir(), "nope", "batch-gone.parquet"),
-		quarantine: filepath.Join(t.TempDir(), "q", "batch-gone.parquet"),
+		live:       filepath.Join(testsupport.TempDir(t), "nope", "batch-gone.parquet"),
+		quarantine: filepath.Join(testsupport.TempDir(t), "q", "batch-gone.parquet"),
 	}
 	if err := quarantineFile(plan); err != nil {
 		t.Fatalf("quarantineFile of a vanished file: %v, want nil (idempotent no-op)", err)

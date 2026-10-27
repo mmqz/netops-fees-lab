@@ -11,6 +11,7 @@ package importer
 
 import (
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,14 +35,14 @@ func TestAnalyzeOfflineRealWorkbook(t *testing.T) {
 }
 
 func TestAnalyzeOfflineMissingFile(t *testing.T) {
-	_, err := AnalyzeOffline(filepath.Join(t.TempDir(), "nope.xlsx"), "nope.xlsx")
+	_, err := AnalyzeOffline(filepath.Join(testsupport.TempDir(t), "nope.xlsx"), "nope.xlsx")
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want a wrapped os.ErrNotExist", err)
 	}
 }
 
 func TestAnalyzeOfflineUnparseableBytes(t *testing.T) {
-	garbage := filepath.Join(t.TempDir(), "garbage.xlsx")
+	garbage := filepath.Join(testsupport.TempDir(t), "garbage.xlsx")
 	if err := os.WriteFile(garbage, []byte("not a zip, not a workbook"), 0o644); err != nil {
 		t.Fatal(err)
 	}

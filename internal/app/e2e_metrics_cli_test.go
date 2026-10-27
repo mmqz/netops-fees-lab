@@ -11,6 +11,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ func TestCLIMetricsBatchLifecycle(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// ① synthdata: 2 devices × 1 port, one perf day, 3 metric columns.

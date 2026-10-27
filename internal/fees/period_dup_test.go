@@ -9,6 +9,7 @@ package fees
 // duplicate paths).
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,7 +139,7 @@ func TestVerifyBatchesCleanThenDirty(t *testing.T) {
 	}
 
 	// Clean post-#20 world: one batch, all three faces agree.
-	rep, err := svc.VerifyBatches(ctx)
+	rep, err := svc.VerifyBatches(ctx, Query(ctx))
 	if err != nil {
 		t.Fatalf("verify-batches: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestVerifyBatchesCleanThenDirty(t *testing.T) {
 	plant := plantForeignPartition(t, analysis, batches[0].ID, 2026, 9, live[0])
 	_ = plant
 
-	rep2, err := svc.VerifyBatches(ctx)
+	rep2, err := svc.VerifyBatches(ctx, Query(ctx))
 	if err != nil {
 		t.Fatalf("verify-batches (dirty): %v", err)
 	}
@@ -349,7 +350,7 @@ func TestDuplicateWarningsNoDupes(t *testing.T) {
 	// The multi-sheet channel's skipped sheets: the pre-#25 merge
 	// prepended the workbook-level advice onto every sheet result,
 	// duplicated for the skipped ones.
-	xlsxPath := threeTypeLedger(t, t.TempDir())
+	xlsxPath := threeTypeLedger(t, testsupport.TempDir(t))
 	xopts := SheetsImportOptions{Path: xlsxPath, OriginalName: "2024年05月费用.xlsx", Year: 2024, Month: 5}
 	if _, err := svc.ImportSheets(ctx, xopts); err != nil {
 		t.Fatalf("first ImportSheets: %v", err)

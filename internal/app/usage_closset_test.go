@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -65,7 +66,7 @@ func TestTopLevelUsageListsEveryDispatchedSubcommand(t *testing.T) {
 // open the application BEFORE dispatching, so the unknown-sub call rides a
 // throwaway --db to reach the default branch.
 func TestDispatcherUsageListsEveryDispatchedSubcommand(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	db := filepath.Join(dir, "netops.db")
 	// #108 found both fees strings stale (`evidence`/`risks` missing), so
 	// fees is the regression headliner; the rest are guarded by the same gate.
@@ -102,7 +103,7 @@ func TestDispatcherUsageListsEveryDispatchedSubcommand(t *testing.T) {
 // claiming ".csv / .xlsx / .xls" was a lie the operator discovered only at
 // import time.
 func TestFeesImportHelpNoLongerClaimsXLS(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	db := filepath.Join(dir, "netops.db")
 	var stdout, stderr bytes.Buffer
 	code := CLI([]string{"fees", "--db", db, "--data", dir, "import", "--definitely-not-a-flag"}, &stdout, &stderr)

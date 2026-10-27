@@ -2,6 +2,48 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.20.2] — 2026-10-27
+
+**零金额诚实纪律版**（用户 v0.20.1 实测反馈五连修：#29 塔类结算详单金额静默全零 / #31 对账零金额站误判 / #30 spike 排除建议误导 / #32 verify-batches 数据面失明 / #28 Windows 测试 flake）——「有记录但金额为 0」与「无记录」从此是两个世界，且系统永远自己说出来。
+
+### 修复 — 塔类结算详单金额静默全零（#29，P1）：多行表头归一化 + 类型口径专表 + 全零止血警告
+- **根因**：甲方标准结算详单 157 列、金额列 5 个（产品服务费合计 ×4 变体 + 罚责赠费合计），表头单元格内含换行；通用识别器的 contains 兜底按同义词序抓「第一个含『费用』的列」——在真实表上命中的是全零变体列。454 行导入成功、totalCents 全 0、零警告零失败（issue 实测 100% 复现）。
+- **表头归一化**：`headerMatchKey` 折叠换行/回车/制表符——Excel Alt+Enter 多行表头（「产品服务费合计\n（出账费用）（不含税）」）折叠为单行 key，同义词匹配不再被换行击败；空格/下划线/连字符/全角空格折叠行为不变。
+- **类型口径专表（#29 §7.2）**：`typeAmountSynonyms`——tower_lease 的金额列按口径优先级 exact 匹配（绝不 contains）：「产品服务费合计（出账费用）（不含税）」（全角+半角两形）→「产品服务费合计」逐级回退；命中即覆盖通用识别，miss 则逐字节回退旧行为。**显式映射 JSON 永远胜出**（口径是运营决策，系统绝不代猜——issue §7.3 的铁律）。
+- **全零止血警告（#29 §7.1）**：新导入若全部行金额为 0，completed 应答携带显式 warning（行数 + 表列数 + 「无法参与任何金额分析」+ 映射核对指引）——不再静默导好。
+- **多金额列口径声明（#29 验收 5）**：`ImportSummary.amountColumn` 新字段写明实际取数的表头；同族变体 >1 时 warnings 说明取了哪列、共几列、如何换口径。
+- **测试**：headerMatchKey 折叠表驱动 5 形；专表 exact 命中/干扰列不中招/半角全角/非塔回退；**复现形态 e2e**（xlsx 多行表头 + 前置全零「罚责赠费合计」干扰列 + 三变体）——映射/口径 note/警告三面断言 + duckdb 构建金额落地 634617 分回归；显式映射胜出 + 全零 CSV 警告。共 7 顶新测试。
+
+### 修复 — 跨数据集对账零金额失真（#31）：对账输入换全域原语，「有行但金额 0」可区分
+- **根因（深层）**：`CrossReconcile` 的输入是展示原语 `Totals(top-500 by total DESC)`——零金额站沉底被 LIMIT 切割。塔侧 500+ 站全零时（#29 形态）尾部站整个从对账消失：4 行塔记录的站在电费侧被误判 `only_electricity`（presence 伪装 absence），差额退化为电费重排列（issue §三），且零警告。
+- **全域原语**：`CrossUniverseTotals`（新 engine 原语，duckdb 实现 + std 501 桩）——无 LIMIT、site_code 升序、有行的站全量返回（0 分含在内）；对账语义与展示语义正式分家。520 站全零 e2e：521 行全在、误判 0、展示原语保持 500 cap（契约分家的证明）。
+- **行级 zeroSide（#31 §6.1）**：两侧有行但一侧金额 0 的行（class 仍 both——行数维度早就是分类依据）携带 `zeroSide`（"electricity"/"tower"/"electricity+tower"）——排查方向指向金额列而非编码映射；双零形态诚实标记。纯函数测试钉死「有行零金额 ≠ 无记录」。
+- **侧健康告警（#31 §6.2）**：`CrossReconcileResult.warnings`（#21 通道惯例）——一侧「有记录站全部零金额」触发「差额=对侧全额不具参考价值」+ #29 形态指引；一侧完全无行触发「对账前提不成立」（only_x 分类不具排查意义）；健康表静默（零金额少数派行级标记足够，不洪泛）。
+- **note 更新**：对账表尾注新增 zeroSide 语义（先查金额列，不是编码映射问题）。
+
+### 修复 — spike 排除建议误导（#30）：排除分类计数 + 按场景分化排查指引
+- **根因**：排除告警文案对所有场景硬编码「查重复导入/多批次」；spike 的排除其实是两类（跨批次对 + 环比基期 ≤ 0 的对组），#29 全零导入时排除质量几乎全是零基期——用户按建议查 verify-batches 一无所获后误判「无异常」（issue §六第 4 条最危险形态）。
+- **分类计数（方案 B）**：`SpikeExcluded{CrossBatch, ZeroBase}`——`RiskSpikePreset` 返回值从合并 int 改为分类结构（engine 接口 + std 桩 + duckdb 实现三面同步）；`RiskResult.excludedBreakdown`（omitempty，仅 spike）序列化两类计数；`excluded` 总数算术逐字节不变（pre-#30 兼容）。
+- **按场景建议（方案 A）**：`exclusionAdvice`——spike 文案带两类各自计数与动作（① verify-batches 查重复批次；② 零基期原因核查——基期普遍为 0 即 #29 形态查金额列映射）；ledger-consistency 的排除是 #8 规则口径（一表多户/换表断链）而非数据缺失，文案如理说明；outlier 单一排除类保持通用指引。0 线索/排除主导两个分支 + note 同文通道（#21 纪律）全部跟随。
+- **测试**：报告形态复现（2+2437 → 总 2439 + 分类 + 双动作文案 + note 同文）；非 spike 场景 breakdown omitempty；outlier 单类指引不串场；advice 纯函数四分支。共 4 顶新测试。
+
+### 新增 — verify-batches 数据有效性面（#32）：金额全零批次从「检查通过」到现形
+- **失明问题（issue §四）**：#20 的四面检查全是账期一致性，金额全零批次照样 `problems: []`——实测 17 批中 9 个塔批全零，自检工具毫无察觉（「检查通过」比「没检查」更危险）。
+- **数据体检三查（#32 §5.2）**：`zero-amount`（min=max=0 且 rows>0——sum==0 的正负抵消不算，#29 形态指纹）；`empty-site-code`（站址编码全空——导入守卫逐行拒绝空码，命中即写入通道回归指纹）；`all-negative-amount`（max<0——整批负数是口径/解析异常，中严重度如实降级）。行数骤降不在本面（导入时 #12 守卫已覆盖，重复实现不增证据）。
+- **两档输出（#32 §5.3）**：`periodProblems`（既有四面，行为不变）+ `dataProblems`（新数据面）+ `problems`（合并，pre-#32 消费者兼容）+ `dataChecksSkipped`（默认构建诚实声明数据面未运行——静默跳过正是本 issue 反对的假全清）。
+- **工程面**：`VerifyBatches(ctx, engine)` 签名（数据面依赖真引擎）；duckdb 体检查询按批次白名单 id + 路径字节校验（同 feeTableGlob 纪律——无用户字符串进 SQL）；CLI 退出码文案分档计数 + 默认构建 stderr 提示。duckdb/std 双实现（build tag 拆分）。
+- **测试**：duckdb 三顶（全零检出/全负检出/混合不误报——min<0<max 击穿两类全零判定）；std 一顶（跳过标志 + 账期面照跑）；既有 TestVerifyBatchesCleanThenDirty 零改动过（兼容证明）。
+
+### 修复 — Windows 测试 75% flake（#28）：全仓 71 处裸 t.TempDir() 替换 + 静态门禁
+- **根因**：Go 标准库 `t.TempDir()` 清理不可重试——Windows 句柄释放延迟（SQLite WAL/驱动内部延迟关闭）下 `RemoveAll` 直接 FAIL 测试（unlinkat: The directory is not empty，testing.go:1617）；仓内早有 `testsupport.TempDir`（25×40ms 重试 + 失败仅记日志）专项兜底，但 33 个测试文件 71 处绕过了它（Linux unlink 语义掩盖，CI 不可见——issue 实测 3/4 随机漂移失败）。
+- **方案 A**：71 处全仓机械替换 `t.TempDir()` → `testsupport.TempDir(t)`（33 文件，含 6 个 duckdb 测试文件）。
+- **方案 B（根治）**：`TestNoStdlibTempDir` 静态门禁（testsupport 包，随 `go test` 全平台跑，无需 CI 改动）——扫描 internal/+cmd/ 全部 *_test.go，裸调用即 FAIL 并报文件:行；前缀字符判定排除 `testsupport.TempDir(t)` 自身（朴素 contains 会把替换后的 216 处全误伤）；行内豁免标记 `// stdlib-tempdir-ok: <原因>` 留给确需标准库语义的场景；扫描自身失败即 FAIL（不静默跳过）。
+- **验证**：负例实测（种一个裸调用 → 门禁 FAIL 报 file:line → 删除恢复绿）；testsupport.TempDir 现有实现不动（25×40ms≈1s 窗口按 issue 方案 C 属「可接受」，加固留待 Windows 实测数据）。
+
+### 本版工程口径
+- 顶层测试 518 → **531**（+13：#29 ×7 / #30 ×4 / #31 纯函数 ×2 / #32 std ×1 / #28 门禁 ×1——duckdb 构建 fees 包 156 顶另含 +5：金额落地 ×1 / 全域 e2e ×2 / 数据体检 ×3，减 1 个 std 专属）；go-test-packages 17 → **18**（testsupport 因 #28 门禁测试从「无测试包」变「有测试包」）；vitest 162 不变（后端新增字段全 omitempty，前端零消费零破坏）。
+- 全量门禁本地亲跑：gofmt 空 / vet（默认+duckdb 双构建）0 告警 / 默认 18 包 531 顶全绿 / duckdb 18 包 0 FAIL / tsc 0 错 / vitest 162/162 / case-collision gate clean（52 文件）/ vite build ✓。
+
 ## [0.20.1] — 2026-10-27
 
 **v0.20.0 实测反馈三连修版**（patch：风险地图空数据挂载异常 #26、跨层场景空面噪音/空集治理 #27、重复导入 warnings 双份 #25）——诚实空态纪律贯穿风险面。

@@ -4,6 +4,7 @@ package app
 // CLI flag reaches the pipeline and the refusal names the cell.
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ func TestE2EStrictRowsFlag(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	path := filepath.Join(tmp, "mixed.csv")
 	body := "站址编码,实际电量,电费(元),账期\n" +
 		"HLJ-0001,130,11050,2026-01\n" +

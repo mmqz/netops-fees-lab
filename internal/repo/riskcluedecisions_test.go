@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 // the map), and List/Count honor the ledger filters and the decided_at
 // DESC order.
 func TestRiskClueDecisionRepo(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "netops.db"))
+	db, err := Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -8,6 +8,7 @@ package convert
 // and deterministically.
 
 import (
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,7 +48,7 @@ func raw(t *testing.T, f *excelize.File, sheet, cell string) string {
 // prices that upstream decoded 100x), dates stay dates, formula cells
 // carry their cached results, text stays text.
 func TestConvertFidelityXLSX(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "ledger-2003-format.xlsx")
+	out := filepath.Join(testsupport.TempDir(t), "ledger-2003-format.xlsx")
 	outs, err := ConvertFile(fixturePath(t), filepath.Dir(out), FormatXLSX)
 	if err != nil {
 		t.Fatalf("ConvertFile: %v", err)
@@ -129,7 +130,7 @@ func TestConvertFidelityXLSX(t *testing.T) {
 // TestConvertToCSVSheets pins the csv container: one CSV per sheet under
 // the original-name directory, dates ISO, numbers exact, headers intact.
 func TestConvertToCSVSheets(t *testing.T) {
-	outDir := t.TempDir()
+	outDir := testsupport.TempDir(t)
 	outs, err := ConvertFile(fixturePath(t), outDir, FormatCSV)
 	if err != nil {
 		t.Fatalf("ConvertFile csv: %v", err)
@@ -165,7 +166,7 @@ func TestConvertToCSVSheets(t *testing.T) {
 // produce an explicit per-file failure — never a silent skip, never a
 // half-written output.
 func TestConvertRejectsCorruptXLS(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	bad := filepath.Join(dir, "bad.xls")
 	if err := os.WriteFile(bad, []byte("this is not an OLE compound file"), 0o644); err != nil {
 		t.Fatalf("write bad.xls: %v", err)
@@ -189,7 +190,7 @@ func TestConvertRejectsCorruptXLS(t *testing.T) {
 // TestConvertIdempotentContent pins acceptance #6: converting the same
 // file twice yields identical content (per-cell values and merges).
 func TestConvertIdempotentContent(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	_, err := ConvertFile(fixturePath(t), dir, FormatXLSX)
 	if err != nil {
 		t.Fatalf("first convert: %v", err)
@@ -220,18 +221,18 @@ func TestConvertIdempotentContent(t *testing.T) {
 // TestRunSkipsNonXLSInputs: a directory entry that is not .xls is not a
 // target (skipped, no error, no output); a missing input is an error.
 func TestRunSkipsNonXLSInputs(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Run(dir, t.TempDir(), FormatXLSX, false)
+	res, err := Run(dir, testsupport.TempDir(t), FormatXLSX, false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if res.Converted != 0 || res.Failed != 0 {
 		t.Fatalf("result = %+v, want nothing converted or failed", res)
 	}
-	if _, err := Run(filepath.Join(dir, "nope"), t.TempDir(), FormatXLSX, false); err == nil {
+	if _, err := Run(filepath.Join(dir, "nope"), testsupport.TempDir(t), FormatXLSX, false); err == nil {
 		t.Fatal("missing input must be an error")
 	}
 }

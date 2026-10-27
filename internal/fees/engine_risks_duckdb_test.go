@@ -10,6 +10,7 @@ package fees
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func importRiskFixture(t *testing.T, svc *Service) {
 		{"zero-base-08.csv", 2024, 8, "站址编码,账期,电费(元)\nS-ZERO,2024-08,900.00\n"},
 	}
 	for _, f := range files {
-		p := filepath.Join(t.TempDir(), f.name)
+		p := filepath.Join(testsupport.TempDir(t), f.name)
 		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
 			t.Fatal(err)
 		}

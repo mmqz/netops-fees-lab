@@ -8,6 +8,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ func TestCLIFeesDetailsLifecycle(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// add: 201-equivalent exit 0, the pending row on stdout.
@@ -112,7 +113,7 @@ func TestCLIFeesAliasesLifecycle(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// add: the audited human confirm channel.

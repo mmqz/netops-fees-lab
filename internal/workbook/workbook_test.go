@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"io"
 	"os"
 	"path/filepath"
@@ -331,7 +332,7 @@ func TestMultiSheetWorkbook(t *testing.T) {
 		}
 	}
 
-	path := filepath.Join(t.TempDir(), "multi.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "multi.xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("SaveAs: %v", err)
 	}
@@ -376,7 +377,7 @@ func TestMultiSheetWorkbook(t *testing.T) {
 // --- error paths ---
 
 func TestReadRejectsNonXLSX(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bogus.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "bogus.xlsx")
 	if err := os.WriteFile(path, []byte("this is not a zip/xlsx file"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +391,7 @@ func TestReadRejectsWorkbookWithoutData(t *testing.T) {
 	if err := f.SetCellStr("Sheet1", "A1", "设备编码"); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "header-only.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "header-only.xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +404,7 @@ func TestReadRejectsWorkbookWithoutData(t *testing.T) {
 }
 
 func TestReadMissingFile(t *testing.T) {
-	_, err := Read(filepath.Join(t.TempDir(), "does-not-exist.xlsx"))
+	_, err := Read(filepath.Join(testsupport.TempDir(t), "does-not-exist.xlsx"))
 	if err == nil || errors.Is(err, ErrNotXLSX) || errors.Is(err, ErrEmptyWorkbook) {
 		t.Errorf("Read(missing file) error = %v, want a plain read error", err)
 	}
@@ -447,7 +448,7 @@ func writeSheetWorkbook(t *testing.T, cols int, sheetRows ...int) string {
 			}
 		}
 	}
-	path := filepath.Join(t.TempDir(), "sized.xlsx")
+	path := filepath.Join(testsupport.TempDir(t), "sized.xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("SaveAs: %v", err)
 	}
@@ -509,7 +510,7 @@ func rewriteZipEntry(t *testing.T, src, name string, transform func([]byte) []by
 		t.Fatalf("OpenReader(%s): %v", src, err)
 	}
 	defer func() { _ = zr.Close() }()
-	dst := filepath.Join(t.TempDir(), "rewritten.xlsx")
+	dst := filepath.Join(testsupport.TempDir(t), "rewritten.xlsx")
 	out, err := os.Create(dst)
 	if err != nil {
 		t.Fatalf("Create: %v", err)

@@ -12,6 +12,7 @@ package fees
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func importCustomRulesFixture(t *testing.T, svc *Service) {
 		{"dup-b.csv", 6, "站址编码,账期,电费(元),备注\nS-DUP,2024-06,100.00,台账B\n"},
 	}
 	for _, f := range files {
-		p := filepath.Join(t.TempDir(), f.name)
+		p := filepath.Join(testsupport.TempDir(t), f.name)
 		if err := os.WriteFile(p, []byte(f.body), 0o644); err != nil {
 			t.Fatal(err)
 		}

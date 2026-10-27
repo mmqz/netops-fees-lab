@@ -796,12 +796,17 @@ func cmdFeesVerifySources(ctx context.Context, svc *fees.Service, args []string,
 	return nil
 }
 
-// cmdFeesVerifyBatches implements `fees verify-batches` (#20 方案 C): the
-// three-face period consistency audit — fee_batches vs the snapshot path vs
-// the analysis partitions, plus the same-SHA-multi-period family report.
+// cmdFeesVerifyBatches implements `fees verify-batches` (#20 方案 C + #32
+// data face): the three-face period consistency audit — fee_batches vs
+// the snapshot path vs the analysis partitions, plus the same-SHA-
+// multi-period family report, plus every completed batch's money-health
+// aggregate (all-zero amounts / blank site codes / all-negative).
 // Read-only: nothing is mutated, nothing is refused; a non-empty problem
-// count exits non-zero so the operator's terminal sees it (stdout keeps the
-// one JSON envelope, errAlreadyPrinted discipline).
+// count exits non-zero so the operator's terminal sees it (stdout keeps
+// the one JSON envelope, errAlreadyPrinted discipline). The default
+// build answers with dataChecksSkipped: true — the period face still
+// runs, the data face is honestly named as not-run, never silently
+// skipped.
 func cmdFeesVerifyBatches(ctx context.Context, svc *fees.Service, args []string, stdout, stderr io.Writer) error {
 	fs, usage := newFlagSet("fees verify-batches")
 	if err := fs.Parse(args); err != nil {
@@ -810,7 +815,7 @@ func cmdFeesVerifyBatches(ctx context.Context, svc *fees.Service, args []string,
 	if fs.NArg() > 0 {
 		return &usageError{msg: "verify-batches 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
 	}
-	report, err := svc.VerifyBatches(ctx)
+	report, err := svc.VerifyBatches(ctx, fees.Query(ctx))
 	if err != nil {
 		return err
 	}
@@ -821,8 +826,12 @@ func cmdFeesVerifyBatches(ctx context.Context, svc *fees.Service, args []string,
 	if _, err := stdout.Write(append(enc, '\n')); err != nil {
 		return err
 	}
+	if report.DataChecksSkipped {
+		fmt.Fprintln(stderr, "注意：默认构建未装配 duckdb 引擎——数据有效性检查（金额全零/关键列空/全负）未运行；账期一致性检查结果不受影响")
+	}
 	if len(report.Problems) > 0 {
-		return fmt.Errorf("发现 %d 处批次/快照/分析层账期不一致（明细见 stdout JSON）: %w", len(report.Problems), errAlreadyPrinted)
+		return fmt.Errorf("发现 %d 处问题（账期 %d + 数据有效性 %d，明细见 stdout JSON）: %w",
+			len(report.Problems), len(report.PeriodProblems), len(report.DataProblems), errAlreadyPrinted)
 	}
 	return nil
 }

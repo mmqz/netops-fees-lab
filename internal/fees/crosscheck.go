@@ -221,11 +221,22 @@ type CrossRow struct {
 	DeltaCents       int64  `json:"deltaCents"`
 	ElecRows         int    `json:"elecRows"`
 	TowerRows        int    `json:"towerRows"`
-	RedirectedFrom   string `json:"redirectedFrom,omitempty"` // the alias trail of this line
+	// ZeroSide (#31): "electricity" or "tower" when BOTH sides carry rows
+	// but one side's total is 0 — a presence-with-zero-cents row, distinct
+	// from the class-mates whose zero side carries NO rows at all. The
+	// classify itself is row-count-based (both vs only-either); this marker
+	// tells the operator WHICH side to suspect for the amount, so a
+	// wrong-column import (#29) reads as "钱列可疑" instead of "编码映射可疑"
+	// — the two lead to completely different audits.
+	ZeroSide       string `json:"zeroSide,omitempty"`
+	RedirectedFrom string `json:"redirectedFrom,omitempty"` // the alias trail of this line
 }
 
 // CrossReconcileResult is the envelope: the merged table (anomaly-first
-// order), the class counts and the doctrine note.
+// order), the class counts and the doctrine note. Warnings (#31) carries
+// the side-level health notices — a side whose every present site totals
+// 0 (or a side with no rows at all) makes the DELTA column meaningless
+// and the envelope must say so, the #21 channel discipline.
 type CrossReconcileResult struct {
 	Year            int        `json:"year"`
 	Month           int        `json:"month"`
@@ -235,6 +246,7 @@ type CrossReconcileResult struct {
 	Both            int        `json:"both"`
 	AliasesApplied  int        `json:"aliasesApplied"`
 	Note            string     `json:"note"`
+	Warnings        []string   `json:"warnings,omitempty"`
 }
 
 // crossMerge is the PURE reconcile: two per-site totals presets + the two
@@ -285,6 +297,17 @@ func crossMerge(year, month int, elec, tower []TotalsRow, elecAliases, towerAlia
 		switch {
 		case a.elecRows > 0 && a.towerRows > 0:
 			row.Class = string(CrossBoth)
+			// #31: rows on both sides but one side totals 0 — a
+			// presence-with-zero-cents row. NOT reclassified (the site
+			// IS both systems'), but marked: the operator audits the
+			// AMOUNT column of the zero side, never the code mapping.
+			if a.elecCents == 0 && a.towerCents == 0 {
+				row.ZeroSide = "electricity+tower"
+			} else if a.elecCents == 0 {
+				row.ZeroSide = "electricity"
+			} else if a.towerCents == 0 {
+				row.ZeroSide = "tower"
+			}
 			res.Both++
 		case a.elecRows > 0:
 			row.Class = string(CrossOnlyElectricity)
@@ -316,7 +339,8 @@ func sortCrossRows(rows []CrossRow) {
 	}
 }
 
-// CrossReconcile runs the merge for one period (issue #12 acceptance 2/3).
+// CrossReconcile runs the merge for one period (issue #12 acceptance
+// 2/3; #31 re-worked the input face).
 func (s *Service) CrossReconcile(ctx context.Context, engine QueryEngine, year, month int) (CrossReconcileResult, error) {
 	if !validQueryPeriod(year, month) {
 		return CrossReconcileResult{}, fmt.Errorf("fees: 账期 %04d-%02d 不在合法范围", year, month)
@@ -324,11 +348,19 @@ func (s *Service) CrossReconcile(ctx context.Context, engine QueryEngine, year, 
 	if !engine.Available() {
 		return CrossReconcileResult{}, ErrEngineNotBuilt
 	}
-	elec, err := engine.Totals(ctx, s.analysisDir(), domain.FeeTypeElectricity, year, month, 500)
+	// #31: the UNIVERSE primitive, not the display Totals. The old input
+	// (Totals, top-500 by total DESC) truncated the zero-amount tail of a
+	// 500+ site side — a tower sheet whose amounts all landed 0 (the #29
+	// wrong-column import) lost its 0-cent sites past the 500th row and
+	// every electricity-present site classified only_electricity: presence
+	// read as absence, the delta column degenerated to the electricity
+	// re-pricing, and the envelope said NOTHING. The universe answers
+	// EVERY site that has rows, 0 cents included.
+	elec, err := engine.CrossUniverseTotals(ctx, s.analysisDir(), domain.FeeTypeElectricity, year, month)
 	if err != nil {
 		return CrossReconcileResult{}, err
 	}
-	tower, err := engine.Totals(ctx, s.analysisDir(), domain.FeeTypeTowerLease, year, month, 500)
+	tower, err := engine.CrossUniverseTotals(ctx, s.analysisDir(), domain.FeeTypeTowerLease, year, month)
 	if err != nil {
 		return CrossReconcileResult{}, err
 	}
@@ -343,8 +375,55 @@ func (s *Service) CrossReconcile(ctx context.Context, engine QueryEngine, year, 
 	applied := len(elecAliases) + len(towerAliases)
 	res := crossMerge(year, month, elec, tower, elecAliases, towerAliases)
 	res.AliasesApplied = applied
-	res.Note = "对账表是待核实差异而非认定结论：只在电费台账=疑似自建站或编码不一致；只在塔表=多为共享站（正常）或电费在别处；差额方向=电费−塔租。映射经人工确认审计通道建立。"
+	res.Note = "对账表是待核实差异而非认定结论：只在电费台账=疑似自建站或编码不一致；只在塔表=多为共享站（正常）或电费在别处；差额方向=电费−塔租；双方都有但一侧金额为 0（zeroSide 标记）=先查该侧金额列是否导入正确，不是编码映射问题。映射经人工确认审计通道建立。"
+	res.Warnings = crossSideHealthWarnings(res)
 	return res, nil
+}
+
+// crossSideHealthWarnings answers the #31 envelope-level notices: a side
+// whose EVERY present site totals 0 carries no money information — the
+// delta column degenerates to the OTHER side's full amounts and every
+// class reading is unreliable; a side with NO rows at all is the
+// not-imported shape (its only_either mates are un-auditable by
+// construction). Both shapes get their warning; the healthy table stays
+// silent (a warning on good data is its own noise).
+func crossSideHealthWarnings(res CrossReconcileResult) []string {
+	type sideStats struct {
+		present, nonZero int
+	}
+	elec, tower := sideStats{}, sideStats{}
+	for _, r := range res.Rows {
+		if r.ElecRows > 0 {
+			elec.present++
+			if r.ElectricityCents != 0 {
+				elec.nonZero++
+			}
+		}
+		if r.TowerRows > 0 {
+			tower.present++
+			if r.TowerCents != 0 {
+				tower.nonZero++
+			}
+		}
+	}
+	var warnings []string
+	if elec.present > 0 && elec.nonZero == 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"电费侧有记录的 %d 站金额全部为 0（0 个非零）——差额=塔租全额不具参考价值；金额全零极可能是金额列未正确识别（#29 形态），请核对导入映射后重导",
+			elec.present))
+	}
+	if tower.present > 0 && tower.nonZero == 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"塔租侧有记录的 %d 站金额全部为 0（0 个非零）——差额=电费全额不具参考价值；金额全零极可能是金额列未正确识别（#29 形态），请核对导入映射后重导",
+			tower.present))
+	}
+	if elec.present == 0 {
+		warnings = append(warnings, "电费侧该账期无任何记录——对账前提不成立，only_tower 分类不具排查意义（电费台账未导入该账期？）")
+	}
+	if tower.present == 0 {
+		warnings = append(warnings, "塔租侧该账期无任何记录——对账前提不成立，only_electricity 分类不具排查意义（塔类详单未导入该账期？）")
+	}
+	return warnings
 }
 
 // ---- the import-time data-volume guard (#12 acceptance 4) ----

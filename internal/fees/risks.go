@@ -255,6 +255,13 @@ type RiskResult struct {
 	// carries the same text (acceptance 1); the array exists so the UI can
 	// render it as an alert bar instead of parsing prose.
 	Warnings []string `json:"warnings,omitempty"`
+	// ExcludedBreakdown (#30): the spike scenario's excluded count by
+	// class — crossBatch (duplicate imports, verify-batches territory) vs
+	// zeroBase (环比基期 ≤ 0, data-import health). Present ONLY on spike:
+	// the other scenarios' exclusions carry no comparable classes, and a
+	// zero-valued struct would be its own misinformation. The excluded
+	// int above stays the total (backward-compatible arithmetic).
+	ExcludedBreakdown *SpikeExcluded `json:"excludedBreakdown,omitempty"`
 }
 
 // RiskQuery is the parameter set of one scenario query. Every threshold
@@ -344,6 +351,9 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		warnings []string
 		err      error
 	)
+	// spikeBreakdown (#30): the spike scenario's excluded count, by class.
+	// Every other scenario leaves it nil (omitempty — no zero-struct noise).
+	var spikeBreakdown *SpikeExcluded
 	switch scenario {
 	case RiskDuplicateSettlement:
 		clues, excluded, err = engine.RiskDuplicatesPreset(ctx, s.analysisDir(), q)
@@ -352,8 +362,11 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 		clues, excluded, err = engine.RiskLedgerMismatchPreset(ctx, s.analysisDir(), q)
 		note = "线索口径：同一 (站址, 账期) 的各批次合计金额不一致（合同台账与账单台账作为不同批次导入时的差异形态）——差异金额供核对，非认定结论"
 	case RiskSpike:
-		clues, excluded, err = engine.RiskSpikePreset(ctx, s.analysisDir(), q)
-		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；排除数含两类（全年口径，月份参数只收窄显示的线索窗口，#83/#105）：跨批次 (站址, 账期) 对（那属于重复结算/金额差异场景）；环比基期 ≤ 0 的对组——零基期后产生费用是最强烈的突增形态，但涨幅比无定义，无法出线索，请对排除数人工核查"
+		var se SpikeExcluded
+		clues, se, err = engine.RiskSpikePreset(ctx, s.analysisDir(), q)
+		excluded = se.Total()
+		spikeBreakdown = &se
+		note = "线索口径：单批次口径的站址月度合计环比涨幅达阈值；排除数含两类（全年口径，月份参数只收窄显示的线索窗口，#83/#105）：跨批次 (站址, 账期) 对（那属于重复结算/金额差异场景）；环比基期 ≤ 0 的对组——零基期后产生费用是最强烈的突增形态，但涨幅比无定义，无法出线索，请对排除数人工核查（分类计数见 excludedBreakdown）"
 	case RiskOutlier:
 		clues, excluded, err = engine.RiskOutlierPreset(ctx, s.analysisDir(), q)
 		note = "线索口径：同期同类（同费用类型）单批次站址集合的月度总额 z-score 离群（双侧，符号在 metricValue）——注意：本场景对月度总额而非单位成本计算，规模大的站天然偏高，请结合站点规模人工判断（#117：规模归一化待基数字段落地后显式参数化）；统计线索，非认定结论；跨批次 (站址, 账期) 已排除，排除数见 excluded"
@@ -387,7 +400,9 @@ func (s *Service) Risks(ctx context.Context, engine QueryEngine, scenario RiskSc
 	if err != nil {
 		return RiskResult{}, err
 	}
-	return s.finishClues(ctx, engine, q, scenario, clues, excluded, note, warnings), nil
+	result := s.finishClues(ctx, engine, q, scenario, clues, excluded, note, warnings, spikeBreakdown)
+	result.ExcludedBreakdown = spikeBreakdown
+	return result, nil
 }
 
 // cluesPack is the cross-layer compositions' return shape (clues + the
@@ -880,7 +895,8 @@ func periodWindow(year, month int) (string, string) {
 // anchor-less clue carries [] (the arrays-are-never-null discipline of
 // the whole API surface), and the frontend renders it defensively.
 func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQuery,
-	scenario RiskScenario, clues []RiskClue, excluded int, note string, packWarnings []string) RiskResult {
+	scenario RiskScenario, clues []RiskClue, excluded int, note string, packWarnings []string,
+	spikeBreakdown *SpikeExcluded) RiskResult {
 
 	sort.SliceStable(clues, func(i, j int) bool {
 		if clues[i].MetricValue != clues[j].MetricValue {
@@ -983,18 +999,23 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 	// "全部被排除" would be its own misinformation).
 	// #27: the cross-layer compositions' own precheck notices ("未分析")
 	// ride the SAME channel — they arrive as packWarnings and merge here.
+	// #30: the audit ADVICE is scenario-aware — the one-size-fits-all 查重复导入
+	// text used to send the operator whose excluded mass was zero BASES
+	// (the #29 wrong-column import's mirror) chasing duplicate batches,
+	// finding nothing, and concluding "无异常".
 	warnings := packWarnings
 	if excluded > 0 {
+		advice := exclusionAdvice(scenario, spikeBreakdown)
 		switch {
 		case total == 0:
 			warnings = append(warnings, fmt.Sprintf(
-				"本场景返回 0 条线索，另有 %d 个对象被排除出统计——0 条线索可能是「数据被排除后无法分析」而非「无异常」；请核对是否存在重复导入/多批次（可用 fees verify-batches 审计跨账期重复）",
-				excluded))
+				"本场景返回 0 条线索，另有 %d 个对象被排除出统计——0 条线索可能是「数据被排除后无法分析」而非「无异常」；%s",
+				excluded, advice))
 		case excluded*2 >= total+excluded:
 			pct := excluded * 100 / (total + excluded)
 			warnings = append(warnings, fmt.Sprintf(
-				"本场景排除数 %d 已达线索与排除合计的 %d%%——统计面被显著削弱，结果可能不具备代表性；请核对是否存在重复导入/多批次（可用 fees verify-batches 审计跨账期重复）",
-				excluded, pct))
+				"本场景排除数 %d 已达线索与排除合计的 %d%%——统计面被显著削弱，结果可能不具备代表性；%s",
+				excluded, pct, advice))
 		}
 		if len(warnings) > 0 {
 			// acceptance 1: the note carries the count + the advice too —
@@ -1015,6 +1036,31 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 		Note:       note,
 		Warnings:   warnings,
 	}
+}
+
+// exclusionAdvice names the exclusion classes the scenario can actually
+// produce and the audit action each class points at (#30). The pre-#30
+// one-size-fits-all text appended 请核对是否存在重复导入/多批次 to every
+// scenario — correct for outlier (its only exclusion class IS cross-batch
+// pairs), actively misleading for spike (its zero-base class — often the
+// WHOLE excluded mass after a #29 wrong-column import made every base
+// month 0 — points at data-import health, not duplicate batches) and for
+// ledger-consistency (its exclusions are the #8 rule-scope rows: one
+// meter shared by several accounts and swap-flagged legal chain breaks —
+// a rule 口径, not missing data). The advice must name the classes and
+// the action for EACH; a wrong direction is worse than silence (#30 §6).
+func exclusionAdvice(scenario RiskScenario, spikeBreakdown *SpikeExcluded) string {
+	if scenario == RiskSpike && spikeBreakdown != nil {
+		return fmt.Sprintf(
+			"排除分类：跨批次 (站址, 账期) %d 对、环比基期 ≤ 0 的对组 %d 个——请分别核对："+
+				"①是否存在重复导入/多批次（可用 fees verify-batches 审计跨账期重复）；"+
+				"②上期金额为 0 的原因（零基期无法计算涨幅；若基期金额普遍为 0，极可能是该账期数据未正确导入，请核对金额列映射）",
+			spikeBreakdown.CrossBatch, spikeBreakdown.ZeroBase)
+	}
+	if scenario == RiskLedgerConsistency {
+		return "被排除行属规则口径而非数据缺失：一表多户的行（#8 读数差规则只判单户表）与已标记换表的合法断链——如需逐行核查可运行台账明细查询（fees ledger-rows）"
+	}
+	return "请核对是否存在重复导入/多批次（可用 fees verify-batches 审计跨账期重复）"
 }
 
 func joinComma(ss []string) string {

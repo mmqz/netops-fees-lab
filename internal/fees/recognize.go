@@ -478,24 +478,96 @@ func RecognizeSheetType(sheetName string, headers []string) (FeeType, int) {
 }
 
 // headerMatchKey folds a header (or synonym) into its comparison key:
-// lower-cased, with spaces, underscores, hyphens and full-width spaces
-// removed — "Site Code" / "site_code" / "SITE-CODE" / "sitecode" share
-// one key. Chinese text is untouched (lower-casing is a no-op), so every
-// Chinese-only header decision is identical to the previous exact
-// matcher (#65 P3-d added English/ mixed-form headers; it changed
-// nothing for the forms that already matched).
+// lower-cased, with spaces, underscores, hyphens, full-width spaces AND
+// LINE BREAKS removed — "Site Code" / "site_code" / "SITE-CODE" /
+// "sitecode" share one key, and a multi-line xlsx header (the cell-wrapped
+// 产品服务费合计\n（出账费用）（不含税） of the #29 tower settlement sheet —
+// Excel's Alt+Enter wrap) folds to its single-line form so the synonym
+// matchers are never defeated by a line break again. Chinese text is
+// untouched (lower-casing is a no-op), so every Chinese-only header
+// decision is identical to the previous exact matcher (#65 P3-d added
+// English/ mixed-form headers; it changed nothing for the forms that
+// already matched).
 func headerMatchKey(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
 		switch r {
-		case ' ', '_', '-', '　':
+		case ' ', '_', '-', '　', '\n', '\r', '\t':
 			continue
 		default:
 			b.WriteRune(unicode.ToLower(r))
 		}
 	}
 	return b.String()
+}
+
+// typeAmountSynonyms (#29): fee-type-SCOPED amount-column candidates for
+// the real settlement sheets, in 口径-priority order. The tower product-fee
+// settlement detail (塔类产品服务费结算详单 — 甲方标准格式，157 列) carries
+// SEVERAL 产品服务费合计 variants (出账费用 / 出账+历史调增 / 历史待退回) plus
+// 罚责赠费合计， and the pre-#29 generic contains-fallback matched the
+// FIRST header containing 费用 — on the real sheet that was an all-zero
+// variant column: 454 rows imported, totalCents all 0, zero warnings. The
+// scoped table matches EXACT NORMALIZED KEY ONLY (never contains): which
+// column IS the amount is a business-口径 decision, and the settlement's
+// own header fingerprint (产品服务费合计 + 出账费用 + 不含税) is the declared
+// 口径. Both full-width and half-width paren forms are listed —
+// headerMatchKey folds spaces and line breaks, not paren width.
+var typeAmountSynonyms = map[FeeType][]string{
+	FeeTypeTowerLease: {
+		"产品服务费合计（出账费用）（不含税）",
+		"产品服务费合计(出账费用)(不含税)",
+		"产品服务费合计（出账费用）",
+		"产品服务费合计(出账费用)",
+		"产品服务费合计",
+	},
+}
+
+// towerAmountStem is the scoped family's stem: 产品服务费合计. When the
+// chosen column is one of several stem-sharing variants the import
+// warning must say WHICH 口径 landed and how many siblings were left
+// behind (#29 acceptance 5 — 多金额列口径声明).
+const towerAmountStem = "产品服务费合计"
+
+// RecognizeAmountForType resolves the amount column through the fee
+// type's scoped synonym table (#29): exact normalized-key equality, in
+// 口径-priority order. hit=false when the type has no scoped table or no
+// exact match — the caller then falls back to the generic recognizer
+// byte-compatibly. variants counts the headers sharing the scoped stem
+// (0 when the type has no stem family); the caller reports the 口径 when
+// the family is non-trivial.
+func RecognizeAmountForType(ft FeeType, headers []string) (header string, hit bool, variants int) {
+	syns, ok := typeAmountSynonyms[ft]
+	if !ok || len(headers) == 0 {
+		return "", false, 0
+	}
+	keys := make([]string, len(headers))
+	for i, h := range headers {
+		keys[i] = headerMatchKey(h)
+	}
+	for _, syn := range syns {
+		k := headerMatchKey(syn)
+		for i, h := range headers {
+			if keys[i] == k {
+				return h, true, countStemHits(keys, headerMatchKey(towerAmountStem))
+			}
+		}
+	}
+	return "", false, 0
+}
+
+// countStemHits counts the headers whose key contains the family stem —
+// the 多金额列口径 declaration needs to know how many sibling variants
+// the sheet carries next to the chosen column.
+func countStemHits(keys []string, stemKey string) int {
+	n := 0
+	for _, k := range keys {
+		if strings.Contains(k, stemKey) {
+			n++
+		}
+	}
+	return n
 }
 
 // ledgerFieldSynonyms maps the OPTIONAL ledger richness columns of issue

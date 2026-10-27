@@ -441,18 +441,18 @@ SELECT count(*) FROM per WHERE batches > 1`, glob, feeType, period)
 // CatchUpSpanDays get the catch-up ANNOTATION (not exclusion) — the
 // rise may be the metering consequence of a concentrated catch-up
 // report, and the operator must see that reading before acting.
-func (duckQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
+func (duckQueryEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, SpikeExcluded, error) {
 	if analysisEmpty(analysisDir) {
-		return nil, 0, nil
+		return nil, SpikeExcluded{}, nil
 	}
 	db, err := openAnalysis()
 	if err != nil {
-		return nil, 0, err
+		return nil, SpikeExcluded{}, err
 	}
 	defer func() { _ = db.Close() }()
 	catchUp, err := catchUpSpans(ctx, db, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, 0))
 	if err != nil {
-		return nil, 0, err
+		return nil, SpikeExcluded{}, err
 	}
 	// A single-month scope narrows the CLUE window, not the lag base:
 	// the per CTE always sees the WHOLE YEAR (month 0 in the period
@@ -483,7 +483,7 @@ ORDER BY ratio DESC, site_code, year, month`,
 		feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, 0), q.Ratio, monthClueFilter)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, 0, fmt.Errorf("fees: 风险场景 spike 查询: %w", err)
+		return nil, SpikeExcluded{}, fmt.Errorf("fees: 风险场景 spike 查询: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var clues []RiskClue
@@ -496,7 +496,7 @@ ORDER BY ratio DESC, site_code, year, month`,
 			rks, prevRks, prevRs sql.NullInt64
 		)
 		if err := rows.Scan(&site, &year, &month, &total, &r, &prev, &ratio, &rks, &prevRks, &prevRs); err != nil {
-			return nil, 0, fmt.Errorf("fees: 读取环比线索: %w", err)
+			return nil, SpikeExcluded{}, fmt.Errorf("fees: 读取环比线索: %w", err)
 		}
 		th := q.Ratio
 		clue := RiskClue{
@@ -537,7 +537,7 @@ ORDER BY ratio DESC, site_code, year, month`,
 	// affects every ratio in the year.
 	excluded, err := excludedPairCount(ctx, db, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, 0))
 	if err != nil {
-		return nil, 0, err
+		return nil, SpikeExcluded{}, err
 	}
 	// #105: pairs whose PREVIOUS total is <= 0 used to be invisible in
 	// BOTH counters — no clue (the ratio is undefined on a zero base) and
@@ -546,9 +546,14 @@ ORDER BY ratio DESC, site_code, year, month`,
 	// service note tells the operator what the class means).
 	zeroBase, err := zeroBasePairCount(ctx, db, feeTableGlob(analysisDir), string(q.FeeType), riskPeriodFilter(q.Year, 0))
 	if err != nil {
-		return nil, 0, err
+		return nil, SpikeExcluded{}, err
 	}
-	return clues, excluded + zeroBase, nil
+	// #30: the breakdown answers as itself — the envelope's excluded
+	// count (the two-class sum) is computed by the service via
+	// SpikeExcluded.Total, and the warnings can finally name WHICH
+	// class the excluded mass belongs to instead of pointing every
+	// operator at 重复导入.
+	return clues, SpikeExcluded{CrossBatch: excluded, ZeroBase: zeroBase}, nil
 }
 
 // catchKey addresses one (site, period) pair in the catch-up map.

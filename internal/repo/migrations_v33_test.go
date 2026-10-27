@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func withoutV33(t *testing.T) {
 // guards reject out-of-enum scenario/fee_type/status values, the UNIQUE
 // identity holds, and a second reopen changes nothing (idempotency).
 func TestMigrationV33AddsRiskClueDecisions(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	path := filepath.Join(dir, "netops.db")
 
 	// Phase 1: a genuine v32 database — the table does not exist yet.

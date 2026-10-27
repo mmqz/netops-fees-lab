@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ import (
 // not-yet-existing directory is created; a missing --out is a usage
 // error (exit 2 path).
 func TestCLIBackup(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	dbPath := filepath.Join(dir, "netops.db")
 
 	// Seed the source database with one resource (data the snapshot must

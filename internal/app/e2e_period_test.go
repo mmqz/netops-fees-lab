@@ -7,6 +7,7 @@ package app
 // marked manual.
 
 import (
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestCLIFeesPeriodFlow(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// The 综维工资单 shape: 业务账期 says 2026-08.

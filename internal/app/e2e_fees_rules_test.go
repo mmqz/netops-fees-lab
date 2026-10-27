@@ -8,6 +8,7 @@ package app
 // preset honors).
 
 import (
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ func TestCLIFeesRulesLifecycle(t *testing.T) {
 	if e2eBin == "" {
 		t.Skip("netopsfees binary was not built (go tool unavailable)")
 	}
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	db := filepath.Join(tmp, "netops.db")
 
 	// create: the rule lands DISABLED with the rule_<uuid> id shape.

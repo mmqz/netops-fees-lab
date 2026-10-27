@@ -92,7 +92,7 @@ netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --y
 ```
 
 - 全部单 JSON stdout 契约；usage 错误 exit 2；幂等重复导入 **informational（exit 0 + `skippedDuplicate`）**——与资源导入器重复跳过同严重级。
-- `--map` 缺省时自动识别（表头同义词：站址编码/电费(元)/账期…；类型标记：电量/塔租/工单/综维…）；识别不到 siteCode 或 amount → 拒绝（人工映射是回退，不是猜测）。
+- `--map` 缺省时自动识别（表头同义词：站址编码/电费(元)/账期…；类型标记：电量/塔租/工单/综维…）；识别不到 siteCode 或 amount → 拒绝（人工映射是回退，不是猜测）。**表头归一化（#29）**：换行/回车/制表符与空格/下划线/连字符一并折叠——Excel Alt+Enter 多行表头（塔类结算详单「产品服务费合计\n（出账费用）（不含税）」）折叠为单行 key 再匹配。**类型口径专表（#29）**：tower_lease 的金额列按口径优先级 **exact 匹配**（产品服务费合计（出账费用）（不含税）→ … → 产品服务费合计，全角/半角两形）——通用 contains 兜底在 157 列多金额列变体表上曾命中全零变体列（454 行导入、totalCents 全 0、零警告的实测缺陷）；专表 miss 逐字节回退通用识别；显式 `--map` 永远胜出（口径是运营决策）；摘要 `amountColumn` 写明实际取数表头，同族变体 >1 时 warnings 说明口径。**全零止血（#29）**：新导入全部行金额为 0 → completed 应答携带具名警告（绝不静默导好）；`fees verify-batches` 数据面（#32）对存量批次同形态检出（`zero-amount`）。
 - `query` 两个预设：`totals`（站址汇总，分区裁剪验证面）+ `duplicates`（跨批次重复结算候选——**风险线索，非结论**：账单存在 ≠ 重复付款认定，输出待人工核实的差异行）。
 
 ## 7. HTTP API 面（与 CLI 同语义）

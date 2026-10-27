@@ -13,6 +13,7 @@ package fees
 import (
 	"context"
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,10 @@ type fakeRiskEngine struct {
 	totals       []TotalsRow
 	duplicates   []DuplicateRow
 	customRules  []CustomRuleClue
+	// #30: the spike exclusion breakdown + outlier excluded count the
+	// advice tests script (nil/0 = the not-used answers stay).
+	spikeExcluded   *SpikeExcluded
+	outlierExcluded int
 }
 
 func (f *fakeRiskEngine) Available() bool { return true }
@@ -68,11 +73,14 @@ func (f *fakeRiskEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir s
 func (f *fakeRiskEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("not used")
 }
-func (f *fakeRiskEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
-	return nil, 0, errors.New("not used")
+func (f *fakeRiskEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, SpikeExcluded, error) {
+	if f.spikeExcluded == nil {
+		return nil, SpikeExcluded{}, errors.New("not used")
+	}
+	return nil, *f.spikeExcluded, nil
 }
 func (f *fakeRiskEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
-	return nil, 0, nil // honest empty — the note test exercises the envelope tail only
+	return nil, f.outlierExcluded, nil // 0 = the honest empty the note test exercises
 }
 func (f *fakeRiskEngine) RiskCustomRulesPreset(ctx context.Context, analysisDir string, q RiskQuery, rules []domain.FeeRiskRule) ([]CustomRuleClue, error) {
 	return f.customRules, nil // #2 phase 1: the scripted findings of the composition test
@@ -85,6 +93,13 @@ func (f *fakeRiskEngine) SiteTotalsAll(ctx context.Context, analysisDir string, 
 }
 func (f *fakeRiskEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
 	return f.evidence, nil
+}
+
+// CrossUniverseTotals (#31): the reconcile surface's universe primitive —
+// the risk composition tests never call it; the honest not-used answer
+// keeps the compile-time contract pinned like every other unused face.
+func (f *fakeRiskEngine) CrossUniverseTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]TotalsRow, error) {
+	return nil, errors.New("not used")
 }
 
 // TestParseRiskScenario pins the closed enum and its rejection contract.
@@ -554,7 +569,7 @@ func TestSplitCommaTrimsAndDrops(t *testing.T) {
 // the doc comment promised to surface. A glob error now reads as
 // NON-empty, so the real query runs and surfaces the underlying error.
 func TestAnalysisEmptySurfacesGlobErrors(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := testsupport.TempDir(t)
 	// empty dir → honestly empty
 	if !analysisEmpty(tmp) {
 		t.Error("empty analysis dir: want analysisEmpty == true")
@@ -572,7 +587,7 @@ func TestAnalysisEmptySurfacesGlobErrors(t *testing.T) {
 	}
 	// a "[" in the dir makes the glob pattern malformed → the error must
 	// read as NON-empty (the query surfaces it), never as honest-empty
-	bad := filepath.Join(t.TempDir(), "analysis[bad")
+	bad := filepath.Join(testsupport.TempDir(t), "analysis[bad")
 	if err := os.MkdirAll(bad, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -838,8 +853,8 @@ func (unavailableEngine) RiskDuplicatesPreset(ctx context.Context, analysisDir s
 func (unavailableEngine) RiskLedgerMismatchPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("unreachable")
 }
-func (unavailableEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
-	return nil, 0, errors.New("unreachable")
+func (unavailableEngine) RiskSpikePreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, SpikeExcluded, error) {
+	return nil, SpikeExcluded{}, errors.New("unreachable")
 }
 func (unavailableEngine) RiskOutlierPreset(ctx context.Context, analysisDir string, q RiskQuery) ([]RiskClue, int, error) {
 	return nil, 0, errors.New("unreachable")
@@ -854,6 +869,11 @@ func (unavailableEngine) SiteTotalsAll(ctx context.Context, analysisDir string, 
 	return nil, errors.New("unreachable")
 }
 func (unavailableEngine) EvidenceFor(ctx context.Context, analysisDir string, feeType FeeType, keys []EvidenceKey, maxPer int) (map[EvidenceKey][]EvidenceAnchor, error) {
+	return nil, errors.New("unreachable")
+}
+
+// CrossUniverseTotals (#31): the unavailable engine's face-filling stub.
+func (unavailableEngine) CrossUniverseTotals(ctx context.Context, analysisDir string, feeType FeeType, year, month int) ([]TotalsRow, error) {
 	return nil, errors.New("unreachable")
 }
 

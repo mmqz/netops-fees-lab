@@ -18,6 +18,7 @@ package fees
 import (
 	"archive/zip"
 	"errors"
+	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 	"io"
 	"os"
 	"path/filepath"
@@ -72,7 +73,7 @@ func writeXLSX(t *testing.T, dir, name string, rows [][]string, extraSheets map[
 }
 
 func TestReadFeeFileXLSX(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	// Sheet row 1 = header; row 2 and 4/5 = data; row 3 = BLANK (occupied
 	// but skipped — its number must not leak into the data rows').
 	src := writeXLSX(t, dir, "may-bills.xlsx", [][]string{
@@ -108,7 +109,7 @@ func TestReadFeeFileXLSX(t *testing.T) {
 }
 
 func TestReadFeeFileXLSXMultiSheet(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	// First-sheet contract: a workbook whose SECOND sheet carries far more
 	// data than the first must read ONLY the first — the contract is
 	// documented (recognize.go: "xlsx: the first sheet only") but was never
@@ -140,7 +141,7 @@ func TestReadFeeFileXLSXMultiSheet(t *testing.T) {
 }
 
 func TestReadFeeFileXLSXNoHeader(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	// A sheet with no values at all: the first-non-blank-row header search
 	// finds nothing — the refusal copy must name the sheet.
 	src := writeXLSX(t, dir, "empty.xlsx", [][]string{{"", "", ""}}, nil)
@@ -166,7 +167,7 @@ func rewriteZipEntryFees(t *testing.T, src, name string, transform func([]byte) 
 		t.Fatalf("OpenReader(%s): %v", src, err)
 	}
 	defer func() { _ = zr.Close() }()
-	dst := filepath.Join(t.TempDir(), "rewritten.xlsx")
+	dst := filepath.Join(testsupport.TempDir(t), "rewritten.xlsx")
 	out, err := os.Create(dst)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -207,7 +208,7 @@ func rewriteZipEntryFees(t *testing.T, src, name string, transform func([]byte) 
 // are only as trustworthy as the row count, so a sheet cut mid-file must
 // surface as an error — never as a clean partial import.
 func TestReadFeeFileRejectsTruncatedSheet(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := writeXLSX(t, dir, "trunc.xlsx", [][]string{
 		{"站址编码", "电费", "账期"},
 		{"HLJ0001", "100", "2025-01"},
@@ -237,7 +238,7 @@ func TestReadFeeFileRejectsTruncatedSheet(t *testing.T) {
 // tests keep passing (TestReadFeeFileXLSX et al.) and this explicit one
 // guards the multi-sheet case too.
 func TestReadFeeFileAcceptsValidXLSXAfterGuard(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	p := writeXLSX(t, dir, "valid.xlsx", [][]string{
 		{"站址编码", "电费", "账期"},
 		{"HLJ0001", "100", "2025-01"},
@@ -268,7 +269,7 @@ func writeFeeCSV(t *testing.T, dir, name string, content []byte) string {
 // BOM used to survive into the first header cell ("\ufeff站址编码"), the
 // recognizer missed siteCode, and the file bounced out of auto-recognize.
 func TestReadFeeFileCSVBOMTolerated(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	body := []byte("站址编码,账期,电费(元)\nHLJ-0001,2024-05,100.00\n")
 	src := writeFeeCSV(t, dir, "bom.csv", append([]byte{0xEF, 0xBB, 0xBF}, body...))
 
@@ -296,7 +297,7 @@ func TestReadFeeFileCSVBOMTolerated(t *testing.T) {
 // accounting grouping (1-3 digit head + exactly-3-digit tail) whenever the
 // row count can equalize with the header; the amounts come back exact.
 func TestReadFeeFileCSVThousandsReassembled(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := writeFeeCSV(t, dir, "thousands.csv", []byte(
 		"站址编码,账期,电费(元),电量(kWh)\n"+
 			"HLJ-0001,2024-05,1,234.56,3200\n"+
@@ -330,7 +331,7 @@ func TestReadFeeFileCSVThousandsReassembled(t *testing.T) {
 // header that CANNOT be reassembled as thousands groups must fail LOUD with
 // the row number — misaligned data never reaches the analysis table.
 func TestReadFeeFileCSVRaggedRefused(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := writeFeeCSV(t, dir, "ragged.csv", []byte(
 		"站址编码,账期,电费(元)\n"+
 			"HLJ-0001,2024-05,100.00\n"+
@@ -348,7 +349,7 @@ func TestReadFeeFileCSVRaggedRefused(t *testing.T) {
 // keep the tolerant "" cells (a missing trailing optional column stays
 // legal) — the #98 refusal is only for the OVER-count misalignment.
 func TestReadFeeFileCSVShortRowsStillTolerated(t *testing.T) {
-	dir := t.TempDir()
+	dir := testsupport.TempDir(t)
 	src := writeFeeCSV(t, dir, "short.csv", []byte(
 		"站址编码,账期,电费(元),备注\n"+
 			"HLJ-0001,2024-05,100.00\n"))
