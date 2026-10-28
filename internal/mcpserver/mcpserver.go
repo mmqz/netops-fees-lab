@@ -128,20 +128,21 @@ func NewServer(svc *services.Services) *mcp.Server {
 		return nil, out, nil
 	})
 	addFeeTools(server, svc)
-	addEvidenceTools(server, svc) // #36 第一批：fee_evidence + fee_links_list（只读，双面注册）
-	addFeeRuleTool(server, svc)   // #2: the write-side creation tool — NewServer ONLY, never --read-only
+	addEvidenceTools(server, svc)  // #36 第一批：fee_evidence + fee_links_list（只读，双面注册）
+	addAnalyticsTools(server, svc) // #36 第二+三批：fee_cross_reconcile + fee_details_list + fee_batches_list + fee_verify_batches（只读，双面注册）
+	addFeeRuleTool(server, svc)    // #2: the write-side creation tool — NewServer ONLY, never --read-only
 	return server
 }
 
 // NewReadOnlyServer builds the --read-only variant of issue #10: the
 // tools annotated readOnlyHint=true ONLY — today that is resource_search
-// + the three fee query tools + #36's two evidence tools (six read-only
-// faces), while the write-side tool (fee_rules_create, #2) stays on
-// NewServer only. The variant exists as the deployment boundary: a
-// future write tool registered on NewServer does NOT appear here, and
-// the invariant (the read-only registry == the readOnlyHint=true set)
-// is pinned by TestMCPReadOnlyRegistryIsReadOnlyHintSet plus the facts
-// file mcp-tools-readonly gate.
+// + the three fee query tools + #36's six read-only fee faces (the two
+// evidence tools + the four analysis tools), while the write-side tool
+// (fee_rules_create, #2) stays on NewServer only. The variant exists as
+// the deployment boundary: a future write tool registered on NewServer
+// does NOT appear here, and the invariant (the read-only registry == the
+// readOnlyHint=true set) is pinned by TestMCPReadOnlyRegistryIsReadOnlyHintSet
+// plus the facts file mcp-tools-readonly gate.
 func NewReadOnlyServer(svc *services.Services) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: ServerName, Version: ServerVersion},
@@ -162,7 +163,8 @@ func NewReadOnlyServer(svc *services.Services) *mcp.Server {
 		return nil, out, nil
 	})
 	addFeeTools(server, svc)
-	addEvidenceTools(server, svc) // #36 第一批：两个只读证据工具——read-only 面同款（readOnlyHint=true）
+	addEvidenceTools(server, svc)  // #36 第一批：两个只读证据工具——read-only 面同款（readOnlyHint=true）
+	addAnalyticsTools(server, svc) // #36 第二+三批：四个只读分析面工具——read-only 面同款（readOnlyHint=true）
 	return server
 }
 

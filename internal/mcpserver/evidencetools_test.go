@@ -31,10 +31,11 @@ import (
 	"github.com/mmqz/netops-fees-lab/internal/testsupport"
 )
 
-// seedFeeImport writes and imports one electricity CSV through the REAL
+// seedFeeImport writes and imports one CSV through the REAL
 // service composition (the same WithFees wiring startSession uses),
-// answering the completed batch id.
-func seedFeeImport(t *testing.T, db *repo.DB, dir, name, body string, year, month int) string {
+// answering the completed batch id. The fee TYPE is the caller's — the
+// reconcile faces need both universes.
+func seedFeeImport(t *testing.T, db *repo.DB, dir, name, body string, year, month int, feeType fees.FeeType) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
@@ -42,7 +43,7 @@ func seedFeeImport(t *testing.T, db *repo.DB, dir, name, body string, year, mont
 	}
 	svc := services.New(db, services.WithFees(dir))
 	summary, err := svc.Fees.Import(context.Background(), fees.ImportOptions{
-		Path: p, FeeType: fees.FeeTypeElectricity, Year: year, Month: month,
+		Path: p, FeeType: feeType, Year: year, Month: month,
 	})
 	if err != nil {
 		t.Fatalf("import %s: %v", name, err)
@@ -104,7 +105,7 @@ func TestMCPServerFeeEvidenceRaw(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	dir := testsupport.TempDir(t)
 	batch := seedFeeImport(t, db, dir, "ev.csv",
-		"站址编码,账期,电费(元)\nS-EV,2026-09,123.45\n", 2026, 9)
+		"站址编码,账期,电费(元)\nS-EV,2026-09,123.45\n", 2026, 9, fees.FeeTypeElectricity)
 	session := startSessionIn(t, db, dir)
 
 	// row 2 = the data row: header + cells + note, the structured contract.
@@ -194,8 +195,8 @@ func TestMCPServerFeeEvidenceClue(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	dir := testsupport.TempDir(t)
 	// a real spike: 100.00 -> 240.00 (+140%, over the 0.30 governed bar).
-	seedFeeImport(t, db, dir, "m1.csv", "站址编码,账期,电费(元)\nS-SP,2026-01,100.00\n", 2026, 1)
-	seedFeeImport(t, db, dir, "m2.csv", "站址编码,账期,电费(元)\nS-SP,2026-02,240.00\n", 2026, 2)
+	seedFeeImport(t, db, dir, "m1.csv", "站址编码,账期,电费(元)\nS-SP,2026-01,100.00\n", 2026, 1, fees.FeeTypeElectricity)
+	seedFeeImport(t, db, dir, "m2.csv", "站址编码,账期,电费(元)\nS-SP,2026-02,240.00\n", 2026, 2, fees.FeeTypeElectricity)
 	session := startSessionIn(t, db, dir)
 	ctx := context.Background()
 

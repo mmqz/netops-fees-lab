@@ -229,16 +229,18 @@ func TestMCPServerResourceSearch(t *testing.T) {
 }
 
 // TestMCPToolRegistry is the §11 SEC-P2 acceptance test: tools/list exposes
-// EXACTLY the seven contract tools — resource_search + fee_risks (v0.15,
+// EXACTLY the eleven contract tools — resource_search + fee_risks (v0.15,
 // #58 stage 5) + fee_totals / fee_duplicates (#120) + fee_rules_create
 // (#2 phase 1: the first WRITE tool — creation only, NewServer only) +
 // #36 第一批's two read-only evidence tools (fee_evidence / fee_links_list
-// — the AI analysis loop's 证据链 entry points) — and nothing else: no SQL,
-// shell, file or production tools, and no enable/disable tool (the human
-// channel stays HTTP/CLI). The COUNT is additionally pinned against
-// docs/facts.md by TestMCPToolCountMatchesFactsFile (#110 — the facts-file
-// gate), so the number quoted in prose can never drift from the registry
-// silently.
+// — the AI analysis loop's 证据链 entry points) + #36 第二+三批's four
+// read-only analysis tools (fee_cross_reconcile / fee_details_list /
+// fee_batches_list / fee_verify_batches — the 对账/明细/批次/自检 faces)
+// — and nothing else: no SQL, shell, file or production tools, and no
+// enable/disable tool (the human channel stays HTTP/CLI). The COUNT is
+// additionally pinned against docs/facts.md by TestMCPToolCountMatchesFactsFile
+// (#110 — the facts-file gate), so the number quoted in prose can never
+// drift from the registry silently.
 func TestMCPToolRegistry(t *testing.T) {
 	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
@@ -260,13 +262,14 @@ func TestMCPToolRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	// The seven contract tools of the fees repo, SORTED for comparison (the
+	// The eleven contract tools of the fees repo, SORTED for comparison (the
 	// closed registry; the order is unspecified). fee_rules_create joined in
 	// #2 phase 1 — the first write tool, registered on NewServer ONLY (the
 	// --read-only twin must never see it — TestMCPReadOnlyRegistryIsReadOnlyHintSet);
-	// fee_evidence + fee_links_list joined in #36 第一批 (both readOnlyHint=true).
+	// fee_evidence + fee_links_list joined in #36 第一批, the four analysis
+	// faces in #36 第二+三批 (all readOnlyHint=true).
 	want := []string{
-		"fee_duplicates", "fee_evidence", "fee_links_list", "fee_risks", "fee_rules_create", "fee_totals", "resource_search",
+		"fee_batches_list", "fee_cross_reconcile", "fee_details_list", "fee_duplicates", "fee_evidence", "fee_links_list", "fee_risks", "fee_rules_create", "fee_totals", "fee_verify_batches", "resource_search",
 	}
 	names := make([]string, 0, len(list.Tools))
 	for _, tool := range list.Tools {
@@ -282,8 +285,8 @@ func TestMCPToolRegistry(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 7 {
-		t.Fatalf("tools/list exposes %d tools (%v), want exactly the seven contract tools %v", len(names), names, want)
+	if len(names) != 11 {
+		t.Fatalf("tools/list exposes %d tools (%v), want exactly the eleven contract tools %v", len(names), names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {

@@ -143,7 +143,7 @@ func TestMCPReadOnlyRegistryExcludesRuleCreate(t *testing.T) {
 			t.Fatalf("the --read-only registry must never expose %s (write tool): %v", feeRulesCreateName, names)
 		}
 	}
-	if len(names) != 6 {
-		t.Fatalf("read-only registry = %v, want the six read-only tools (4 pure queries + #36's fee_evidence/fee_links_list)", names)
+	if len(names) != 10 {
+		t.Fatalf("read-only registry = %v, want the ten read-only tools (4 pure queries + #36's evidence/analysis six)", names)
 	}
 }

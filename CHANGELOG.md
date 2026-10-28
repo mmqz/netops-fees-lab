@@ -4,7 +4,7 @@
 
 ## [0.21.0] — 2026-10-28
 
-**证据链收口版**（#35–#39 五 issue 全量交付）：文档示例从「照抄必崩」变为「文档即测试」（#35/#37）；对账从「列出差异」升级为「给出归因」（#38，站址主数据三结构化列）；快照原始行回读补齐证据链最后一段（#39，含字节扫描快路径）；MCP 补上 AI 分析闭环的第二步（#36，`fee_evidence` + `fee_links_list`）。Go 顶层测试 593 → **607**（默认构建口径，+14）；迁移链 v39 → **v40**；MCP 工具 5 → **7**（只读面 4 → 6）；vitest 172 不变。
+**证据链收口版**（#35–#39 五 issue 全量交付）：文档示例从「照抄必崩」变为「文档即测试」（#35/#37）；对账从「列出差异」升级为「给出归因」（#38，站址主数据三结构化列）；快照原始行回读补齐证据链最后一段（#39，含字节扫描快路径）；MCP 三批八个只读费用面工具补齐 AI 分析闭环（#36，工具面 5 → **11**，只读面 4 → **10**）。Go 顶层测试 593 → **611**（默认构建口径，+18）；迁移链 v39 → **v40**；vitest 172 不变。
 
 ### 修复 — #35 CI artifact 文档示例 GLIBC 失配（P2，实测 `GLIBC_2.38 not found`）
 - 根因：duckdb CI job 跑在 Ubuntu 24.04（GLIBC 2.39），CGO 二进制动态链接构建环境 glibc；`docs/fees-layer.md` §5.2 示例却指 `debian:bookworm-slim`（2.36）——构建 10 秒成功，容器一秒退出，#34 的「Windows 开发者免本地编译」目标在最后一步失效。
@@ -27,17 +27,19 @@
 - `EvidenceRow` 增 `note` 字段：「原始行字段，未经系统解释……不是认定结论」——**未建模列同样可读**（塔表 154 列的折扣生效日期/分项单价都在 cells 里），三面同文（HTTP #86 端点、CLI `fees evidence`、MCP `fee_evidence` 原始行模式）。
 - 方案 C：`spike`/`outlier` 场景每条线索 note 附**真实可用**的溯源指引（首证据锚点的 batch/row——占位符被禁止，无锚点不给指引）；同一站相邻账期两行逐列比对即可定位变更字段（issue 实测：+60% 涨价线索的根因是原始表第 92 列「折扣生效日期」变更）。
 
-### 新增 — #36 MCP 第一批：AI 分析闭环的证据链入口（P2，两个 P0 只读工具）
-- `fee_evidence`（双模式一契约）：线索模式 `{scenario, feeType, year, month?, site}`——与 fee_risks 同源预设、只留指定站线索、返回行级锚点（sourceFile/sourceRow/amountCents/importBatch）；原始行模式 `{batch, row}`——锚点回读快照原始行（#39），纯文件读取任何构建可用。默认构建线索模式如实报「分析引擎未编译」（契约答案，`#103` 裁定透传）；模式互斥显式拒绝（#91）。
-- `fee_links_list`：站址关联状态查询（confirmed=已确认至多一条 / pending=模糊提案待人工核实 / dismissed=已驳回留痕；status 闭集过滤）；note 带「待人工核实」「非费用认定结论」验收措辞——**确认/驳回是人类通道（HTTP/CLI），AI 只读**。
-- 治理沿面：两工具 `readOnlyHint=true`（双面注册，--read-only 可用）；limit 缺省 20 上限 50（feetools.go 同款）；数组永不 null（#93——clue 空态答 `[]` 不答缺键）。注册表闭集/计数门禁、facts.md（7/6）、architecture.md 同步。
-- e2e：真 MCP 客户端（initialize → tools/list → tools/call）三测试——原始行结构化回读、线索模式（默认构建拒答 + duckdb 构建真锚点）、关联双态与过滤。
+### 新增 — #36 MCP 三批八个只读费用面：AI 分析闭环全通（P2）
+- **第一批（P0，证据链入口）**`fee_evidence`（双模式一契约）：线索模式 `{scenario, feeType, year, month?, site}`——与 fee_risks 同源预设、只留指定站线索、返回行级锚点（sourceFile/sourceRow/amountCents/importBatch）；原始行模式 `{batch, row}`——锚点回读快照原始行（#39），纯文件读取任何构建可用。默认构建线索模式如实报「分析引擎未编译」（契约答案，`#103` 裁定透传）；模式互斥显式拒绝（#91）。`fee_links_list`：站址关联状态（confirmed=已确认至多一条 / pending=模糊提案待人工核实 / dismissed=已驳回留痕；status 闭集过滤）——确认/驳回是人类通道（HTTP/CLI），AI 只读。
+- **第二批（P1）**`fee_cross_reconcile`：对账归因面——全量三类计数 + #38 归因直方图 attributionCounts（issue 自己的答案形态：only_tower 115 条中 92 条共享无供电…）+ 异常优先排序行（limit 缺省 20 上限 50，截取在 note 里自报名，rowsTotal 恒全量）；默认构建 501 同源拒答透传，参数纪律先于引擎检查（400 先于 501）。`fee_details_list`：明细补录层（佐证而非权威教义随行；linkKey/period/feeType/status/category 五过滤与 HTTP 同一契约；status 四态闭集）。
+- **第三批（P2）**`fee_batches_list`：导入批次面（数据来源可靠性 + 幂等键口径；status 三态闭集；批次 id 即 fee_evidence 原始行模式的入口）。`fee_verify_batches`：数据自检（三面一致性 + 账期一致性 + 金额健康聚合；任何构建可用——默认构建 dataChecksSkipped=true 且 note 自报名，非静默跳过）。
+- 治理沿面：八工具全部 `readOnlyHint=true`（双面注册，--read-only 可用）；limit 缺省 20 上限 50；数组永不 null（#93）。注册表闭集/计数门禁、facts.md（11/10）、architecture.md 同步。
+- e2e：真 MCP 客户端七测试——原始行结构化回读、线索模式（默认构建拒答 + duckdb 构建真锚点）、关联双态与过滤、批次可见性与闭集、自检报告与诚实跳过注、明细过滤与闭集、对账直方图与截取自报（默认拒答 + duckdb 真表）。
+- 分批实施表的第四批（`fee_clue_decide` 写工具）不在本批：裁定是人类通道，需 annotations 治理设计单独立项。
 
 ### 文档
 - `docs/api.md`：cross-reconcile 归因六令牌契约（含洗白禁止与 unknown 计数告警）；evidence 端点未建模列可读性 + note 教义。
 - `docs/fees-layer.md` §5.2：ubuntu:24.04 + GLIBC 基线注 + 「文档即测试」段落。
-- `docs/architecture.md`：MCP 工具面 5→7（修正隔离边界段的 11 工具旧文案——拆分遗留漂移）。
-- `docs/facts.md`：mcp-tools 7 / mcp-tools-readonly 6 / repo-migrations 40 / go-top-level-tests 607；迁移头说明改 v40。
+- `docs/architecture.md`：MCP 工具面 5→11（修正隔离边界段自拆分遗留的旧工具清单漂移）。
+- `docs/facts.md`：mcp-tools 11 / mcp-tools-readonly 10 / repo-migrations 40 / go-top-level-tests 611；迁移头说明改 v40。
 
 ## [0.20.4] — 2026-10-28
 

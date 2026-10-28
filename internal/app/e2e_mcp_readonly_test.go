@@ -2,8 +2,8 @@ package app
 
 // e2e_mcp_readonly_test.go — the real-process stdio smoke of `netopsfees
 // mcp --read-only` (issue #10): a bare JSON-RPC initialize + tools/list
-// over the process's actual stdin/stdout must answer EXACTLY the six
-// read-only tools (the four pure queries + #36's two evidence tools),
+// over the process's actual stdin/stdout must answer EXACTLY the ten
+// read-only tools (the four pure queries + #36's evidence/analysis six),
 // each carrying the explicit annotation set.
 
 import (
@@ -97,12 +97,12 @@ func TestMCPReadOnlyStdioSmoke(t *testing.T) {
 		}
 	}
 
-	if len(listing.Tools) != 6 {
+	if len(listing.Tools) != 10 {
 		names := make([]string, 0, len(listing.Tools))
 		for _, tool := range listing.Tools {
 			names = append(names, tool.Name)
 		}
-		t.Fatalf("mcp --read-only tools/list = %d tools (%v), want exactly the six read-only tools (4 pure queries + #36's two evidence tools)", len(listing.Tools), names)
+		t.Fatalf("mcp --read-only tools/list = %d tools (%v), want exactly the ten read-only tools (4 pure queries + #36's evidence/analysis six)", len(listing.Tools), names)
 	}
 	for _, tool := range listing.Tools {
 		if tool.Annotations == nil {
