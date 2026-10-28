@@ -41,6 +41,23 @@ type Resource struct {
 	// parsing JSON per row (see ResourceRepo.Nearest).
 	GeoLat *float64
 	GeoLng *float64
+
+	// SiteNature / PowerMode / Lifecycle are the #38 structured
+	// master-data columns (migration v40): the three answers the
+	// cross-dataset reconcile needs to ATTRIBUTE an only_tower /
+	// only_electricity row instead of merely listing it — 站址性质
+	// (self_built/shared/leased), 供电方式 (direct/transfer/none),
+	// 生命周期 (active/retired/dismantled). Empty string means NULL =
+	// master data missing, the reconcile's honest "unknown" (never a
+	// silent "normal"). The v20 geo trio is the precedent: REAL columns
+	// beside the attributes JSON, because free text cannot be
+	// CHECK-constrained or joined. The importer projects RECOGNIZED
+	// sheet values here (ParseSiteNatureValue & co.); an out-of-set
+	// value warns W002 and leaves the column NULL — never a row
+	// failure, never a guess (the status-field doctrine).
+	SiteNature string
+	PowerMode  string
+	Lifecycle  string
 }
 
 // Relation is a typed edge between two resources. Current closed set:

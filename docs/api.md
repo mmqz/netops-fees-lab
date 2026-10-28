@@ -831,7 +831,9 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 ## GET /api/fees/batches/{id}/evidence?row= — 费用证据回读（快照原文，#86）
 
-证据链的**第三级兑现**：风险线索/导入错误携带 `source_file + source_row + import_batch` 锚点，本端点把锚点回读成**快照里的原始行**——从「结论」到「原文」一步可查。`row` 是**源文件自身的行号**（表头 = 1；与每条线索的 `sourceRow`、导入错误 detail 里的行号同口径），非法（非整数 / < 1）→ 400。返回 `EvidenceRow{batchId, sourceFile, originalName, feeType, year, month, row, header[], cells[]}`（`header` + `cells` 逐列对位，运营者无需再打开原始文件）。未知批次 id → 404。**纯文件读取，无引擎参与**：任何构建（含默认构建）都可读。快照不可变且**按设计在回滚后存活**，故 `rolled_back` 批次的证据同样可回读（证据寿命 > 批次寿命，与 §`POST /api/fees/batches/{id}/rollback` 同一教义）。CLI 等价：`netopslab fees evidence --batch <id> --row <n>`。
+证据链的**第三级兑现**：风险线索/导入错误携带 `source_file + source_row + import_batch` 锚点，本端点把锚点回读成**快照里的原始行**——从「结论」到「原文」一步可查。`row` 是**源文件自身的行号**（表头 = 1；与每条线索的 `sourceRow`、导入错误 detail 里的行号同口径），非法（非整数 / < 1）→ 400。返回 `EvidenceRow{batchId, sourceFile, originalName, feeType, year, month, row, header[], cells[], note}`（`header` + `cells` 逐列对位，运营者无需再打开原始文件）。未知批次 id → 404。**纯文件读取，无引擎参与**：任何构建（含默认构建）都可读。快照不可变且**按设计在回滚后存活**，故 `rolled_back` 批次的证据同样可回读（证据寿命 > 批次寿命，与 §`POST /api/fees/batches/{id}/rollback` 同一教义）。CLI 等价：`netopslab fees evidence --batch <id> --row <n>`。
+
+**未建模列同样可读（#39）**：`cells` 是快照原文的**逐列完整副本**——含导入映射未建模的原始列（塔类详单的 154 列里：折扣生效日期/分项单价/折扣率/共享用户数……都在，只是分析层不消费）；溯源时把同一站相邻账期两行原始行逐列比对即可定位变更字段（#39 实测：+60% 涨价线索的根因就在原始表第 92 列「折扣生效日期」）。`note` 携带 #39 教义：「原始行字段，未经系统解释……不是认定结论」——回读是证据兑现，不是结论生成；`spike` / `outlier` 场景的每条线索 note 亦附带首锚点的真实 `(batch, row)` 溯源指引（三面同文：CLI `fees evidence --batch <id> --row <n>`、本端点、MCP `fee_evidence` 原始行模式）。
 
 ## GET /api/fees/years — 费用数据年份发现（v0.20.3）
 
@@ -893,7 +895,7 @@ multipart 字段：`file`（.xlsx；**CSV 拒收**——没有表名就没有类
 
 ## GET /api/fees/cross-reconcile?year=&month= — 跨数据集对账表（#12 验收 2/3）
 
-**甲方核对乙方**：电费台账与塔类详单按**主编码**归并（别名经映射桥重定向，痕迹随行）。逐站 `{canonical, class, electricityCents, towerCents, deltaCents(电−塔), elecRows, towerRows, zeroSide?, redirectedFrom}`；信封 `{onlyElectricity, onlyTower, both, aliasesApplied, note, warnings?}`。**零金额纪律（#31）**：对账输入是全域原语（有行的站全量参与，0 分含在内——展示原语的 top-500 截断不再能切掉零金额尾部）；`zeroSide` 标记「两侧有行但一侧金额 0」的行（排查方向=金额列，不是编码映射）；`warnings` 在一侧「有记录站全部零金额」（差额退化为对侧全额，不具参考价值）或一侧完全无行（对账前提不成立）时给出侧级健康告警，健康表静默。**三类分拣**：only_electricity=疑似自建站或编码不一致（#12 实测 7 站形态）/ only_tower=多为共享站（正常）/ both=可进一步核对；排序=异常优先（只在电费→只在塔表→双方），确定性 tiebreak。**对账表是待核实差异而非认定结论**。参数校验先于引擎检查（400 先于 501）；合并为纯函数（同数据同输出）。CLI：`fees cross-reconcile --year [--month]`。
+**甲方核对乙方**：电费台账与塔类详单按**主编码**归并（别名经映射桥重定向，痕迹随行）。逐站 `{canonical, class, electricityCents, towerCents, deltaCents(电−塔), elecRows, towerRows, zeroSide?, redirectedFrom?, attribution?}`；信封 `{onlyElectricity, onlyTower, both, aliasesApplied, note, warnings?}`。**零金额纪律（#31）**：对账输入是全域原语（有行的站全量参与，0 分含在内——展示原语的 top-500 截断不再能切掉零金额尾部）；`zeroSide` 标记「两侧有行但一侧金额 0」的行（排查方向=金额列，不是编码映射）；`warnings` 在一侧「有记录站全部零金额」（差额退化为对侧全额，不具参考价值）或一侧完全无行（对账前提不成立）时给出侧级健康告警，健康表静默。**三类分拣**：only_electricity=疑似自建站或编码不一致（#12 实测 7 站形态）/ only_tower=多为共享站（正常）/ both=可进一步核对；排序=异常优先（只在电费→只在塔表→双方），确定性 tiebreak。**带判定的三分类（#38）**：每行 only_* 差异携带 `attribution`（归因，主数据的结构化判读，非认定结论）——闭集六令牌：`shared_no_power_needed` 共享站且无供电（正常）/ `self_built_no_tower_needed` 自建站无塔租（正常）/ `retired_but_billed` 已退网或已拆仍计费（风险，应追回）/ `power_should_exist` 应供电但电费无记录（漏登风险，应补记）/ `code_mismatch` 疑两系统编码不一致（存在映射提案，先人工确认）/ `unknown` 缺站址主数据（无已确认关联或资源未带站址性质/供电方式/生命周期），**无法判断差异性质——不是正常**。判定读经确认关联的站址主数据三结构化列（迁移 v40：`site_nature`/`power_mode`/`lifecycle`，从基站/局站/机房导入表的「站址性质/供电方式/生命周期」列识别，口径外值警告 W002 并留空）；硬主数据优先于映射提案提示；主数据缺失时 **绝不默认归为正常**（洗白禁止），信封 `warnings` 携带 unknown 计数（「N 行差异 attribution=unknown……不是正常」）。both 行不携带 attribution（无可解释的差异）。**对账表是待核实差异而非认定结论**。参数校验先于引擎检查（400 先于 501）；合并为纯函数（同数据同输出）。CLI：`fees cross-reconcile --year [--month]`。
 
 ## POST /api/fees/period-probe — 账期内容探测（#15）
 

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -193,7 +194,22 @@ func ReadSnapshotRow(path string, row int) (RowEvidence, error) {
 	case "csv":
 		return readSnapshotRowCSV(path, row)
 	default: // "xlsx" — the only other SnapshotExt output
-		return readSnapshotRowXLSX(path, row)
+		// #39: the byte-scanning two-row reader answers first — O(target
+		// row) instead of the excelize token walk's O(every row above it)
+		// (the issue's own 157列×454行 shape measured 200-230ms before the
+		// render even started, against the <200ms acceptance budget). Every
+		// case the fast reader cannot prove byte-identical BAILS (handled=
+		// false, or errFastPathBail) and the walk answers instead — the
+		// contract never shifts, the fast path only ever answers what the
+		// walk would answer (TestFastXLSXRowReaderEquivalence pins it).
+		if ev, handled, ferr := readSnapshotRowXLSXFast(path, row); handled {
+			return ev, ferr
+		} else if ferr != nil && !errors.Is(ferr, errFastPathBail) {
+			// the fast reader's own real failure (e.g. the zip open) — the
+			// walk would hit the same wall; speak it here.
+			return ev, ferr
+		}
+		return readSnapshotRowXLSXExcelize(path, row)
 	}
 }
 
@@ -230,7 +246,13 @@ func readSnapshotRowCSV(path string, row int) (RowEvidence, error) {
 		domain.ErrNotFound, filepath.Base(path), recNo, row)
 }
 
-func readSnapshotRowXLSX(path string, row int) (RowEvidence, error) {
+// readSnapshotRowXLSXExcelize is the original streaming walk: excelize's
+// Rows() iterator token-decodes EVERY cell of EVERY row above the target
+// — the #39 latency measurement's baseline (and the bail target of the
+// byte-scanning fast path, snapshot_xlsx_fast.go). Kept verbatim: every
+// shape the fast reader cannot prove byte-identical lands here, so the
+// contract the callers see never moved.
+func readSnapshotRowXLSXExcelize(path string, row int) (RowEvidence, error) {
 	f, err := excelize.OpenFile(path)
 	if err != nil {
 		return RowEvidence{}, fmt.Errorf("fees: 打开快照 %s: %w", path, err)

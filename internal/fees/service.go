@@ -1808,7 +1808,17 @@ type EvidenceRow struct {
 	Row          int      `json:"row"`
 	Header       []string `json:"header"`
 	Cells        []string `json:"cells"`
+	// Note (#39) carries the raw-row doctrine: the cells are the snapshot's
+	// own bytes — including every column the import mapping never modeled
+	// (折扣生效日期/分项单价/共享用户数…) — 未经系统解释, evidence for a
+	// human (or AI) to read, never a verdict.
+	Note string `json:"note"`
 }
+
+// evidenceRowNote is the #39 acceptance's own doctrine sentence — the raw
+// row is the operator's original text (the snapshot is the source file's
+// complete copy), so the read-back must never dress up as a conclusion.
+const evidenceRowNote = "原始行字段，未经系统解释——含导入映射未建模的原始列（如塔类详单的折扣生效日期/分项单价/共享用户数）；行级证据供人工核对，不是认定结论；(batch, row) 与线索证据锚点同口径（表头=1），可逐列比对相邻账期定位变更字段"
 
 // EvidenceRow reads one row of a batch's snapshot back (#86). row is the
 // source file's own numbering (header = 1) — exactly the source_row anchors
@@ -1850,6 +1860,7 @@ func (s *Service) EvidenceRow(ctx context.Context, batchID string, row int) (Evi
 		Row:          row,
 		Header:       ev.Header,
 		Cells:        ev.Cells,
+		Note:         evidenceRowNote,
 	}, nil
 }
 

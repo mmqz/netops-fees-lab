@@ -230,6 +230,15 @@ type CrossRow struct {
 	// — the two lead to completely different audits.
 	ZeroSide       string `json:"zeroSide,omitempty"`
 	RedirectedFrom string `json:"redirectedFrom,omitempty"` // the alias trail of this line
+	// Attribution (#38) is the row's WHY — the master-data judgment the
+	// reconcile reads off the confirmed link's resource (站址性质/供电方式/
+	// 生命周期, migration v40) plus the alias-proposal face. Closed token set
+	// (crossattribution.go owns the decision order): shared_no_power_needed /
+	// self_built_no_tower_needed / retired_but_billed / power_should_exist /
+	// code_mismatch / unknown. both rows carry none (omitempty — no
+	// difference to explain); unknown means master data is MISSING and says
+	// so — never a silent "normal" (the issue's own 洗白 warning).
+	Attribution string `json:"attribution,omitempty"`
 }
 
 // CrossReconcileResult is the envelope: the merged table (anomaly-first
@@ -375,8 +384,26 @@ func (s *Service) CrossReconcile(ctx context.Context, engine QueryEngine, year, 
 	applied := len(elecAliases) + len(towerAliases)
 	res := crossMerge(year, month, elec, tower, elecAliases, towerAliases)
 	res.AliasesApplied = applied
-	res.Note = "对账表是待核实差异而非认定结论：只在电费台账=疑似自建站或编码不一致；只在塔表=多为共享站（正常）或电费在别处；差额方向=电费−塔租；双方都有但一侧金额为 0（zeroSide 标记）=先查该侧金额列是否导入正确，不是编码映射问题。映射经人工确认审计通道建立。"
+	// #38: attribute every only_* row — the structured master data through
+	// the confirmed link (hard answers) plus the alias-proposal face (hints);
+	// a row with neither answers unknown and the envelope warns with the
+	// count (never a silent all-clear). Hard master data outranks hints: a
+	// retired site's row attributes retired_but_billed even when a fuzzy
+	// proposal also exists.
+	master, err := s.fetchSiteMaster(ctx, collectAttributionCodes(res.Rows))
+	if err != nil {
+		return CrossReconcileResult{}, err
+	}
+	proposals, err := s.proposalCoverage(ctx, engine)
+	if err != nil {
+		return CrossReconcileResult{}, err
+	}
+	unknown := attributeCrossRows(res.Rows, master, proposals)
+	res.Note = "对账表是待核实差异而非认定结论：只在电费台账=疑似自建站或编码不一致；只在塔表=多为共享站（正常）或电费在别处；差额方向=电费−塔租；双方都有但一侧金额为 0（zeroSide 标记）=先查该侧金额列是否导入正确，不是编码映射问题。映射经人工确认审计通道建立。" + attributionNoteAppendix
 	res.Warnings = crossSideHealthWarnings(res)
+	if unknown > 0 {
+		res.Warnings = append(res.Warnings, attributionUnknownWarning(unknown))
+	}
 	return res, nil
 }
 

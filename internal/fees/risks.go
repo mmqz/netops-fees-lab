@@ -983,6 +983,31 @@ func (s *Service) finishClues(ctx context.Context, engine QueryEngine, q RiskQue
 			clues[i].Evidence = make([]EvidenceAnchor, 0)
 		}
 	}
+	// #39 方案 C: the spike/outlier clues carry their own traceability
+	// hint — the issue's measured shape was a REAL +60% rent spike whose
+	// cause sat in the original row's unmapped 折扣生效日期 column, and the
+	// operator had to open Excel by hand to find it. The hint cites the
+	// clue's FIRST evidence anchor (real batch/row — a placeholder the
+	// operator cannot cash in would be its own noise; a clue with no
+	// anchor gets no hint, never a fabricated one). All three faces print
+	// it (HTTP/CLI read the same clue JSON; MCP's fee_evidence clue mode
+	// answers these clues verbatim).
+	if scenario == RiskSpike || scenario == RiskOutlier {
+		for i := range clues {
+			if len(clues[i].Evidence) == 0 || clues[i].Evidence[0].ImportBatch == "" {
+				continue
+			}
+			a := clues[i].Evidence[0]
+			hint := fmt.Sprintf(
+				"溯源指引：金额变化可能源于调价类字段变更（如折扣生效日期/分项单价）；可用 CLI `fees evidence --batch %s --row %d`、HTTP GET /api/fees/batches/%s/evidence?row=%d 或 MCP fee_evidence {batch:%q, row:%d} 回读该行快照原始字段（含未建模列，逐列比对相邻账期即可定位变更字段）",
+				a.ImportBatch, a.SourceRow, a.ImportBatch, a.SourceRow, a.ImportBatch, a.SourceRow)
+			if clues[i].Note != "" {
+				clues[i].Note += "；" + hint
+			} else {
+				clues[i].Note = hint
+			}
+		}
+	}
 	// The envelope's own array rides the same #93 doctrine: a zero-clue
 	// scenario (idle-billing on a bare fixture) must answer "clues": [],
 	// never null — the browser-side run-all (#3) iterates every envelope

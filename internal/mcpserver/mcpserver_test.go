@@ -60,6 +60,15 @@ func importSeededWorkbooks(t *testing.T) *repo.DB {
 // pipes are shut down by the cleanup function.
 func startSession(t *testing.T, db *repo.DB) *mcp.ClientSession {
 	t.Helper()
+	return startSessionIn(t, db, testsupport.TempDir(t))
+}
+
+// startSessionIn is startSession with an explicit fees data dir — the #36
+// evidence tools' e2e needs the session's fee service to point at the SAME
+// dir the seeded import wrote its snapshot into (startSession's temp dir is
+// call-private and unreachable from the test body).
+func startSessionIn(t *testing.T, db *repo.DB, dir string) *mcp.ClientSession {
+	t.Helper()
 
 	// Client → server pipe and server → client pipe.
 	srvRead, cliWrite, err := os.Pipe()
@@ -78,8 +87,8 @@ func startSession(t *testing.T, db *repo.DB) *mcp.ClientSession {
 		// ends as its stdin/stdout. W9-D: the session consumes the single
 		// service composition built from this test's db (the same shape
 		// app.New hands to Run). #58 stage 5: WithFees wires the fee
-		// analysis service (a temp data dir — the fee_risks tool needs it).
-		done <- Run(ctx, services.New(db, services.WithFees(testsupport.TempDir(t))), srvRead, srvWrite)
+		// analysis service (the GIVEN data dir — the fee tools need it).
+		done <- Run(ctx, services.New(db, services.WithFees(dir)), srvRead, srvWrite)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -220,14 +229,16 @@ func TestMCPServerResourceSearch(t *testing.T) {
 }
 
 // TestMCPToolRegistry is the §11 SEC-P2 acceptance test: tools/list exposes
-// EXACTLY the five contract tools — resource_search + fee_risks (v0.15,
+// EXACTLY the seven contract tools — resource_search + fee_risks (v0.15,
 // #58 stage 5) + fee_totals / fee_duplicates (#120) + fee_rules_create
-// (#2 phase 1: the first WRITE tool — creation only, NewServer only) —
-// and nothing else: no SQL, shell, file or production tools, and no
-// enable/disable tool (the human channel stays HTTP/CLI). The COUNT is additionally
-// pinned against docs/facts.md by TestMCPToolCountMatchesFactsFile (#110 —
-// the facts-file gate), so the number quoted in prose can never drift from
-// the registry silently.
+// (#2 phase 1: the first WRITE tool — creation only, NewServer only) +
+// #36 第一批's two read-only evidence tools (fee_evidence / fee_links_list
+// — the AI analysis loop's 证据链 entry points) — and nothing else: no SQL,
+// shell, file or production tools, and no enable/disable tool (the human
+// channel stays HTTP/CLI). The COUNT is additionally pinned against
+// docs/facts.md by TestMCPToolCountMatchesFactsFile (#110 — the facts-file
+// gate), so the number quoted in prose can never drift from the registry
+// silently.
 func TestMCPToolRegistry(t *testing.T) {
 	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {
@@ -249,12 +260,13 @@ func TestMCPToolRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	// The five contract tools of the fees repo, SORTED for comparison (the
+	// The seven contract tools of the fees repo, SORTED for comparison (the
 	// closed registry; the order is unspecified). fee_rules_create joined in
 	// #2 phase 1 — the first write tool, registered on NewServer ONLY (the
-	// --read-only twin must never see it — TestMCPReadOnlyRegistryIsReadOnlyHintSet).
+	// --read-only twin must never see it — TestMCPReadOnlyRegistryIsReadOnlyHintSet);
+	// fee_evidence + fee_links_list joined in #36 第一批 (both readOnlyHint=true).
 	want := []string{
-		"fee_duplicates", "fee_risks", "fee_rules_create", "fee_totals", "resource_search",
+		"fee_duplicates", "fee_evidence", "fee_links_list", "fee_risks", "fee_rules_create", "fee_totals", "resource_search",
 	}
 	names := make([]string, 0, len(list.Tools))
 	for _, tool := range list.Tools {
@@ -270,8 +282,8 @@ func TestMCPToolRegistry(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if len(names) != 5 {
-		t.Fatalf("tools/list exposes %d tools (%v), want exactly the five contract tools %v", len(names), names, want)
+	if len(names) != 7 {
+		t.Fatalf("tools/list exposes %d tools (%v), want exactly the seven contract tools %v", len(names), names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {

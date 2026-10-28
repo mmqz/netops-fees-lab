@@ -160,7 +160,7 @@ func TestMigrationV29AddsFeeBatches(t *testing.T) {
 	if err := db.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 39 {
-		t.Errorf("max schema version = %d, want 39", maxV)
+	if maxV != len(migrations) {
+		t.Errorf("max schema version = %d, want the registry head", maxV)
 	}
 }

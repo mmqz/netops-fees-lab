@@ -96,11 +96,13 @@ gh run download <run-id> -n netopsfees-linux-amd64-duckdb -D out
 拿到二进制后，本地 40+ 分钟的 CGO 构建场景坍塌为 5 秒的 COPY（`go:embed` 已内嵌前端，单文件即全部）：
 
 ```dockerfile
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 COPY netopsfees /app/netopsfees
 ENTRYPOINT ["/app/netopsfees"]
 # docker build -t fees:ci . && docker run --rm -p 8080:8080 -v fees-data:/data fees:ci serve --addr :8080 --db /data/netops.db --data-dir /data
 ```
+
+**基线要求（#35 实测教训）**：该二进制由 CGO 动态链接 CI 构建环境（Ubuntu 24.04）的 glibc，需要 **GLIBC ≥ 2.38**。基础镜像选错了「构建成功、运行即崩」（`libm.so.6: version 'GLIBC_2.38' not found`，容器一秒退出）——`debian:bookworm-slim`（GLIBC 2.36）与 `ubuntu:22.04`（2.35）都不够；`ubuntu:24.04`（2.39）实测可跑、DuckDB 引擎在位。**本节的 Dockerfile 示例不是普通文档**：CI 的 duckdb job 末步「verify artifact runs in the documented base image」用 `scripts/extract-doc-dockerfile.py` 把这段示例原样提取出来、用刚产出的二进制实际构建并启动断言（文档即测试，#37）——示例改坏（换错基础镜像、删掉 GLIBC 基线注）CI 立刻红，不再等用户踩坑。
 
 诚实边界：artifact 是 **linux-amd64** 单平台产物（解决的是 CGO 跨平台不可得）；按版本取产物用 GitHub Release 的三资产（source / linux-amd64 / linux-amd64-duckdb——v0.20.0 起每版都在），按最新主干取产物用 CI artifact；artifact 过期 30 天后走 Release。
 

@@ -252,6 +252,27 @@ func statusField(extra ...string) FieldSpec {
 	return f
 }
 
+// #38 站址主数据 — the closed raw-value sets of the three structured
+// master-data columns (migration v40): the SHEET spellings (Chinese)
+// plus the API tokens (English), the exact closed sets the domain
+// parsers (ParseSiteNatureValue & co.) accept. The enum list and the
+// parser must stay in lockstep — site_master_test pins both spellings
+// through a real import.
+var (
+	siteNatureEnum = []string{"自建", "共享", "租用", "self_built", "shared", "leased"}
+	powerModeEnum  = []string{"直供", "转供", "无", "direct", "transfer", "none"}
+	lifecycleEnum  = []string{"在网", "退网", "已拆", "active", "retired", "dismantled"}
+)
+
+// siteMasterField builds one of the three #38 master-data fields.
+// KindEnum (not KindString) carries the W002 doctrine: an out-of-set
+// value warns and the row still imports with the column NULL — never a
+// row failure, never a guess (the status precedent); a RECOGNIZED value
+// lives ONLY in the structured column — attributes() skips enum fields.
+func siteMasterField(name, label string, enum []string, synonyms ...string) FieldSpec {
+	return FieldSpec{Name: name, Label: label, Kind: KindEnum, Enum: enum, Synonyms: synonyms}
+}
+
 // FieldSpec describes one target field of a resource schema (§6).
 type FieldSpec struct {
 	// Name is the canonical field name (the mapping target key).
@@ -668,6 +689,15 @@ var baseStationSpec = TypeSpec{
 			Synonyms: []string{"经度", "lng", "lon", "LON", "GPS经度", "东经"}},
 		{Name: "geo", Label: "经纬度", Kind: KindGeo,
 			Synonyms: []string{"经纬度", "装机经纬度", "坐标", "GPS坐标", "位置"}},
+		// #38 站址主数据三列 — the structured reconcile-attribution inputs
+		// (site_nature/power_mode/lifecycle, migration v40): recognized
+		// values project onto the REAL columns the cross-dataset reconcile
+		// reads through the confirmed link; out-of-set values warn W002 and
+		// stay NULL. Optional — the classic station sheets without these
+		// columns import byte-identically.
+		siteMasterField("site_nature", "站址性质", siteNatureEnum, "站址性质", "站址类型"),
+		siteMasterField("power_mode", "供电方式", powerModeEnum, "供电方式", "供电"),
+		siteMasterField("lifecycle", "生命周期", lifecycleEnum, "生命周期", "生命周期状态"),
 	},
 }
 
@@ -705,6 +735,10 @@ var siteSpec = TypeSpec{
 			Synonyms: []string{"IP地址", "IP", "设备IP"}},
 		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
 		statusField("局站状态"),
+		// #38 站址主数据三列（同 base_station 的口径，迁移 v40）。
+		siteMasterField("site_nature", "站址性质", siteNatureEnum, "站址性质", "站址类型"),
+		siteMasterField("power_mode", "供电方式", powerModeEnum, "供电方式", "供电"),
+		siteMasterField("lifecycle", "生命周期", lifecycleEnum, "生命周期", "生命周期状态"),
 	},
 }
 
@@ -750,6 +784,10 @@ var machineRoomSpec = TypeSpec{
 			Synonyms: []string{"IP地址", "IP", "设备IP"}},
 		// W30 (issue #45): lifecycle status — optional, unmapped → NULL.
 		statusField("机房状态"),
+		// #38 站址主数据三列（同 base_station 的口径，迁移 v40）。
+		siteMasterField("site_nature", "站址性质", siteNatureEnum, "站址性质", "站址类型"),
+		siteMasterField("power_mode", "供电方式", powerModeEnum, "供电方式", "供电"),
+		siteMasterField("lifecycle", "生命周期", lifecycleEnum, "生命周期", "生命周期状态"),
 	},
 }
 

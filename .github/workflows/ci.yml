@@ -112,6 +112,43 @@ jobs:
           name: netopsfees-linux-amd64-duckdb
           path: netopsfees
           retention-days: 30
+      # Issue #37 (its root cause measured in #35): a green run used to prove
+      # the CODE and stop there — the documented artifact path could still be
+      # broken (the #34 acceptance verified "it runs" on the BUILD machine's
+      # own Ubuntu 24.04, which asserts nothing about the documented base
+      # image; the user's bookworm-slim run died with GLIBC_2.38 not found).
+      # 文档即测试: extract THE Dockerfile example out of docs/fees-layer.md
+      # §5.2 (the single source of truth — the extractor also refuses a
+      # missing GLIBC floor note, #35 acceptance 4), build it against the
+      # binary this job just produced, boot it, and assert health + the
+      # DuckDB engine. The doc regresses (wrong base image, dropped note)
+      # → THIS step goes red, not the user's docker run.
+      - name: verify artifact runs in the documented base image (#37)
+        run: |
+          set -e
+          python3 scripts/extract-doc-dockerfile.py docs/fees-layer.md > /tmp/Dockerfile.artifact
+          docker build -f /tmp/Dockerfile.artifact -t artifact-test .
+          docker run -d --name artifact-test -p 18080:8080 artifact-test \
+            serve --addr :8080 --db /data/netops.db --data-dir /data --auth-token ci-verify
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/api/health 2>/dev/null | grep -q '"version"'; then
+              break
+            fi
+            sleep 1
+          done
+          if ! curl -fsS http://127.0.0.1:18080/api/health | grep -q '"version"'; then
+            echo "::error::the documented container never answered /api/health with a version object"
+            docker logs artifact-test || true
+            exit 1
+          fi
+          docker exec artifact-test /app/netopsfees fees --db /data/netops.db --data /data \
+            query monthly --type electricity --year 2026 > /tmp/engine-check.out 2>&1 || true
+          if grep -q '引擎未编译' /tmp/engine-check.out; then
+            echo "::error::the artifact's DuckDB engine is missing (引擎未编译)"
+            docker logs artifact-test || true
+            exit 1
+          fi
+          docker rm -f artifact-test
 
   web:
     runs-on: ubuntu-latest

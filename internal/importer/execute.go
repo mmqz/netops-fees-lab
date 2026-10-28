@@ -391,7 +391,14 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 						"allowed": strings.Join(f.Enum, "/"),
 					},
 				})
-			} else {
+			} else if f.Name == "status" {
+				// Only the status FIELD feeds Resource.Status. The KindEnum family
+				// grew beyond status in #38 (site_nature/power_mode/lifecycle on the
+				// site-like specs; delay_mechanism on ptp_port predates it) — before
+				// the guard the LAST mapped enum field with a value silently won,
+				// so a mapped delay_mechanism or a recognized 站址性质 could hijack
+				// Resource.Status. The trio projects onto its OWN structured columns
+				// below; delay_mechanism was always attribute-only by design.
 				status = v
 			}
 		}
@@ -552,6 +559,28 @@ func (st *sheetState) processRow(ctx context.Context, row workbook.Row, results 
 	if v := vals["geo_lng"]; v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			resource.GeoLng = &f
+		}
+	}
+	// #38 站址主数据: the three enum columns project onto the structured
+	// migration-v40 columns the cross-dataset reconcile's attribution reads.
+	// The values already passed the KindEnum check above — an out-of-set
+	// value warned W002 there and lands NOWHERE (column NULL, attributes
+	// skip enum fields: the row imports, never a guess); a recognized value
+	// re-reads the SAME closed set here (siteNatureEnum & co. are the
+	// parser's own spellings, pinned in lockstep by site_master_test).
+	if v := vals["site_nature"]; v != "" {
+		if n, ok := domain.ParseSiteNatureValue(v); ok {
+			resource.SiteNature = string(n)
+		}
+	}
+	if v := vals["power_mode"]; v != "" {
+		if p, ok := domain.ParsePowerModeValue(v); ok {
+			resource.PowerMode = string(p)
+		}
+	}
+	if v := vals["lifecycle"]; v != "" {
+		if l, ok := domain.ParseLifecycleValue(v); ok {
+			resource.Lifecycle = string(l)
 		}
 	}
 	if err := st.tx.Resources.Insert(ctx, resource); err != nil {

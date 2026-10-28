@@ -1,11 +1,15 @@
 package fees
 
 // The XLSX half of the evidence channel: real ledgers arrive as .xlsx
-// workbooks (#125's whole motivation), so readSnapshotRowXLSX is the
-// production path of EvidenceRow — and the one the CSV-only test corpus
-// never touched. The pin walks the REAL vertical slice: import an .xlsx
-// fee workbook → EvidenceRow answers the header row and a data row's
-// cells exactly as the operator's source file shows them.
+// workbooks (#125's whole motivation), so the xlsx read path of
+// ReadSnapshotRow is the production path of EvidenceRow — and the one the
+// CSV-only test corpus never touched. The pin walks the REAL vertical
+// slice: import an .xlsx fee workbook → EvidenceRow answers the header row
+// and a data row's cells exactly as the operator's source file shows
+// them. (#39 split the xlsx face into the byte-scanning fast reader + the
+// excelize walk bail target — TestFastXLSXRowReaderEquivalence pins their
+// equivalence; this file pins the walk's own fidelity corpus, which both
+// paths must answer.)
 
 import (
 	"context"

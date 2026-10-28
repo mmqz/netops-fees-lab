@@ -157,8 +157,8 @@ VALUES ('run_v24_pre','api','2026-04-01T08:00:00Z','2026-04-01T08:00:01Z',1000)`
 	if err := db2.sql.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 39 {
-		t.Errorf("max schema version after upgrade = %d, want 39", maxV)
+	if maxV != len(migrations) {
+		t.Errorf("max schema version after upgrade = %d, want the registry head", maxV)
 	}
 
 	// Phase 3: reopening is a bookkeeping no-op.

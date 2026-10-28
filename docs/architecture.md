@@ -54,7 +54,7 @@ web/                                   ← React 源码（构建产物输出到 
 | `query` | 检索/统计/详情（含 source_refs 解析与 relationCount）/关系子图/拓扑检查——只读服务 | `query.go` |
 | `report` | 质量报告：`Report` 结构（camelCase JSON）、来源解析（resolve.go：source_ref_id → workbook/sheet/row；行级失败行 → 批次+行号；否则 applicationGenerated）、独立 HTML（`html/template` + `//go:embed template.html`，全量自动转义）；Phase 2 增仿真工作台报告（labreport.go + labtemplate.html：引擎版本/评分/发现/变更集/检查点 + 同一免责声明） | `report.go` `resolve.go` `html.go` `labreport.go` |
 | `sim` | **仿真引擎**（Phase 2）：类型化操作集（10 前向 + 3 内部 restore）与严格校验、物化（确定性端口分配）、CHK-001..005 确定性校验、连通性 BFS、规范状态哈希、run diff、LIFO undo、检查点创建/恢复（ADR-0007/0008）；**独占仿真表写路径** | `ops.go` `apply.go` `materialize.go` `checks.go` `state.go` `diff.go` `undo.go` `checkpoint.go` |
-| `mcpserver` | MCP stdio 服务器（go-sdk v1.8.0 IOTransport）；费用仓拆分后注册 **5 个工具**：只读 `resource_search` + 只读 `fee_risks`（v0.15，#58 阶段 5；现含 #2 场景 10 custom-rules）/ `fee_totals` / `fee_duplicates`（#120）+ 写侧 `fee_rules_create`（#2 首个——创建停用规则，人类经 HTTP/CLI 启用；`--read-only` 变体排除写工具） | `mcpserver.go` `feetools.go` `ruletools.go` |
+| `mcpserver` | MCP stdio 服务器（go-sdk v1.8.0 IOTransport）；费用仓拆分后注册 **7 个工具**：只读 `resource_search` + 只读 `fee_risks`（v0.15，#58 阶段 5；现含 #2 场景 10 custom-rules）/ `fee_totals` / `fee_duplicates`（#120）+ #36 第一批两个只读证据工具 `fee_evidence`（双模式：线索锚点查询 + #39 快照原始行回读）/ `fee_links_list`（站址关联状态）+ 写侧 `fee_rules_create`（#2 首个——创建停用规则，人类经 HTTP/CLI 启用；`--read-only` 变体排除写工具） | `mcpserver.go` `feetools.go` `evidencetools.go` `ruletools.go` |
 | `api` | net/http stdlib 路由（Go 1.27 method patterns）、统一 JSON 信封与错误映射（400/404/409/413/422/500）、panic 恢复 + slog 请求日志、10MB 上传限制、`no-store` 缓存中间件、SPA 挂载；Phase 2 增 17 条 §7 仿真路由（workspaces.go，英文错误消息） | `server.go` `workspaces.go` 等 |
 | `app` | 组装 + CLI 子命令实现（退出码 0/1/2、stdout 单 JSON 对象）+ 优雅停机（SIGINT/SIGTERM，5s）；Phase 2 增 `lab` 子命令树（workspace/topology/path/apply/checks/diff/undo/checkpoint） | `app.go` `cli.go` |
 | `webui` | `//go:embed all:dist` 嵌入前端产物；SPA 文件服务 + index.html 回退 | `webui.go` |
@@ -62,7 +62,7 @@ web/                                   ← React 源码（构建产物输出到 
 ## 3. 隔离边界（isolation boundaries）
 
 1. **无 SQL 泄漏**：SQL 只存在于 `internal/repo`；服务层只见类型化仓储方法。MCP/HTTP 均不暴露任意 SQL/Shell/SSH/文件访问。
-2. **无生产写能力**：全仓库不存在任何设备连接代码；仿真的"写"也只落在本地 SQLite 的仿真表。MCP 工具面 = `[resource_search, lab_apply_ops, lab_run_checks, lab_diff_undo, lab_checkpoint, graph_traverse, graph_impact, graph_context, alerts_query, metrics_query, fee_risks]` **恰好 11 个**（测试 `TestMCPToolRegistry` 断言名字闭集；数量另由 `TestMCPToolCountMatchesFactsFile` 对照 [docs/facts.md](facts.md) 机读事实源钉死——加工具必须同步事实源，漂移即测试红）。
+2. **无生产写能力**：全仓库不存在任何设备连接代码；仿真的"写"也只落在本地 SQLite 的仿真表。MCP 工具面 = `[resource_search, fee_risks, fee_totals, fee_duplicates, fee_evidence, fee_links_list, fee_rules_create]` **恰好 7 个**（测试 `TestMCPToolRegistry` 断言名字闭集；数量另由 `TestMCPToolCountMatchesFactsFile` 对照 [docs/facts.md](facts.md) 机读事实源钉死——加工具必须同步事实源，漂移即测试红）。
 3. **AI 边界（Phase 2）**：AI 改仿真态只能通过 4 个类型化 lab 工具（每个变更显式携带 workspaceId、走引擎校验/变更集/自动校验）；**MCP 不能创建/删除工作区**（工作区创建是人工/API 动作）；`restore_*` 内部操作码在 HTTP/MCP/CLI 三边界均被拒。
 4. **引擎独占仿真写路径**：`internal/sim` 是唯一写 v5 仿真表的包（ADR-0007 决策 6）——出口层只做协议适配。
 5. **出口层薄**：`api`/`mcpserver` 只做协议适配（路径参数、错误码映射、JSON 形状），业务规则零重写；CLI 与 HTTP 共用同一服务实例（`app.New` 组装）。P2 路由错误消息为英文、P1 路由保持中文（§7 契约，信封同构）。

@@ -2,6 +2,43 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.21.0] — 2026-10-28
+
+**证据链收口版**（#35–#39 五 issue 全量交付）：文档示例从「照抄必崩」变为「文档即测试」（#35/#37）；对账从「列出差异」升级为「给出归因」（#38，站址主数据三结构化列）；快照原始行回读补齐证据链最后一段（#39，含字节扫描快路径）；MCP 补上 AI 分析闭环的第二步（#36，`fee_evidence` + `fee_links_list`）。Go 顶层测试 593 → **607**（默认构建口径，+14）；迁移链 v39 → **v40**；MCP 工具 5 → **7**（只读面 4 → 6）；vitest 172 不变。
+
+### 修复 — #35 CI artifact 文档示例 GLIBC 失配（P2，实测 `GLIBC_2.38 not found`）
+- 根因：duckdb CI job 跑在 Ubuntu 24.04（GLIBC 2.39），CGO 二进制动态链接构建环境 glibc；`docs/fees-layer.md` §5.2 示例却指 `debian:bookworm-slim`（2.36）——构建 10 秒成功，容器一秒退出，#34 的「Windows 开发者免本地编译」目标在最后一步失效。
+- 方案 A 落地：示例改 `FROM ubuntu:24.04`（issue 实测可跑、DuckDB 引擎在位），并补**基线要求注**「该二进制需要 **GLIBC ≥ 2.38**」——基线注与镜像标签同为契约（提取器同查）。
+
+### 新增 — #37 交付形态进 CI：文档即测试（P2）
+- duckdb job 新增 `verify artifact runs in the documented base image` 步：`scripts/extract-doc-dockerfile.py` 从 `docs/fees-layer.md` 提取**唯一** dockerfile 围栏块（唯一事实源；两块/缺 FROM/缺 GLIBC 基线注即红）→ 用本 job 刚产出的二进制实际 `docker build` → 容器启动 → 断言 `/api/health` 版本对象 + DuckDB 引擎在位（`fees query monthly` 不报「引擎未编译」）。
+- 历史缺口封口：#22/#28/#26/#35 四例同源（CI 验证代码、不验证交付形态）——示例失效从「等用户踩坑」变为「CI 立即红」。
+- `docs/acceptance.md`：验收标准可测性标注约定（`[CI]` / `[手动+环境]` / `[不可测]`），两条硬规则：**[手动+环境] 不写环境 = 验收不完整**；**交付物官方消费示例默认 [CI]**。
+
+### 新增 — #38 站址主数据 + 对账归因：从「列出」到「判定」（P2）
+- 迁移 **v40**：resources 表三结构化列 `site_nature` / `power_mode` / `lifecycle`（CHECK 闭集 self_built/shared/leased、direct/transfer/none、active/retired/dismantled），沿 v20 geo 先例；旧库升级时对 attributes 同名键做 CASE 回填（中文值→英文令牌），口径外值如实留 NULL。repo 三态 INSERT（无主数据 = 9/11 列旧形态逐字节不变；有主数据 = 14 列新形态）。
+- 导入通道：基站/局站/机房三 spec 增「站址性质/供电方式/生命周期」KindEnum 列（中英双拼闭集）；口径外值警告 W002、行照常导入、列留空——**永不猜**；已识别值只落结构化列（attributes 跳过枚举字段，status 先例）。
+- **连带修复**：execute.go 的 KindEnum 分支曾把「最后一个有值的枚举字段」写进 Resource.Status——#38 加列前就会让 ptp_port 的 `delay_mechanism` 劫持 status，加列后 `站址性质` 也会；现守卫为仅 `status` 字段喂 Resource.Status。
+- 对账归因（`crossattribution.go`，纯函数决策核）：每行 only_* 差异携带 `attribution` 闭集六令牌——`shared_no_power_needed`（共享站且无供电，正常）/ `self_built_no_tower_needed`（自建站无塔租，正常）/ `retired_but_billed`（已退网/已拆仍计费，风险应追回）/ `power_should_exist`（应供电但电费无记录，漏登风险）/ `code_mismatch`（存在映射提案，先人工确认）/ `unknown`（**缺站址主数据——无法判断，不是正常**）。硬主数据优先于提案提示（retired 走 retired_but_billed 即便另有模糊提案）；归因读经确认关联（别名迹原码同查）；unknown 计数进 warnings（洗白禁止——「N 行差异 attribution=unknown」）。both 行不携带归因。信封 note 补归因口径全表。
+- 测试：五分支+镜像分支表钉（`crossattribution_test.go` 六测试）、真引擎真关联 e2e（六归因全活，`TestDuckCrossReconcileAttributionEndToEnd`）、升级回填 + CHECK 拒写 + 往返（`migrations_v40_test.go`）、导入投影双拼写（`site_master_test.go`）。**14 个迁移升级测试的链头断言从字面量 39 改为 `len(migrations)` 实数**——链头计数已由 facts 门禁钉死，每加迁移不再连坐十四文件。
+
+### 新增 — #39 异常溯源：证据链最后一段的兑现（P2，方案 A+C）
+- **快路径**（`snapshot_xlsx_fast.go`）：xlsx 行回读从 excelize 全量 token 走读（157 列×454 行实测 200-230ms，超验收预算）改为字节扫描两行读取——只解目标行与表头行、sharedStrings 仅解码被引条目；**保真裁决逐条镜像 excelize v2.11.0 语义**（S==0 恒真；S>0 仅 numFmtId 0 族；数字族 isNumeric 规范化；尾部空截断；行号缺失顺序回退），凡不可证明逐字节一致即 BAIL 回原走读（日期样式/奇异类型/超大件）——**契约从未移动**，等价性由 `TestFastXLSXRowReaderEquivalence` 钉死（含 BAIL 形态的负例）。
+- `EvidenceRow` 增 `note` 字段：「原始行字段，未经系统解释……不是认定结论」——**未建模列同样可读**（塔表 154 列的折扣生效日期/分项单价都在 cells 里），三面同文（HTTP #86 端点、CLI `fees evidence`、MCP `fee_evidence` 原始行模式）。
+- 方案 C：`spike`/`outlier` 场景每条线索 note 附**真实可用**的溯源指引（首证据锚点的 batch/row——占位符被禁止，无锚点不给指引）；同一站相邻账期两行逐列比对即可定位变更字段（issue 实测：+60% 涨价线索的根因是原始表第 92 列「折扣生效日期」变更）。
+
+### 新增 — #36 MCP 第一批：AI 分析闭环的证据链入口（P2，两个 P0 只读工具）
+- `fee_evidence`（双模式一契约）：线索模式 `{scenario, feeType, year, month?, site}`——与 fee_risks 同源预设、只留指定站线索、返回行级锚点（sourceFile/sourceRow/amountCents/importBatch）；原始行模式 `{batch, row}`——锚点回读快照原始行（#39），纯文件读取任何构建可用。默认构建线索模式如实报「分析引擎未编译」（契约答案，`#103` 裁定透传）；模式互斥显式拒绝（#91）。
+- `fee_links_list`：站址关联状态查询（confirmed=已确认至多一条 / pending=模糊提案待人工核实 / dismissed=已驳回留痕；status 闭集过滤）；note 带「待人工核实」「非费用认定结论」验收措辞——**确认/驳回是人类通道（HTTP/CLI），AI 只读**。
+- 治理沿面：两工具 `readOnlyHint=true`（双面注册，--read-only 可用）；limit 缺省 20 上限 50（feetools.go 同款）；数组永不 null（#93——clue 空态答 `[]` 不答缺键）。注册表闭集/计数门禁、facts.md（7/6）、architecture.md 同步。
+- e2e：真 MCP 客户端（initialize → tools/list → tools/call）三测试——原始行结构化回读、线索模式（默认构建拒答 + duckdb 构建真锚点）、关联双态与过滤。
+
+### 文档
+- `docs/api.md`：cross-reconcile 归因六令牌契约（含洗白禁止与 unknown 计数告警）；evidence 端点未建模列可读性 + note 教义。
+- `docs/fees-layer.md` §5.2：ubuntu:24.04 + GLIBC 基线注 + 「文档即测试」段落。
+- `docs/architecture.md`：MCP 工具面 5→7（修正隔离边界段的 11 工具旧文案——拆分遗留漂移）。
+- `docs/facts.md`：mcp-tools 7 / mcp-tools-readonly 6 / repo-migrations 40 / go-top-level-tests 607；迁移头说明改 v40。
+
 ## [0.20.4] — 2026-10-28
 
 **测试体系补强版**（#33 全量交付 + #34 同批合入）：九个 fuzz 目标 + 六条不变量 + DQ1-DQ6 数据质量面 + 十个基准带基线与 20% 门禁 + W3/W4 静态门禁 + 突变轮全捕获——测试函数总数 569 → **650**（Test 631 / Fuzz 9 / Benchmark 10）。

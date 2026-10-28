@@ -23,26 +23,32 @@ type ResourceRepo struct{ q DBTX }
 // W22 run-state snapshot columns (run_state/run_state_at, migration v17)
 // are READ here; the INSERT column list below deliberately omits them —
 // imports never write run state (§12-B1: 台账与运行状态分立). The W30 geo
-// columns (geo_lat/geo_lng, migration v20) are read AND written by Insert —
-// they are ledger data (presentation metadata), not run-state.
-const resourceColumns = `id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, run_state, run_state_at, geo_lat, geo_lng`
+// columns (geo_lat/geo_lng, migration v20) and the #38 site master-data
+// columns (site_nature/power_mode/lifecycle, migration v40) are read AND
+// written by Insert — they are ledger data (presentation/attribution
+// metadata), not run-state.
+const resourceColumns = `id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, run_state, run_state_at, geo_lat, geo_lng, site_nature, power_mode, lifecycle`
 
 // scanResource scans one resources row into a domain.Resource.
 func scanResource(s scanner) (domain.Resource, error) {
 	var (
-		res       domain.Resource
-		rtype     string
-		attrsJSON string
-		status    sql.NullString
-		createdAt string
-		updatedAt string
-		runState  sql.NullString
-		runAt     sql.NullString
-		geoLat    sql.NullFloat64
-		geoLng    sql.NullFloat64
+		res          domain.Resource
+		rtype        string
+		attrsJSON    string
+		status       sql.NullString
+		createdAt    string
+		updatedAt    string
+		runState     sql.NullString
+		runAt        sql.NullString
+		geoLat       sql.NullFloat64
+		geoLng       sql.NullFloat64
+		siteNature   sql.NullString
+		powerMode    sql.NullString
+		lifecycleCol sql.NullString
 	)
 	err := s.Scan(&res.ID, &rtype, &res.NaturalKey, &res.Name, &attrsJSON, &status,
-		&res.FirstBatchID, &createdAt, &updatedAt, &runState, &runAt, &geoLat, &geoLng)
+		&res.FirstBatchID, &createdAt, &updatedAt, &runState, &runAt, &geoLat, &geoLng,
+		&siteNature, &powerMode, &lifecycleCol)
 	if err != nil {
 		return domain.Resource{}, err
 	}
@@ -80,6 +86,12 @@ func scanResource(s scanner) (domain.Resource, error) {
 		v := geoLng.Float64
 		res.GeoLng = &v
 	}
+	// #38 master-data columns (v40): NULL scans to "" — the reconcile's
+	// honest master-data-missing state (attribution "unknown"), never a
+	// fabricated answer.
+	res.SiteNature = stringFromNull(siteNature)
+	res.PowerMode = stringFromNull(powerMode)
+	res.Lifecycle = stringFromNull(lifecycleCol)
 	return res, nil
 }
 
@@ -93,26 +105,37 @@ func (r *ResourceRepo) Insert(ctx context.Context, res domain.Resource) error {
 	if err != nil {
 		return err
 	}
-	// Two static shapes (W30, issue #45): a resource WITHOUT coordinates
-	// uses the legacy 9-column insert — byte-identical to pre-v30 behaviour,
-	// which is what keeps the pre-v20 migration tests (seeding genuine old
-	// schemas through this very API) green; a resource WITH coordinates
-	// writes the geo columns too. The split is on presence, not value: nil
-	// means "no position", never (0,0).
+	// Three static shapes (W30 geo split + the #38 master trio): a resource
+	// WITHOUT master data keeps the two pre-#38 INSERT byte shapes
+	// (the geo presence split — the pre-v20 migration tests seed genuine old
+	// schemas through this very API); a resource WITH any of the three
+	// master columns writes the 14-column shape, geo included (nullFloat
+	// renders absent coordinates as NULL). The split is on presence, not
+	// value: "" means "master data missing", the reconcile's unknown.
 	var errInsert error
-	if res.GeoLat == nil && res.GeoLng == nil {
-		_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
+	if res.SiteNature == "" && res.PowerMode == "" && res.Lifecycle == "" {
+		if res.GeoLat == nil && res.GeoLng == nil {
+			_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
 (id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at)
 VALUES (?,?,?,?,?,?,?,?,?)`,
-			res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
-			nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt))
-	} else {
-		_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
+				res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
+				nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt))
+		} else {
+			_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
 (id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, geo_lat, geo_lng)
 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+				res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
+				nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt),
+				nullFloat(res.GeoLat), nullFloat(res.GeoLng))
+		}
+	} else {
+		_, errInsert = r.q.ExecContext(ctx, `INSERT INTO resources
+(id, resource_type, natural_key, name, attributes, status, first_batch_id, created_at, updated_at, geo_lat, geo_lng, site_nature, power_mode, lifecycle)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			res.ID, res.Type.String(), res.NaturalKey, res.Name, attrs,
 			nullString(res.Status), res.FirstBatchID, formatTime(res.CreatedAt), formatTime(res.UpdatedAt),
-			nullFloat(res.GeoLat), nullFloat(res.GeoLng))
+			nullFloat(res.GeoLat), nullFloat(res.GeoLng),
+			nullString(res.SiteNature), nullString(res.PowerMode), nullString(res.Lifecycle))
 	}
 	if err := errInsert; err != nil {
 		if isUniqueViolation(err) {
