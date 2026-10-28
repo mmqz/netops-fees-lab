@@ -82,18 +82,53 @@ wsl -e bash -lc "cd /mnt/c/<repo> && make build-duckdb"
 
 导入/快照/Parquet 写入与关联扫描在 Windows 默认构建上**全功能可用**（纯 Go）——只有查询预设需要上述路径。`run.ps1` 头部注释与 `ErrEngineNotBuilt` 错误文案同步携带该指引。
 
+### 5.2 从 CI 产物直接获得已验证的 Linux 二进制（#34）
+
+上述 ①② 之外的第三条官方路径：**每次 main 推送，CI 的 duckdb job 在测试全绿后把部署二进制上传为 artifact**（`actions/upload-artifact@v4`，名 `netopsfees-linux-amd64-duckdb`，保留 30 天）。构建命令与 `scripts/release.sh` 的发布资产**逐字相同**（`CGO_ENABLED=1 go build -tags duckdb`），测试步已编译过全量依赖树——构建秒级、不增 CI 时长；CI 验证过的二进制与 Release 资产同源同树。任意平台下载：
+
+```powershell
+# Windows / macOS / Linux 均可：
+gh run download <run-id> -n netopsfees-linux-amd64-duckdb -D out
+./out/netopsfees fees          # 裸调用即列出全部 17 个子命令（CLI 契约：usage 应答也是单 JSON，exit 2）
+./out/netopsfees fees --db ./data/netops.db --data ./data query monthly --type electricity --year 2026
+```
+
+拿到二进制后，本地 40+ 分钟的 CGO 构建场景坍塌为 5 秒的 COPY（`go:embed` 已内嵌前端，单文件即全部）：
+
+```dockerfile
+FROM debian:bookworm-slim
+COPY netopsfees /app/netopsfees
+ENTRYPOINT ["/app/netopsfees"]
+# docker build -t fees:ci . && docker run --rm -p 8080:8080 -v fees-data:/data fees:ci serve --addr :8080 --db /data/netops.db --data-dir /data
+```
+
+诚实边界：artifact 是 **linux-amd64** 单平台产物（解决的是 CGO 跨平台不可得）；按版本取产物用 GitHub Release 的三资产（source / linux-amd64 / linux-amd64-duckdb——v0.20.0 起每版都在），按最新主干取产物用 CI artifact；artifact 过期 30 天后走 Release。
+
 ## 6. CLI 面
 
 ```
-netopslab fees --db <path> --data <dir> import  --file <f> --type <t> --year <Y> --month <M> [--map <json>]
-netopslab fees --db <path> --data <dir> list    [--status completed|failed|rolled_back]
-netopslab fees --db <path> --data <dir> rollback --batch <id>
-netopslab fees --db <path> --data <dir> query   totals|duplicates --type <t> --year <Y> [--month <M>] [--limit <n>]
+netopsfees fees --db <path> --data <dir> import           --file <f> --type <t> --year <Y> --month <M> [--map <json>]
+netopsfees fees --db <path> --data <dir> import-sheets    --file <f> --year <Y> --month <M>   （多 sheet 工作簿）
+netopsfees fees --db <path> --data <dir> period-probe     --file <f>      （#15：表级账期/年份探测，导入面板的数据面）
+netopsfees fees --db <path> --data <dir> list             [--status completed|failed|rolled_back]
+netopsfees fees --db <path> --data <dir> rollback         --batch <id>
+netopsfees fees --db <path> --data <dir> evidence          [--batch <id>]   （快照证据链）
+netopsfees fees --db <path> --data <dir> query             totals|monthly|duplicates|rows --type <t> --year <Y> [--month <M>] [--limit <n>] [rows: --site <s> --record-key <k>]
+netopsfees fees --db <path> --data <dir> link-scan                          （分级关联扫描：exact → rule → fuzzy 提案）
+netopsfees fees --db <path> --data <dir> links             <list|…>         （confirmed 关联管理）
+netopsfees fees --db <path> --data <dir> risks             [--scenario <s>] （风险十场景）
+netopsfees fees --db <path> --data <dir> rules              <add|list|remove>（#2：自定义规则）
+netopsfees fees --db <path> --data <dir> clue-decisions   <list|decide>    （线索人工裁定：verified/pending/dismissed）
+netopsfees fees --db <path> --data <dir> details           <add|list|remove>（明细层增删改查，三强制生效）
+netopsfees fees --db <path> --data <dir> aliases           add|list|remove|scan （站址别名）
+netopsfees fees --db <path> --data <dir> cross-reconcile                     （#12：跨数据集对账）
+netopsfees fees --db <path> --data <dir> verify-sources                      （#6：源文件审计/可写建议）
+netopsfees fees --db <path> --data <dir> verify-batches                      （#32：两档体检——账期问题 + 数据质量 dataProblems）
 ```
 
 - 全部单 JSON stdout 契约；usage 错误 exit 2；幂等重复导入 **informational（exit 0 + `skippedDuplicate`）**——与资源导入器重复跳过同严重级。
 - `--map` 缺省时自动识别（表头同义词：站址编码/电费(元)/账期…；类型标记：电量/塔租/工单/综维…）；识别不到 siteCode 或 amount → 拒绝（人工映射是回退，不是猜测）。**表头归一化（#29）**：换行/回车/制表符与空格/下划线/连字符一并折叠——Excel Alt+Enter 多行表头（塔类结算详单「产品服务费合计\n（出账费用）（不含税）」）折叠为单行 key 再匹配。**类型口径专表（#29）**：tower_lease 的金额列按口径优先级 **exact 匹配**（产品服务费合计（出账费用）（不含税）→ … → 产品服务费合计，全角/半角两形）——通用 contains 兜底在 157 列多金额列变体表上曾命中全零变体列（454 行导入、totalCents 全 0、零警告的实测缺陷）；专表 miss 逐字节回退通用识别；显式 `--map` 永远胜出（口径是运营决策）；摘要 `amountColumn` 写明实际取数表头，同族变体 >1 时 warnings 说明口径。**全零止血（#29）**：新导入全部行金额为 0 → completed 应答携带具名警告（绝不静默导好）；`fees verify-batches` 数据面（#32）对存量批次同形态检出（`zero-amount`）。
-- `query` 两个预设：`totals`（站址汇总，分区裁剪验证面）+ `duplicates`（跨批次重复结算候选——**风险线索，非结论**：账单存在 ≠ 重复付款认定，输出待人工核实的差异行）。
+- `query` 四个预设：`totals`（站址汇总，分区裁剪验证面）+ `monthly`（#3：全年逐月趋势序列，不接受 `--month`）+ `rows`（#5：明细行原始面，带 --site/--record-key 过滤）+ `duplicates`（跨批次重复结算候选——**风险线索，非结论**：账单存在 ≠ 重复付款认定，输出待人工核实的差异行）。子命令闭集由 `usage_closset_test.go` 以 go/ast 双向钉死，清单以代码为准。
 
 ## 7. HTTP API 面（与 CLI 同语义）
 

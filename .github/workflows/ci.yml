@@ -78,6 +78,25 @@ jobs:
         run: go vet -tags duckdb ./...
       - name: go test (duckdb)
         run: go test -count=1 -tags duckdb -timeout 25m ./...
+      # Issue #34: a green run used to prove the code and then throw the
+      # binary away — Windows operators had no way to obtain the CGO/duckdb
+      # build at all (docker builds stall 40+ minutes on go-duckdb's small-
+      # file IO storm under Docker Desktop's bind mounts; WSL2 is not a
+      # given on every contributor machine). The test step above already
+      # compiled the whole dependency tree, so this build is cache-warm and
+      # adds seconds, not minutes. The command is byte-identical to
+      # scripts/release.sh's duckdb asset build, so the CI artifact and the
+      # Release asset are the same build of the same tested tree.
+      # Download from any platform:
+      #   gh run download <run-id> -n netopsfees-linux-amd64-duckdb
+      - name: build linux binary (duckdb, release-identical command)
+        run: CGO_ENABLED=1 go build -tags duckdb -o netopsfees ./cmd/netopsfees
+      - name: upload binary artifact (#34)
+        uses: actions/upload-artifact@v4
+        with:
+          name: netopsfees-linux-amd64-duckdb
+          path: netopsfees
+          retention-days: 30
 
   web:
     runs-on: ubuntu-latest
