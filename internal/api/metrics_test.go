@@ -184,7 +184,7 @@ func TestMetricEndpointsContract(t *testing.T) {
 	}
 
 	// missing mapping field → 400
-	resp, body = uploadMetricFile(t, srv, "/api/metrics/imports", "perf-day-01.xlsx", perf, "")
+	resp, _ = uploadMetricFile(t, srv, "/api/metrics/imports", "perf-day-01.xlsx", perf, "")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("import without mapping: status = %d, want 400", resp.StatusCode)
 	}
@@ -332,7 +332,7 @@ func TestMetricEndpointsContract(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rollback: %d\n%s", resp.StatusCode, body)
 	}
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+portID+"/metrics", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources/"+portID+"/metrics", nil, "")
 	decodeJSON(t, "after rollback", body, &seriesBody)
 	for _, s := range seriesBody.Series {
 		if len(s.Points) != 1 {

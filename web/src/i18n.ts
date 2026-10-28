@@ -22,7 +22,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.20.3';
+export const APP_VERSION = 'v0.20.4';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';

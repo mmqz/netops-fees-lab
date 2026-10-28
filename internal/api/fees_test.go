@@ -515,11 +515,11 @@ func TestAPIFeesLinkJourney(t *testing.T) {
 		}
 	}
 	// the scan keeps the human link.
-	resp, body = doRequest(t, srv, http.MethodPost, "/api/fees/links/scan", nil, "")
+	resp, _ = doRequest(t, srv, http.MethodPost, "/api/fees/links/scan", nil, "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("re-scan: status = %d", resp.StatusCode)
 	}
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/links?status=confirmed&source=human", nil, "")
+	resp, _ = doRequest(t, srv, http.MethodGet, "/api/fees/links?status=confirmed&source=human", nil, "")
 	_ = resp
 	// (source filter is not a query param — assert via the full list)
 	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/links?status=confirmed", nil, "")
@@ -693,21 +693,21 @@ func TestAPIFeesEvidenceReadback(t *testing.T) {
 		t.Errorf("evidence row=99: status = %d, want 404\nbody: %s", resp.StatusCode, body)
 	}
 	// garbage / non-positive row → 400.
-	resp, body = get("abc")
+	resp, _ = get("abc")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("evidence row=abc: status = %d, want 400", resp.StatusCode)
 	}
-	resp, body = get("0")
+	resp, _ = get("0")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("evidence row=0: status = %d, want 400", resp.StatusCode)
 	}
 	// missing row param → 400.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/batches/"+sum.BatchID+"/evidence", nil, "")
+	resp, _ = doRequest(t, srv, http.MethodGet, "/api/fees/batches/"+sum.BatchID+"/evidence", nil, "")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("evidence without row: status = %d, want 400", resp.StatusCode)
 	}
 	// unknown batch → 404.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/batches/fee_nope/evidence?row=1", nil, "")
+	resp, _ = doRequest(t, srv, http.MethodGet, "/api/fees/batches/fee_nope/evidence?row=1", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("evidence unknown batch: status = %d, want 404", resp.StatusCode)
 	}
@@ -1084,7 +1084,7 @@ func TestAPIFeesClueDecisionEndpoints(t *testing.T) {
 	post(`{"scenario":"missing-billing","feeType":"tower_lease","siteCode":"S-2","year":2024,"month":0,"status":"dismissed"}`)
 
 	// the ledger: two rows, newest first; the filters narrow.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions", nil, "")
 	var ledger struct {
 		Items []struct {
 			SiteCode string `json:"siteCode"`
@@ -1109,7 +1109,7 @@ func TestAPIFeesClueDecisionEndpoints(t *testing.T) {
 	if gotSet["S-1"] != "verified" || gotSet["S-2"] != "dismissed" {
 		t.Fatalf("ledger set = %v, want S-1 verified + S-2 dismissed", gotSet)
 	}
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions?status=verified", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/fees/risk-clue-decisions?status=verified", nil, "")
 	if err := json.Unmarshal([]byte(body), &ledger); err != nil {
 		t.Fatal(err)
 	}

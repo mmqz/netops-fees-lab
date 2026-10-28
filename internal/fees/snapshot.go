@@ -254,9 +254,7 @@ func readSnapshotRowXLSX(path string, row int) (RowEvidence, error) {
 			return RowEvidence{}, fmt.Errorf("fees: 读取快照 %s 第 %d 行: %w", path, rowNum, cerr)
 		}
 		strs := make([]string, len(cells))
-		for i, c := range cells {
-			strs[i] = c
-		}
+		copy(strs, cells)
 		if ev.Header == nil && !isBlankRow(strs) {
 			ev.Header = trimAll(strs)
 		}

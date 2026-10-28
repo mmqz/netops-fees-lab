@@ -232,14 +232,6 @@ type resourceDetail struct {
 	RelationCount int         `json:"relationCount"`
 }
 
-// graphEdge mirrors the edges[] entry of the relations subgraph.
-type graphEdge struct {
-	ID           string `json:"id"`
-	RelationType string `json:"relationType"`
-	FromID       string `json:"fromId"`
-	ToID         string `json:"toId"`
-}
-
 // statsResp mirrors GET /api/stats.
 type statsResp struct {
 	TotalResources   int            `json:"totalResources"`
@@ -297,19 +289,6 @@ type reportResp struct {
 			RowsFailed   int    `json:"rowsFailed"`
 		} `json:"batches"`
 	} `json:"summary"`
-}
-
-// topologyHop mirrors one hops[] entry of the topology check.
-type topologyHop struct {
-	DeviceID   string `json:"deviceId"`
-	DeviceCode string `json:"deviceCode"`
-}
-
-// checkResp mirrors GET /api/topology/check.
-type checkResp struct {
-	Reachable  bool          `json:"reachable"`
-	Hops       []topologyHop `json:"hops"`
-	PathLength int           `json:"pathLength"`
 }
 
 // batchItem mirrors one GET /api/batches entry.
@@ -574,7 +553,7 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// Type filter.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=device", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=device", nil, "")
 	decodeJSON(t, "resources type filter", body, &page)
 	if page.Total != 27 || len(page.Items) != 20 {
 		t.Errorf("resources type=device: total/len = %d/%d, want 27/20", page.Total, len(page.Items))
@@ -587,34 +566,34 @@ func TestAPIImportFlow(t *testing.T) {
 
 	// q filter: "DEV-001" matches the device natural key plus every resource
 	// whose attributes mention it (CKT-001 a_end, POOL-01 assigned device).
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?q=DEV-001", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources?q=DEV-001", nil, "")
 	decodeJSON(t, "resources q filter", body, &page)
 	if page.Total != 3 {
 		t.Errorf("resources q=DEV-001: total = %d, want 3", page.Total)
 	}
 	// Status filter: DEV-016 and CKT-007 are the two 停用 resources.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?status="+url.QueryEscape("停用"), nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources?status="+url.QueryEscape("停用"), nil, "")
 	decodeJSON(t, "resources status filter", body, &page)
 	if page.Total != 2 {
 		t.Errorf("resources status=停用: total = %d, want 2", page.Total)
 	}
 
 	// Pagination: page 3 with pageSize 30 covers the last 4 of 64.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?page=3&pageSize=30", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources?page=3&pageSize=30", nil, "")
 	decodeJSON(t, "resources page 3", body, &page)
 	if page.Total != 64 || page.Page != 3 || page.PageSize != 30 || len(page.Items) != 4 {
 		t.Errorf("resources page=3 pageSize=30: total/page/pageSize/len = %d/%d/%d/%d, want 64/3/30/4",
 			page.Total, page.Page, page.PageSize, len(page.Items))
 	}
 	// pageSize is clamped to the §9 maximum of 100.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?pageSize=500", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources?pageSize=500", nil, "")
 	decodeJSON(t, "resources pageSize clamp", body, &page)
 	if page.PageSize != 100 || len(page.Items) != 64 {
 		t.Errorf("resources pageSize=500: pageSize/len = %d/%d, want 100/64", page.PageSize, len(page.Items))
 	}
 
 	// GET /api/resources/{id}: DEV-001 with sourceRefs and relationCount.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=device&q=DEV-001", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/resources?type=device&q=DEV-001", nil, "")
 	decodeJSON(t, "find DEV-001", body, &page)
 	if page.Total != 1 || len(page.Items) != 1 {
 		t.Fatalf("find DEV-001: total = %d, want 1", page.Total)
@@ -651,7 +630,7 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// GET /api/issues?severity=error: the 13 error issues with evidence.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/issues?severity=error&pageSize=100", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/issues?severity=error&pageSize=100", nil, "")
 	var ip issuesPage
 	decodeJSON(t, "issues error", body, &ip)
 	if ip.Total != 13 || len(ip.Items) != 13 {
@@ -680,19 +659,19 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// No filter: all 17 issues (14 row-phase + 3 set-level).
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/issues?pageSize=100", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/issues?pageSize=100", nil, "")
 	decodeJSON(t, "issues all", body, &ip)
 	if ip.Total != 17 {
 		t.Errorf("issues all: total = %d, want 17", ip.Total)
 	}
 	// batchId filter: the devices batch's 4 row-phase issues.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/issues?batchId="+devicesBatch, nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/issues?batchId="+devicesBatch, nil, "")
 	decodeJSON(t, "issues by batch", body, &ip)
 	if ip.Total != 4 {
 		t.Errorf("issues batchId=devices: total = %d, want 4", ip.Total)
 	}
 	// ruleCode filter.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/issues?ruleCode="+domain.RuleSubnetOverlap, nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/issues?ruleCode="+domain.RuleSubnetOverlap, nil, "")
 	decodeJSON(t, "issues by rule", body, &ip)
 	if ip.Total != 1 || ip.Items[0].RuleCode != domain.RuleSubnetOverlap {
 		t.Errorf("issues ruleCode=E005: total = %d, want 1", ip.Total)
@@ -712,7 +691,7 @@ func TestAPIImportFlow(t *testing.T) {
 
 	// POST /api/validate with a batchId body: devices-batch scope (its row
 	// issues + all set-level issues) scores 74, the T6 report cross-check.
-	resp, body = doRequest(t, srv, http.MethodPost, "/api/validate",
+	_, body = doRequest(t, srv, http.MethodPost, "/api/validate",
 		[]byte(`{"batchId":"`+devicesBatch+`"}`), "application/json")
 	decodeJSON(t, "validate batch scope", body, &val)
 	assertIssues(t, "validate batch scope", val.Issues, map[string]int{"error": 5, "warning": 1, "info": 1})
@@ -776,7 +755,7 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// GET /api/batches: newest first (circuits, ippools, devices).
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/batches", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/batches", nil, "")
 	var bp batchesPage
 	decodeJSON(t, "batches list", body, &bp)
 	if bp.Total != 3 || len(bp.Items) != 3 {
@@ -797,7 +776,7 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// GET /api/batches/{id}: per-sheet summary + echoed mapping.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/batches/"+devicesBatch, nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/batches/"+devicesBatch, nil, "")
 	var bd batchDetailResp
 	decodeJSON(t, "batch detail", body, &bd)
 	if bd.ID != devicesBatch || bd.RuleVersion != domain.RuleVersion {
@@ -817,7 +796,7 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// GET /api/batches/{id}/rows?status=failed: the 3 failed device rows.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/batches/"+devicesBatch+"/rows?status=failed&pageSize=10", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/batches/"+devicesBatch+"/rows?status=failed&pageSize=10", nil, "")
 	var rp rowsPage
 	decodeJSON(t, "batch rows", body, &rp)
 	if rp.Total != 3 || len(rp.Items) != 3 {
@@ -867,7 +846,7 @@ func TestAPIImportFlow(t *testing.T) {
 	}
 
 	// After the rollback the circuits are gone.
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/stats", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/stats", nil, "")
 	decodeJSON(t, "stats after rollback", body, &stats)
 	if stats.ByType["circuit"] != 0 || stats.TotalResources != 43 {
 		t.Errorf("stats after rollback: circuit=%d total=%d, want 0/43", stats.ByType["circuit"], stats.TotalResources)

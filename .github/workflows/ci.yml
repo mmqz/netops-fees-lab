@@ -53,6 +53,16 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: go vet
         run: go vet ./...
+      # W3 (#33): staticcheck zero-warning gate, three faces in one step —
+      # the default build, the duckdb build tag, and the Windows GOOS (the
+      # repo's one *_windows.go file is invisible to a Linux-only scan;
+      # GOOS=windows + CGO_ENABLED=0 type-checks it from here, no extra
+      # billed Windows minutes).
+      - name: staticcheck (W3 #33: default + duckdb + windows-GOOS)
+        run: |
+          go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 -tags duckdb ./...
+          CGO_ENABLED=0 GOOS=windows go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
       - name: go test
         run: go test -count=1 -timeout 15m ./...
 

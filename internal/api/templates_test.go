@@ -402,7 +402,7 @@ func TestAPIImportTemplateLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("capture of awaiting batch: status = %d, want 409\nbody: %s", resp.StatusCode, body)
 	}
-	resp, body = doRequest(t, srv, http.MethodPost, "/api/imports/bat_nope/template", nil, "")
+	resp, _ = doRequest(t, srv, http.MethodPost, "/api/imports/bat_nope/template", nil, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("capture of unknown batch: status = %d, want 404", resp.StatusCode)
 	}
@@ -458,11 +458,11 @@ func TestAPIImportTemplateLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("template delete: status = %d\nbody: %s", resp.StatusCode, body)
 	}
-	resp, body = doRequest(t, srv, http.MethodDelete, "/api/mapping-templates/"+tplID, nil, "")
+	resp, _ = doRequest(t, srv, http.MethodDelete, "/api/mapping-templates/"+tplID, nil, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("repeat template delete: status = %d, want 404", resp.StatusCode)
 	}
-	resp, body = doRequest(t, srv, http.MethodGet, "/api/mapping-templates", nil, "")
+	_, body = doRequest(t, srv, http.MethodGet, "/api/mapping-templates", nil, "")
 	decodeJSON(t, "templates after delete", body, &list)
 	if list.Total != 0 || len(list.Items) != 0 {
 		t.Fatalf("templates after delete = %+v, want empty", list)

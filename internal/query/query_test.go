@@ -44,16 +44,6 @@ func newSeededService(t *testing.T) (*Service, *repo.DB) {
 	return New(db), db
 }
 
-// deviceID resolves a device's resource id by its natural key.
-func deviceID(t *testing.T, db *repo.DB, code string) string {
-	t.Helper()
-	r, err := db.Resources.GetByTypeKey(context.Background(), domain.ResourceTypeDevice, code)
-	if err != nil {
-		t.Fatalf("GetByTypeKey(%s): %v", code, err)
-	}
-	return r.ID
-}
-
 // TestResourceDetailErrors pins the unknown-id error of the detail view.
 func TestResourceDetailErrors(t *testing.T) {
 	svc, _ := newSeededService(t)

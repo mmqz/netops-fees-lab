@@ -1,0 +1,22 @@
+# netops-fees-lab benchmark baseline (#33)
+# generated: 2026-10-28 (dev sandbox, 2 vCPU, Linux)
+# reproduce: go test -count=1 -tags duckdb -run '^$' -bench . -benchtime 1s ./internal/fees/
+# compare:   python3 scripts/bench-gate.py new.txt this baseline (warns over 20% regressions)
+# cross-machine comparisons are meaningless — regenerate the baseline
+# per machine before gating on a new host (the benchstat doctrine).
+goos: linux
+goarch: amd64
+pkg: github.com/mmqz/netops-fees-lab/internal/fees
+cpu: Intel(R) Xeon(R) Processor
+BenchmarkQueryMonthly-2           	      69	  17743173 ns/op	   35789 B/op	     603 allocs/op
+BenchmarkRiskSingleScenario-2     	      20	  57656779 ns/op	   50070 B/op	     786 allocs/op
+BenchmarkRiskAllTen-2             	       6	 188924825 ns/op	  232796 B/op	    3226 allocs/op
+BenchmarkCrossReconcile-2         	      36	  31231354 ns/op	  258497 B/op	    5555 allocs/op
+BenchmarkImportCSV1k-2            	      82	  13429309 ns/op	   0.07 MB/s	 7219891 B/op	   53892 allocs/op
+BenchmarkImportCSV10k-2           	      14	  88330873 ns/op	   0.11 MB/s	58057537 B/op	  522243 allocs/op
+BenchmarkImportCSV100k-2          	       2	 658596904 ns/op	   0.15 MB/s	542773044 B/op	 5203425 allocs/op
+BenchmarkImportXLSXSettlement-2   	      82	  17958812 ns/op	   0.03 MB/s	 6956397 B/op	   77396 allocs/op
+BenchmarkDetailWrite-2            	   13194	     89828 ns/op	    4635 B/op	     107 allocs/op
+BenchmarkFuzzySweep10k1k-2        	       1	1433612423 ns/op
+PASS
+ok  	github.com/mmqz/netops-fees-lab/internal/fees	22.561s

@@ -326,9 +326,7 @@ func readSheet(data []byte, f *excelize.File, sheet string) (SheetData, error) {
 			return SheetData{}, fmt.Errorf("fees: 读取工作表 %s 第 %d 行: %w", sheet, rowNum, err)
 		}
 		strs := make([]string, len(cells))
-		for i, c := range cells {
-			strs[i] = c
-		}
+		copy(strs, cells)
 		if isBlankRow(strs) {
 			continue
 		}
@@ -478,24 +476,43 @@ func RecognizeSheetType(sheetName string, headers []string) (FeeType, int) {
 }
 
 // headerMatchKey folds a header (or synonym) into its comparison key:
-// lower-cased, with spaces, underscores, hyphens, full-width spaces AND
-// LINE BREAKS removed — "Site Code" / "site_code" / "SITE-CODE" /
-// "sitecode" share one key, and a multi-line xlsx header (the cell-wrapped
-// 产品服务费合计\n（出账费用）（不含税） of the #29 tower settlement sheet —
-// Excel's Alt+Enter wrap) folds to its single-line form so the synonym
-// matchers are never defeated by a line break again. Chinese text is
-// untouched (lower-casing is a no-op), so every Chinese-only header
-// decision is identical to the previous exact matcher (#65 P3-d added
-// English/ mixed-form headers; it changed nothing for the forms that
-// already matched).
+// lower-cased, with the whitespace family (spaces, NBSP, the Unicode Zs
+// separators, line/tab breaks) plus underscores and hyphens removed, and
+// full-width parentheses normalized to their half-width forms — "Site Code"
+// / "site_code" / "SITE-CODE" / "sitecode" share one key, a multi-line
+// xlsx header (the cell-wrapped 产品服务费合计\n（出账费用）（不含税） of
+// the #29 tower settlement sheet — Excel's Alt+Enter wrap) folds to its
+// single-line form, and 「费用（元）」/「费用(元)」 fold to the SAME key so
+// synonym tables list each 口径 once (#33 F2: the pre-#33 matcher folded
+// spaces and line breaks but not paren width — every paren-carrying
+// synonym had to be hand-duplicated in both widths and a missing twin
+// was exactly the #29 failure shape). Chinese text is untouched
+// (lower-casing is a no-op), so every Chinese-only header decision is
+// identical to the previous exact matcher (#65 P3-d added English/mixed
+// headers; it changed nothing for the forms that already matched).
 func headerMatchKey(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
 		switch r {
-		case ' ', '_', '-', '　', '\n', '\r', '\t':
+		case '（':
+			b.WriteByte('(')
+			continue
+		case '）':
+			b.WriteByte(')')
+			continue
+		case '_', '-':
+			// not unicode spaces, but folded by the #29 contract
 			continue
 		default:
+			// the whole unicode space family: ' ', '\n', '\r', '\t',
+			// '\v', '\f', NBSP (\u00a0), NEL, and the Zs
+			// separators (\u2000-\u200a, \u3000, …) — one
+			// branch instead of a hand-list that already missed
+			// NBSP (#33 F1's seed).
+			if unicode.IsSpace(r) {
+				continue
+			}
 			b.WriteRune(unicode.ToLower(r))
 		}
 	}
@@ -512,13 +529,13 @@ func headerMatchKey(s string) string {
 // scoped table matches EXACT NORMALIZED KEY ONLY (never contains): which
 // column IS the amount is a business-口径 decision, and the settlement's
 // own header fingerprint (产品服务费合计 + 出账费用 + 不含税) is the declared
-// 口径. Both full-width and half-width paren forms are listed —
-// headerMatchKey folds spaces and line breaks, not paren width.
+// 口径. Each 口径 is listed ONCE in its half-width form — headerMatchKey
+// normalizes paren width (#33 F2), so the full-width twins match the same
+// key and the old both-widths duplication was removed along with its
+// miss-a-twin failure mode (the exact #29 shape).
 var typeAmountSynonyms = map[FeeType][]string{
 	FeeTypeTowerLease: {
-		"产品服务费合计（出账费用）（不含税）",
 		"产品服务费合计(出账费用)(不含税)",
-		"产品服务费合计（出账费用）",
 		"产品服务费合计(出账费用)",
 		"产品服务费合计",
 	},

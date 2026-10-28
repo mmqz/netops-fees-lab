@@ -60,19 +60,6 @@ func commandEnum(subs []string) string {
 	return strings.Join(subs[:len(subs)-1], "、") + " 或 " + subs[len(subs)-1]
 }
 
-// registeredResourceTypes returns the CLI spelling of the closed resource
-// type set, derived from the domain registry — never hand-copied, so no
-// error message can go stale when the registry extends (#108; same
-// doctrine as the MCP face, #91, cf. mapping's #26 four-point gate that
-// pins the registry itself).
-func registeredResourceTypes() []string {
-	types := make([]string, 0, len(domain.AllResourceTypes()))
-	for _, rt := range domain.AllResourceTypes() {
-		types = append(types, rt.String())
-	}
-	return types
-}
-
 // CLI dispatches the netopsfees subcommands. Every successful command writes
 // exactly one JSON object to stdout (the report --format html command writes
 // an HTML document instead, per §10); failures write one JSON error object
@@ -678,15 +665,6 @@ func templatesItemOf(t domain.MappingTemplate) templatesItem {
 		ConfirmedAt:       t.ConfirmedAt.UTC().Format(time.RFC3339),
 		ConfirmedBatch:    t.ConfirmedBatch,
 	}
-}
-
-// exportResponse is the stdout contract of `netopsfees export`: the written
-// file path, the per-type row counts (only types with at least one
-// resource) and the total row count.
-type exportResponse struct {
-	File      string         `json:"file"`
-	Types     map[string]int `json:"types"`
-	TotalRows int            `json:"totalRows"`
 }
 
 // splitSubArgs separates the leading command-level flags (--db[=path])

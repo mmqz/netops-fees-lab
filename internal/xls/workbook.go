@@ -111,7 +111,7 @@ func (wb *WorkBook) parseBof(buf io.ReadSeeker, b *bof, pre *bof, offset_pre int
 			for err == nil && offset_pre < len(wb.sst) {
 				var str string
 				if size > 0 {
-					str, err = wb.get_string(buf_item, size)
+					str, _ = wb.get_string(buf_item, size)
 					wb.sst[offset_pre] = wb.sst[offset_pre] + str
 				}
 
@@ -236,8 +236,7 @@ func (w *WorkBook) get_string(buf io.ReadSeeker, size uint16) (res string, err e
 			// err = binary.Read(buf, binary.LittleEndian, bts)
 		}
 		if phonetic_size > 0 {
-			var bts []byte
-			bts = make([]byte, phonetic_size)
+			bts := make([]byte, phonetic_size)
 			err = binary.Read(buf, binary.LittleEndian, bts)
 			if err == io.EOF {
 				w.continue_apsb = phonetic_size

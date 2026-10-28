@@ -33,10 +33,6 @@ func toolResultText(t *testing.T, res *mcp.CallToolResult) string {
 	return ""
 }
 
-const ruleCreateArgs = `{"name":"电费单月超阈值","feeType":"electricity","metric":"amount",
-"aggregation":"sum","dimension":"site_month","comparator":"gt",
-"threshold":500000,"windowMonths":1,"severity":"high","description":"单站单月电费超 5000 元"}`
-
 func TestMCPRuleCreateChannel(t *testing.T) {
 	db, err := repo.Open(filepath.Join(testsupport.TempDir(t), "netops.db"))
 	if err != nil {

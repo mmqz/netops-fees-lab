@@ -2,8 +2,6 @@ package api_test
 
 import (
 	"bytes"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
@@ -48,21 +46,4 @@ func buildDeviceWorkbook(t *testing.T, ip string) []byte {
 		t.Fatalf("close workbook: %v", err)
 	}
 	return buf.Bytes()
-}
-
-func importDeviceWorkbook(t *testing.T, srv *httptest.Server, ip string) {
-	t.Helper()
-	resp, body := uploadFile(t, srv, "devices.xlsx", buildDeviceWorkbook(t, ip))
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("upload: status = %d, want 202\nbody: %s", resp.StatusCode, body)
-	}
-	var a importAnalysis
-	decodeJSON(t, "upload", body, &a)
-	resp, body = doRequest(t, srv, http.MethodPost, "/api/imports/"+a.BatchID+"/mapping",
-		[]byte(deviceImportMapping), "application/json")
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("mapping: status = %d, want 202\nbody: %s", resp.StatusCode, body)
-	}
-	var sum importSummary
-	decodeJSON(t, "mapping", body, &sum)
 }

@@ -515,6 +515,10 @@ func rewriteZipEntry(t *testing.T, src, name string, transform func([]byte) []by
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// defer FIRST (#33 W4): a t.Fatalf between Create and the explicit
+	// Close below runs deferred calls on exit — the non-deferred close
+	// leaks the handle exactly there (the Windows shape the gate pins).
+	defer func() { _ = out.Close() }()
 	zw := zip.NewWriter(out)
 	for _, ze := range zr.File {
 		rc, err := ze.Open()

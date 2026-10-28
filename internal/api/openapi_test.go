@@ -20,21 +20,6 @@ type specDoc struct {
 	Paths   map[string]map[string]any `json:"paths"`
 }
 
-// specMethodsOf extracts the registered methods of one spec path.
-func specMethodsOf(doc *specDoc, path string) []string {
-	var methods []string
-	item, ok := doc.Paths[path]
-	if !ok {
-		return nil
-	}
-	for _, m := range []string{"get", "post", "patch", "delete", "put"} {
-		if _, ok := item[m]; ok {
-			methods = append(methods, strings.ToUpper(m))
-		}
-	}
-	return methods
-}
-
 // TestOpenAPISpecBasics pins the document envelope: valid OpenAPI 3.0,
 // the app version (the SAME constant /api/health reports), tags and
 // every operation carrying a summary (a route without a summary is a

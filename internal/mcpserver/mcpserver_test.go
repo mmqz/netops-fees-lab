@@ -311,20 +311,6 @@ func TestMCPToolRegistry(t *testing.T) {
 	}
 }
 
-// callTool invokes a tool and returns its decoded structured result, failing
-// on protocol errors and tool errors alike.
-func callTool(t *testing.T, session *mcp.ClientSession, name string, args map[string]any) map[string]any {
-	t.Helper()
-	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
-	if err != nil {
-		t.Fatalf("CallTool(%s): protocol error: %v", name, err)
-	}
-	if res.IsError {
-		t.Fatalf("CallTool(%s) answered a tool error: %s", name, toolErrorText(t, res))
-	}
-	return toolResultJSON(t, res)
-}
-
 // callToolError invokes a tool that MUST answer an MCP tool error (IsError =
 // true) and returns the error message text.
 func callToolError(t *testing.T, session *mcp.ClientSession, name string, args map[string]any) string {
@@ -349,39 +335,6 @@ func toolErrorText(t *testing.T, res *mcp.CallToolResult) string {
 	}
 	t.Fatalf("tool error result has no text content: %+v", res)
 	return ""
-}
-
-// num returns out[key] as a float64 (JSON numbers decode as float64), failing
-// when the field is missing or not a number.
-func num(t *testing.T, ctx string, out map[string]any, key string) float64 {
-	t.Helper()
-	v, ok := out[key].(float64)
-	if !ok {
-		t.Fatalf("%s: %s = %#v, want a number", ctx, key, out[key])
-	}
-	return v
-}
-
-// str returns out[key] as a string, failing when the field is missing.
-func str(t *testing.T, ctx string, out map[string]any, key string) string {
-	t.Helper()
-	v, ok := out[key].(string)
-	if !ok {
-		t.Fatalf("%s: %s = %#v, want a string", ctx, key, out[key])
-	}
-	return v
-}
-
-// obj returns out[key] as a nested object (nil-safe for absence checks).
-func obj(out map[string]any, key string) map[string]any {
-	m, _ := out[key].(map[string]any)
-	return m
-}
-
-// arr returns out[key] as a nested array (nil when absent/not an array).
-func arr(out map[string]any, key string) []any {
-	a, _ := out[key].([]any)
-	return a
 }
 
 // TestMCPFeeRisks pins the fee_risks tool (#58 stage 5): the closed

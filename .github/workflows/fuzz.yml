@@ -1,0 +1,76 @@
+# Nightly fuzz — issue #33's 总验收: every fuzz target in
+# internal/fees/fuzz_test.go gets 5 minutes of engine time per night.
+#
+# The registry (fuzzTargets in fuzz_test.go) and the matrix below are
+# closed against each OTHER by TestFuzzNightlyMatrixMatchesRegistry — adding
+# a target without wiring it here fails CI, deleting one from here leaves
+# the registry entry unmatched in this file's matrix strings.
+#
+# Cost discipline (the account's private-repo Actions quota was exhausted
+# once already, see ci.yml's header): the idle gate skips the job when
+# main saw no commit in the last 24h — fuzzing yesterday's bytes again
+# buys nothing, and idle nights bill ~30 seconds, not 45 minutes.
+#
+# Crash discipline: Go's fuzzing engine writes a failing input to
+# testdata/fuzz/<Target>/ and the step exits red — that input then runs as
+# a permanent regression case in the ordinary seed corpus path. The
+# workflow never auto-fixes anything; a red run is a finding, not noise.
+
+name: fuzz
+
+on:
+  schedule:
+    # 19:00 UTC = 03:00 Asia/Shanghai — off-peak, before the workday.
+    - cron: '0 19 * * *'
+  workflow_dispatch: {} # manual evidence runs (the #33 close comment cites one)
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the four P0 faces from the issue's plan, full 5-minute runs
+          - { target: FuzzHeaderMatchKey, minutes: 5m }
+          - { target: FuzzParenWidthEquivalence, minutes: 5m }
+          - { target: FuzzNormalizeAmount, minutes: 5m }
+          - { target: FuzzReadCSV, minutes: 5m }
+          # the repo-native extensions, the same nightly slot
+          - { target: FuzzParsePeriod, minutes: 5m }
+          - { target: FuzzParseDatePeriod, minutes: 5m }
+          - { target: FuzzDetectPeriod, minutes: 5m }
+          - { target: FuzzNormalizeSiteCode, minutes: 5m }
+          - { target: FuzzReassembleThousands, minutes: 5m }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # the idle gate only needs the tip's date
+      - name: idle gate (skip when main saw no commit in 24h)
+        id: idle
+        run: |
+          if [ -z "$(git log -1 --since='24 hours ago' --format=oneline HEAD)" ]; then
+            echo "idle=true" >> "$GITHUB_OUTPUT"
+            echo "no commit in the last 24h — fuzzing yesterday's bytes buys nothing"
+          else
+            echo "idle=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-go@v5
+        if: steps.idle.outputs.idle != 'true'
+        with:
+          go-version: '1.27.x'
+      - name: fuzz ${{ matrix.target }} (${{ matrix.minutes }})
+        if: steps.idle.outputs.idle != 'true'
+        run: go test -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime ${{ matrix.minutes }} ./internal/fees/
+      - name: upload crash corpus on failure
+        if: failure() && steps.idle.outputs.idle != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: internal/fees/testdata/fuzz/
+          retention-days: 90
+          if-no-files-found: ignore

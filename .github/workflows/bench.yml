@@ -1,0 +1,73 @@
+# Nightly benchmark gate — issue #33 stage 3: 基准退化 > 20% 时告警
+# (不阻断). Same cadence and same idle gate as fuzz.yml: the job skips
+# when main saw no commit in the last 24h.
+#
+# The comparison is NIGHTLY-vs-NIGHTLY (consecutive runs on the same
+# ubuntu-latest runner family) — NOT against the committed
+# testdata/bench/baseline.txt, because ns/op across machines is noise,
+# not signal. The committed baseline stays the dev-machine record and the
+# local-gate default (scripts/bench-gate.py). The previous run's result
+# rides the `bench-latest` artifact; the first night has no predecessor
+# and the gate answers UNPAIRED, which is a warning, not a failure.
+
+name: bench
+
+on:
+  schedule:
+    - cron: '40 19 * * *' # 03:40 Asia/Shanghai — after the fuzz wave
+  workflow_dispatch: {}
+
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: idle gate (skip when main saw no commit in 24h)
+        id: idle
+        run: |
+          if [ -z "$(git log -1 --since='24 hours ago' --format=oneline HEAD)" ]; then
+            echo "idle=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "idle=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-go@v5
+        if: steps.idle.outputs.idle != 'true'
+        with:
+          go-version: '1.27.x'
+      - name: fetch the previous nightly's result (the comparison base)
+        if: steps.idle.outputs.idle != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV="$(gh run list --workflow bench.yml --status success --limit 2 --json databaseId,createdAt --jq ".[1].databaseId // empty")"
+          if [ -n "$PREV" ]; then
+            mkdir -p /tmp/bench-prev
+            (cd /tmp/bench-prev && gh run download "$PREV" -n bench-latest) || echo "no previous artifact (first night)"
+          fi
+          ls /tmp/bench-prev 2>/dev/null || true
+      - name: run the benchmark suite (duckdb build, CGO)
+        if: steps.idle.outputs.idle != 'true'
+        run: |
+          go test -count=1 -run '^$' -tags duckdb -bench . -benchtime 1s ./internal/fees/ | tee bench-new.txt
+      - name: gate (warn over 20%, never block)
+        if: steps.idle.outputs.idle != 'true'
+        run: |
+          OLD="/tmp/bench-prev/bench-new.txt"
+          if [ -f "$OLD" ]; then
+            python3 scripts/bench-gate.py --new bench-new.txt --old "$OLD" || true
+          else
+            echo "first active night — no comparison base, this run becomes it"
+          fi
+      - name: keep this run's result for tomorrow's comparison
+        if: steps.idle.outputs.idle != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-latest
+          path: bench-new.txt
+          retention-days: 7

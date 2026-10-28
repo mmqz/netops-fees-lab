@@ -136,7 +136,7 @@ func TestAPIMDocHeadingsMatchRouteTable(t *testing.T) {
 // heading path never contains one, but the character class must stop
 // there. \r is excluded for the #124 CRLF checkout shape (the caller
 // trims it too — belt and braces).
-var apiDocHeading = regexp.MustCompile("^#{2,4} (GET|POST|PUT|DELETE|PATCH) ([^ ?\\x60—\\r]+)")
+var apiDocHeading = regexp.MustCompile(`^#{2,4} (GET|POST|PUT|DELETE|PATCH) ([^ ?\x60—\r]+)`)
 
 // TestAPIDocHeadingCRProof is the #124 self-check: a Windows checkout
 // (core.autocrlf) hands api.md over with CRLF endings, and the heading

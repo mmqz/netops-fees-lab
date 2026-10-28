@@ -98,13 +98,15 @@ func TestDuckVerifyBatchesAllNegativeFlags(t *testing.T) {
 
 // TestDuckVerifyBatchesMixedAmountsStayClean pins the boundaries the
 // money-health checks must NOT flag: a legit zero row inside a non-zero
-// batch (one site's true 0 is data, not a defect), and a batch with both
-// positive and negative amounts (a wash is a business state).
+// batch (one site's true 0 is data, not a defect), a negative row present
+// in a batch (a wash is a business state) — and, since #33's DQ5, the
+// negative minority must stay UNDER the 30% medium bar: 1 negative row of
+// 5 (20%) stays clean, the majority band starts strictly above 30%.
 func TestDuckVerifyBatchesMixedAmountsStayClean(t *testing.T) {
 	svc, _, dir := newService(t)
 	ctx := context.Background()
 	p := filepath.Join(dir, "mixed.csv")
-	if err := os.WriteFile(p, []byte("站址编码,账期,金额\nA,2026-01,100.00\nB,2026-01,0\nC,2026-01,(40.00)\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("站址编码,账期,金额\nA,2026-01,100.00\nB,2026-01,0\nC,2026-01,(40.00)\nD,2026-01,200.00\nE,2026-01,300.00\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Import(ctx, ImportOptions{Path: p, FeeType: FeeTypeMaintenance, Year: 2026, Month: 1}); err != nil {
@@ -115,6 +117,6 @@ func TestDuckVerifyBatchesMixedAmountsStayClean(t *testing.T) {
 		t.Fatalf("verify-batches: %v", err)
 	}
 	if len(rep.DataProblems) != 0 {
-		t.Errorf("dataProblems = %+v, want clean (min<0<max defeats both all-zero and all-negative)", rep.DataProblems)
+		t.Errorf("dataProblems = %+v, want clean (min<0<max defeats all-zero/all-negative, and 1/5 negative rows stays under the DQ5 30%% bar)", rep.DataProblems)
 	}
 }

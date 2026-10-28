@@ -226,12 +226,11 @@ func TestDoConcurrentWorkloads(t *testing.T) {
 				// pattern that hit SQLITE_BUSY with deferred BEGIN.
 				var n int
 				if err := db.Do(ctx, func(tx *Tx) error {
-					existing, err := tx.SimLinks.ListByWorkspace(ctx, "ws-conc")
-					if err != nil {
+					// the read leg of the upgrade shape (its result feeds
+					// nothing — the point is the read-before-write
+					// transaction shape, so the discard is explicit)
+					if _, err := tx.SimLinks.ListByWorkspace(ctx, "ws-conc"); err != nil {
 						return err
-					}
-					if len(existing) < 0 {
-						t.Errorf("impossible link count")
 					}
 					v, err := tx.Sequences.Allocate(ctx, domain.SeqLink)
 					if err != nil {

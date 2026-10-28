@@ -898,17 +898,44 @@ type SourceVerifyReport struct {
 // partition of the batch disagrees with fee_batches), "analysis-missing"
 // (a completed batch has no Parquet file at all — rolled-back-elsewhere or
 // GC'd), "duplicate-sha-period" (the same file hash lives under more than
-// one period — the #20 core shape); and since #32 the DATA-VALIDITY face:
-// "zero-amount" (every row of the batch carries amount 0 — the #29
-// wrong-column import shape: 454 rows, totalCents all 0, zero warnings),
-// "empty-site-code" (every row's site code is blank — an import-guard
-// regression fingerprint), "all-negative-amount" (every amount negative —
-// a parse/口径 anomaly: refunds netting everything to the minus side
-// deserve eyes).
+// one period — the #20 core shape); and since #32 the DATA-VALIDITY face
+// with the #33 DQ ids and severities riding the new Check/Severity fields:
+//
+//	DQ1 "zero-amount" (high)   — every row of the batch carries amount 0,
+//	                              the #29 wrong-column import shape: 454
+//	                              rows, totalCents all 0, zero warnings.
+//	DQ2 "empty-site-code" (high) — every row's site code blank; the
+//	                              import guard refuses blanks row-by-row,
+//	                              so a live hit is a writer regression.
+//	DQ3 "single-site-code" (high) — rows > 1 but ALL one site: the issue's
+//	                              literal distinct==0 is unreachable here
+//	                              (site_code is never NULL in this schema —
+//	                              the all-NULL shape collapses into DQ2's
+//	                              blank fingerprint); the useful
+//	                              distinctness signal our data can carry
+//	                              is whole-batch-one-site (a paste-error
+//	                              fingerprint), implemented instead.
+//	DQ4 "row-count-cliff" (medium) — same fee type, adjacent periods with
+//	                              data: this period imported < 50% of the
+//	                              previous period's rows. The #12 import
+//	                              guard warns at the door against last
+//	                              year; this is the ledger-level audit
+//	                              across all history (both builds — pure
+//	                              DB face).
+//	DQ5 "all-negative-amount" (high) / "majority-negative-amount" (medium)
+//	                              — the minus side's share: 100% high,
+//	                              > 30% (and not 100%) medium.
+//	DQ6 has NO verify-side kind BY DESIGN: the multi-candidate amount
+//	    column is an import-time face (#29's amountColumn + variants
+//	    warnings answer it when the evidence — the headers — is in
+//	    hand); re-parsing snapshots per verify run would re-do the import
+//	    face with less context. The mapping is documented, not faked.
 type VerifyBatchProblem struct {
-	Kind    string `json:"kind"`
-	BatchID string `json:"batchId"`
-	Detail  string `json:"detail"`
+	Kind     string `json:"kind"`
+	BatchID  string `json:"batchId"`
+	Detail   string `json:"detail"`
+	Check    string `json:"check,omitempty"`    // #33: the DQ face id on data problems
+	Severity string `json:"severity,omitempty"` // #33: high/medium on data problems
 }
 
 // VerifyBatchesReport is the verify-batches envelope: every completed batch
@@ -968,6 +995,13 @@ func (s *Service) VerifyBatches(ctx context.Context, engine QueryEngine) (Verify
 	type periodKey struct{ y, m int }
 	shaPeriods := make(map[string]map[periodKey]string) // sha -> period -> batch id
 	var dataTargets []batchDataTarget
+	// #33 DQ4: per-fee-type period -> imported rows accumulator (the
+	// ledger-level adjacent-period cliff is a pure DB face — both builds).
+	type periodRowTotal struct {
+		y, m, rows int
+		firstID    string
+	}
+	cliffAcc := make(map[FeeType][]periodRowTotal)
 
 	for _, b := range batches {
 		if b.Status != FeeStatusCompleted {
@@ -1034,6 +1068,23 @@ func (s *Service) VerifyBatches(ctx context.Context, engine QueryEngine) (Verify
 			shaPeriods[b.SHA256] = make(map[periodKey]string)
 		}
 		shaPeriods[b.SHA256][periodKey{b.FeeYear, b.FeeMonth}] = b.ID
+
+		// 3b. accumulate the DQ4 period face (adjacent-period row
+		// totals per fee type; multiple batches of one period sum —
+		// a period's size is its ledger, not any one file).
+		acc := cliffAcc[b.FeeType]
+		found := false
+		for i := range acc {
+			if acc[i].y == b.FeeYear && acc[i].m == b.FeeMonth {
+				acc[i].rows += b.RowsImported
+				found = true
+				break
+			}
+		}
+		if !found {
+			acc = append(acc, periodRowTotal{y: b.FeeYear, m: b.FeeMonth, rows: b.RowsImported, firstID: b.ID})
+		}
+		cliffAcc[b.FeeType] = acc
 	}
 
 	// 4. same sha under several periods — the #20 shape; name every member.
@@ -1053,6 +1104,35 @@ func (s *Service) VerifyBatches(ctx context.Context, engine QueryEngine) (Verify
 				Detail:  fmt.Sprintf("文件（SHA256 前 12 位 %s）同时存在于多个账期：%s ——同文件多账期会把数据重复入账", sha[:12], strings.Join(members, "、")),
 			})
 			_ = pk
+		}
+	}
+
+	// 4b. the #33 DQ4 row-count cliff: per fee type, order the periods
+	// that carry data and compare each against its immediate
+	// predecessor — importing under half the previous period's rows
+	// earns a medium warning naming both ledgers. A gap month is NOT
+	// a cliff (a missing import is the missing-billing scenarios'
+	// story, not this check's); the comparison is strictly
+	// adjacent-periods-with-data.
+	for ft, acc := range cliffAcc {
+		sort.Slice(acc, func(i, j int) bool {
+			if acc[i].y != acc[j].y {
+				return acc[i].y < acc[j].y
+			}
+			return acc[i].m < acc[j].m
+		})
+		for i := 1; i < len(acc); i++ {
+			if acc[i-1].rows <= 0 || acc[i].rows >= acc[i-1].rows/2 {
+				continue
+			}
+			report.DataProblems = append(report.DataProblems, VerifyBatchProblem{
+				Kind:    "row-count-cliff",
+				BatchID: acc[i].firstID,
+				Detail: fmt.Sprintf("%s 账期 %04d-%02d 仅导入 %d 行，不足上一有数据账期 %04d-%02d（%d 行）的一半——本月表不全或上期口径变化，请人工核对",
+					FeeTypeLabel(ft), acc[i].y, acc[i].m, acc[i].rows, acc[i-1].y, acc[i-1].m, acc[i-1].rows),
+				Check:    "DQ4",
+				Severity: "medium",
+			})
 		}
 	}
 

@@ -236,22 +236,6 @@ func claimedSubcommands(msg string) []string {
 	return nil
 }
 
-// typesClaimedInError extracts the registry enumeration from a --type
-// validation error of the shape "--type 必须是注册资源类型之一（a/b/…），收到 %q".
-func typesClaimedInError(t *testing.T, msg string) []string {
-	t.Helper()
-	open := strings.Index(msg, "（")
-	if open < 0 {
-		t.Fatalf("--type error carries no closed-set parentheses: %q", msg)
-	}
-	rest := msg[open+len("（"):]
-	end := strings.Index(rest, "）")
-	if end < 0 {
-		t.Fatalf("--type error carries no closing parenthesis: %q", msg)
-	}
-	return splitAndTrim(rest[:end], "/")
-}
-
 // splitAndTrim splits s on sep, trimming each part and dropping empties.
 func splitAndTrim(s, sep string) []string {
 	parts := strings.Split(s, sep)

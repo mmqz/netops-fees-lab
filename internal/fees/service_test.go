@@ -63,10 +63,6 @@ const csvMay = `站址编码,账期,电费(元),电量(kWh)
 0230101ABCDEFG03,2024-05,9,876.50,5300
 `
 
-const csvJune = `站址编码,账期,电费(元),电量(kWh)
-0230101ABCDEFG01,2024-06,2,000.00,3400
-`
-
 // TestImportPipelineAndIdempotency walks the full vertical slice:
 // import → completed batch + snapshot + partitioned parquet with lineage →
 // same file re-import = duplicate skip (zero new data) → listed state →

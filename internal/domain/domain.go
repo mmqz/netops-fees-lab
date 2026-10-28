@@ -22,12 +22,15 @@ import (
 const RuleVersion = "1.0.0"
 
 // AppVersion is the version of the NetOps Lab application itself, reported by
-// the health endpoint, the MCP server implementation and the CLI. v0.20.3 is
-// the data-first year patch (GET /api/fees/years path-level discovery — the
-// year pickers default to the latest year WITH data instead of the calendar,
-// the overview answers a dataless year with the honest year-empty banner
-// instead of a blank dashboard, and the risk map never sends month=0).
-const AppVersion = "v0.20.3"
+// the health endpoint, the MCP server implementation and the CLI. v0.20.4 is
+// the test-system hardening patch of #33: nine fuzz targets with a nightly
+// engine, six pinned invariants (idempotency / conservation / rollback /
+// presence-class / monotonicity / period consistency), the DQ1-DQ6 data-
+// quality face on verify-batches, ten benchmarks with baselines and a
+// 20% gate, the W3/W4 static gates, and a mutation round where every
+// named mutant is caught — plus the #34 CI artifact (the duckdb job now
+// ships the verified linux binary it used to throw away).
+const AppVersion = "v0.20.4"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.

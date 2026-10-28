@@ -2,6 +2,44 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.20.4] — 2026-10-28
+
+**测试体系补强版**（#33 全量交付 + #34 同批合入）：九个 fuzz 目标 + 六条不变量 + DQ1-DQ6 数据质量面 + 十个基准带基线与 20% 门禁 + W3/W4 静态门禁 + 突变轮全捕获——测试函数总数 569 → **650**（Test 631 / Fuzz 9 / Benchmark 10）。
+
+### 新增 — Fuzz 面（#33 F1-F5 + 仓内原生扩展，共 9 目标）
+- `internal/fees/fuzz_test.go`：`FuzzHeaderMatchKey`（幂等/无折叠残留/全小写三不变量）、`FuzzParenWidthEquivalence`（**#33 F2 的回归钉**：括号宽度永不改变匹配 key）、`FuzzNormalizeAmount`（规范渲染往返无损 + 零只来自零形文本）、`FuzzParsePeriod` / `FuzzParseDatePeriod`（接受值必落 CHECK 边界 2000..2100×1..12）、`FuzzDetectPeriod`（探测层要么不作答要么给合法账期，年月成对）、`FuzzNormalizeSiteCode`（幂等/无空白/前导零不丢）、`FuzzReassembleThousands`（#98 恢复路径：成功即恰达 want、合并无损）、`FuzzReadCSV`（内容级：行单元格数 ≤ 表头数——短行合法契约的诚实修正）。种子语料随普通 `go test` 常跑；**夜间 `.github/workflows/fuzz.yml`** 每目标 5 分钟引擎时间（#33 总验收口径），主干 24h 无新提交整 job 跳过（配额纪律——ci.yml 头注的教训），注册表与 workflow 矩阵被 `TestFuzzNightlyMatrixMatchesRegistry` 双向钉死。
+- **fuzz 首航即有真发现**：引擎立即击中 `FuzzNormalizeAmount` 的「０」（全角零）——解析器对（全角数字化是功能），**不变量写错了**：零形文本的剥字符集漏了全角数字族。修正不变量（含 IsSpace 全空白族 + 全角标点族），crash 种子留档 `testdata/fuzz/` 作永久回归种子。
+
+### 修复 — 表头归一化补全（#33 F2 判决：会失败 → 修根）
+- `headerMatchKey` 折叠面从手工列举扩为：整面 `unicode.IsSpace`（NBSP/Zs 分隔符/\\v\\f——旧手列表漏 NBSP）+ **全角括号 `（）` 归一为半角**。收益不止正确性：`typeAmountSynonyms` 塔类口径表**去重为半角一形**（旧表全角/半角双形并列，「新增同义词漏列一种括号」正是 #29 的失效形态——归一化层携带宽度后该失败模式从根上消失）；`TestHeaderMatchKeyFoldsLineBreaks` 第 4 断言按新契约翻转为同 key（测试注释记录翻转理由）。
+
+### 新增 — 属性不变量 I1-I6（#33 §3 全谱）
+- **I1 导入幂等**：同文件 n∈{1,2,5,10} 次导入终态恒一（1 completed 批次/1 快照/1 活分区文件；重复应答是 `ErrDuplicateImport` 哨兵 + 完整库记录摘要——#24 契约钉死）+ **顺序无关**（A→B 与 B→A 摘要恒等——幂等键内容寻址非位置寻址）。
+- **I2 金额守恒**（duckdb 真引擎）：站点汇总面/月度序列/全年聚合三面同值；增长加钱、回滚减钱、幂等重导零增量——每一步金额分毫守恒；每站点分账守恒（聚合对但错主分账也逃不过）。
+- **I3 回滚彻底性**：分析行消失 + 兄弟批次不动 + **快照保留**（证据链比数据活得久）+ rolled_back 状态在册——issue 四面一景钉死。
+- **I4 存在性×金额**（#31 教训的性质化）：200 组种子生成四元组——分类**只看行数**（金额含零/负不移动象限）；显式四象限矩阵 + 计数恒等式（三类计数和=行数）+ 金额合并守恒 + 重跑逐字节确定。
+- **I5 线索单调性**（静态资源宇宙 + 增长费用面）：四结构场景线索集只增不减；**统计场景（spike/outlier）被诚实排除并以反例证明排除的正当性**——`TestStatisticalScenariosExcludedFromMonotonicity` 演示「加 3 个同极值 peer 后 S-OUT 线索正当退役」，单调性若硬套统计场景就是伪性质。
+- **I6 账期一致性**：申报账期=快照路径段=Parquet 分区=账册行四面独立再推导（verify-batches 自身也可能错，性质从原始面重推）+ 月度序列诚实缺席（无数据月永不出现为 0 行——#3 教义的不变量化）。
+
+### 新增 — DQ1-DQ6 数据质量面（verify-batches 集成）
+- `VerifyBatchProblem` 增 `check`（DQ 编号）+ `severity`（high/medium）两域（omitempty 加性——pre-#32 消费者契约不断）。**DQ1** zero-amount（#29 指纹，high）/ **DQ2** empty-site-code（写入通道回归指纹，high）/ **DQ3** single-site-code（整批单一站址的粘贴错误指纹，high——issue 字面 distinct==0 在本 schema 不可达：site_code 永不为 NULL，全空形态归 DQ2，文档化裁决）/ **DQ4** row-count-cliff（同类型相邻有数据账期行数 < 上期一半，medium——纯 DB 面双构建可用；同账期多批次按账期合并后比较；首期无前驱、缺月不比较）/ **DQ5** all-negative（high）+ 新 majority-negative（>30% 负数行非全负，medium；#32 混合边界测试随红线更新为 1/5=20% 洁净形态并文档化 30% 新界）/ **DQ6** 按设计留在导入时面（#29 的 amountColumn+变体 warnings——verify 重解析快照=以更少上下文重做导入面，映射如实文档化不伪造）。
+
+### 新增 — 基准面 B1-B7（10 个基准 + 基线 + 双门禁）
+- `bench_test.go`：B1 CSV 导入吞吐三标尺点（1k/10k/100k——新库首导口径：幂等哨兵什么都不测）、B2 157 列塔类结算详单 XLSX 导入（#29 真实表形：Alt+Enter 表头+同族诱饵列）、B7 明细层写入。`bench_duckdb_test.go`：B3 月度序列 / B4 单场景（spike 最重面）/ B5 十场景全跑 / B6 跨数据集对账（12 月×200 站×双类型种子语料）。全部 `ReportAllocs` + `SetBytes`（行/秒直接可读）。
+- **基线**：`testdata/bench/baseline.txt`（开发机记录；跨机比较无意义——benchstat 教义，文件头注明再生成纪律）+ `scripts/bench-gate.py`（超 20% 告警，`--strict` 才阻断）+ **夜间 `bench.yml`**：隔夜**同机族**对比（昨夜 artifact 为基线，非提交基线），首夜无前驱答 UNPAIRED 不算失败。
+
+### 新增 — W3/W4 静态门禁（W1/W2 既有，四门齐）
+- **W3 staticcheck**：全仓零告警——50 处存量清零（29 处 SA4006 测试死赋值机械修复 / 16 处 U1000 死码删除——含 cli.go 两处主仓拆分遗留死码 registeredResourceTypes 与 exportResponse、mcpserver 五个死 JSON 助手、server_test 三个死镜像类型 / S1001×2 copy 循环 / S1007 正则原文 / S1021 声明合并 / SA4024 永假比较 / workbook.go SST err 覆写丢弃）。CI go job 新增三面步：默认 / `-tags duckdb` / `GOOS=windows`（仓内唯一 `*_windows.go` 对 Linux 扫描不可见，跨 GOOS 类型检查替跑——不加计费的 Windows 分钟）。版本钉 2026.2.2。
+- **W4** `TestNoUnclosedCreateInTests`（`internal/testsupport/closefile_gate_test.go`）：测试内 `os.Create`/`os.CreateTemp` 必须同函数 `defer NAME.Close()`——非 defer 关闭只覆盖幸福路径，t.Fatalf 中途退出即句柄泄漏到进程死（#28 Windows 形态）；行内 `create-close-ok:` 豁免通道（W1 同款）。两处 zip 改写助手补 defer（正是该形态的真实存量）；门禁逻辑自身有形状单测 + 种裸 Create 负例实测（种→红→删→绿）。
+
+### 新增 — 突变测试轮（#33 §7）
+- `scripts/mutation-round.py`：issue §7.3 点名的四突变（risks.go 阈值移出可触发域 / crosscheck.go 分类边界 `>0`→`>1` / recognize.go 口径表删条目 / repo.go **commit→rollback**），逐个注入→定向测试→还原→报告。**4/4 全捕获，存活率 0% < 20% 红线**——套件会验证，不只是会跑。突变点与源码漂移被 `TestMutationHarnessPointsPresent` 在 CI 时代位拦（运行时 MUTATION POINT GONE + 门禁双重）。
+
+### 工程口径与文档
+- **测试面**：Go 顶层 593（默认构建 `go test -list` 口径，+55）；测试函数总数 650（Test 631 / Fuzz 9 / Benchmark 10，#33 总验收线达成）；testsupport W4 门禁从无测试包变有测试包。vitest 172 不变（本轮无前端代码改动）。**门禁全绿**：gofmt / vet 双构建 / staticcheck 双构建+跨 GOOS / Go 全量双构建 / tsc / vitest / case-collision / build。
+- facts.md 计数行同步（`go-top-level-tests` 538→593，新增 `go-fuzz-targets` 9 与 `go-benchmarks` 10 两行）；api.md verify-batches 契约段扩写 DQ 全谱；fees-layer.md §5 构建形态段记录 CI 三面 staticcheck + 双夜间 workflow、§6 归一化叙述随 #33a 更新（两形列表 → 归一化层携带宽度）、verify-batches 行注 DQ 标注；两文档面新增 `TestAPIDocCarriesDQFace` / `TestFeesLayerDocCarriesNightlyFaces` 文档门（#116 教义：散文契约随代码同变更旅行）。
+- #34（CI 产物）同批合入：duckdb job 测试后以 release.sh 同命令构建 linux 二进制上传 30 天 artifact；fees-layer.md §5.2「用 CI 产物快速启动」+ §6 CLI 面 17 子命令全量重录（原 4 条且缺 monthly/rows 两预设、旧名 netopslab）。
+
 ## [0.20.3] — 2026-10-27
 
 **数据优先年份版**（自立项收口：v0.20.2 轮 worklog 记录在案、待裁定的旧数据环境观感 papercut——数据在 2024、日历在 2026 时，费用总览默认落在 2026：整页空白仪表盘 + 风险地图把 month=0 发给后端浮出「month 必须是 1–12 的整数」校验错。与 v0.20.1/v0.20.2 的诚实空态纪律同源：**年份默认从日历手里还给数据，所选年没有数据就以横幅诚实作答**）。

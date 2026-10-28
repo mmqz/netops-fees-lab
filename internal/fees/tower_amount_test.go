@@ -30,7 +30,12 @@ func TestHeaderMatchKeyFoldsLineBreaks(t *testing.T) {
 		{"产品服务费合计\n（出账费用）（不含税）", "产品服务费合计（出账费用）（不含税）", true},
 		{"产品服务费合计\r\n（出账费用）（不含税）", "产品服务费合计（出账费用）（不含税）", true},
 		{"产品服务费合计\t（出账费用）（不含税）", "产品服务费合计（出账费用）（不含税）", true},
-		{"产品服务费合计（出账费用）（不含税）", "产品服务费合计(出账费用)(不含税)", false},
+		// #33 F2 flipped this expectation: paren width is now normalized
+		// (headerMatchKey maps （→( and ）→)), so the two widths share one
+		// key and the synonym table lists each 口径 once. Pre-#33 this was
+		// false — the hand-duplicated both-widths tables were the exact
+		// miss-a-twin failure shape #29 paid for.
+		{"产品服务费合计（出账费用）（不含税）", "产品服务费合计(出账费用)(不含税)", true},
 		{"Site\nCode", "sitecode", true},
 	}
 	for _, c := range cases {

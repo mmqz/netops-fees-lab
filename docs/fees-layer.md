@@ -64,7 +64,7 @@ analysis/fees/fee_type=electricity/year=2024/month=05/batch-fee_<uuid>.parquet
 | 默认（全平台，含 Windows/CI） | `go build` | `engine_std.go`：查询答 `ErrEngineNotBuilt`；**导入/快照/Parquet 写入全功能**（纯 Go，parquet-go） |
 | 发布（linux/WSL2/macOS/docker） | `CGO_ENABLED=1 go build -tags duckdb`（或 `make build-duckdb`） | `engine_duckdb.go`：go-duckdb v2（#59 验证：预编译平台绑定、17s 构建、~68MB） |
 
-CI 四个 job：go（默认全量）+ web + **duckdb（linux CGO `-tags duckdb` 跑引擎 e2e）** + windows（默认构建，验证 CGO 不泄漏）。
+CI 四个 job：go（默认全量 + **staticcheck W3 门禁三面**：默认构建 / `-tags duckdb` / `GOOS=windows` 跨平台类型检查——#33 起零告警）+ web + **duckdb（linux CGO `-tags duckdb` 跑引擎 e2e，测试后构建部署二进制上传为 artifact，#34）** + windows（默认构建，验证 CGO 不泄漏）。另有两条夜间 workflow（#33）：**fuzz**（`internal/fees` 九个 fuzz 目标各 5 分钟引擎时间；主干 24h 无新提交即整 job 跳过——fuzz昨天的字节无意义，配额纪律）与 **bench**（基准套件隔夜同机族对比，`scripts/bench-gate.py` 超阅 20% 告警不阻断）。
 
 ### 5.1 Windows 查询路径（#65 P1-c）
 
@@ -123,11 +123,11 @@ netopsfees fees --db <path> --data <dir> details           <add|list|remove>（�
 netopsfees fees --db <path> --data <dir> aliases           add|list|remove|scan （站址别名）
 netopsfees fees --db <path> --data <dir> cross-reconcile                     （#12：跨数据集对账）
 netopsfees fees --db <path> --data <dir> verify-sources                      （#6：源文件审计/可写建议）
-netopsfees fees --db <path> --data <dir> verify-batches                      （#32：两档体检——账期问题 + 数据质量 dataProblems）
+netopsfees fees --db <path> --data <dir> verify-batches                      （#32：两档体检——账期问题 + 数据质量 dataProblems；#33 起每条携带 check（DQ1-DQ6）与 severity 标注，见 api.md）
 ```
 
 - 全部单 JSON stdout 契约；usage 错误 exit 2；幂等重复导入 **informational（exit 0 + `skippedDuplicate`）**——与资源导入器重复跳过同严重级。
-- `--map` 缺省时自动识别（表头同义词：站址编码/电费(元)/账期…；类型标记：电量/塔租/工单/综维…）；识别不到 siteCode 或 amount → 拒绝（人工映射是回退，不是猜测）。**表头归一化（#29）**：换行/回车/制表符与空格/下划线/连字符一并折叠——Excel Alt+Enter 多行表头（塔类结算详单「产品服务费合计\n（出账费用）（不含税）」）折叠为单行 key 再匹配。**类型口径专表（#29）**：tower_lease 的金额列按口径优先级 **exact 匹配**（产品服务费合计（出账费用）（不含税）→ … → 产品服务费合计，全角/半角两形）——通用 contains 兜底在 157 列多金额列变体表上曾命中全零变体列（454 行导入、totalCents 全 0、零警告的实测缺陷）；专表 miss 逐字节回退通用识别；显式 `--map` 永远胜出（口径是运营决策）；摘要 `amountColumn` 写明实际取数表头，同族变体 >1 时 warnings 说明口径。**全零止血（#29）**：新导入全部行金额为 0 → completed 应答携带具名警告（绝不静默导好）；`fees verify-batches` 数据面（#32）对存量批次同形态检出（`zero-amount`）。
+- `--map` 缺省时自动识别（表头同义词：站址编码/电费(元)/账期…；类型标记：电量/塔租/工单/综维…）；识别不到 siteCode 或 amount → 拒绝（人工映射是回退，不是猜测）。**表头归一化（#29 + #33）**：换行/回车/制表符与空格/下划线/连字符一并折叠，#33 起整面 unicode 空白族（NBSP、Zs 分隔符、\v\f）也折叠且**全角括号归一为半角**——Excel Alt+Enter 多行表头（塔类结算详单「产品服务费合计\n（出账费用）（不含税）」）折叠为单行 key 再匹配，「费用（元）」与「费用(元)」同键。**类型口径专表（#29）**：tower_lease 的金额列按口径优先级 **exact 匹配**（产品服务费合计(出账费用)(不含税)→ … → 产品服务费合计，各口径只列半角一形——#33 起括号宽度由归一化层携带，全角表头同键命中；曾靠手工双形列表，漏一种即 #29 的失效形态）——通用 contains 兜底在 157 列多金额列变体表上曾命中全零变体列（454 行导入、totalCents 全 0、零警告的实测缺陷）；专表 miss 逐字节回退通用识别；显式 `--map` 永远胜出（口径是运营决策）；摘要 `amountColumn` 写明实际取数表头，同族变体 >1 时 warnings 说明口径。**全零止血（#29）**：新导入全部行金额为 0 → completed 应答携带具名警告（绝不静默导好）；`fees verify-batches` 数据面（#32/#33）对存量批次同形态检出（`zero-amount`，DQ1）。
 - `query` 四个预设：`totals`（站址汇总，分区裁剪验证面）+ `monthly`（#3：全年逐月趋势序列，不接受 `--month`）+ `rows`（#5：明细行原始面，带 --site/--record-key 过滤）+ `duplicates`（跨批次重复结算候选——**风险线索，非结论**：账单存在 ≠ 重复付款认定，输出待人工核实的差异行）。子命令闭集由 `usage_closset_test.go` 以 go/ast 双向钉死，清单以代码为准。
 
 ## 7. HTTP API 面（与 CLI 同语义）
