@@ -29,12 +29,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmqz/netops-fees-lab/internal/changes"
 	"github.com/mmqz/netops-fees-lab/internal/domain"
 	"github.com/mmqz/netops-fees-lab/internal/fees"
 	"github.com/mmqz/netops-fees-lab/internal/importer"
 	"github.com/mmqz/netops-fees-lab/internal/mapping"
 	"github.com/mmqz/netops-fees-lab/internal/metrics"
 	"github.com/mmqz/netops-fees-lab/internal/query"
+	"github.com/mmqz/netops-fees-lab/internal/renames"
 	"github.com/mmqz/netops-fees-lab/internal/repo"
 	"github.com/mmqz/netops-fees-lab/internal/report"
 	"github.com/mmqz/netops-fees-lab/internal/services"
@@ -67,6 +69,12 @@ type Server struct {
 	// instance the CLI fee commands use (the composition root's Fees,
 	// rooted at the app's DataDir).
 	fees *fees.Service
+	// changes is the attribute change confirmation service (W005): the
+	// composition root's Changes — the human apply/dismiss channel.
+	changes *changes.Service
+	// renames is the rename confirmation service (W006): the composition
+	// root's Renames — the human apply/reject identity-merge channel.
+	renames *renames.Service
 	// AuthToken is the opt-in write gate (v0.11-R13): non-empty turns
 	// every mutating /api request (POST/PATCH/DELETE/PUT) into a
 	// Bearer-token check; reads, /api/health, /api/openapi.json and the
@@ -101,6 +109,8 @@ func New(log *slog.Logger, svc *services.Services, dataDir string) *Server {
 		query:      svc.Query,
 		report:     svc.Report,
 		fees:       svc.Fees,
+		changes:    svc.Changes,
+		renames:    svc.Renames,
 	}
 }
 

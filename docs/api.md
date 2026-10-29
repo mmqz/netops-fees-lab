@@ -4,7 +4,7 @@ Base URL：`http://localhost:8080`（`netopsfees serve`）。全部响应 UTF-8 
 
 **通用约定**
 
-- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`；写门禁（见下节）另用 `unauthorized`（401，缺/错令牌）与 `forbidden`（403，申报级令牌访问管理级路由）；费用域另用 `fee_import_failed`（422，费用文件语义错误）与 `engine_not_built`（501，默认构建未编译 DuckDB 分析引擎）。
+- 错误信封（任何非 2xx）：`{"error":{"code":"…","message":"…"}}`。常用 code：`bad_request` / `validation` / `not_found` / `conflict` / `batch_in_use` / `too_large` / `not_xlsx` / `empty_workbook` / `workbook_too_large` / `internal`；写门禁（见下节）另用 `unauthorized`（401，缺/错令牌）与 `forbidden`（403，申报级令牌访问管理级路由）；费用域另用 `fee_import_failed`（422，费用文件语义错误）与 `engine_not_built`（501，默认构建未编译 DuckDB 分析引擎）；属性变更确认路由（W005）另用 `attribute_conflict`（409，apply 时旧值漂移，见 §POST /api/attribute-changes/{id}/apply）与 `ref_target_missing`（409，apply 的 ref 字段新值解析不到被引用类型资源，见 §POST /api/attribute-changes/{id}/apply）；改名确认路由（W006）另用 `target_missing`（409，apply 时新资源已不存在而提案仍在，见 §POST /api/renames/{id}/apply）。
 - 分页参数（v0.6.2 起双接口，issue #7）：`page`（1 起）+ `pageSize`（默认 20，>100 截断为 100），或 REST 风格 `limit`（1–100，>100 截断为 100）+ `offset`（0 起，页号按 offset/limit 推导）。非数值/负数/零的 page/pageSize/limit 与负数 offset → 400 `bad_request`（消息说明取值范围；此前 limit/offset 是未知名被静默忽略，负值与「已生效」不可区分）。两接口混用（page+offset 或 pageSize+limit）→ 400。列表信封：`{"items":[…],"total":n,"page":p,"pageSize":s}`。
 - 请求日志（slog JSON：method/path/status/duration_ms/bytes）走 stderr；panic 一律转 500 信封，不外泄细节。
 - `/api/*` 响应一律 `Cache-Control: no-store`（ADR-0006）。
@@ -711,6 +711,34 @@ HTTP/1.1 409 Conflict
 ```
 
 （上例为仅导入 devices 后的库；三本全导后为 64 资源、E13/W3/I1、评分 32。批次口径 `?batchId=…` 时 `scope` 为 `batch:<id>`，`batches[]` 仅含该批次，问题 = 该批次行级 + 全部集合级。）
+
+## GET /api/attribute-changes?status=&resource_id=&batch_id=&limit=&offset= — 属性变更提案列表
+
+（W005，migration v11）同键再导入检测到属性差异时逐字段记录的**待确认变更**。参数：`status=pending|applied|dismissed|all`（缺省 all）；`resource_id` / `batch_id` 精确过滤；分页用 `limit`（默认 20，>100 截断）/ `offset`（非负，默认 0）——边界遵循既有列表端点惯例。信封 `{"items":[…],"total":n}`，按 `created_at, rowid`（提案入队序）排序。`resourceType` / `naturalKey` 为资源侧 join 字段（提案的资源被回滚级联删除后为空串）。`relationRetargeted` ——列表项上为**实时谓词重算**（引用字段且该资源当前已有对应派生关系 → true；非引用字段与无派生关系的引用字段恒 false），pending 项作确认预览（前端提示用它）；apply/dismiss 响应上为**该操作的事实结果**（apply 重挂成功 true / dismiss 恒 false）。生产端：importer 的 skip 分支在属性不同时逐字段记 pending 提案 + 一条 W005 warning issue，同值再导仍纯 skip 零记录（幂等不变）；同字段同新值已 pending → 不重复记录（也不重记 issue）。
+
+## POST /api/attribute-changes/{id}/apply — 应用待确认变更（人工确认通道，管理级）
+
+仅 pending 可应用。校验**资源当前属性值 == 提案旧值**：相等 → 新值写入 `resources.attributes`、`updated_at` 刷新、提案置 `applied`（`appliedAt` 打点），同一事务内原子完成 → 200 返回变更后对象。**变更字段恰为该类型展示名字段（NameField）时 `resources.name` 一并同步**（name 是该字段值的投影）；**ref 类字段的重挂**：新值先按被引用类型的自然键解析（与 E003 同一查法）——解析不到 → 409 `ref_target_missing`（message 含字段/目标键/被引用类型；提案保持 pending，资源与关系零改动）；解析成功且资源已有派生关系 → 该关系的 `to_resource_id` 在同一事务内改挂到新目标，200 响应 `relationRetargeted: true`；解析成功但资源无派生关系 → 只改属性不建边。该字段已被其它变更修改（当前值 ≠ 旧值）→ 409 `attribute_conflict`，message 含字段名与两个值，资源不动。非 pending → 409 `conflict`；未知 id 或提案的资源已不存在 → 404。
+
+## POST /api/attribute-changes/{id}/dismiss — 忽略待确认变更（管理级）
+
+仅 pending 可忽略：提案置 `dismissed`（`appliedAt` 保持 null），资源永不触碰，审计线保留 → 200 返回变更后对象；非 pending → 409 `conflict`；未知 id → 404。
+
+> **AI 通道边界**：变更确认是 HTTP/CLI 的人类通道——MCP 工具面全部只读（无 apply/dismiss 类变更工具），AI 不得经 MCP 确认或驳回变更。
+
+## GET /api/renames?status=&resource_id=&resource_type=&batch_id=&limit=&offset= — 疑似改名提案列表
+
+（W006，migration v12）名称类键类型（ip_pool / base_station / port，`TypeSpec.RenameDetection`）的新键导入行与旧键消失资源属性全等时记录的**待确认改名提案**。参数：`status=pending|applied|rejected|all`（缺省 all）；`resource_id`（**提案任一侧**：`resource_id` 或 `new_resource_id` 命中即返回——双侧匹配，W006 issue 深链落在新资源抽屉时面板同样可见）/ `resource_type` / `batch_id` 精确过滤（`resource_type` 非法 → 400）；分页边界同上。信封 `{"items":[…],"total":n}`，按 `created_at, rowid` 排序。项字段：`id`、`resourceId`（旧资源）、`resourceType` / `naturalKey`、`batchId`、`newResourceId`、`oldKey`、`newKey`、`matchedFields[]`（参与匹配且相等的非键字段名）、`status`、`sheet`、`rowNumber`、`createdAt`、`decidedAt`。检测五条件与幂等语义见 [import-and-validation.md](import-and-validation.md) §16。
+
+## POST /api/renames/{id}/apply — 确认改名（身份合并，人工确认通道，管理级）
+
+确认 pending 提案：单事务完成身份合并——新资源的关系改挂旧资源（UNIQUE 撞车删新侧边）、**键分量属性同步**（新侧非空者覆写旧资源——键换了键分量属性也得换，防假 W005）、**展示名 Name 同步**（`resources.name` 是 NameField 值的投影，合并后跟随新名——键类名称字段如 pool_name 不进 attributes 时取新资源自身的 name）、删新资源（其 pending 属性变更随 v11 CASCADE）、旧资源 `natural_key` 换为新键 + `updated_at` 刷新、提案置 `applied` + `decidedAt` 打点。**旧资源代理键 `res_x`、关系身份、SourceRef 不动**——合并是键改挂，不是行替换。→ 200 返回提案对象。非 pending → 409 `conflict`；**新资源已不存在而提案仍在** → 409 `target_missing`（诚实口径：标准批次回滚会先删本批 pending 提案、随后的 apply 将得 404；此 409 是防御性守卫——典型触发是新资源被其它路径直接删除而提案幸存，消息建议 reject 后重新导入）；未知 id → 404。
+
+## POST /api/renames/{id}/reject — 拒绝改名（维持独立，管理级）
+
+仅 pending 可拒绝：提案置 `rejected` + `decidedAt` 打点，资源零改动——两个资源维持独立（导入的默认结果），提案留作人工决策审计线 → 200 返回提案对象；非 pending → 409 `conflict`；未知 id → 404。CLI 等价：`netopsfees renames --db … list|apply|reject`（结构化 JSON stdout；冲突 exit 1 + 错误信封）；属性变更侧 `netopsfees changes --db … list|apply|dismiss` 同构。
+
+> **AI 通道边界（同上）**：改名确认是 HTTP/CLI 的人类通道——MCP 工具面全部只读（无身份合并/改键类工具），AI 不得经 MCP 合并身份或改写自然键。回滚不对称：批次回滚删本批 pending 提案，applied/rejected 留审计线（与模板生命周期同理）。
 
 ## 时序指标端点（v0.7.0 W20 — 数据模型 v1.0 §5/§7.3）
 

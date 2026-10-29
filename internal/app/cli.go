@@ -15,11 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mmqz/netops-fees-lab/internal/changes"
 	"github.com/mmqz/netops-fees-lab/internal/domain"
 	"github.com/mmqz/netops-fees-lab/internal/importer"
 	"github.com/mmqz/netops-fees-lab/internal/mapping"
 	"github.com/mmqz/netops-fees-lab/internal/mcpserver"
 	"github.com/mmqz/netops-fees-lab/internal/metrics"
+	"github.com/mmqz/netops-fees-lab/internal/renames"
 	"github.com/mmqz/netops-fees-lab/internal/testfixtures"
 	"github.com/mmqz/netops-fees-lab/internal/workbook"
 )
@@ -43,7 +45,7 @@ const envDBPath = "NETOPS_DB"
 var cliSubcommands = []string{
 	"serve", "analyze", "import", "ingest", "metrics",
 	"validate", "report", "fees", "templates", "mcp", "gc", "backup", "testdata",
-	"convert",
+	"convert", "changes", "renames",
 }
 
 // commandEnum renders the enumeration of the "必须是 …" usage errors:
@@ -101,6 +103,10 @@ func CLI(args []string, stdout, stderr io.Writer) int {
 		err = cmdBackup(args[1:], stdout, stderr)
 	case "testdata":
 		err = cmdTestdata(args[1:], stdout, stderr)
+	case "changes":
+		err = cmdChanges(args[1:], stdout, stderr)
+	case "renames":
+		err = cmdRenames(args[1:], stdout, stderr)
 	default:
 		writeCLIError(stdout, "usage_error", fmt.Sprintf("未知子命令 %q；可用：%s", args[0], strings.Join(cliSubcommands, ", ")))
 		return exitUsage
@@ -161,6 +167,13 @@ func cliErrorCode(err error) string {
 	var fieldErr *mapping.FieldError
 	if errors.As(err, &fieldErr) {
 		return "validation"
+	}
+	// The ref-target guard of the attribute-change apply (W005): the CLI
+	// mirrors the HTTP 409 ref_target_missing code — the taxonomy parity the
+	// docstring promises.
+	var refMissing *changes.RefTargetMissingError
+	if errors.As(err, &refMissing) {
+		return "ref_target_missing"
 	}
 	// The W24 unattended-import refusal (§12-B7): the code the task contract
 	// pins — the error envelope names the unmatched sheets and the batch
@@ -973,4 +986,242 @@ func cmdTestdata(args []string, stdout, stderr io.Writer) error {
 		"out":   *out,
 		"files": []string{"devices.xlsx", "ippools.xlsx", "circuits.xlsx", "expected-summary.json"},
 	})
+}
+
+// changesSubcommands lists the changes dispatcher's cases; both usage
+// surfaces derive from it (see cliSubcommands for the #108 rationale).
+var changesSubcommands = []string{"list", "apply", "dismiss"}
+
+// cmdChanges implements `netopsfees changes --db <path> list|apply|dismiss …`
+// — the CLI side of the attribute change confirmation flow (W005; the query
+// subcommand pattern: leading --db, then the sub-subcommand). All outputs
+// are the single-JSON-object stdout contract: list → {items,total};
+// apply/dismiss → the change object after the transition.
+func cmdChanges(args []string, stdout, stderr io.Writer) error {
+	dbPath, sub, subArgs, err := splitSubArgs("changes", strings.Join(changesSubcommands, " / "), args)
+	if err != nil {
+		return err
+	}
+	a, err := openApp(dbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	switch sub {
+	case "list":
+		return cmdChangesList(ctx, a, subArgs, stdout, stderr)
+	case "apply":
+		return cmdChangesApply(ctx, a, subArgs, stdout, stderr)
+	case "dismiss":
+		return cmdChangesDismiss(ctx, a, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("changes 子命令必须是 %s，收到 %q", commandEnum(changesSubcommands), sub)}
+	}
+}
+
+// cmdChangesList implements `changes list [--status] [--resource-id]
+// [--batch-id] [--limit] [--offset]`.
+func cmdChangesList(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("changes list")
+	status := fs.String("status", "", "状态过滤：pending / applied / dismissed / all（缺省 all）")
+	resourceID := fs.String("resource-id", "", "按资源 id 过滤")
+	batchID := fs.String("batch-id", "", "按导入批次 id 过滤")
+	limit := fs.Int("limit", changes.DefaultPageSize, "每页条数（最大 100）")
+	offset := fs.Int("offset", 0, "偏移量（非负）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "changes list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	filter := changes.Filter{
+		ResourceID: *resourceID,
+		BatchID:    *batchID,
+		Limit:      *limit,
+		Offset:     *offset,
+	}
+	if *status != "" && *status != "all" {
+		st, err := domain.ParseChangeStatus(*status)
+		if err != nil {
+			return &usageError{msg: fmt.Sprintf("--status 必须是 pending/applied/dismissed/all，收到 %q", *status), usage: usage.String()}
+		}
+		filter.Status = st
+	}
+	result, err := a.Changes.List(ctx, filter)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cmdChangesApply implements `changes apply --id <changeId>`.
+func cmdChangesApply(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("changes apply")
+	id := fs.String("id", "", "待确认变更 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "changes apply 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	item, err := a.Changes.Apply(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, item)
+}
+
+// cmdChangesDismiss implements `changes dismiss --id <changeId>`.
+func cmdChangesDismiss(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("changes dismiss")
+	id := fs.String("id", "", "待确认变更 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "changes dismiss 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	item, err := a.Changes.Dismiss(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, item)
+}
+
+// renamesSubcommands lists the renames dispatcher's cases; both usage
+// surfaces derive from it (see cliSubcommands for the #108 rationale).
+var renamesSubcommands = []string{"list", "apply", "reject"}
+
+// cmdRenames implements `netopsfees renames --db <path> list|apply|reject …`
+// — the CLI side of the rename confirmation flow (W006). All outputs are
+// the single-JSON-object stdout contract: list → {items,total}; apply /
+// reject → the proposal object after the transition.
+func cmdRenames(args []string, stdout, stderr io.Writer) error {
+	dbPath, sub, subArgs, err := splitSubArgs("renames", strings.Join(renamesSubcommands, " / "), args)
+	if err != nil {
+		return err
+	}
+	a, err := openApp(dbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.Close() }()
+	ctx := context.Background()
+
+	switch sub {
+	case "list":
+		return cmdRenamesList(ctx, a, subArgs, stdout, stderr)
+	case "apply":
+		return cmdRenamesApply(ctx, a, subArgs, stdout, stderr)
+	case "reject":
+		return cmdRenamesReject(ctx, a, subArgs, stdout, stderr)
+	default:
+		return &usageError{msg: fmt.Sprintf("renames 子命令必须是 %s，收到 %q", commandEnum(renamesSubcommands), sub)}
+	}
+}
+
+// cmdRenamesList implements `renames list [--status] [--type] [--resource-id]
+// [--batch-id] [--limit] [--offset]`.
+func cmdRenamesList(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("renames list")
+	status := fs.String("status", "", "状态过滤：pending / applied / rejected / all（缺省 all）")
+	typ := fs.String("type", "", "资源类型过滤：注册资源类型之一（完整闭集在 --type 校验错误信息里自动列出）")
+	resourceID := fs.String("resource-id", "", "按资源 id 过滤（提案任一侧：旧资源或新资源均可命中）")
+	batchID := fs.String("batch-id", "", "按导入批次 id 过滤")
+	limit := fs.Int("limit", renames.DefaultPageSize, "每页条数（最大 100）")
+	offset := fs.Int("offset", 0, "偏移量（非负）")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "renames list 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	filter := renames.Filter{
+		ResourceID: *resourceID,
+		BatchID:    *batchID,
+		Limit:      *limit,
+		Offset:     *offset,
+	}
+	if *status != "" && *status != "all" {
+		st, err := domain.ParseRenameStatus(*status)
+		if err != nil {
+			return &usageError{msg: fmt.Sprintf("--status 必须是 pending/applied/rejected/all，收到 %q", *status), usage: usage.String()}
+		}
+		filter.Status = st
+	}
+	if *typ != "" {
+		t, err := domain.ParseResourceType(*typ)
+		if err != nil {
+			return &usageError{msg: fmt.Sprintf("--type 必须是注册资源类型之一（%s），收到 %q", strings.Join(cliRegisteredResourceTypes(), "/"), *typ), usage: usage.String()}
+		}
+		filter.ResourceType = t
+	}
+	result, err := a.Renames.List(ctx, filter)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, result)
+}
+
+// cliRegisteredResourceTypes joins the registry's type names for the --type
+// closed-set error messages (derived from mapping.Specs, never hand-copied —
+// the #26/#108 doctrine).
+func cliRegisteredResourceTypes() []string {
+	names := make([]string, 0, len(mapping.Specs))
+	for _, spec := range mapping.Specs {
+		names = append(names, spec.Type.String())
+	}
+	return names
+}
+
+// cmdRenamesApply implements `renames apply --id <proposalId>`: the identity
+// merge (one transaction — relations retargeted, key-component attributes
+// and the display name synced, the new resource deleted, the old resource's
+// natural key rewritten).
+func cmdRenamesApply(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("renames apply")
+	id := fs.String("id", "", "待确认改名提案 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "renames apply 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	item, err := a.Renames.Apply(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, item)
+}
+
+// cmdRenamesReject implements `renames reject --id <proposalId>`: both
+// resources stay independent (the import's default result).
+func cmdRenamesReject(ctx context.Context, a *App, args []string, stdout, stderr io.Writer) error {
+	fs, usage := newFlagSet("renames reject")
+	id := fs.String("id", "", "待确认改名提案 id，必填")
+	if err := fs.Parse(args); err != nil {
+		return &usageError{msg: "参数解析失败：" + err.Error(), usage: usage.String()}
+	}
+	if *id == "" {
+		return &usageError{msg: "缺少 --id 参数", usage: usage.String()}
+	}
+	if fs.NArg() > 0 {
+		return &usageError{msg: "renames reject 不接受位置参数：" + strings.Join(fs.Args(), " "), usage: usage.String()}
+	}
+	item, err := a.Renames.Reject(ctx, *id)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, item)
 }

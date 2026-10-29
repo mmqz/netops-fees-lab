@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `mcp-tools` | 11 | `internal/mcpserver.TestMCPToolCountMatchesFactsFile`：真实 MCP 握手 `tools/list` 实数；名字闭集另由 `TestMCPToolRegistry` 钉死 |
 | `mcp-tools-readonly` | 10 | `internal/mcpserver.TestMCPReadOnlyToolCountMatchesFactsFile`：`--read-only` 变体握手 `tools/list` 实数（issue #10；不变式=full 面中 `readOnlyHint=true` 的子集，另由 `TestMCPReadOnlyRegistryIsReadOnlyHintSet` 钉死） |
-| `api-routes` | 59 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
+| `api-routes` | 65 | `internal/api.TestAPIRouteCountsMatchFactsFile`：`apiRoutes()` 路由表总实数 |
 | `api-fees-routes` | 33 | 同上（`fees` tag 过滤计数）——fees-layer.md §7 的口径 |
 | `repo-migrations` | 40 | `internal/repo.TestMigrationCountMatchesFactsFile`：迁移列表长度 == 本值，且版本号连续 1..N（无跳号） |
 | `resource-types` | 33 | `internal/domain.TestResourceTypeCountMatchesFactsFile`：`domain.AllResourceTypes()` 实数 |
@@ -38,8 +38,8 @@
 
 | key | 当前值 | 口径（复算命令，仓库根目录执行） |
 | --- | --- | --- |
-| `go-top-level-tests` | 607 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
-| `go-test-packages` | 18 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
+| `go-top-level-tests` | 639 | `go test -list '.*' ./... 2>/dev/null \| grep -c '^Test'`（顶层测试函数口径，默认构建无 `-tags`） |
+| `go-test-packages` | 20 | `go test -count=1 -timeout 15m ./... 2>&1 \| grep -c '^ok'`（全绿的含测试包） |
 | `vitest-tests` | 172 | `cd web && npx vitest run` 的 `Tests` 计数（10 文件；v0.20.3 修正：旧快照的「7 文件」停更于上轮，实数重录） |
 | `go-fuzz-targets` | 9 | `grep -rn "^func Fuzz" --include="*_test.go" internal/ \| wc -l`（#33 起有值；夜间 fuzz workflow 的矩阵闭集） |
 | `go-benchmarks` | 10 | `grep -rn "^func Benchmark" --include="*_test.go" internal/ \| wc -l`（#33 起 B1-B7 + 既有 FuzzySweep；`testdata/bench/baseline.txt` 为基线） |

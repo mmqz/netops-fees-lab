@@ -15,10 +15,12 @@
 package services
 
 import (
+	"github.com/mmqz/netops-fees-lab/internal/changes"
 	"github.com/mmqz/netops-fees-lab/internal/fees"
 	"github.com/mmqz/netops-fees-lab/internal/importer"
 	"github.com/mmqz/netops-fees-lab/internal/metrics"
 	"github.com/mmqz/netops-fees-lab/internal/query"
+	"github.com/mmqz/netops-fees-lab/internal/renames"
 	"github.com/mmqz/netops-fees-lab/internal/repo"
 	"github.com/mmqz/netops-fees-lab/internal/report"
 	"github.com/mmqz/netops-fees-lab/internal/validation"
@@ -51,6 +53,14 @@ type Services struct {
 	// that — serve, the fees CLI and the MCP server all pass their
 	// --data/--data-dir explicitly (#97).
 	Fees *fees.Service
+	// Changes is the attribute change confirmation service (W005, migration
+	// v11): the human channel that applies or dismisses the attribute diffs
+	// the importer records on duplicate-key rows.
+	Changes *changes.Service
+	// Renames is the rename confirmation service (W006, migration v12): the
+	// human channel that merges or rejects the suspected-rename proposals of
+	// name-keyed types.
+	Renames *renames.Service
 }
 
 // DB returns the repository every service of the composition is bound to.
@@ -96,6 +106,8 @@ func New(db *repo.DB, opts ...Option) *Services {
 		Query:      query.New(db),
 		Report:     report.New(db),
 		Metrics:    metrics.New(db),
+		Changes:    changes.New(db),
+		Renames:    renames.New(db),
 	}
 	return s
 }

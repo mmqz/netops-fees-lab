@@ -29,6 +29,10 @@ import type {
   OpenApiSpec,
   Paged,
   PartialIssueCounts,
+  AttributeChangeItem,
+  AttributeChangeList,
+  RenameList,
+  RenameProposalItem,
   ResourceDetail,
   ResourceItem,
   ResourceMetricsResponse,
@@ -474,6 +478,65 @@ export interface RenamesQuery {
   batchId?: string;
   limit?: number;
   offset?: number;
+}
+
+/** GET /api/attribute-changes?status=&resource_id=&batch_id=&limit=&offset= */
+export function listAttributeChanges(query: AttributeChangesQuery): Promise<AttributeChangeList> {
+  return requestJson<AttributeChangeList>(
+    `/attribute-changes${buildQuery({
+      status: query.status,
+      resource_id: query.resourceId,
+      batch_id: query.batchId,
+      limit: query.limit,
+      offset: query.offset,
+    })}`,
+  );
+}
+
+/** POST /api/attribute-changes/{id}/apply（非 pending 409；旧值漂移 409 attribute_conflict） */
+export function applyAttributeChange(id: string): Promise<AttributeChangeItem> {
+  return requestJson<AttributeChangeItem>(
+    `/attribute-changes/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  );
+}
+
+/** POST /api/attribute-changes/{id}/dismiss（非 pending 409） */
+export function dismissAttributeChange(id: string): Promise<AttributeChangeItem> {
+  return requestJson<AttributeChangeItem>(
+    `/attribute-changes/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
+  );
+}
+
+/** GET /api/renames?status=&resource_id=&resource_type=&batch_id=&limit=&offset= */
+export function listRenames(query: RenamesQuery): Promise<RenameList> {
+  return requestJson<RenameList>(
+    `/renames${buildQuery({
+      status: query.status,
+      resource_id: query.resourceId,
+      resource_type: query.resourceType,
+      batch_id: query.batchId,
+      limit: query.limit,
+      offset: query.offset,
+    })}`,
+  );
+}
+
+/** 确认改名（POST /api/renames/{id}/apply）：合并身份，旧资源保留 ID 并接管新键。 */
+export function applyRename(id: string): Promise<RenameProposalItem> {
+  return requestJson<RenameProposalItem>(
+    `/renames/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  );
+}
+
+/** 拒绝改名（POST /api/renames/{id}/reject）：两个资源维持独立。 */
+export function rejectRename(id: string): Promise<RenameProposalItem> {
+  return requestJson<RenameProposalItem>(
+    `/renames/${encodeURIComponent(id)}/reject`,
+    { method: 'POST' },
+  );
 }
 // ---------------------------------------------------------------------------
 // 仿真工作台端点（PROJECT_BRIEF_P2 §7）

@@ -74,6 +74,29 @@ func (s *Service) Rollback(ctx context.Context, batchID string) error {
 		if _, err := tx.Relations.DeleteByBatch(ctx, batchID); err != nil {
 			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
 		}
+		// Pending attribute change proposals (W005, v11): the asymmetric
+		// lifecycle — the batch's unconfirmed proposals die with it
+		// (applied/dismissed stay as the human-decision audit trail,
+		// decoupled from the batch lifecycle). Deleted BEFORE the
+		// resources so the deleted-count accounting reflects every
+		// pending row of the batch, not just those the resource_id
+		// CASCADE would have caught (W005 proposals anchor at OTHER
+		// batches' pre-existing resources — the cascade never touches
+		// those).
+		if _, err := tx.AttributeChanges.DeletePendingByBatch(ctx, batchID); err != nil {
+			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
+		}
+		// Pending rename proposals (W006, v12): same asymmetric
+		// lifecycle — the batch's unconfirmed suggestions die with it
+		// (the NEW resource the proposal pointed at disappears with the
+		// batch too, so a dangling proposal would be meaningless);
+		// applied/rejected stay as the audit trail. Proposals whose OLD
+		// resource is deleted below are removed by the resource_id ON
+		// DELETE CASCADE regardless of status — the audited resource no
+		// longer exists.
+		if _, err := tx.RenameProposals.DeletePendingByBatch(ctx, batchID); err != nil {
+			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
+		}
 		if _, err := tx.Resources.DeleteByBatch(ctx, batchID); err != nil {
 			return fmt.Errorf("importer: rollback batch %s: %w", batchID, err)
 		}

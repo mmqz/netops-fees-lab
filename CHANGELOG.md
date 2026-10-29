@@ -2,6 +2,29 @@
 
 本项目所有显著变更变更记录于此。格式参考 Keep a Changelog；版本遵循语义化版本（SemVer）。
 
+## [0.22.0] — 2026-10-29
+
+**资源身份治理版**（主仓遗留项继承：名称改名身份流 + 属性变更确认通道，R4 裁决的两半落地）。费用仓 fork（ffc7139）当年保留了 v11/v12 两表、repo 层、`TypeSpec.RenameDetection`、W005/W006 规则目录与全套设计文档，但裁掉了 importer 生产端与确认服务——本仓文档自那时起声称的「同键再导属性 diff → pending 提案」「改名检测 → 身份合并提案」在本仓从不为真（docs-code 漂移）。v0.22.0 把两端接上：**W005**（键没变、数据变）——同键 skip 行逐字段记录 pending 属性变更提案 + warning issue（幂等去重：同字段同新值已 pending 不重复），HTTP/CLI 人工 apply（单事务写属性 + NameField 同步 + ref 字段派生关系同事务改挂 + 旧值漂移 409 `attribute_conflict` / 引用目标缺失 409 `ref_target_missing` 守卫）/ dismiss（资源零改动）；**W006**（键变了、数据没变）——名称类键类型（ip_pool/base_station/port）新键行与「旧键从源消失」资源属性全等（五条件：类型开启/旧键消失/属性全等/双射/非空洞）时行照常导入 + pending 改名提案 + warning issue，人工 apply 单事务合并身份（关系改挂 + 键分量属性同步 + 展示名跟随 + 删新资源 + 旧资源换键，代理键/关系身份/SourceRef 不动）/ reject 维持独立。落地理由：费用对账的联接键正是站址身份——改名分裂成双资源会静默污染按站聚合（R4 数据一致性最高优先项）。批回滚删本批 pending 提案、终态提案留审计线（不对称生命周期）；MCP 工具面 11 个维持全部只读（身份裁定是人类通道红线）。路由 59 → **65**（+6：attribute-changes list/apply/dismiss + renames list/apply/reject，写面 4 个全部管理级）；管理级闭集 11 → **15**；CLI 新增 `changes` / `renames` 两子命令；前端资源抽屉双面板（待确认属性变更 + 疑似改名，任一侧渲染）。docs §16 自此与代码一致；§18 PTP 通道补费用仓裁剪标注（费用域只处理 Excel，能力属母仓）。Go 顶层测试 607 → **639**（默认构建口径，+32）；含测试包 18 → **20**（新增 internal/changes、internal/renames）；迁移链与 vitest 基线不变。
+
+### 新增 — W005 属性变更确认通道（migration v11 表激活，importer 生产端 + changes 服务）
+- **importer skip 分支 diff 检测**（execute.go recordAttributeDiff）：非键、非枚举、非空字段与库内值不同 → 每字段一条 pending 提案（`resource_attribute_changes`）+ 一条 W005 warning issue（evidence 含 fields/change_count/sheet/row_number）；行仍 skip 不改库；同字段同新值已 pending → 不重复记录也不重记 issue（再导幂等保持「纯 skip 零记录」的既有行为）；新值又变 → 第二条提案按 (created_at, rowid) 排队，先 apply 的生效、后续同字段因旧值不匹配 409。
+- **internal/changes 服务**：Apply（资源当前值 == 提案旧值校验 → 单事务写属性 + updated_at + applied_at 打点；NameField 字段同步 resources.name；ref 字段先解析目标（E003 同一查法），解析不到 409 `ref_target_missing` 零改动，解析到且有派生边 → 同事务改挂并回 `relationRetargeted: true`，无派生边只改属性不建边——建边需重导的谱系不变式）/ Dismiss（pending → dismissed，资源永不触碰）。
+- **HTTP/CLI/前端**：`GET /api/attribute-changes`（列表含 relationRetargeted 实时预览）+ `POST …/{id}/apply|dismiss`（管理级）；`netopsfees changes --db … list|apply|dismiss`；资源抽屉「待确认属性变更」面板（apply/忽略 + 行内错误 + 引用字段改挂预览提示）。
+
+### 新增 — W006 疑似改名身份合并通道（migration v12 表激活，importer 生产端 + renames 服务）
+- **importer 两阶段检测**（rename.go）：insert 分支收集 RenameDetection 类型新键行 → 全 sheet 处理完毕后在同一事务内对每类型做五条件匹配（键全集来自 st.seen 的 phase-1 注册）→ 双射命中记录 pending 提案（`rename_proposals`，锚定旧资源=身份保留方）+ W006 warning issue（SourceRef 锚定新资源行）；行照常按新资源导入，绝不自动合并；0 或 ≥2 候选（任一侧）保守沉默；增量导入误报面诚实声明于 docs §16（宁可误报待人工，不可漏报+自动合并）。
+- **internal/renames 服务**：Apply 单事务身份合并——新资源关系改挂旧资源（UNIQUE 撞车删新侧边）+ 键分量属性同步（`KeyComponentNames`，新侧非空者胜——防合并后每次再导触发假 W005）+ 展示名 Name 跟随 + 删新资源（其 pending 提案随 CASCADE）+ 旧资源 natural_key 换新键 + decided_at；新资源已不存在而提案仍在 → 409 `target_missing`（诚实口径：标准回滚先删本批 pending，此 409 为防御性守卫）。Reject：pending → rejected，两资源维持独立（导入默认结果）。
+- **HTTP/CLI/前端**：`GET /api/renames`（resource_id 匹配提案任一侧——双侧渲染）+ `POST …/{id}/apply|reject`（管理级）；`netopsfees renames --db … list|apply|reject`（`--type` 闭集由注册表推导）；资源抽屉「疑似改名待确认」面板。
+- **回滚不对称**（rollback.go + 批删除计数）：批回滚删本批 pending 提案（两表 DeletePendingByBatch，先于资源删除——W005 提案锚定他批资源，级联够不着）、applied/rejected/dismissed 终态留人工决策审计线；`DELETE /api/batches/{id}` 的 `deleted` 计数新增 `attributeChanges`/`renameProposals`（pending-only 口径）。
+
+### 修复 — fork 遗留的 docs-code 漂移（本轮立项动因）
+- docs/import-and-validation.md §16/§17 与 data-model.md DDL v11/v12 节描述的 importer 行为在本仓从不为真（fork 只删了代码留了文档）——本版使文档成真；§18 PTP 通道补「本仓不含」标注（费用域只处理 Excel，`.txt`/`.cfg` 422 not_xlsx；母仓 95727da 能力留作架构参照）；§16 标题补费用仓重落地血统注记。
+- rollback.go 文档声称的「pending 属性变更/改名提案随批删除」此前同样不真——DeletePendingByBatch 两调用补齐，语义与母仓逐字对齐（先删提案再删资源，计数诚实）。
+
+### 测试
+- 移植并适配母仓测试族（fees 口径）：importer `rename_test.go`（五条件正例/0 候选/≥2 候选/空洞匹配/键全集含 skip 行/确定性顺序）+ `attributechange_test.go`（diff 产生/幂等去重/新值又变多提案/同值纯 skip/回滚不对称）；changes/renames 两服务测试（apply 语义全表 + 409 家族 + NameField/ref 改挂分支）；api `attributechanges_test.go`（全流程 + ref-retarget 三分支守卫——边验证改 repo 直查，本仓无 /relations 读端点）+ `renames_test.go`（HTTP 全流程 + 拒绝与回滚）；app 层 CLI e2e 三件（changes / changes-ref / renames reject，资源验证改 repo 直查——本仓无 query 子命令）。
+- 既有行为零回归：默认构建全绿、duckdb 构建全绿、既有 importer 幂等/SourceRef 版本化测试零改动通过（同值再导仍纯 skip）；三防漂移门按新实数收口（admin 闭集 15、api-routes 65、api.md 六节齐）。
+
 ## [0.21.0] — 2026-10-28
 
 **证据链收口版**（#35–#39 五 issue 全量交付）：文档示例从「照抄必崩」变为「文档即测试」（#35/#37）；对账从「列出差异」升级为「给出归因」（#38，站址主数据三结构化列）；快照原始行回读补齐证据链最后一段（#39，含字节扫描快路径）；MCP 三批八个只读费用面工具补齐 AI 分析闭环（#36，工具面 5 → **11**，只读面 4 → **10**）。Go 顶层测试 593 → **611**（默认构建口径，+18）；迁移链 v39 → **v40**；vitest 172 不变。

@@ -213,9 +213,11 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 - **同根未修（诚实声明）**：资源/指标通道的上传落盘（imports.go/metrics.go）也是原地 `O_TRUNC` 写（与 #106-A 同形态，#88 家族）——同内容并发双提交同样可能哈希/字节不一致。#106 范围仅费用域（审计 #88 续查指名），资源/指标通道待后续 issue 处置。
 
 
-## 16. 疑似改名检测与身份合并人工流（v0.5，W6-D）
+## 16. 疑似改名检测与身份合并人工流（v0.5，W6-D；费用仓 v0.22.0 重落地）
 
 闭环 [natural-keys.md](natural-keys.md) §2/§6 差距 #3——「名称变 = 身份变更事件」的人工确认流（migration v12 的 `rename_proposals` 表，DDL 与设计决策见 [data-model.md](data-model.md) §15）。
+
+> **费用仓血统注记**：fork（ffc7139）保留了 v12 表、repo 层、`TypeSpec.RenameDetection` 与本节全文，但裁掉了 importer 生产端与确认服务；v0.22.0 把两端重新接上——费用对账的联接键正是站址身份（fee_site_links / site-code-aliases / cross-reconcile），名称类键分裂成双资源会静默污染按站聚合。本节描述自此与代码一致（W005 属性 diff 通道同批落地，见 data-model.md DDL v11 节）。
 
 **与 W005 的对偶关系**：W005 是「键没变、数据变」（同键行 skip + 属性 diff 待确认）；W006 是「键变了、数据没变」（新键行照常导入 + 改名提案待确认）——两者合起来覆盖「带变化再导入」的两半。
 
@@ -274,6 +276,8 @@ site（局站）与 machine_room（机房）是 v0.4 W3-D 引入的第六、七�
 
 
 ## 18. PTP 配置脚本导入通道（v0.5，W8-D）
+
+> **本仓不含此通道（费用仓裁剪决定，ffc7139/3e7f921）**：费用域只处理 Excel 台账（`workbook/script.go` 已删、`internal/ptpconfig` 未随 fork 迁入、`ptp_port` 类型 spec 保留仅作类型目录兼容）。本节为母仓（netops-lab v0.5.0+，95727da）能力描述，留作架构参照——若未来费用域需要接入脚本形态，按此架构在费用仓重建解析器即可复用全部既有管线。下方描述中的行为在**本仓**不可用：`.txt`/`.cfg` 上传按未知扩展名 422 `not_xlsx` 拒绝。
 
 第 4 类真实电信材料形态：中兴 VRP 风格 PTP 配置脚本（文本，非 xlsx）。**架构 = 解析器产出「虚拟 sheet」→ 完整复用既有 analyze → 映射确认 → 导入执行管线**——脚本通道没有旁路，E001-E006/W001-W006/I001 全规则、幂等、回滚、SourceRef 版本化（§17）、改名检测（§16）全部天然适用。
 

@@ -22,7 +22,7 @@ export const APP_NAME = 'NetOps Lab';
 export const APP_SUBTITLE = '云网资源治理';
 /** 本地回退版本号：侧栏优先展示 /api/health 上报的 domain.AppVersion（事实源），
  *  请求失败时才回退到本常量（R1-D1 根治前端手抄漂移）。 */
-export const APP_VERSION = 'v0.21.0';
+export const APP_VERSION = 'v0.22.0';
 
 export const NAV_OVERVIEW = '概览';
 export const NAV_IMPORT = '数据导入';
@@ -1045,3 +1045,37 @@ export function formatRelativeTime(iso?: string | null): string {
 
 /** 画布右键菜单回退：kind/sem 未命中标签表时的兜底标签（#113-A 收编）。 */
 
+
+// ---------------------------------------------------------------------------
+// 资源抽屉 · 待确认属性变更面板（W005，migration v11）
+// ---------------------------------------------------------------------------
+
+export const RES_CHANGES_TITLE = '待确认属性变更';
+export const RES_CHANGES_HINT = '同键再导入检测到属性差异，行已跳过；人工确认后变更才会生效。';
+export const RES_CHANGES_BATCH_ROW = '批次 {batch} · 行 {row}';
+/** 引用字段的行内轻提示（relationRetargeted 预览为真时渲染）。 */
+export const RES_CHANGES_REF_FIELD_HINT = '引用字段 · 确认后将同步改挂关系（需目标已存在）';
+export const RES_CHANGE_APPLY = '应用';
+export const RES_CHANGE_DISMISS = '忽略';
+export const RES_CHANGE_APPLYING = '处理中…';
+export const RES_CHANGES_APPLIED_TOAST = '已应用变更：{field} 已更新';
+/** apply 响应 relationRetargeted=true 时使用（派生关系已随确认改挂）。 */
+export const RES_CHANGES_APPLIED_RETARGETED_TOAST = '已应用变更：{field} 已更新，关系已改挂';
+export const RES_CHANGES_DISMISSED_TOAST = '已忽略变更：{field} 维持原值';
+export const RES_CHANGES_ACTION_FAILED = '操作失败：{message}';
+
+// ---------------------------------------------------------------------------
+// 资源抽屉 · 疑似改名面板（W006，migration v12）
+// ---------------------------------------------------------------------------
+
+export const RES_RENAMES_TITLE = '疑似改名待确认';
+export const RES_RENAMES_HINT =
+  '新键行与库内旧键资源属性一致，疑似同一资产改名。确认后合并身份（保留本资源的 ID 与关系并改用新键），拒绝则维持两个独立资源。';
+export const RES_RENAME_KEYS = '{old} → {new}';
+export const RES_RENAMES_MATCHED = '{count} 个属性一致';
+export const RES_RENAME_CONFIRM = '确认改名';
+export const RES_RENAME_REJECT = '拒绝';
+export const RES_RENAME_WORKING = '处理中…';
+export const RES_RENAMES_APPLIED_TOAST = '已确认改名：{old} → {new}';
+export const RES_RENAMES_REJECTED_TOAST = '已拒绝改名提案，资源 {old} 保持独立';
+export const RES_RENAMES_ACTION_FAILED = '操作失败：{message}';

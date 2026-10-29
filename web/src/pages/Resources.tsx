@@ -9,20 +9,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
+  AttributeChangeItem,
   Paged,
+  RenameProposalItem,
   ResourceDetail,
   ResourceItem,
   ResourceMetricsResponse,
   ResourceType,
 } from '../api/types';
 import {
+  applyAttributeChange,
+  applyRename,
   debounce,
+  dismissAttributeChange,
   formatApiError,
   formatApiErrorText,
   getResource,
   getResourceMetrics,
+  listAttributeChanges,
   listMetricKeys,
+  listRenames,
   listResources,
+  rejectRename,
 } from '../api/client';
 import {
   BTN_IMPORT_DATA,
@@ -59,6 +67,27 @@ import {
   RES_TABLE_LABEL,
   RESOURCE_STATUS_VALUES,
   RESOURCE_TYPE_LABELS,
+  RES_CHANGES_ACTION_FAILED,
+  RES_CHANGES_APPLIED_RETARGETED_TOAST,
+  RES_CHANGES_APPLIED_TOAST,
+  RES_CHANGES_BATCH_ROW,
+  RES_CHANGES_DISMISSED_TOAST,
+  RES_CHANGES_HINT,
+  RES_CHANGES_REF_FIELD_HINT,
+  RES_CHANGES_TITLE,
+  RES_CHANGE_APPLY,
+  RES_CHANGE_APPLYING,
+  RES_CHANGE_DISMISS,
+  RES_RENAME_CONFIRM,
+  RES_RENAME_KEYS,
+  RES_RENAME_REJECT,
+  RES_RENAME_WORKING,
+  RES_RENAMES_ACTION_FAILED,
+  RES_RENAMES_APPLIED_TOAST,
+  RES_RENAMES_HINT,
+  RES_RENAMES_MATCHED,
+  RES_RENAMES_REJECTED_TOAST,
+  RES_RENAMES_TITLE,
 } from '../i18n';
 import { fieldsForType, fieldLabel } from '../schema';
 import { Drawer } from '../components/Drawer';
@@ -167,6 +196,18 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [tab, setTab] = useState<DrawerTab>('attrs');
+  /** 待确认属性变更（W005）：抽屉加载时并行拉取，无 pending 时面板不渲染。 */
+  const [pendingChanges, setPendingChanges] = useState<AttributeChangeItem[]>([]);
+  /** 行内操作错误（应用/忽略失败时按 change id 定位）。 */
+  const [changeErrors, setChangeErrors] = useState<Record<string, string>>({});
+  /** 正在处理中的 change id（按钮禁用）。 */
+  const [changeBusy, setChangeBusy] = useState<string | null>(null);
+  /** 疑似改名提案（W006）：本资源任一侧（旧资源或新资源）的 pending 提案。 */
+  const [pendingRenames, setPendingRenames] = useState<RenameProposalItem[]>([]);
+  /** 改名操作行内错误（按提案 id 定位）。 */
+  const [renameErrors, setRenameErrors] = useState<Record<string, string>>({});
+  /** 正在处理中的提案 id（按钮禁用）。 */
+  const [renameBusy, setRenameBusy] = useState<string | null>(null);
   /** 性能指标序列（v0.9-R2）：懒加载——首次切到该页签才拉，缓存于组件态；
    *  keys 目录同理（key → 中文标签映射），两者并行、互不阻塞。 */
   const [metrics, setMetrics] = useState<ResourceMetricsResponse | null>(null);
@@ -187,10 +228,20 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
     setLoading(true);
     setError(null);
     setErrorDetail(null);
-    getResource(resourceId)
-      .then((detail) => {
+    Promise.all([
+      getResource(resourceId),
+      listAttributeChanges({ resourceId, status: 'pending', limit: 100 })
+        .catch(() => ({ items: [] as AttributeChangeItem[], total: 0 })),
+      listRenames({ resourceId, status: 'pending', limit: 100 })
+        .catch(() => ({ items: [] as RenameProposalItem[], total: 0 })),
+    ])
+      .then((results) => {
         if (!isCurrent()) return;
-        setDetail(detail);
+        setDetail(results[0]);
+        setPendingChanges(results[1].items);
+        setPendingRenames(results[2].items);
+        setChangeErrors({});
+        setRenameErrors({});
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -261,6 +312,77 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
     }
   }
 
+  /** 应用一条待确认变更：成功后行内刷新（重拉详情/剩余 pending）；
+   *  引用字段且已有派生关系的 apply 会同步改挂关系，toast 文案带「关系已改挂」
+   *  （relationRetargeted 由 apply 响应回真值）。 */
+  function applyChange(change: AttributeChangeItem): void {
+    setChangeBusy(change.id);
+    setChangeErrors((prev) => ({ ...prev, [change.id]: '' }));
+    applyAttributeChange(change.id)
+      .then((applied) => {
+        const template = applied.relationRetargeted
+          ? RES_CHANGES_APPLIED_RETARGETED_TOAST
+          : RES_CHANGES_APPLIED_TOAST;
+        toast.show(format(template, { field: fieldLabel(change.field) }), 'success');
+        load();
+      })
+      .catch((err: unknown) => {
+        // 409 冲突（字段已被其它变更修改/非 pending/引用目标缺失）等 → 行内错误展示
+        const display = formatApiErrorText(err);
+        setChangeErrors((prev) => ({ ...prev, [change.id]: display }));
+      })
+      .finally(() => setChangeBusy(null));
+  }
+
+  /** 忽略一条待确认变更：成功后行内刷新。 */
+  function dismissChange(change: AttributeChangeItem): void {
+    setChangeBusy(change.id);
+    setChangeErrors((prev) => ({ ...prev, [change.id]: '' }));
+    dismissAttributeChange(change.id)
+      .then(() => {
+        toast.show(format(RES_CHANGES_DISMISSED_TOAST, { field: fieldLabel(change.field) }), 'info');
+        load();
+      })
+      .catch((err: unknown) => {
+        const display = formatApiErrorText(err);
+        setChangeErrors((prev) => ({ ...prev, [change.id]: display }));
+      })
+      .finally(() => setChangeBusy(null));
+  }
+
+  /** 确认一条疑似改名：旧资源保留 ID 与关系并改用新键，新资源消失；成功后整抽屉刷新。 */
+  function confirmRename(proposal: RenameProposalItem): void {
+    setRenameBusy(proposal.id);
+    setRenameErrors((prev) => ({ ...prev, [proposal.id]: '' }));
+    applyRename(proposal.id)
+      .then(() => {
+        toast.show(format(RES_RENAMES_APPLIED_TOAST, { old: proposal.oldKey, new: proposal.newKey }), 'success');
+        load();
+      })
+      .catch((err: unknown) => {
+        // 409（非 pending / 新资源已不存在而提案仍在——target_missing 防御性守卫）等 → 行内错误展示
+        const display = formatApiErrorText(err);
+        setRenameErrors((prev) => ({ ...prev, [proposal.id]: display }));
+      })
+      .finally(() => setRenameBusy(null));
+  }
+
+  /** 拒绝一条疑似改名：两个资源维持独立（导入的默认结果）；成功后整抽屉刷新。 */
+  function rejectRenameProposal(proposal: RenameProposalItem): void {
+    setRenameBusy(proposal.id);
+    setRenameErrors((prev) => ({ ...prev, [proposal.id]: '' }));
+    rejectRename(proposal.id)
+      .then(() => {
+        toast.show(format(RES_RENAMES_REJECTED_TOAST, { old: proposal.oldKey }), 'info');
+        load();
+      })
+      .catch((err: unknown) => {
+        const display = formatApiErrorText(err);
+        setRenameErrors((prev) => ({ ...prev, [proposal.id]: display }));
+      })
+      .finally(() => setRenameBusy(null));
+  }
+
   useEffect(() => {
     load();
     setTab('attrs');
@@ -282,6 +404,108 @@ function ResourceDrawer({ resourceId, onClose }: ResourceDrawerProps) {
             <StatusChip status={detail.status} />
             <span className="cell-strong">{detail.naturalKey}</span>
           </div>
+          {pendingChanges.length > 0 && (
+            <div className="change-panel" data-testid="pending-changes">
+              <div className="change-panel-title">{RES_CHANGES_TITLE}</div>
+              <div className="muted-note">{RES_CHANGES_HINT}</div>
+              {pendingChanges.map((change) => {
+                const busy = changeBusy === change.id;
+                const changeError = changeErrors[change.id] ?? '';
+                return (
+                  <div className="change-row" key={change.id}>
+                    <div className="change-main">
+                      <span className="cell-strong">{fieldLabel(change.field)}</span>
+                      <span className="change-values" title={`${change.oldValue} → ${change.newValue}`}>
+                        <span className="change-old">{change.oldValue === '' ? NO_VALUE : change.oldValue}</span>
+                        <span className="change-arrow" aria-hidden="true">→</span>
+                        <span className="change-new">{change.newValue}</span>
+                      </span>
+                      {change.relationRetargeted && (
+                        <span className="muted-note">{RES_CHANGES_REF_FIELD_HINT}</span>
+                      )}
+                      <span className="muted-note">
+                        {format(RES_CHANGES_BATCH_ROW, {
+                          batch: change.batchId.length > 12 ? `${change.batchId.slice(0, 12)}…` : change.batchId,
+                          row: change.rowNumber,
+                        })}
+                      </span>
+                    </div>
+                    <div className="change-actions">
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        disabled={busy}
+                        onClick={() => applyChange(change)}
+                      >
+                        {busy ? RES_CHANGE_APPLYING : RES_CHANGE_APPLY}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        disabled={busy}
+                        onClick={() => dismissChange(change)}
+                      >
+                        {RES_CHANGE_DISMISS}
+                      </button>
+                    </div>
+                    {changeError !== '' && (
+                      <div className="form-error change-error" role="alert">
+                        {format(RES_CHANGES_ACTION_FAILED, { message: changeError })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {pendingRenames.length > 0 && (
+            <div className="change-panel" data-testid="pending-renames">
+              <div className="change-panel-title">{RES_RENAMES_TITLE}</div>
+              <div className="muted-note">{RES_RENAMES_HINT}</div>
+              {pendingRenames.map((proposal) => {
+                const busy = renameBusy === proposal.id;
+                const renameError = renameErrors[proposal.id] ?? '';
+                return (
+                  <div className="change-row" key={proposal.id}>
+                    <div className="change-main">
+                      <span className="cell-strong">{format(RES_RENAME_KEYS, { old: proposal.oldKey, new: proposal.newKey })}</span>
+                      <span className="muted-note">
+                        {format(RES_RENAMES_MATCHED, { count: proposal.matchedFields.length })}
+                        {' · '}
+                        {format(RES_CHANGES_BATCH_ROW, {
+                          batch: proposal.batchId.length > 12 ? `${proposal.batchId.slice(0, 12)}…` : proposal.batchId,
+                          row: proposal.rowNumber,
+                        })}
+                      </span>
+                    </div>
+                    <div className="change-actions">
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        disabled={busy}
+                        onClick={() => confirmRename(proposal)}
+                      >
+                        {busy ? RES_RENAME_WORKING : RES_RENAME_CONFIRM}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        disabled={busy}
+                        onClick={() => rejectRenameProposal(proposal)}
+                      >
+                        {RES_RENAME_REJECT}
+                      </button>
+                    </div>
+                    {renameError !== '' && (
+                      <div className="form-error change-error" role="alert">
+                        {format(RES_RENAMES_ACTION_FAILED, { message: renameError })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="tabs">
             <button
               type="button"

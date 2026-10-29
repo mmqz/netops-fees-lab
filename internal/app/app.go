@@ -19,10 +19,12 @@ import (
 	"time"
 
 	"github.com/mmqz/netops-fees-lab/internal/api"
+	"github.com/mmqz/netops-fees-lab/internal/changes"
 	"github.com/mmqz/netops-fees-lab/internal/fees"
 	"github.com/mmqz/netops-fees-lab/internal/importer"
 	"github.com/mmqz/netops-fees-lab/internal/metrics"
 	"github.com/mmqz/netops-fees-lab/internal/query"
+	"github.com/mmqz/netops-fees-lab/internal/renames"
 	"github.com/mmqz/netops-fees-lab/internal/repo"
 	"github.com/mmqz/netops-fees-lab/internal/report"
 	"github.com/mmqz/netops-fees-lab/internal/services"
@@ -94,6 +96,12 @@ type App struct {
 	// Metrics is the timeseries metric ingest/query service (the
 	// cross-check scenarios' other ledger).
 	Metrics *metrics.Service
+	// Changes is the attribute change confirmation service (the W005
+	// human channel; aliases the composition root's instance).
+	Changes *changes.Service
+	// Renames is the rename confirmation service (the W006 human channel;
+	// aliases the composition root's instance).
+	Renames *renames.Service
 	// API is the HTTP API server.
 	API *api.Server
 }
@@ -139,6 +147,8 @@ func New(cfg Config) (*App, error) {
 		Fees:       svc.Fees,
 		Report:     svc.Report,
 		Metrics:    svc.Metrics,
+		Changes:    svc.Changes,
+		Renames:    svc.Renames,
 	}
 	a.API = api.New(log, svc, cfg.DataDir)
 	// The write gate rides the same server instance — set BEFORE Routes()

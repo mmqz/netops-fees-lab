@@ -29,7 +29,7 @@ const RuleVersion = "1.0.0"
 // (#38), the snapshot raw-row read-back with the byte-scanning fast reader
 // (#39), and the MCP evidence tools fee_evidence/fee_links_list that hand the
 // AI the analysis loop's second step (#36).
-const AppVersion = "v0.21.0"
+const AppVersion = "v0.22.0"
 
 // Validation rule codes (PROJECT_BRIEF §7). Row-phase codes run during import
 // on each data row; set-phase codes run after import on the whole database.
