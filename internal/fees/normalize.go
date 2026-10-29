@@ -139,7 +139,16 @@ func NormalizeAmount(raw string) (int64, error) {
 // a number — the same doctrine as the machine_room/site 12/17-digit IDs);
 // a numeric re-parse is deliberately absent.
 func NormalizeSiteCode(raw string) string {
-	fields := strings.Fields(strings.TrimSpace(raw))
+	// Invalid UTF-8 is sanitized BEFORE the field split (nightly fuzz
+	// FuzzNormalizeSiteCode, seed a1adba6a): a lone lead byte and a lone
+	// continuation byte with whitespace between them ("\xc2" + " " +
+	// "\xa0") used to GLUE into a different valid character when the
+	// separator dropped — pass one produced U+00A0, pass two stripped it
+	// (NBSP IS unicode whitespace), breaking the idempotency the site-code
+	// key contract needs. RuneError is not whitespace and never
+	// recombines, so the output is stable under re-normalization.
+	valid := strings.ToValidUTF8(raw, "\uFFFD")
+	fields := strings.Fields(strings.TrimSpace(valid))
 	return strings.Join(fields, "")
 }
 

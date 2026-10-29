@@ -21,6 +21,10 @@
 - docs/import-and-validation.md §16/§17 与 data-model.md DDL v11/v12 节描述的 importer 行为在本仓从不为真（fork 只删了代码留了文档）——本版使文档成真；§18 PTP 通道补「本仓不含」标注（费用域只处理 Excel，`.txt`/`.cfg` 422 not_xlsx；母仓 95727da 能力留作架构参照）；§16 标题补费用仓重落地血统注记。
 - rollback.go 文档声称的「pending 属性变更/改名提案随批删除」此前同样不真——DeletePendingByBatch 两调用补齐，语义与母仓逐字对齐（先删提案再删资源，计数诚实）。
 
+### 修复 — 夜跑 fuzz 第二捕获：FuzzNormalizeSiteCode 幂等性破（种子 a1adba6a，v0.21.0 夜间轮 40783858072）
+- 根因：`NormalizeSiteCode` 的 `strings.Fields` 会把「孤立 UTF-8 引导字节 + 空白 + 孤立续字节」（`\xc2` + 空格 + `\xa0`）两段在拼接时**粘合成另一个合法字符**——首趟产出 U+00A0（NBSP），二趟把它当空白剥掉（NBSP 属 unicode.White_Space），站址编码键的幂等不变式（键 = 归一化的不动点）被打破：含此类损坏字节的单元格在首次导入与后续比对之间产生不稳定键。
+- 修根：无效 UTF-8 字节在分词前先经 `strings.ToValidUTF8` 归一为 RuneError（U+FFFD 不是空白、永不重新组合），输出对再归一稳定；真实 NBSP（合法 UTF-8）仍按空白剥离不变。崩溃种子留作回归语料（testdata/fuzz/FuzzNormalizeSiteCode/a1adba6a），表驱动单测钉死两形态（损坏字节对 → 双 FFFD 稳定；真 NBSP → 剥离）+ 不动点断言；本地定向 fuzz 60s/6.1 万次执行零新崩溃。
+
 ### 测试
 - 移植并适配母仓测试族（fees 口径）：importer `rename_test.go`（五条件正例/0 候选/≥2 候选/空洞匹配/键全集含 skip 行/确定性顺序）+ `attributechange_test.go`（diff 产生/幂等去重/新值又变多提案/同值纯 skip/回滚不对称）；changes/renames 两服务测试（apply 语义全表 + 409 家族 + NameField/ref 改挂分支）；api `attributechanges_test.go`（全流程 + ref-retarget 三分支守卫——边验证改 repo 直查，本仓无 /relations 读端点）+ `renames_test.go`（HTTP 全流程 + 拒绝与回滚）；app 层 CLI e2e 三件（changes / changes-ref / renames reject，资源验证改 repo 直查——本仓无 query 子命令）。
 - 既有行为零回归：默认构建全绿、duckdb 构建全绿、既有 importer 幂等/SourceRef 版本化测试零改动通过（同值再导仍纯 skip）；三防漂移门按新实数收口（admin 闭集 15、api-routes 65、api.md 六节齐）。

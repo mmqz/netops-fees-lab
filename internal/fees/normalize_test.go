@@ -103,9 +103,25 @@ func TestNormalizeSiteCode(t *testing.T) {
 		{"2301010ABCDE 00001", "2301010ABCDE00001"}, // internal whitespace collapsed
 		{"０１２３", "０１２３"},                            // full-width digits preserved verbatim
 		{"\t2301\n", "2301"},
+		// the nightly-fuzz crash shape (seed a1adba6a): a lone lead byte and a
+		// lone continuation byte with whitespace between them must not GLUE
+		// into a valid character when the separator drops (pass one used to
+		// produce U+00A0, pass two stripped it — not idempotent). Both invalid
+		// bytes become RuneError, which is stable.
+		{"0000\xc2 \xa0", "0000\uFFFD\uFFFD"},
+		// a REAL NBSP (valid UTF-8 U+00A0) is unicode whitespace: stripped,
+		// same as any other space — and the output stays idempotent.
+		{"00\u00a0012", "00012"},
 	} {
 		if got := NormalizeSiteCode(tc.raw); got != tc.want {
 			t.Errorf("NormalizeSiteCode(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+	// idempotency is the key contract: the second pass must be a fixpoint.
+	{
+		glued := NormalizeSiteCode("0000\xc2 \xa0")
+		if again := NormalizeSiteCode(glued); again != glued {
+			t.Errorf("NormalizeSiteCode not idempotent on sanitized output: %q -> %q", glued, again)
 		}
 	}
 	// the leading-zero doctrine: a numeric-looking code keeps its zeros.
